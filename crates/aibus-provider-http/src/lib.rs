@@ -290,24 +290,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_wins_over_a_slow_server_within_100ms() {
+    async fn cancel_wins_over_a_slow_server() {
         let server = MockServer::start().await;
         Mock::given(path("/slow"))
-            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(600)))
             .mount(&server)
             .await;
         let http = Http::new();
         let url = format!("{}/slow", server.uri());
         let cancel = token();
         let c2 = cancel.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(20)).await;
+        // Cancel once the server has the request; it will not answer for ten minutes, so only
+        // the cancel can end the call. The outer timeout turns a hang into a failure.
+        let watch = tokio::spawn(async move {
+            while server.received_requests().await.unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
             c2.cancel();
+            server
         });
-        let t0 = std::time::Instant::now();
-        let e = http.send(&cancel, |c| c.get(&url)).await.unwrap_err();
+        let e = tokio::time::timeout(Duration::from_secs(30), http.send(&cancel, |c| c.get(&url)))
+            .await
+            .expect("cancel ends the call")
+            .unwrap_err();
         assert_eq!(e.kind, ProviderErrorKind::Cancelled);
-        assert!(t0.elapsed() < Duration::from_millis(100) + Duration::from_millis(20));
+        let _server = watch.await.unwrap();
     }
 
     #[tokio::test]

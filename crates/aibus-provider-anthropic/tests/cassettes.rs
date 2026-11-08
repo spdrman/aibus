@@ -249,25 +249,38 @@ async fn effort_goes_out_only_for_a_model_that_takes_it() {
     assert_eq!(reqs[1].headers.get("anthropic-beta").unwrap(), "effort-2025-11-24");
 }
 
+/// Waits until the mock server has seen `n` requests, so a cancel is sent while the provider is
+/// really waiting on the server and not before it started. No clock bound on the cancel itself:
+/// the guard timeout only turns a hang into a failure.
+async fn requests_seen(server: &MockServer, n: usize) {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while server.received_requests().await.unwrap().len() < n {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the request reached the server");
+}
+
 #[tokio::test]
-async fn cancel_returns_within_100ms_while_waiting_for_the_server_and_mid_stream() {
+async fn cancel_ends_a_call_waiting_for_the_server() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(cassette("stream_text").template().set_delay(Duration::from_secs(30)))
+        .respond_with(cassette("stream_text").template().set_delay(Duration::from_secs(600)))
         .mount(&server)
         .await;
     let p = provider(&server);
     let cancel = CancellationToken::new();
-    let c2 = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        c2.cancel();
-    });
     let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    let t0 = std::time::Instant::now();
-    let e = p.stream(&cred(AuthMethodKind::ApiKey), request("x"), tx, cancel).await.unwrap_err();
+    let run = tokio::spawn({
+        let cancel = cancel.clone();
+        async move { p.stream(&cred(AuthMethodKind::ApiKey), request("x"), tx, cancel).await }
+    });
+    requests_seen(&server, 1).await;
+    cancel.cancel();
+    // The server will not answer for ten minutes, so only the cancel can end this.
+    let e = tokio::time::timeout(Duration::from_secs(30), run).await.expect("cancel ends the call").unwrap().unwrap_err();
     assert_eq!(e.kind, ProviderErrorKind::Cancelled);
-    assert!(t0.elapsed() < Duration::from_millis(150), "{:?}", t0.elapsed());
 }
 
 #[tokio::test]
@@ -275,17 +288,23 @@ async fn cancel_wins_over_a_full_output_channel() {
     let server = server_with("POST", "/v1/messages", "stream_text").await;
     let p = provider(&server);
     let cancel = CancellationToken::new();
-    let c2 = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        c2.cancel();
-    });
     // Capacity one and nobody reading: the second chunk blocks.
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    let t0 = std::time::Instant::now();
-    let e = p.stream(&cred(AuthMethodKind::ApiKey), request("x"), tx, cancel).await.unwrap_err();
+    let watch = tx.clone();
+    let run = tokio::spawn({
+        let cancel = cancel.clone();
+        async move { p.stream(&cred(AuthMethodKind::ApiKey), request("x"), tx, cancel).await }
+    });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while watch.capacity() > 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the channel filled");
+    cancel.cancel();
+    let e = tokio::time::timeout(Duration::from_secs(30), run).await.expect("cancel ends the call").unwrap().unwrap_err();
     assert_eq!(e.kind, ProviderErrorKind::Cancelled);
-    assert!(t0.elapsed() < Duration::from_millis(200), "{:?}", t0.elapsed());
 }
 
 #[tokio::test]

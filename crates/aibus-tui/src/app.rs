@@ -1,12 +1,13 @@
 //! Terminal setup, the panic hook and the event loop (the only file that touches a real tty).
 
 use std::io::{self, Stdout, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use aibus_core::state::ANIMATING;
 use aibus_core::{
-    AibusError, App, Command, KeyCode, KeyEvent, Msg, Ticker, MSG_CAPACITY,
+    AibusError, App, Command, KeyCode, KeyEvent, Msg, Ticker, UiIntent, MSG_CAPACITY,
 };
 use aibus_graph::{Graph, Value};
 use crossterm::event::{self, Event, KeyEventKind};
@@ -18,8 +19,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
+use crate::input::{self, Context, Input, MouseMode};
+use crate::keys::Keymap;
+use crate::layout::Layout;
 use crate::theme::Theme;
-use crate::ui::Ui;
+use crate::ui::{Chrome, Prompt, Ui};
 use crate::view;
 
 /// How many times `restore` has run. The panic-hook test reads it.
@@ -28,10 +32,26 @@ pub static RESTORES: AtomicUsize = AtomicUsize::new(0);
 /// The second `Ctrl+c` within this window quits (05 section 4).
 const QUIT_WINDOW: Duration = Duration::from_secs(2);
 
-/// Leaves the alternate screen, shows the cursor and drops raw mode. Safe to call twice.
+/// What the terminal loop is told by whoever launched it.
+pub struct Options {
+    pub hz: u32,
+    pub theme: Theme,
+    pub keys: Keymap,
+    pub prompt: Prompt,
+    /// `[ui] mouse` and `--no-mouse`.
+    pub mouse: bool,
+    /// `$TERM`, to turn the mouse off where the terminal cannot report it.
+    pub term: Option<String>,
+    /// `state/ui.toml`, where dragged sizes are kept.
+    pub layout_file: Option<PathBuf>,
+}
+
+/// Leaves the alternate screen, shows the cursor, stops mouse reporting and drops raw mode. Safe
+/// to call twice.
 pub fn restore() {
     RESTORES.fetch_add(1, Ordering::SeqCst);
     let mut out = io::stdout();
+    let _ = out.write_all(input::mouse_switch(MouseMode::Hover, MouseMode::Off).as_bytes());
     let _ = execute!(out, LeaveAlternateScreen, cursor::Show);
     let _ = disable_raw_mode();
     let _ = out.flush();
@@ -92,11 +112,17 @@ pub fn key_from_crossterm(k: event::KeyEvent) -> Option<KeyEvent> {
     if k.kind == KeyEventKind::Release {
         return None;
     }
+    let mut shift = k.modifiers.contains(M::SHIFT);
     let code = match k.code {
         K::Char(c) => KeyCode::Char(c),
         K::Enter => KeyCode::Enter,
         K::Esc => KeyCode::Esc,
         K::Tab => KeyCode::Tab,
+        // Shift+Tab arrives as its own key code.
+        K::BackTab => {
+            shift = true;
+            KeyCode::Tab
+        }
         K::Backspace => KeyCode::Backspace,
         K::Up => KeyCode::Up,
         K::Down => KeyCode::Down,
@@ -111,50 +137,126 @@ pub fn key_from_crossterm(k: event::KeyEvent) -> Option<KeyEvent> {
         code,
         ctrl: k.modifiers.contains(M::CONTROL),
         alt: k.modifiers.contains(M::ALT),
-        shift: k.modifiers.contains(M::SHIFT),
+        shift,
     })
 }
 
+/// Handles a batch of terminal events: each one becomes messages that are stepped before the
+/// next event is looked at, so a click that follows a click sees what the first one did. Pointer
+/// and prompt state change on `input` and `ui`. Returns true when a border drag ended and the
+/// layout should be saved.
+pub fn terminal_events<G: Graph>(
+    events: Vec<Event>,
+    app: &mut App<G>,
+    ui: &mut Ui,
+    input: &mut Input,
+    ctrl_c: &mut CtrlC,
+    mouse: bool,
+    now: Instant,
+) -> Result<bool, AibusError> {
+    let mut layout_done = false;
+    for ev in input::coalesce(events) {
+        let cx = Context::read(&app.graph);
+        let out = match ev {
+            Event::Key(k) => {
+                let Some(key) = key_from_crossterm(k) else { continue };
+                if key.ctrl && key.code == KeyCode::Char('c') && ctrl_c.press(now) {
+                    app.step(Msg::Command(Command::Quit { force: false }))?;
+                    continue;
+                }
+                input.key(key, &cx, &ui.keys, &ui.drawn, &mut ui.prompt.text)
+            }
+            Event::Mouse(m) if mouse => input.mouse(m, now, &ui.drawn, &cx),
+            Event::Resize(cols, rows) => {
+                app.step(Msg::Resize { cols, rows })?;
+                continue;
+            }
+            _ => continue,
+        };
+        for msg in out.msgs {
+            app.step(msg)?;
+        }
+        layout_done |= out.layout_done;
+    }
+    ui.pointer = input.pointer;
+    Ok(layout_done)
+}
+
 /// Runs the dashboard until quit. Registers the `view:` nodes, draws once, then draws only when
-/// `view:dirty` names a widget or the terminal is resized. Ticks run only while
-/// `view:animating` is true.
-pub async fn run<G: Graph>(mut app: App<G>, hz: u32) -> Result<(), AibusError> {
+/// `view:dirty` names a widget, the UI state or the pointer changed, or the terminal is resized.
+/// Ticks run only while `view:animating` is true.
+pub async fn run<G: Graph>(mut app: App<G>, opts: Options) -> Result<(), AibusError> {
     install_panic_hook();
     let keys = view::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
     let mut session = Session::enter()?;
     let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);
-    let ticker = Ticker::spawn(tx.clone(), hz);
+    let (ev_tx, mut ev_rx) = mpsc::channel::<Event>(256);
+    let ticker = Ticker::spawn(tx.clone(), opts.hz);
     std::thread::spawn(move || {
         while let Ok(ev) = event::read() {
-            let msg = match ev {
-                Event::Key(k) => key_from_crossterm(k).map(Msg::Key),
-                Event::Resize(cols, rows) => Some(Msg::Resize { cols, rows }),
-                _ => None,
-            };
-            if let Some(m) = msg {
-                if tx.blocking_send(m).is_err() {
-                    return;
-                }
+            if ev_tx.blocking_send(ev).is_err() {
+                return;
             }
         }
     });
 
-    let mut ui = Ui::new(Theme::recording());
+    let mut ui = Ui::new(opts.theme);
+    ui.keys = opts.keys;
+    ui.prompt = opts.prompt;
+    let mut input = Input::default();
     let mut ctrl_c = CtrlC::default();
+    let supported = input::mouse_supported(opts.term.as_deref());
+    let mut mode = MouseMode::Off;
+
+    let size = session.term.size()?;
+    app.step(Msg::Resize { cols: size.width, rows: size.height })?;
+    if let Some(file) = &opts.layout_file {
+        let saved = Layout::load(file);
+        if let Some(w) = saved.rail {
+            app.step(Msg::Ui(UiIntent::SetRailWidth(w)))?;
+        }
+        if let Some(h) = saved.log {
+            app.step(Msg::Ui(UiIntent::SetLogRows(h)))?;
+        }
+    }
     ui.note_commit(&app.graph);
     ui.draw(&mut session.term, &app.graph)?;
-    while let Some(mut msg) = rx.recv().await {
-        if let Msg::Key(k) = &msg {
-            if k.ctrl && k.code == KeyCode::Char('c') && ctrl_c.press(Instant::now()) {
-                msg = Msg::Command(Command::Quit { force: false });
+    loop {
+        let mut layout_done = false;
+        tokio::select! {
+            Some(m) = rx.recv() => app.step(m)?,
+            Some(first) = ev_rx.recv() => {
+                // Everything that piled up while the last frame drew is one batch.
+                let mut batch = vec![first];
+                while batch.len() < 256 {
+                    let Ok(e) = ev_rx.try_recv() else { break };
+                    batch.push(e);
+                }
+                layout_done = terminal_events(
+                    batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(),
+                )?;
             }
+            else => break,
         }
-        app.step(msg)?;
         ui.note_commit(&app.graph);
         let animating = matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));
         ticker.set_animating(animating);
         ui.draw(&mut session.term, &app.graph)?;
+        // Move events are only asked for while something on this frame reacts to hover.
+        let want = input::mouse_mode(opts.mouse, supported, ui.drawn.hits.hoverable());
+        if want != mode {
+            let mut out = io::stdout();
+            out.write_all(input::mouse_switch(mode, want).as_bytes())?;
+            out.flush()?;
+            mode = want;
+        }
+        if layout_done {
+            if let Some(file) = &opts.layout_file {
+                // A failed save is not worth interrupting the session for.
+                let _ = Chrome::read(&app.graph).layout.save(file);
+            }
+        }
         if app.should_quit() {
             break;
         }
@@ -203,5 +305,14 @@ mod tests {
         k.kind = KeyEventKind::Release;
         k.state = KeyEventState::NONE;
         assert!(key_from_crossterm(k).is_none());
+    }
+
+    #[test]
+    fn back_tab_is_shift_tab() {
+        use crossterm::event::{KeyCode as K, KeyModifiers};
+        let got = key_from_crossterm(event::KeyEvent::new(K::BackTab, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!((got.code, got.shift), (KeyCode::Tab, true));
+        let plain = key_from_crossterm(event::KeyEvent::new(K::Tab, KeyModifiers::NONE)).unwrap();
+        assert!(!plain.shift);
     }
 }

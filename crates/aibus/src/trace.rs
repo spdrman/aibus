@@ -26,7 +26,7 @@ pub const TARGET: &str = "aibus_trace";
 
 /// The tracks of the viewer, one per kind of span, so that spans of different kinds never have
 /// to nest.
-const TRACKS: [&str; 5] = ["commit", "effect", "provider_call", "tool_call", "hook"];
+const TRACKS: [&str; 6] = ["commit", "effect", "provider_call", "tool_call", "hook", "router"];
 
 struct Out {
     file: BufWriter<File>,

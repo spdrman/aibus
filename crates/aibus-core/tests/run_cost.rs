@@ -93,6 +93,7 @@ async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
             tx,
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
+            assist: None,
         },
     );
     let mut cost = None;

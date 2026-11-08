@@ -68,6 +68,8 @@ pub struct Accounts {
 pub struct Ctx {
     pub global: Global,
     pub run: RunArgs,
+    /// The TUI (`aibus` on a terminal): an empty prompt is fine and stdin is the keyboard.
+    pub interactive: bool,
     pub redactor: Redactor,
     pub prompt: String,
     pub cwd: PathBuf,
@@ -108,6 +110,7 @@ impl Ctx {
         Self {
             global,
             run,
+            interactive: false,
             redactor,
             prompt: String::new(),
             cwd: PathBuf::new(),
@@ -164,6 +167,20 @@ pub fn steps() -> Vec<Box<dyn Step>> {
         Box::new(EnterLoop),
         Box::new(StartHooks::default()),
         Box::new(SubmitPrompt),
+    ]
+}
+
+/// What the TUI needs before it can draw: steps 1 to 7. The lead run starts when the first
+/// prompt is sent, which is not wired yet (C1.2).
+pub fn interactive_steps() -> Vec<Box<dyn Step>> {
+    vec![
+        Box::new(ParseCli),
+        Box::new(LoadConfig),
+        Box::new(OpenSession),
+        Box::new(BuildGraph),
+        Box::new(DiscoverAgents),
+        Box::new(LoadAccounts),
+        Box::new(StartRuntime),
     ]
 }
 
@@ -229,6 +246,11 @@ impl Step for ParseCli {
         }
         ctx.outcome = crate::env::outcome(ctx.run.outcome.as_deref(), |v| std::env::var(v).ok())?;
         ctx.cwd = ctx.global.project_dir()?;
+        if ctx.interactive {
+            // The prompt, if one was given, waits in the input line for the user to send.
+            ctx.prompt = ctx.run.prompt.clone().unwrap_or_default();
+            return Ok(());
+        }
         // With `--json` and the prompt on the command line, what follows on stdin is the control
         // channel (06 section 2). A prompt read from stdin uses all of it.
         let stdin_is_input = matches!(ctx.run.prompt.as_deref(), None | Some("-"));
@@ -661,18 +683,6 @@ impl Step for EnterLoop {
             swarm_model: pick(&None, &cfg.defaults.swarm_model),
         };
 
-        // The roles that are not the lead only warn: nothing runs them yet.
-        for (role, cli, conf, picked) in [
-            ("advisor", &ctx.global.advisor, &cfg.defaults.advisor_model, &defaults.advisor_model),
-            ("router", &ctx.global.router, &cfg.defaults.router_model, &defaults.router_model),
-        ] {
-            if let (Some(model), true) = (picked, cli.is_some() || conf.is_some()) {
-                if let Err(e) = acc.registry.select(model, &SelectHints::default()) {
-                    eprintln!("aibus: warning: {role} model: {e}");
-                }
-            }
-        }
-
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let orch = Orchestrator::new(limits.clone(), tx.clone());
         orch.set_roster(Roster::of(agents.agents.values()));
@@ -744,7 +754,15 @@ impl Step for EnterLoop {
             chosen: Default::default(),
             defs: Default::default(),
             worktrees: paths.cache.join("worktrees").join(session.id.to_string()),
+            assist: Default::default(),
         });
+        // The advisor and the router get their own models and accounts, or a note on stderr
+        // saying why they are off.
+        let assist = launcher.set_assist(
+            ctx.global.advisor.as_deref(),
+            ctx.global.router.as_deref(),
+            cfg,
+        );
 
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
         // `inherit` has no parent here, so it means the session's model.
@@ -814,6 +832,7 @@ impl Step for EnterLoop {
             tx: tx.clone(),
             hooks: hooks.clone(),
             compactor: Some(compactor),
+            assist,
         };
         if let Some(app) = ctx.app.as_mut() {
             app.set_limits(&limits)?;

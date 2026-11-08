@@ -38,7 +38,7 @@
 │22:13:20  info     router which_tool answered                                                   │
 │22:13:20  info     router retry_or_stop answered                                                │
 │22:13:20  info     advisor spoke at before_plan                                                 │
-│22:13:20  info     checkpoint before_plan                                                       │
+│22:13:20  info     checkpoint before_plan                                                       █
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 
  ~/app $ aibus --model sonnet --advisor opus ▌

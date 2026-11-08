@@ -518,6 +518,7 @@ async fn drive(
             tx,
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
+            assist: None,
         },
     );
     let mut app = common::app();

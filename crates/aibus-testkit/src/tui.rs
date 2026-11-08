@@ -37,7 +37,7 @@ fn colour(c: Color) -> String {
 }
 
 /// Rows of cell symbols with trailing blanks trimmed, and per row the runs of equal style.
-fn frame_of(buf: &Buffer) -> Frame {
+pub fn frame_of(buf: &Buffer) -> Frame {
     let (mut text, mut styles) = (String::new(), String::new());
     for y in 0..buf.area.height {
         let mut row = String::new();
@@ -152,8 +152,14 @@ fn start<G: Graph>(app: &mut App<G>, seq: u128, agent: &str, role: Role, model: 
 fn answer<G: Graph>(app: &mut App<G>, fork: u64, kind: &str, p: f64, verdict: Verdict) {
     app.step(Msg::RouterAnswered {
         fork: ForkId(fork),
-        question: RouterQuestion { kind: kind.into(), prompt: String::new() },
-        answer: RouterAnswer { choice: String::new(), p, verdict },
+        question: RouterQuestion { kind: kind.into(), context: String::new(), choices: Vec::new() },
+        answer: RouterAnswer {
+            choice: String::new(),
+            p: p as f32,
+            verdict,
+            latency: std::time::Duration::ZERO,
+            source: PSource::Logprob,
+        },
     })
     .unwrap();
 }

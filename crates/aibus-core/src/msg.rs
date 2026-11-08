@@ -83,6 +83,44 @@ pub enum Selection {
     Clear,
 }
 
+/// What a mouse gesture or a bound key asks of the UI state (05 section 6.1). The TUI turns a
+/// hit on its map into one of these, so a click and the key with the same meaning take the same
+/// path through `reduce`, and replay sees both alike.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UiIntent {
+    Focus(Pane),
+    FocusNext,
+    FocusPrev,
+    Select(Pane, Selection),
+    /// `lines` is positive towards older rows (up). `sideways` scrolls the card row.
+    Scroll {
+        pane: Pane,
+        lines: i32,
+        sideways: bool,
+    },
+    /// Enter, or a double click: open what the pane has selected.
+    Open(Pane),
+    ToggleRail,
+    SetRailWidth(u16),
+    SetLogRows(u16),
+}
+
+impl UiIntent {
+    pub fn name(self) -> &'static str {
+        match self {
+            UiIntent::Focus(_) => "focus",
+            UiIntent::FocusNext => "focus_next",
+            UiIntent::FocusPrev => "focus_prev",
+            UiIntent::Select(..) => "select",
+            UiIntent::Scroll { .. } => "scroll",
+            UiIntent::Open(_) => "open",
+            UiIntent::ToggleRail => "toggle_rail",
+            UiIntent::SetRailWidth(_) => "set_rail_width",
+            UiIntent::SetLogRows(_) => "set_log_rows",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Outcome {
     Succeeded,
@@ -199,16 +237,64 @@ pub struct HookOutcome {
     pub message: Option<String>,
 }
 
+/// What the router is asked (01 section 7.2).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum RouterKind {
+    WhichFile,
+    WhichTool,
+    RetryOrStop,
+    Custom(String),
+}
+
+impl RouterKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            RouterKind::WhichFile => "which_file",
+            RouterKind::WhichTool => "which_tool",
+            RouterKind::RetryOrStop => "retry_or_stop",
+            RouterKind::Custom(name) => name,
+        }
+    }
+}
+
+impl From<&str> for RouterKind {
+    fn from(name: &str) -> Self {
+        match name {
+            "which_file" => RouterKind::WhichFile,
+            "which_tool" => RouterKind::WhichTool,
+            "retry_or_stop" => RouterKind::RetryOrStop,
+            other => RouterKind::Custom(other.to_owned()),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RouterQuestion {
-    pub kind: SmolStr,
-    pub prompt: String,
+    pub kind: RouterKind,
+    /// A short, templated view: the file list, the last error, the available tools.
+    pub context: String,
+    pub choices: Vec<String>,
+}
+
+/// Where a router answer's `p` came from (Q4).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum PSource {
+    Logprob,
+    SelfReport,
+}
+
+impl PSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PSource::Logprob => "logprob",
+            PSource::SelfReport => "self_report",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Verdict {
     Sharp,
-    Soft,
     Split,
 }
 
@@ -216,7 +302,6 @@ impl Verdict {
     pub fn as_str(self) -> &'static str {
         match self {
             Verdict::Sharp => "sharp",
-            Verdict::Soft => "soft",
             Verdict::Split => "split",
         }
     }
@@ -225,8 +310,12 @@ impl Verdict {
 #[derive(Clone, PartialEq, Debug)]
 pub struct RouterAnswer {
     pub choice: String,
-    pub p: f64,
+    /// 0.0..=1.0, from logprobs when the provider gives them, else self-reported.
+    pub p: f32,
     pub verdict: Verdict,
+    pub latency: Duration,
+    /// Not in the spec's struct: the log and `model:router:last:<kind>` show it (Q4).
+    pub source: PSource,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -358,6 +447,8 @@ pub enum Msg {
     // terminal
     Key(KeyEvent),
     Mouse(MouseEvent),
+    /// A gesture or key that only changes UI state.
+    Ui(UiIntent),
     Resize {
         cols: u16,
         rows: u16,
@@ -466,6 +557,7 @@ impl Msg {
         match self {
             Msg::Key(_) => "Key",
             Msg::Mouse(_) => "Mouse",
+            Msg::Ui(_) => "Ui",
             Msg::Resize { .. } => "Resize",
             Msg::Tick => "Tick",
             Msg::SubmitPrompt { .. } => "SubmitPrompt",
@@ -500,6 +592,7 @@ impl Msg {
         let len = |t: &str| n(t.len());
         match self {
             Msg::Key(_) | Msg::Mouse(_) | Msg::Tick | Msg::Persisted => map([("msg", name)]),
+            Msg::Ui(i) => map([("msg", name), ("intent", s(i.name()))]),
             Msg::Resize { cols, rows } => {
                 map([("msg", name), ("cols", n(*cols)), ("rows", n(*rows))])
             }
@@ -583,7 +676,7 @@ impl Msg {
             Msg::RouterAnswered { fork, question, .. } => map([
                 ("msg", name),
                 ("fork", n(fork.0)),
-                ("kind", s(&question.kind)),
+                ("kind", s(question.kind.as_str())),
             ]),
             Msg::AdvisorSpoke {
                 checkpoint,

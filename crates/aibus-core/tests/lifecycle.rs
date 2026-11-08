@@ -135,6 +135,7 @@ impl Launcher for TestLauncher {
                     creds: Arc::new(fake_credential()),
                     model: ModelId("fake-small".into()),
                 })),
+                assist: None,
             },
         ))
     }
@@ -296,6 +297,7 @@ impl Rig {
                     creds: Arc::new(fake_credential()),
                     model: ModelId("fake-small".into()),
                 })),
+                assist: None,
             },
         );
         self.orch

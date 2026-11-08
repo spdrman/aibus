@@ -16,9 +16,10 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 26] = [
+pub const ALL_NAMES: [&str; 27] = [
     "Key",
     "Mouse",
+    "Ui",
     "Resize",
     "Tick",
     "SubmitPrompt",
@@ -332,6 +333,12 @@ pub fn cases() -> Vec<Case> {
             expect: vec![],
         },
         Case {
+            name: "Ui",
+            setup: none,
+            msg: Msg::Ui(UiIntent::Focus(Pane::Log)),
+            expect: vec!["ctrl:focus"],
+        },
+        Case {
             name: "Resize",
             setup: none,
             msg: Msg::Resize { cols: 98, rows: 46 },
@@ -516,12 +523,15 @@ pub fn cases() -> Vec<Case> {
                 fork: ForkId(7),
                 question: RouterQuestion {
                     kind: "which_file".into(),
-                    prompt: t.clone(),
+                    context: t.clone(),
+                    choices: vec![t.clone()],
                 },
                 answer: RouterAnswer {
                     choice: t.clone(),
                     p: 0.9,
                     verdict: Verdict::Sharp,
+                    latency: std::time::Duration::ZERO,
+                    source: PSource::Logprob,
                 },
             },
             expect: vec![

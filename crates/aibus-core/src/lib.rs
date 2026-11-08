@@ -2,8 +2,10 @@
 #![forbid(unsafe_code)]
 
 pub mod accounts;
+pub mod advisor;
 pub mod agent;
 pub mod app;
+pub mod assist;
 pub mod config;
 pub mod context;
 pub mod credentials;
@@ -17,6 +19,7 @@ pub mod permission;
 pub mod persist;
 pub mod redact;
 pub mod replay;
+pub mod router;
 pub mod run;
 pub mod state;
 pub mod tool;
@@ -26,6 +29,7 @@ pub mod worktree;
 pub use accounts::{AccountRegistry, SelectError, SelectHints};
 pub use agent::*;
 pub use app::{App, Ticker, MSG_CAPACITY};
+pub use assist::{AdvisorSeat, Assist, RouterSeat, Seat};
 pub use credentials::{
     AccountCredential, CredentialSource, CredentialStore, KeyRef, Keychain, KeychainError,
     MemoryKeychain, StoreHealth,

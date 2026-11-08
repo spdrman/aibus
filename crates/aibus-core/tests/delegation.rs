@@ -132,6 +132,7 @@ impl Launcher for TestLauncher {
                 tx,
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
+                assist: None,
             },
         ))
     }
@@ -285,6 +286,7 @@ impl Rig {
                 tx: self.tx.clone(),
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
+                assist: None,
             },
         );
         self.orch

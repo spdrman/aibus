@@ -40,7 +40,7 @@ const FORK_KINDS: [(&str, &str); 3] = [
 ];
 
 /// Log rows kept in `view:session_log:lines`; the widget shows as many as fit.
-const LOG_LINES_KEPT: usize = 24;
+const LOG_LINES_KEPT: usize = 128;
 
 fn runs<'a>(t: &mut Tracker<'a>, role: &str) -> Vec<(&'a str, &'a Value)> {
     let Some(order) = t.get_key(RUNS_ORDER) else {

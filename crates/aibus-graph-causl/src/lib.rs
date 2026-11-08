@@ -16,8 +16,8 @@ use std::time::SystemTime;
 
 use aibus_graph::{
     Bytes, Commit, CommitError, CommitObserver, Compute, Explanation, Graph, GraphTime,
-    HydrateError, Node, NodeKey, NodeKind, NodeObserver, RetentionResult, SimulateResult, Snapshot,
-    SmolStr, StoreHandle, Tracker, Unsubscribe, Value, COMMIT_HISTORY_CAP,
+    HydrateError, Node, NodeKey, NodeKind, NodeObserver, RetentionResult, SimulateResult, SmolStr,
+    Snapshot, StoreHandle, Tracker, Unsubscribe, Value, COMMIT_HISTORY_CAP,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -158,15 +158,23 @@ struct Host<'a> {
 impl Host<'_> {
     /// The settled value of `n` for a compute whose dependency list so far is `prior`. The engine
     /// orders recomputes by the old edges, so a dependency this compute just picked up can be a
-    /// derived it has not reached yet: that one is computed on the spot (`pull`).
+    /// derived it has not reached yet: that one is computed on the spot (a pull).
     fn read(&self, state: &State, prior: &[NodeId], n: Node) -> Option<&Value> {
         let i = n.0 as usize;
         if let Some(v) = self.overlay.get(i).and_then(OnceCell::get) {
             return Some(v);
         }
         let meta = self.nodes.get(i)?;
-        if meta.compute.is_some() && !prior.contains(&node_id(n)) && self.stale(state, n) {
-            self.pull(state, n);
+        let pullable = meta.compute.is_some()
+            && !prior.contains(&node_id(n))
+            && !self.pulling.borrow().contains(&n.0)
+            && self.stale(state, n);
+        if pullable {
+            self.pulling.borrow_mut().push(n.0);
+            if let Ok((value, _)) = self.eval(state, node_id(n), None, true) {
+                let _ = self.overlay[i].set(value);
+            }
+            self.pulling.borrow_mut().pop();
             if let Some(v) = self.overlay[i].get() {
                 return Some(v);
             }
@@ -187,17 +195,6 @@ impl Host<'_> {
                 None => self.nodes[i].compute.is_some() && self.stale(state, d),
             }
         })
-    }
-
-    fn pull(&self, state: &State, n: Node) {
-        if self.pulling.borrow().contains(&n.0) {
-            return;
-        }
-        self.pulling.borrow_mut().push(n.0);
-        if let Ok((value, _)) = self.eval(state, node_id(n), None, true) {
-            let _ = self.overlay[n.0 as usize].set(value);
-        }
-        self.pulling.borrow_mut().pop();
     }
 
     /// Run the registered closure of `id` through a tracker: its value and the nodes it read.
@@ -261,7 +258,12 @@ fn commit_of(c: &IRCommit, originated_at: Option<GraphTime>) -> Commit {
         time: c.time,
         intent: SmolStr::new(&c.intent),
         originated_at,
-        changed_nodes: c.changed_nodes.iter().copied().filter_map(node_of).collect(),
+        changed_nodes: c
+            .changed_nodes
+            .iter()
+            .copied()
+            .filter_map(node_of)
+            .collect(),
         at: SystemTime::now(),
     }
 }
@@ -286,7 +288,9 @@ fn transact(
 ) -> Result<Tx, CommitError> {
     let mut seen = BTreeSet::new();
     for (n, _) in writes {
-        let meta = nodes.get(n.0 as usize).ok_or(CommitError::UnknownNode(*n))?;
+        let meta = nodes
+            .get(n.0 as usize)
+            .ok_or(CommitError::UnknownNode(*n))?;
         if meta.kind != NodeKind::Input {
             return Err(CommitError::NotAnInput(*n));
         }
@@ -324,7 +328,10 @@ fn transact(
     }
     let action = Action::CommitWithValues {
         intent: intent.to_owned(),
-        writes: changed.iter().map(|(n, v)| (node_id(*n), encode(v))).collect(),
+        writes: changed
+            .iter()
+            .map(|(n, v)| (node_id(*n), encode(v)))
+            .collect(),
     };
     let record = transition_phased_in_place_with_callbacks(
         state,
@@ -349,15 +356,19 @@ fn transact(
             message: format!("{other:?}"),
         },
     })?;
-    let changed_nodes: Vec<Node> = record.changed_nodes.iter().copied().filter_map(node_of).collect();
+    let changed_nodes: Vec<Node> = record
+        .changed_nodes
+        .iter()
+        .copied()
+        .filter_map(node_of)
+        .collect();
     let values = changed_nodes
         .iter()
         .map(|&n| {
-            let value = host.overlay[n.0 as usize].get().cloned().unwrap_or_else(|| {
-                state
-                    .get_value(node_id(n))
-                    .map_or(Value::Null, decode)
-            });
+            let value = host.overlay[n.0 as usize]
+                .get()
+                .cloned()
+                .unwrap_or_else(|| state.get_value(node_id(n)).map_or(Value::Null, decode));
             (n, value)
         })
         .collect();
@@ -457,7 +468,11 @@ impl CauslGraph {
         let mut tracker = Tracker::new(&read, &self.by_key, None);
         let value = compute(&mut tracker);
         let tracked = tracker.finish();
-        let value = if tracked.error.is_some() { Value::Null } else { value };
+        let value = if tracked.error.is_some() {
+            Value::Null
+        } else {
+            value
+        };
         let deps: SmallVec<[NodeId; 4]> = tracked.deps.into_iter().map(node_id).collect();
         let now = self.state.now;
         let cell = self.state.derived_mut_or_insert(id);
@@ -578,7 +593,14 @@ impl Graph for CauslGraph {
     }
 
     fn commit(&mut self, intent: &str, writes: &[(Node, Value)]) -> Result<Commit, CommitError> {
-        let tx = transact(&self.nodes, &self.by_key, &mut self.state, intent, writes, false)?;
+        let tx = transact(
+            &self.nodes,
+            &self.by_key,
+            &mut self.state,
+            intent,
+            writes,
+            false,
+        )?;
         // No change means no new time: one commit creates exactly one time or zero.
         if tx.commit.changed_nodes.is_empty() {
             return Ok(tx.commit);
@@ -587,7 +609,9 @@ impl Graph for CauslGraph {
     }
 
     fn read(&self, node: Node) -> &Value {
-        self.nodes.get(node.0 as usize).map_or(&Value::Null, |m| &m.value)
+        self.nodes
+            .get(node.0 as usize)
+            .map_or(&Value::Null, |m| &m.value)
     }
 
     fn read_key(&self, key: &str) -> Option<&Value> {
@@ -670,8 +694,15 @@ impl Graph for CauslGraph {
             writes.push((node, value));
         }
         // Hydrate always advances time by one, even when every input already matches.
-        let tx = transact(&self.nodes, &self.by_key, &mut self.state, "hydrate", &writes, true)
-            .map_err(HydrateError::Commit)?;
+        let tx = transact(
+            &self.nodes,
+            &self.by_key,
+            &mut self.state,
+            "hydrate",
+            &writes,
+            true,
+        )
+        .map_err(HydrateError::Commit)?;
         Ok(self.apply(tx, Some(snap.now)))
     }
 
@@ -701,7 +732,14 @@ impl Graph for CauslGraph {
 
     fn simulate(&self, intent: &str, writes: &[(Node, Value)]) -> SimulateResult {
         let mut scratch = self.state.clone();
-        match transact(&self.nodes, &self.by_key, &mut scratch, intent, writes, false) {
+        match transact(
+            &self.nodes,
+            &self.by_key,
+            &mut scratch,
+            intent,
+            writes,
+            false,
+        ) {
             Err(e) => SimulateResult::Rejected(e),
             Ok(tx) => SimulateResult::Applied {
                 time: tx.commit.time,

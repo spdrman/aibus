@@ -216,7 +216,11 @@ pub struct AccountAdd {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCmd {
-    List,
+    List {
+        /// Read the session directories again instead of trusting index.sqlite
+        #[arg(long)]
+        rebuild: bool,
+    },
     Show {
         id: String,
     },
@@ -236,6 +240,9 @@ pub enum SessionCmd {
     },
     Replay {
         id: String,
+        /// Replay on the fake provider: the recorded stream needs no other
+        #[arg(long, value_parser = ["fake"], default_value = "fake")]
+        provider: String,
     },
     Prune {
         #[arg(long, value_name = "AGE")]

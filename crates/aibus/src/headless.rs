@@ -99,16 +99,17 @@ pub fn verdict(result: Option<&RunResult>, interrupted: bool) -> Result<(), Aibu
 /// cancels the run and gives it `GRACE` to wind down; a second one within `FORCE_WITHIN` of the
 /// first stops waiting at once.
 fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
-    let (Some(rt), Some(app), Some(rx), Some(handle), Some(signals)) = (
+    let (Some(rt), Some(app), Some(rx), Some(handle), Some(signals), Some(writer)) = (
         ctx.rt.as_ref(),
         ctx.app.as_mut(),
         ctx.rx.as_mut(),
         ctx.handle.as_mut(),
         ctx.signals.as_mut(),
+        ctx.writer.as_mut(),
     ) else {
         return Err(not_ready("run"));
     };
-    let redactor = &ctx.redactor;
+    let (redactor, prompt) = (&ctx.redactor, &ctx.prompt);
     // A second signal this soon after the first is a forced quit (06 section 5); a graceful
     // stop may take this long before we give up on the run.
     const FORCE_WITHIN: Duration = Duration::from_secs(2);
@@ -121,6 +122,8 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         let mut interrupted = false;
         let mut first_signal: Option<Instant> = None;
         let mut deadline: Option<Instant> = None;
+        // Buffered log lines go out within 2 s even when nothing is happening.
+        let mut idle = tokio::time::interval(Duration::from_secs(1));
         loop {
             let timeout = async {
                 match deadline {
@@ -141,7 +144,13 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                         Msg::RunFinished { result, .. } => Some(result.clone()),
                         _ => None,
                     };
+                    let at = SystemTime::now();
+                    writer.msg(&msg, at)?;
+                    if let Msg::RunStarted { run, .. } = &msg {
+                        writer.prompt(*run, at, prompt)?;
+                    }
                     app.step(msg)?;
+                    writer.after_step(app)?;
                     if done.is_some() {
                         finished = done;
                         break;
@@ -157,6 +166,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                     deadline = Some(now + GRACE);
                     handle.cancel.cancel();
                 }
+                _ = idle.tick() => writer.after_step(app)?,
                 () = timeout => break,
             }
         }

@@ -4,13 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use aibus_graph::{Graph, Node, NodeKey, Snapshot, Value};
+use aibus_graph::{Commit, Graph, Node, NodeKey, Snapshot, Value};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::effects::Effects;
 use crate::error::AibusError;
 use crate::msg::Msg;
+use crate::persist::commits::CommitRecord;
+use crate::persist::time::rfc3339;
 use crate::state::reduce::{reduce, Env};
 use crate::state::store::Store;
 use crate::state::{self, register_run, router_last, ANIMATING, PERMISSIONS_BYPASS, SHUTDOWN};
@@ -95,6 +97,9 @@ pub struct App<G: Graph> {
     tx: mpsc::Sender<Msg>,
     rx: mpsc::Receiver<Msg>,
     ticker: Option<Ticker>,
+    /// Every commit that changed an input, since the last `take_journal`. `None` until
+    /// `record_commits`.
+    journal: Option<Vec<CommitRecord>>,
     now: Box<dyn Fn() -> u64>,
 }
 
@@ -112,6 +117,7 @@ impl<G: Graph> App<G> {
             tx,
             rx,
             ticker: None,
+            journal: None,
             now: Box::new(now),
         }
     }
@@ -159,6 +165,57 @@ impl<G: Graph> App<G> {
         Ok(())
     }
 
+    /// From now on every commit that changes an input is kept for `take_journal`, which is what
+    /// the commit log (07 section 2.1) is written from.
+    pub fn record_commits(&mut self) {
+        self.journal.get_or_insert_with(Vec::new);
+    }
+
+    pub fn take_journal(&mut self) -> Vec<CommitRecord> {
+        self.journal.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Registers any run keys the writes name, commits them under `intent` and journals them.
+    fn commit_writes(
+        &mut self,
+        intent: &str,
+        writes: Vec<(NodeKey, Value)>,
+    ) -> Result<Commit, AibusError> {
+        let mut resolved = Vec::with_capacity(writes.len());
+        for (key, value) in &writes {
+            if self.graph.node(key).is_none() {
+                self.register_dynamic(key)?;
+            }
+            let node = self
+                .graph
+                .node(key)
+                .ok_or_else(|| std::io::Error::other(format!("key {key} did not register")))?;
+            resolved.push((node, value.clone()));
+        }
+        let commit = self
+            .graph
+            .commit(intent, &resolved)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        self.dirty.extend(commit.changed_nodes.iter().copied());
+        if let Some(journal) = &mut self.journal {
+            let changed: Vec<(NodeKey, Value)> = writes
+                .into_iter()
+                .zip(&resolved)
+                .filter(|(_, (node, _))| commit.changed_nodes.contains(node))
+                .map(|(w, _)| w)
+                .collect();
+            if !changed.is_empty() {
+                journal.push(CommitRecord {
+                    time: commit.time,
+                    intent: intent.into(),
+                    changed,
+                    at: rfc3339(commit.at),
+                });
+            }
+        }
+        Ok(commit)
+    }
+
     /// One message: reduce, one commit, then the effects. An error leaves the graph untouched.
     pub fn step(&mut self, msg: Msg) -> Result<(), AibusError> {
         let env = Env {
@@ -166,22 +223,7 @@ impl<G: Graph> App<G> {
             ticks_dropped: self.ticker.as_ref().map_or(0, Ticker::dropped),
         };
         let writes = reduce(&self.graph, &self.store, &msg, env)?;
-        let mut resolved = Vec::with_capacity(writes.len());
-        for (key, value) in writes {
-            if self.graph.node(&key).is_none() {
-                self.register_dynamic(&key)?;
-            }
-            let node = self
-                .graph
-                .node(&key)
-                .ok_or_else(|| std::io::Error::other(format!("key {key} did not register")))?;
-            resolved.push((node, value));
-        }
-        let commit = self
-            .graph
-            .commit(msg.name(), &resolved)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        self.dirty.extend(commit.changed_nodes.iter().copied());
+        let commit = self.commit_writes(msg.name(), writes)?;
         if let (Some(t), Some(Value::Bool(on))) = (&self.ticker, self.graph.read_key(ANIMATING)) {
             t.set_animating(*on);
         }
@@ -189,8 +231,10 @@ impl<G: Graph> App<G> {
         Ok(())
     }
 
-    /// Loads a snapshot, then runs the effects once so queued work starts again.
-    pub fn hydrate(&mut self, snap: Snapshot) -> Result<(), AibusError> {
+    /// Loads a snapshot, replays the logged commits that came after it, then runs the effects
+    /// once so queued work starts again.
+    pub fn hydrate(&mut self, snap: Snapshot, tail: &[CommitRecord]) -> Result<(), AibusError> {
+        let after = snap.now;
         let run_keys: Vec<NodeKey> = snap
             .inputs
             .keys()
@@ -202,10 +246,13 @@ impl<G: Graph> App<G> {
                 self.register_dynamic(&k)?;
             }
         }
-        let commit = self
+        let mut commit = self
             .graph
             .hydrate(snap)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
+        for rec in tail.iter().filter(|r| r.time > after) {
+            commit = self.commit_writes(&rec.intent, rec.changed.clone())?;
+        }
         self.effects.after_commit(&self.graph, &commit);
         Ok(())
     }

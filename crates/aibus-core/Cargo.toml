@@ -13,12 +13,14 @@ aibus-provider.workspace = true
 async-trait = "0.1"
 base64 = "0.22"
 bytes = { version = "1", features = ["serde"] }
+fs4 = { version = "0.12", features = ["sync"] }
 globset = "0.4"
 grep-regex = "0.1"
 grep-searcher = "0.1"
 ignore = "0.4"
 indexmap = { version = "2", features = ["serde"] }
 regex = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_ignored = "0.1"
 serde_json = "1"
@@ -31,6 +33,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 ulid = { version = "1", features = ["serde"] }
 yaml-rust2 = "0.10"
+zstd = "0.13"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process"] }

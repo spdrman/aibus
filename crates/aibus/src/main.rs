@@ -7,9 +7,11 @@ mod agent_watch;
 mod cli;
 mod commands;
 mod events;
+mod handoff;
 mod headless;
 mod keychain;
 mod providers;
+mod session_cmd;
 mod signals;
 mod startup;
 
@@ -56,6 +58,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Config(c)) => commands::config(&c, &cli.global),
         Some(Command::Agent(c)) => agent_cmd::agent(&c, &cli.global),
         Some(Command::Account(c)) => commands::account(&c, &cli.global, redactor),
+        Some(Command::Session(c)) => session_cmd::session(&c, &cli.global, redactor),
         Some(_) => not_yet(&path),
     }
 }

@@ -7,8 +7,10 @@
 //! only ever consumed while the run waits for it. Compaction itself is B2.2: this file calls
 //! whatever `RunDeps::compactor` holds.
 
+mod assist;
+
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use aibus_provider::{
@@ -28,7 +30,10 @@ use super::{
     AccountName, AgentName, ContentBlock, Conversation, Message, MessageRole, ModelId, RunError,
     RunErrorKind, RunId, RunResult, RunStatus,
 };
+use assist::{LeadAssist, Route};
+
 use crate::agent::{AgentDef, PermissionMode, Role};
+use crate::assist::Assist;
 use crate::context::{self, ContextInput};
 use crate::credentials::CredentialSource;
 use crate::hooks::{Fired, HookInput, HookRunner};
@@ -106,6 +111,8 @@ pub struct RunDeps {
     /// What compacts a conversation (B2.2). Without one a `ContextTooLong` fails the run and
     /// `RunMail::Compact` is dropped.
     pub compactor: Option<Arc<dyn Compactor>>,
+    /// The advisor, the router and the session ledger (B2.3). Without it nobody is consulted.
+    pub assist: Option<Arc<Assist>>,
 }
 
 /// Summarises the start of a conversation into a `compact_boundary` message (01 section 5.5).
@@ -152,6 +159,8 @@ struct Task<'a> {
     cfg: &'a RunConfig,
     deps: &'a RunDeps,
     cancel: &'a CancellationToken,
+    /// A tool the router chose for the next request (`tool_choice`), taken by `request`.
+    hint: Mutex<Option<smol_str::SmolStr>>,
 }
 
 async fn task(
@@ -165,6 +174,7 @@ async fn task(
         cfg: &cfg,
         deps: &deps,
         cancel: &cancel,
+        hint: Mutex::new(None),
     };
     t.send(Msg::RunStarted {
         run: cfg.run,
@@ -211,6 +221,7 @@ async fn task(
         }
     };
 
+    t.ledger_begin(&conv);
     let eff = effective_tools(
         &cfg.def,
         cfg.def.role,
@@ -417,13 +428,18 @@ impl Task<'_> {
         let mut retries = 0;
         let mut compacted = false;
         let mut waiting = false;
+        // The router may have named the tool to call; it holds for every attempt of this turn.
+        let choice = match self.hint.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            Some(name) => ToolChoice::Named(name),
+            None => ToolChoice::Auto,
+        };
         loop {
             let req = ChatRequest {
                 model: cfg.model.clone(),
                 system: conv.system.clone(),
                 messages: conv.messages.clone(),
                 tools: specs.to_vec(),
-                tool_choice: ToolChoice::Auto,
+                tool_choice: choice.clone(),
                 max_output_tokens: max_output,
                 temperature: None,
                 effort: cfg.def.effort,
@@ -567,6 +583,9 @@ impl Task<'_> {
         let usage = conv.usage;
         let text = last_text(&conv);
         drop(conv);
+        if let Some(a) = &deps.assist {
+            a.ledger.finish(cfg.run, end.status);
+        }
 
         let dir = cfg.runs_dir.join(cfg.run.to_string());
         let (summary, summary_file) =
@@ -687,12 +706,17 @@ async fn drive(
     // Input tokens of the latest request: what a compaction started now would be shrinking.
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
+    let mut lead = LeadAssist::new(t);
 
     loop {
         if cancel.is_cancelled() {
             return End::of(RunStatus::Cancelled);
         }
         t.boundary(mail, &mut queued, conv, mode, pre_tokens).await;
+        t.sync(conv);
+        if let Some(la) = lead.as_mut() {
+            la.before_request(t, conv).await;
+        }
 
         // A forced delegate opens the run in place of the first request.
         let (resp, seeded) = match forced.take() {
@@ -746,6 +770,9 @@ async fn drive(
             })
             .collect();
         conv.messages.push(resp.message);
+        if let Some(la) = lead.as_mut() {
+            la.after_reply(t, conv, mode).await;
+        }
 
         if calls.is_empty() {
             // The run would end here: the `stop` hooks may send it round again.
@@ -768,6 +795,11 @@ async fn drive(
                     ));
                     again = true;
                 }
+            }
+            if let (false, Some(la)) = (again, lead.as_mut()) {
+                // The router may nudge a lead that ended on an intention; the advisor speaks
+                // before it is done.
+                again = la.on_idle(t, conv, mode, &specs).await;
             }
             if !again {
                 // A message that came in during the last turn is answered rather than dropped.
@@ -829,6 +861,9 @@ async fn drive(
         }
 
         let mut results = Vec::with_capacity(calls.len());
+        // Each call's tool, content and failure, for the checkpoints; and a router `stop + ask`.
+        let mut done = Vec::with_capacity(calls.len());
+        let mut stop_after: Option<String> = None;
         for (id, name, mut input) in calls {
             let tool_event = |input: &Value| {
                 Map::from_iter([
@@ -943,6 +978,31 @@ async fn drive(
                     result.is_error = true;
                     event = HookEvent::PostToolUseFailure;
                     response.insert("error".into(), json!(result.content));
+                    // A call that failed on its own (not one that was refused) may be worth
+                    // a second go, or the end of the turn: the router answers `retry_or_stop`.
+                    let refused = matches!(e, ToolError::Denied { .. } | ToolError::Blocked { .. });
+                    if let (false, Some(la)) = (refused, lead.as_mut()) {
+                        match la.retry_or_stop(t, &name, &result.content).await {
+                            Route::Retry => {
+                                let no = |_: String| async { Decision::Deny };
+                                let again = deps
+                                    .tools
+                                    .call_gated(eff, &cx, mode, &name, input.clone(), no)
+                                    .await;
+                                if let Ok(out) = again {
+                                    result.content = out.content;
+                                    result.is_error = false;
+                                    result.artifacts = out.artifacts;
+                                    result.progress = out.progress;
+                                    event = HookEvent::PostToolUse;
+                                    response.clear();
+                                    response.insert("tool_response".into(), json!(result.content));
+                                }
+                            }
+                            Route::Stop => stop_after = Some(result.content.clone()),
+                            Route::Carry => {}
+                        }
+                    }
                 }
             }
             if cancel.is_cancelled() {
@@ -966,6 +1026,7 @@ async fn drive(
                 duration: t0.elapsed(),
             })
             .await;
+            done.push((name.clone(), content.clone(), is_error));
             results.push(ContentBlock::ToolResult {
                 id,
                 content,
@@ -977,6 +1038,19 @@ async fn drive(
             blocks: results,
             at: SystemTime::UNIX_EPOCH,
         });
+        if let Some(la) = lead.as_mut() {
+            la.after_results(t, conv, mode, &done).await;
+        }
+        if let Some(error) = stop_after {
+            return End {
+                status: RunStatus::Partial,
+                error: Some(RunError {
+                    kind: RunErrorKind::Tool,
+                    message: format!("the router chose to stop and ask: {error}"),
+                    retryable: false,
+                }),
+            };
+        }
 
         if *turns >= budgets.max_turns {
             return End::of(RunStatus::Partial);

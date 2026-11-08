@@ -24,6 +24,9 @@ pub struct SelectHints {
     pub inherit: Option<(AccountName, ModelId)>,
     /// Tags that break a tie between several accounts that can serve the model.
     pub prefer_tags: Vec<SmolStr>,
+    /// Among several accounts that can serve the model, take one whose provider reports
+    /// logprobs (the router's `p` is then a probability and not a self-report, Q4).
+    pub logprobs: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -226,6 +229,16 @@ impl AccountRegistry {
         let first = found
             .iter()
             .position(|(a, _)| a.tags.iter().any(|t| hints.prefer_tags.contains(t)))
+            .or_else(|| {
+                let has = |a: &config::Account| {
+                    hints.logprobs
+                        && self
+                            .providers
+                            .get(&a.provider)
+                            .is_ok_and(|p| p.capabilities().logprobs)
+                };
+                found.iter().position(|(a, _)| has(a))
+            })
             .unwrap_or(0);
         if found.is_empty() {
             return Err(SelectError::NoAccount { model: show(&model) });

@@ -628,18 +628,6 @@ impl Step for EnterLoop {
             swarm_model: pick(&None, &cfg.defaults.swarm_model),
         };
 
-        // The roles that are not the lead only warn: nothing runs them yet.
-        for (role, cli, conf, picked) in [
-            ("advisor", &ctx.global.advisor, &cfg.defaults.advisor_model, &defaults.advisor_model),
-            ("router", &ctx.global.router, &cfg.defaults.router_model, &defaults.router_model),
-        ] {
-            if let (Some(model), true) = (picked, cli.is_some() || conf.is_some()) {
-                if let Err(e) = acc.registry.select(model, &SelectHints::default()) {
-                    eprintln!("aibus: warning: {role} model: {e}");
-                }
-            }
-        }
-
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let orch = Orchestrator::new(limits.clone(), tx.clone());
         orch.set_roster(Roster::of(agents.agents.values()));
@@ -706,7 +694,15 @@ impl Step for EnterLoop {
             data_home: Some(paths.data.clone()),
             max_spawn_depth: limits.max_spawn_depth,
             chosen: Default::default(),
+            assist: Default::default(),
         });
+        // The advisor and the router get their own models and accounts, or a note on stderr
+        // saying why they are off.
+        let assist = launcher.set_assist(
+            ctx.global.advisor.as_deref(),
+            ctx.global.router.as_deref(),
+            cfg,
+        );
 
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
         // `inherit` has no parent here, so it means the session's model.
@@ -749,6 +745,7 @@ impl Step for EnterLoop {
             tx: tx.clone(),
             hooks: hooks.clone(),
             compactor: None,
+            assist,
         };
         if let Some(app) = ctx.app.as_mut() {
             app.set_limits(&limits)?;

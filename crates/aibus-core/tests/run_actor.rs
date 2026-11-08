@@ -188,6 +188,7 @@ fn start(script: Script, def: AgentDef, cwd: &Path, runs_dir: &Path) -> Rig {
             tx,
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
+            assist: None,
         },
     );
     Rig { fake, rx, handle }

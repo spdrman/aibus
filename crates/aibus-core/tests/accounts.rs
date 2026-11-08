@@ -137,6 +137,7 @@ impl Rig {
                 tx,
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
+                assist: None,
             },
         );
         let mut msgs = Vec::new();

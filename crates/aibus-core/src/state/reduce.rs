@@ -749,6 +749,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             // reports its exit code.
             match &outcome.message {
                 Some(m) if m.starts_with("hook error: ") => r.log("warn", m),
+                _ if *event == crate::msg::HookEvent::Checkpoint && outcome.exit_code == 2 => {
+                    r.log("info", "advisor skipped: the checkpoint hook exited 2")
+                }
                 _ => r.log(
                     "info",
                     &format!("hook {} exit {}", event.as_str(), outcome.exit_code),
@@ -763,11 +766,15 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let forks = as_i64(r.cur(ROUTER_FORKS)).unwrap_or(0).max(fork.0 as i64);
             r.put(ROUTER_FORKS, n(forks));
             r.put(
-                router_last(&question.kind),
+                router_last(question.kind.as_str()),
                 map([
                     ("choice", s(&answer.choice)),
-                    ("p", Value::F64(answer.p)),
+                    // Four decimals: an `f32` widened to `f64` would carry noise (0.94 would be
+                    // 0.9399999976...) into the graph, the snapshots and the screen.
+                    ("p", Value::F64((f64::from(answer.p) * 1e4).round() / 1e4)),
                     ("verdict", s(answer.verdict.as_str())),
+                    ("source", s(answer.source.as_str())),
+                    ("latency_ms", n(answer.latency.as_millis() as u64)),
                     ("at", n(r.env.now_ms)),
                 ]),
             );
@@ -777,7 +784,17 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .cloned()
                 .collect();
             r.put(ROUTER_QUEUE, list(queue));
-            r.log("info", &format!("router {} answered", question.kind));
+            r.log(
+                "info",
+                &format!(
+                    "router {} -> {}  p={:.2} ({})  {}",
+                    question.kind.as_str(),
+                    answer.choice,
+                    answer.p,
+                    answer.source.as_str(),
+                    answer.verdict.as_str()
+                ),
+            );
         }
         Msg::CheckpointHit { checkpoint, .. } => {
             let a = with(

@@ -360,9 +360,10 @@ fn def_summary(store: &Store, d: &AgentDef) -> Value {
 }
 
 fn account_value(a: &AccountView) -> Result<Value, AibusError> {
-    let ok = ["keyring:", "env:", "file:"]
-        .iter()
-        .any(|p| a.key_ref.starts_with(p));
+    let ok = a.key_ref == "none"
+        || ["keyring:", "env:", "file:"]
+            .iter()
+            .any(|p| a.key_ref.starts_with(p));
     if !ok {
         return Err(CredentialError::NotAReference(a.name.clone()).into());
     }
@@ -472,9 +473,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             };
             let mut text = String::new();
             let mut usage: Option<Value> = None;
+            let mut waiting: Option<&str> = None;
             for c in chunks {
                 match c {
                     StreamChunk::TextDelta(t) => text.push_str(t),
+                    StreamChunk::Waiting(t) => waiting = Some(t),
                     StreamChunk::Usage(u) => {
                         let base = usage
                             .clone()
@@ -495,7 +498,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             if let Some(u) = usage {
                 r.put(run_key(&id, "usage"), u);
             }
-            if r.status(&id) == Some(RunStatus::Starting) {
+            // The card shows `waiting for <account> slot` while the rate limit holds it back.
+            if let Some(w) = waiting {
+                let note = if w.is_empty() { Value::Null } else { s(w) };
+                let meta = with(r.cur(&run_key(&id, "meta")), "waiting", note);
+                r.put(run_key(&id, "meta"), meta);
+            }
+            let started = chunks.iter().any(|c| !matches!(c, StreamChunk::Waiting(_)));
+            if started && r.status(&id) == Some(RunStatus::Starting) {
                 r.set_status(&id, RunStatus::Running);
             }
         }

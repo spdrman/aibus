@@ -208,7 +208,7 @@ impl Checkpoint {
 }
 
 /// What the graph may know about an account. There is deliberately no secret-shaped field:
-/// `key_ref` is `keyring:aibus/<name>`, `env:AIBUS_ACCOUNT_<NAME>_KEY` or `file:<path>`.
+/// `key_ref` is `keyring:aibus/<name>`, `env:AIBUS_ACCOUNT_<NAME>_KEY`, `file:<path>` or `none`.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AccountView {
     pub name: AccountName,

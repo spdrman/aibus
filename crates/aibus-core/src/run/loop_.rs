@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use aibus_provider::{
-    CacheHint, ChatRequest, ChatResponse, Credential, Provider, ProviderError, ProviderErrorKind,
+    CacheHint, ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind,
     RequestMetadata, StreamChunk, ToolChoice,
 };
 use tokio::sync::mpsc;
@@ -25,6 +25,7 @@ use super::{
 };
 use crate::agent::AgentDef;
 use crate::context::{self, ContextInput};
+use crate::credentials::CredentialSource;
 use crate::ids::PermissionId;
 use crate::msg::{Decision, Msg, ToolCall, ToolResult};
 use crate::tool::{ToolCx, ToolError, ToolLimits};
@@ -74,7 +75,7 @@ pub struct RunConfig {
 /// What the run talks to.
 pub struct RunDeps {
     pub provider: Arc<dyn Provider>,
-    pub creds: Arc<Credential>,
+    pub creds: Arc<dyn CredentialSource>,
     pub tools: Arc<ToolExecutor>,
     pub tx: mpsc::Sender<Msg>,
 }
@@ -345,7 +346,12 @@ async fn stream_turn(
     cancel: &CancellationToken,
 ) -> Result<ChatResponse, ProviderError> {
     let (out, mut chunks) = mpsc::channel::<StreamChunk>(STREAM_CAPACITY);
-    let call = deps.provider.stream(&deps.creds, req, out, cancel.clone());
+    // Resolved for every request, so a rotated key is picked up within the store's cache time.
+    let creds = deps
+        .creds
+        .credential()
+        .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
+    let call = deps.provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
 
     let mut co = Coalescer::default();

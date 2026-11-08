@@ -7,7 +7,11 @@ pub use load::{find_line, load, parse_file, ConfigFileError, Loaded};
 
 use std::collections::BTreeMap;
 
-use aibus_provider::AliasTable;
+use aibus_provider::{AliasTable, RateLimits};
+use smol_str::SmolStr;
+
+use crate::credentials::{KeyRef, KEYCHAIN_SERVICE};
+use crate::ids::AccountName;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
@@ -67,6 +71,11 @@ pub struct Account {
     pub label: Option<String>,
     pub base_url: Option<String>,
     pub default_model: Option<String>,
+    /// `sonnet = "claude-sonnet-4-5"`, tried after the global `[models]` table.
+    pub aliases: AliasTable,
+    pub rate: RateLimits,
+    /// "cheap", "eu": what `prefer_tags` in a selection matches.
+    pub tags: Vec<SmolStr>,
     pub enabled: bool,
     pub auth: Auth,
 }
@@ -80,6 +89,8 @@ pub struct Auth {
     pub env: Option<String>,
     /// A `0600` file that holds the key.
     pub file: Option<String>,
+    /// A local server that needs no key.
+    pub none: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -295,8 +306,40 @@ impl Default for Account {
             label: None,
             base_url: None,
             default_model: None,
+            aliases: AliasTable::new(),
+            rate: RateLimits::default(),
+            tags: Vec::new(),
             enabled: true,
             auth: Auth::default(),
+        }
+    }
+}
+
+impl Account {
+    pub fn account_name(&self) -> AccountName {
+        AccountName(self.name.as_str().into())
+    }
+
+    /// Where the key lives, or `None` for a server that needs none. With no `auth` at all the
+    /// key is read from `AIBUS_ACCOUNT_<NAME>_KEY` (06 section 7).
+    pub fn key_ref(&self) -> Option<KeyRef> {
+        let a = &self.auth;
+        if a.none {
+            None
+        } else if a.keyring {
+            Some(KeyRef::Keyring {
+                service: KEYCHAIN_SERVICE.into(),
+                name: self.account_name(),
+            })
+        } else if let Some(path) = &a.file {
+            Some(KeyRef::File { path: path.into() })
+        } else if let Some(var) = &a.env {
+            Some(KeyRef::Env { var: var.clone() })
+        } else {
+            let name = self.name.to_uppercase().replace('-', "_");
+            Some(KeyRef::Env {
+                var: format!("AIBUS_ACCOUNT_{name}_KEY"),
+            })
         }
     }
 }
@@ -341,6 +384,21 @@ impl Config {
                 bad("account.name", "every account needs a name and a provider".into());
             } else if !seen.insert(a.name.as_str()) {
                 bad("account.name", format!("account {} is defined twice", a.name));
+            }
+            let sources = [
+                a.auth.keyring,
+                a.auth.env.is_some(),
+                a.auth.file.is_some(),
+                a.auth.none,
+            ];
+            if sources.into_iter().filter(|s| *s).count() > 1 {
+                bad(
+                    "account.auth",
+                    format!("account {}: pick one of keyring, env, file, none", a.name),
+                );
+            }
+            if a.rate.max_concurrent == 0 {
+                bad("account.rate", format!("account {}: max_concurrent must be at least 1", a.name));
             }
         }
         out

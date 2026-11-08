@@ -34,6 +34,7 @@ fn chunk_json(c: &StreamChunk) -> Value {
             json!({"k": "logprob", "token": token, "logprob": logprob})
         }
         StreamChunk::Done(r) => json!({"k": "done", "v": r}),
+        StreamChunk::Waiting(t) => json!({"k": "waiting", "v": t}),
     }
 }
 
@@ -128,6 +129,7 @@ fn chunk_from_json(v: &Value) -> Result<StreamChunk, String> {
             logprob: field(v, "logprob")?.as_f64().ok_or("logprob")? as f32,
         },
         "done" => StreamChunk::Done(from_value::<StopReason>(v, "v")?),
+        "waiting" => StreamChunk::Waiting(text(v, "v")?.into()),
         other => return Err(format!("unknown chunk kind {other}")),
     })
 }

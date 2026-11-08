@@ -1,10 +1,12 @@
 //! Engine: definitions, runs, tools, hooks, continuity, orchestrator.
 #![forbid(unsafe_code)]
 
+pub mod accounts;
 pub mod agent;
 pub mod app;
 pub mod config;
 pub mod context;
+pub mod credentials;
 pub mod effects;
 pub mod error;
 pub mod ids;
@@ -17,8 +19,13 @@ pub mod state;
 pub mod tool;
 pub mod tools;
 
+pub use accounts::{AccountRegistry, SelectError, SelectHints};
 pub use agent::*;
 pub use app::{App, Ticker, MSG_CAPACITY};
+pub use credentials::{
+    AccountCredential, CredentialSource, CredentialStore, KeyRef, Keychain, KeychainError,
+    MemoryKeychain, StoreHealth,
+};
 pub use redact::Redactor;
 pub use effects::{Effect, Effects, PendingTool, SpawnSpec};
 pub use error::{AibusError, CredentialError};

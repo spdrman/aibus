@@ -45,8 +45,6 @@ fn everything_else_says_not_yet_and_exits_2() {
         &["a prompt for the tui"],
         &["agent", "list"],
         &["agent", "show", "explore"],
-        &["account", "add", "w", "--provider", "anthropic", "--key-stdin"],
-        &["account", "list"],
         &["session", "list"],
         &["session", "resume", "01ABC", "carry on"],
         &["handoff", "list"],

@@ -92,7 +92,10 @@ fn bad_usage_exits_2() {
     let h = home.path();
     assert_eq!(aibus(h, &["run"]).status.code(), Some(2));
     assert_eq!(aibus(h, &["run", "--agent", "nope", "hi"]).status.code(), Some(2));
-    assert_eq!(aibus(h, &["run", "--model", "gpt-9", "hi"]).status.code(), Some(2));
+    // A model no account serves is exit 4 (04 section 4.1, step 7), not a usage error.
+    let nobody = aibus(h, &["run", "--model", "gpt-9", "hi"]);
+    assert_eq!(nobody.status.code(), Some(4));
+    assert!(stderr(&nobody).contains("no account serves model gpt-9"), "{}", stderr(&nobody));
     assert_eq!(aibus(h, &["--permission-mode", "yolo", "run", "hi"]).status.code(), Some(2));
     let bypass = aibus(h, &["run", "--permission-mode", "bypass", "hi"]);
     assert_eq!(bypass.status.code(), Some(2));
@@ -230,7 +233,7 @@ fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(ndjson(&out)[0]["model"], "fake-small");
 
-    // `--config` wins over the variable, and an unknown model alias fails as usage.
+    // `--config` wins over the variable, and a model nobody serves is exit 4.
     let other = home.path().join("other.toml");
     fs::write(&other, "[defaults]\nmodel = \"nope\"\n").unwrap();
     let out = command(home.path())
@@ -238,7 +241,7 @@ fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
         .args(["--config", other.to_str().unwrap(), "run", "--agent", "explore", "hi"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
 }
 
 #[test]

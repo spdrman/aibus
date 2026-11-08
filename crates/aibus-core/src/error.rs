@@ -1,5 +1,7 @@
 //! One error type for the binary, with the exit code mapping from 06 section 3.
 
+use std::path::PathBuf;
+
 use aibus_provider::{ConfigError, ProviderError};
 
 use crate::ids::AccountName;
@@ -11,12 +13,26 @@ pub enum CredentialError {
     Missing(AccountName),
     #[error("account {0} was rejected")]
     Rejected(AccountName),
-    #[error("no account serves model {0}")]
+    /// Also the TUI banner.
+    #[error("no account serves model {0}; add one with: aibus account add <name> --provider <id>")]
     NoAccountForModel(String),
     /// A `key_ref` that is not `keyring:`, `env:` or `file:`. The value is never echoed: it may
     /// be the secret itself.
     #[error("account {0}: key_ref is not a reference")]
     NotAReference(AccountName),
+    #[error("no account named {0}")]
+    UnknownAccount(AccountName),
+    #[error("{}: mode {:04o} lets other users read the key; run: chmod 600 {}", .0.display(), .1, .0.display())]
+    FileMode(PathBuf, u32),
+    #[error("{}: the key file is not owned by you", .0.display())]
+    FileOwner(PathBuf),
+    #[error("{}: {}", .0.display(), .1)]
+    Unreadable(PathBuf, String),
+    /// No keychain on this machine. `account add` offers `--env` and `--file` instead.
+    #[error("no keychain available: {0}; use --env <VAR> or --file <PATH> instead, a key is never stored in plaintext")]
+    NoKeychain(String),
+    #[error("keychain: {0}")]
+    Keychain(String),
 }
 
 #[derive(Debug, thiserror::Error)]

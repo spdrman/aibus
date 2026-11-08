@@ -159,12 +159,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
     use tracing_subscriber::layer::SubscriberExt;
 
 /// What a span's name and fields look like in the file, for the tests: `(name, args)` of every
 /// complete event, in order.
-pub fn complete_events(text: &str) -> Result<Vec<(String, BTreeMap<String, Value>)>, String> {
+pub fn complete_events(text: &str) -> Result<Vec<(String, Value)>, String> {
     let doc: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let events = doc["traceEvents"].as_array().ok_or("no traceEvents")?;
     let mut out = Vec::new();
@@ -174,8 +173,7 @@ pub fn complete_events(text: &str) -> Result<Vec<(String, BTreeMap<String, Value
                 return Err(format!("event without {key}: {e}"));
             }
         }
-        let args = e["args"].as_object().cloned().unwrap_or_default();
-        out.push((e["name"].as_str().unwrap_or_default().to_owned(), args.into_iter().collect()));
+        out.push((e["name"].as_str().unwrap_or_default().to_owned(), e["args"].clone()));
     }
     Ok(out)
 }

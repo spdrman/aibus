@@ -7,6 +7,12 @@ name: causl-spike
 
 on:
   workflow_dispatch:
+  # TEMPORARY: GitHub only lets workflow_dispatch run a workflow that already sits on the default
+  # branch, so while this branch is unmerged the push below is the only way to run it. Removed
+  # before the PR is ready.
+  push:
+    branches: [a1-5-causl-backend]
+    paths: [".github/workflows/causl-spike.yml", "crates/aibus-graph-causl/**"]
 
 permissions:
   contents: read

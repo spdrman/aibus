@@ -30,6 +30,10 @@ The MSRV pins two versions in `Cargo.lock`: `smol_str` 0.3.2 (newer ones need ru
 
 `toml` 0.8 reads the config (with `serde_ignored` to find unknown keys, `regex` for the redactor patterns) and `clap` 4 with `derive` parses the command line. None of them has a `build.rs` (checked in the unpacked sources, as is `signal-hook-registry`); `clap_derive` is the one proc macro, listed above. I picked `toml` 0.8 as the conservative line; it has the `Deserializer` and error spans the line numbers need, and I did not try 1.x. `etcetera` is not used: the XDG layout is a few lines in `persist/paths.rs` and I did not want a dependency for it.
 
+## Agent directory watcher (B1.1)
+
+`notify` watches the agent directories for `agents.reload_on_change`. The only new crate with a `build.rs` on Linux is `inotify-sys`, whose script only decides whether to link `libinotify` on NetBSD and OpenBSD. I unpacked `fsevent-sys` (macOS) and `filetime` and neither has one; `kqueue` and `kqueue-sys` only build on the BSDs and I did not unpack them. The MSRV pins `notify` at 8.0.0 and `notify-types` at 2.0.0 in `Cargo.lock` (8.2 needs rustc 1.88); like the other pins, use `cargo update -p <crate> --precise` rather than a bare `cargo update` until the MSRV moves.
+
 ## CI
 
 `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.

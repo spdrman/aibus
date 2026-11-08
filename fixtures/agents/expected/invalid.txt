@@ -1,0 +1,8 @@
+error: corpus/invalid/bad_max_turns.md: max_turns: field `max_turns`: expected a non-negative integer
+error: corpus/invalid/bad_name_colon.md: name: invalid agent name "team:scout": want [a-z0-9][a-z0-9_-]{0,63}
+error: corpus/invalid/bad_name_uppercase.md: name: invalid agent name "Scout": want [a-z0-9][a-z0-9_-]{0,63}
+error: corpus/invalid/bad_role.md: role: field `role`: expected lead, worker, advisor or router
+error: corpus/invalid/missing_description.md: description: missing required field `description`
+error: corpus/invalid/missing_name.md: name: missing required field `name`
+error: corpus/invalid/no_frontmatter.md: frontmatter: no frontmatter: the file must start with a `---` line and close it with another
+error: corpus/invalid/unclosed_frontmatter.md: frontmatter: no frontmatter: the file must start with a `---` line and close it with another

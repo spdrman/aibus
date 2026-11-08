@@ -1,6 +1,8 @@
 //! The aibus binary: wiring for the TUI and headless modes.
 #![forbid(unsafe_code)]
 
+mod agent_cmd;
+mod agent_watch;
 mod cli;
 mod commands;
 mod events;
@@ -50,6 +52,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             Ok(0)
         }
         Some(Command::Config(c)) => commands::config(&c, &cli.global),
+        Some(Command::Agent(c)) => agent_cmd::agent(&c, &cli.global),
         Some(_) => not_yet(&path),
     }
 }

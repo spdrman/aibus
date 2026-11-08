@@ -43,8 +43,7 @@ fn everything_else_says_not_yet_and_exits_2() {
     let cases: &[&[&str]] = &[
         &[],
         &["a prompt for the tui"],
-        &["agent", "list"],
-        &["agent", "show", "explore"],
+        &["agent", "import", "somewhere"],
         &["account", "add", "w", "--provider", "anthropic", "--key-stdin"],
         &["account", "list"],
         &["session", "list"],

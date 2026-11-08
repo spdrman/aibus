@@ -7,8 +7,9 @@ use indexmap::IndexMap;
 use serde_json::Value;
 
 use super::builtin::BUILTINS;
+use super::roster;
 use super::def::{from_fields, parse, DefError};
-use super::{AgentDef, DefSource, Scope};
+use super::{AgentDef, DefSource, PermissionMode, Scope};
 use crate::ids::AgentName;
 
 #[derive(Debug, Default)]
@@ -16,7 +17,12 @@ pub struct Discovered {
     /// In precedence order: `--agents`, project, user, extra dirs, built-ins.
     pub agents: IndexMap<AgentName, AgentDef>,
     pub warnings: Vec<String>,
+    /// The roster text (01 section 1.5), for the `delegate` description.
+    pub roster: String,
 }
+
+/// Most `*.md` files read from one scope directory (08 section 8).
+pub const MAX_FILES_PER_SCOPE: usize = 1_000;
 
 /// Walk the scopes. A file that fails to parse is skipped with a warning; a bad `--agents`
 /// value is an error, since the user typed it for this run.
@@ -62,27 +68,30 @@ pub fn discover(
         }
     }
 
-    // `<project>` is the nearest ancestor of the cwd with `.aibus/` or `.git/`.
-    if let Some(root) = project_root(cwd) {
-        found.extend(load_dir(
-            &root.join(".aibus/agents"),
-            &Scope::Project,
-            &mut warnings,
-        ));
-    }
-    if let Some(dir) = user_dir {
-        found.extend(load_dir(dir, &Scope::User, &mut warnings));
-    }
-    for dir in extra_dirs {
+    for (scope, dir) in scope_dirs(cwd, user_dir, extra_dirs) {
+        let defs = load_dir(&dir, &scope, &mut warnings);
+        if !matches!(scope, Scope::Extra(_)) {
+            found.extend(defs);
+            continue;
+        }
         let trusted = trusted_dirs.iter().any(|t| {
-            t == dir
-                || matches!((fs::canonicalize(t), fs::canonicalize(dir)), (Ok(a), Ok(b)) if a == b)
+            t == &dir
+                || matches!((fs::canonicalize(t), fs::canonicalize(&dir)), (Ok(a), Ok(b)) if a == b)
         });
-        for mut def in load_dir(dir, &Scope::Extra(dir.clone()), &mut warnings) {
+        for mut def in defs {
             if !trusted && !def.hooks.is_empty() {
                 def.hooks.clear();
                 warnings.push(format!(
                     "{}: hooks ignored, {} is not in agents.trusted_dirs",
+                    def.name,
+                    dir.display()
+                ));
+            }
+            // A file nobody reviewed does not get to switch permission prompts off.
+            if def.permission_mode != PermissionMode::Default {
+                def.permission_mode = PermissionMode::Default;
+                warnings.push(format!(
+                    "{}: permission_mode reset to default, {} is an extra directory",
                     def.name,
                     dir.display()
                 ));
@@ -123,7 +132,28 @@ pub fn discover(
             }
         }
     }
-    Ok(Discovered { agents, warnings })
+    let roster = roster::text(agents.values());
+    warnings.extend(roster::warning(roster::estimate_tokens(&roster)));
+    Ok(Discovered {
+        agents,
+        warnings,
+        roster,
+    })
+}
+
+/// The directories definitions are read from, project first (01 section 1.2). The project one
+/// is left out when there is no project root.
+pub fn scope_dirs(
+    cwd: &Path,
+    user_dir: Option<&Path>,
+    extra_dirs: &[PathBuf],
+) -> Vec<(Scope, PathBuf)> {
+    let project = project_root(cwd).map(|r| (Scope::Project, r.join(".aibus/agents")));
+    let user = user_dir.map(|d| (Scope::User, d.to_owned()));
+    let extra = extra_dirs
+        .iter()
+        .map(|d| (Scope::Extra(d.clone()), d.clone()));
+    project.into_iter().chain(user).chain(extra).collect()
 }
 
 /// The nearest ancestor of `cwd` (itself included) with `.aibus/` or `.git/`.
@@ -132,10 +162,11 @@ pub fn project_root(cwd: &Path) -> Option<&Path> {
         .find(|d| d.join(".aibus").is_dir() || d.join(".git").exists())
 }
 
-/// Every `*.md` in `dir`, in file name order. A missing directory is an empty scope.
-fn load_dir(dir: &Path, scope: &Scope, warnings: &mut Vec<String>) -> Vec<AgentDef> {
+/// The `*.md` files in `dir` in file name order, at most `MAX_FILES_PER_SCOPE`; the flag says
+/// there were more. A missing directory is an empty scope.
+pub fn list_md(dir: &Path) -> (Vec<PathBuf>, bool) {
     let Ok(read) = fs::read_dir(dir) else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
     let mut files: Vec<PathBuf> = read
         .filter_map(Result::ok)
@@ -143,6 +174,20 @@ fn load_dir(dir: &Path, scope: &Scope, warnings: &mut Vec<String>) -> Vec<AgentD
         .filter(|p| p.extension().is_some_and(|x| x == "md") && p.is_file())
         .collect();
     files.sort();
+    let more = files.len() > MAX_FILES_PER_SCOPE;
+    files.truncate(MAX_FILES_PER_SCOPE);
+    (files, more)
+}
+
+/// Every definition in `dir`, up to the file cap, in file name order.
+fn load_dir(dir: &Path, scope: &Scope, warnings: &mut Vec<String>) -> Vec<AgentDef> {
+    let (files, more) = list_md(dir);
+    if more {
+        warnings.push(format!(
+            "{}: more than {MAX_FILES_PER_SCOPE} definition files, reading the first {MAX_FILES_PER_SCOPE}",
+            dir.display()
+        ));
+    }
     let mut defs = Vec::new();
     for path in files {
         let text = match fs::read_to_string(&path) {

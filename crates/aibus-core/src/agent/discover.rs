@@ -63,10 +63,7 @@ pub fn discover(
     }
 
     // `<project>` is the nearest ancestor of the cwd with `.aibus/` or `.git/`.
-    if let Some(root) = cwd
-        .ancestors()
-        .find(|d| d.join(".aibus").is_dir() || d.join(".git").exists())
-    {
+    if let Some(root) = project_root(cwd) {
         found.extend(load_dir(
             &root.join(".aibus/agents"),
             &Scope::Project,
@@ -127,6 +124,12 @@ pub fn discover(
         }
     }
     Ok(Discovered { agents, warnings })
+}
+
+/// The nearest ancestor of `cwd` (itself included) with `.aibus/` or `.git/`.
+pub fn project_root(cwd: &Path) -> Option<&Path> {
+    cwd.ancestors()
+        .find(|d| d.join(".aibus").is_dir() || d.join(".git").exists())
 }
 
 /// Every `*.md` in `dir`, in file name order. A missing directory is an empty scope.

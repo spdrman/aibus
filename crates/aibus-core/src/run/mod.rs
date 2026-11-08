@@ -1,6 +1,15 @@
-//! Runs and conversations (02 section 5).
+//! Runs and conversations (02 section 5), and the task that drives one (02 section 3.3).
 
-use std::time::SystemTime;
+mod coalesce;
+mod loop_;
+mod model;
+pub mod result;
+
+pub use loop_::{spawn, RunConfig, RunDeps, RunHandle, RunMail, MAILBOX_CAPACITY, STREAM_CAPACITY};
+pub use model::{resolve_model, ModelDefaults};
+
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 use aibus_graph::StoreHandle;
 use serde::{Deserialize, Serialize};
@@ -126,13 +135,21 @@ pub struct Run {
     pub transcript: StoreHandle,
 }
 
-/// What a finished run hands back to the loop.
+/// What a finished run hands back (01 section 5.3). Artifacts and the worktree join it with the
+/// tools and isolation that produce them.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct RunResult {
+    pub run_id: RunId,
+    pub agent: AgentName,
     pub status: RunStatus,
     pub turns: u32,
     pub usage: Usage,
+    /// The final assistant text, capped at `ToolLimits::result_max_bytes`.
     pub summary: String,
+    /// The full text when `summary` was capped.
+    pub summary_file: Option<PathBuf>,
+    pub duration: Duration,
+    pub error: Option<RunError>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]

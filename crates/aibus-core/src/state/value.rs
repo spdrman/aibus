@@ -89,3 +89,21 @@ pub fn json_to_value(j: &serde_json::Value) -> Value {
         )),
     }
 }
+
+/// The plain JSON shape of a graph value, for NDJSON output. Bytes and store handles have no
+/// plain shape and come out as `null`.
+pub fn value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null | Value::Bytes(_) | Value::Handle(_) => serde_json::Value::Null,
+        Value::Bool(b) => (*b).into(),
+        Value::I64(n) => (*n).into(),
+        Value::F64(x) => (*x).into(),
+        Value::Str(t) => t.as_str().into(),
+        Value::List(items) => items.iter().map(value_to_json).collect(),
+        Value::Map(m) => serde_json::Value::Object(
+            m.iter()
+                .map(|(k, v)| (k.to_string(), value_to_json(v)))
+                .collect(),
+        ),
+    }
+}

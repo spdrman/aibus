@@ -1,0 +1,8 @@
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"chunks":[{"k":"text","v":"I'll start with the top level of the repo."},{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":140,"output_tokens":22}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"call":"00000000000000000000000001","content_len":14,"is_error":false,"ms":0,"msg":"ToolCallFinished","run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"chunks":[{"k":"text","v":"The repo is a Rust workspace: crates/ holds the engine, the providers and the binary."},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":260,"output_tokens":24}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":2647937,"secs":0},"error":null,"run_id":"01M6XG5WDJ0ENN7MH8Q7W4RDX6","status":"Completed","summary":"","summary_file":null,"summary_len":85,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0006299999999999999,"input_tokens":400,"output_tokens":46}},"run":"01M6XG5WDJ0ENN7MH8Q7W4RDX6"}

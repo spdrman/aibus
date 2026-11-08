@@ -19,6 +19,17 @@ version = "0.0.0"
 dependencies = [
  "aibus-graph",
  "aibus-provider",
+ "aibus-testkit",
+ "async-trait",
+ "bytes",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "ulid",
 ]
 
 [[package]]

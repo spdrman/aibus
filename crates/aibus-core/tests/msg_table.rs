@@ -54,6 +54,7 @@ fn names_are_pinned() {
             Msg::PermissionDecided {
                 id: perm(),
                 decision: Decision::Deny,
+                reason: None,
             },
             "PermissionDecided",
         ),

@@ -1,4 +1,4 @@
-//! The `Tool` trait and its supporting types (02 section 5). Concrete tools land with A4.
+//! The `Tool` trait and its supporting types (02 section 5).
 
 use std::path::PathBuf;
 
@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::PermissionMode;
 use crate::ids::RunId;
 use crate::msg::Msg;
+use crate::run::Progress;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Need {
@@ -40,17 +41,37 @@ pub struct ToolCx {
     pub tx: mpsc::Sender<Msg>,
 }
 
+/// A file a run marked as one of its outputs (`report_artifact`).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Artifact {
     pub name: String,
+    /// What the file is: `report`, `patch`, `data`, whatever the model called it.
+    pub kind: String,
     pub path: PathBuf,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+/// Something a tool wants the run loop to do, because only the loop owns the mailbox and the
+/// effective permission mode.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Signal {
+    /// Park the run in `WaitingUser` and use the next user message as the tool result.
+    AskUser {
+        question: String,
+        choices: Vec<String>,
+    },
+    /// The effective mode becomes `plan`.
+    EnterPlan,
+    /// The effective mode goes back to what the definition asked for.
+    ExitPlan,
+}
+
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct ToolOutput {
     pub content: String,
     pub artifacts: Vec<Artifact>,
     pub truncated: bool,
+    pub progress: Option<Progress>,
+    pub signal: Option<Signal>,
 }
 
 #[derive(Debug, thiserror::Error)]

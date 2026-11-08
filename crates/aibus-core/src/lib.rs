@@ -9,6 +9,7 @@ pub mod effects;
 pub mod error;
 pub mod ids;
 pub mod msg;
+pub mod permission;
 pub mod persist;
 pub mod redact;
 pub mod replay;
@@ -26,4 +27,6 @@ pub use ids::*;
 pub use msg::*;
 pub use run::*;
 pub use tool::*;
-pub use tools::{effective_tools, EffectiveTools, ToolExecutor, ToolRegistry};
+pub use tools::{
+    effective_tools, Bash, EffectiveTools, Gate, JobView, ShellDeny, ToolExecutor, ToolRegistry,
+};

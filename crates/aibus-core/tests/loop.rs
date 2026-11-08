@@ -140,6 +140,7 @@ fn the_seven_effect_nodes_each_start_their_effect() {
     a.step(Msg::PermissionDecided {
         id: perm(),
         decision: Decision::Allow,
+        reason: None,
     })
     .unwrap();
     // 3 hooks:due, 4 router:queue
@@ -197,6 +198,7 @@ fn a_denied_tool_never_runs() {
     a.step(Msg::PermissionDecided {
         id: perm(),
         decision: Decision::Deny,
+        reason: None,
     })
     .unwrap();
     assert!(!log.borrow().iter().any(|e| matches!(e, Effect::Tool(_))));

@@ -12,6 +12,7 @@ pub mod error;
 pub mod hooks;
 pub mod ids;
 pub mod msg;
+pub mod orchestrator;
 pub mod permission;
 pub mod persist;
 pub mod redact;
@@ -34,8 +35,9 @@ pub use error::{AibusError, CredentialError};
 pub use hooks::{Blocked, Fired, HookInput, HookRunner, Ran};
 pub use ids::*;
 pub use msg::*;
+pub use orchestrator::{parse_mention, Launcher, Limits, Orchestrator, Roster, Waited};
 pub use run::*;
 pub use tool::*;
 pub use tools::{
-    effective_tools, Bash, EffectiveTools, Gate, JobView, ShellDeny, ToolExecutor, ToolRegistry,
+    effective_tools, Bash, Delegate, EffectiveTools, Gate, JobView, ShellDeny, ToolExecutor, ToolRegistry,
 };

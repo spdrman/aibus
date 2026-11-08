@@ -99,6 +99,9 @@ fn hydrate_plus_one_after_commit_restarts_queued_work() {
         background: false,
         isolation: Isolation::None,
         parent: None,
+        run: None,
+        model: None,
+        account: None,
     }))
     .unwrap();
     assert_eq!(spawns(&log), 2);
@@ -251,6 +254,9 @@ fn counts_runnable_and_limits() {
         background: false,
         isolation: Isolation::None,
         parent: Some(parent),
+        run: None,
+        model: None,
+        account: None,
     }))
     .unwrap();
     assert_eq!(
@@ -286,6 +292,9 @@ fn counts_runnable_and_limits() {
         background: false,
         isolation: Isolation::None,
         parent: Some(parent),
+        run: None,
+        model: None,
+        account: None,
     }))
     .unwrap();
     let runnable = a.graph.read_key("model:orchestrator:runnable").unwrap();

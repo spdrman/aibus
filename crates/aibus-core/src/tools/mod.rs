@@ -3,6 +3,7 @@
 //! call the run was not granted.
 
 mod bash;
+mod delegate;
 mod policy;
 mod readonly;
 mod shell;
@@ -25,13 +26,11 @@ use crate::tool::{Tool, ToolCx, ToolError, ToolOutput};
 
 pub(crate) use bash::{kill_group, scrubbed_env, Tail};
 pub use bash::{Bash, JobView};
+pub use delegate::Delegate;
 pub use readonly::{Glob, Grep, Ls, Read};
 pub use shell::ShellDeny;
 pub use user::{AskUser, EnterPlanMode, ExitPlanMode, Plan, ReportArtifact};
 pub use write::{Edit, Write};
-
-/// Spawn depth past which `delegate` is no longer offered (`limits.max_spawn_depth`, 01 section 4).
-const MAX_SPAWN_DEPTH: u8 = 3;
 
 /// The tools a run may call: allow patterns with the denies that still need a runtime check.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -43,12 +42,13 @@ pub struct EffectiveTools {
 
 /// Works out the tool list for one run: the role's tool set, narrowed by the definition's
 /// `allow`, with every deny applied before it (deny wins). Background runs lose the interactive
-/// tools, and `delegate` disappears at the depth limit.
+/// tools, and `delegate` disappears at `max_spawn_depth` (01 section 4.4).
 pub fn effective_tools(
     def: &AgentDef,
     role: Role,
     depth: u8,
     background: bool,
+    max_spawn_depth: u8,
 ) -> EffectiveTools {
     const COMMON: [&str; 8] = [
         "read",
@@ -80,7 +80,7 @@ pub fn effective_tools(
         Role::Router => vec![],
     };
     if matches!(role, Role::Lead | Role::Worker) {
-        if depth < MAX_SPAWN_DEPTH {
+        if depth < max_spawn_depth {
             names.push("delegate");
         }
         if def.memory.is_some() {

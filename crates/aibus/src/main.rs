@@ -14,6 +14,7 @@ mod events;
 mod handoff;
 mod headless;
 mod keychain;
+mod launch;
 mod logfile;
 mod logging;
 mod plain;

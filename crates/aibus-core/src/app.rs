@@ -13,6 +13,7 @@ use crate::error::AibusError;
 use crate::msg::Msg;
 use crate::persist::commits::CommitRecord;
 use crate::persist::time::rfc3339;
+use crate::orchestrator::Limits;
 use crate::state::reduce::{reduce, Env};
 use crate::state::store::Store;
 use crate::state::{self, register_run, router_last, ANIMATING, PERMISSIONS_BYPASS, SHUTDOWN};
@@ -136,6 +137,19 @@ impl<G: Graph> App<G> {
             .ok_or_else(|| std::io::Error::other("bypass key is not registered"))?;
         self.graph
             .commit("BypassEnabled", &[(node, Value::Bool(true))])
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Writes the session's limits (config with the `AIBUS_MAX_*` overrides) to `model:limits`,
+    /// where `runnable` reads them. Startup configuration, one commit of its own.
+    pub fn set_limits(&mut self, limits: &Limits) -> Result<(), AibusError> {
+        let node = self
+            .graph
+            .node(state::LIMITS)
+            .ok_or_else(|| std::io::Error::other("limits key is not registered"))?;
+        self.graph
+            .commit("LimitsSet", &[(node, limits.to_value())])
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(())
     }

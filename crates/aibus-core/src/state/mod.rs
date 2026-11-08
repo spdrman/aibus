@@ -5,6 +5,7 @@
 //! `eng:` holds substrate. A `model:` or `eng:` node never depends on `ctrl:` or `view:`.
 
 pub mod derive;
+pub mod migrate;
 pub mod reduce;
 pub mod store;
 pub mod value;

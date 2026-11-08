@@ -1,0 +1,43 @@
+# Best-effort secret shapes (09 section 4). A match is replaced with [redacted:pattern:<name>].
+# Order matters: a more specific shape comes before the general one it would otherwise lose to.
+# The corpus in tests/redact.rs holds a positive and a negative line for each.
+
+[[pattern]]
+name = "private-key"
+regex = '(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\z)'
+
+[[pattern]]
+name = "anthropic-key"
+regex = 'sk-ant-[A-Za-z0-9_-]{20,}'
+
+[[pattern]]
+name = "openai-key"
+regex = '\bsk-[A-Za-z0-9]{20,}'
+
+[[pattern]]
+name = "github-token"
+regex = '\bgh[po]_[A-Za-z0-9]{36}'
+
+[[pattern]]
+name = "github-fine-grained"
+regex = '\bgithub_pat_[A-Za-z0-9_]{22,}'
+
+[[pattern]]
+name = "slack-token"
+regex = '\bxox[baprs]-[A-Za-z0-9-]{10,}'
+
+[[pattern]]
+name = "aws-access-key"
+regex = '\bAKIA[0-9A-Z]{16}\b'
+
+[[pattern]]
+name = "jwt"
+regex = '\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*'
+
+[[pattern]]
+name = "bearer"
+regex = '\bBearer [A-Za-z0-9._-]{20,}'
+
+[[pattern]]
+name = "assignment"
+regex = '(?i)(?:password|passwd|token)=[^\s&"]+'

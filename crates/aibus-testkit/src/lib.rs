@@ -1,6 +1,8 @@
 //! Fixtures, fake clock, TestBackend helpers and snapshot macros.
 #![forbid(unsafe_code)]
 
+pub mod tui;
+
 use std::cell::RefCell;
 use std::io;
 use std::sync::{Arc, Mutex};

@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus account list --json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "name",
+      "provider",
+      "label",
+      "auth",
+      "default_model",
+      "status"
+    ],
+    "properties": {
+      "name": {
+        "type": "string"
+      },
+      "provider": {
+        "type": "string"
+      },
+      "label": {
+        "type": "string"
+      },
+      "auth": {
+        "enum": [
+          "keyring",
+          "env",
+          "file",
+          "none"
+        ]
+      },
+      "default_model": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "status": {
+        "type": "string"
+      }
+    }
+  }
+}

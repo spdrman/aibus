@@ -192,10 +192,24 @@ impl<G: Graph> App<G> {
                 .ok_or_else(|| std::io::Error::other(format!("key {key} did not register")))?;
             resolved.push((node, value.clone()));
         }
+        // One span per commit for `--trace` (08 section 6); a disabled span costs a load.
+        let span = tracing::trace_span!(
+            target: "aibus_trace",
+            "commit",
+            intent = intent,
+            changed = tracing::field::Empty,
+            recompute_us = tracing::field::Empty,
+        );
+        let began = (!span.is_disabled()).then(std::time::Instant::now);
         let commit = self
             .graph
             .commit(intent, &resolved)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
+        if let Some(t0) = began {
+            span.record("changed", commit.changed_nodes.len() as u64);
+            span.record("recompute_us", t0.elapsed().as_micros() as u64);
+        }
+        drop(span);
         self.dirty.extend(commit.changed_nodes.iter().copied());
         if let Some(journal) = &mut self.journal {
             let changed: Vec<(NodeKey, Value)> = writes

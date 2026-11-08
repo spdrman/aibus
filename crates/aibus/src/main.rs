@@ -6,19 +6,30 @@ mod agent_cmd;
 mod agent_watch;
 mod cli;
 mod commands;
+mod completions;
+mod control;
+mod doctor;
+mod env;
 mod events;
 mod handoff;
 mod headless;
 mod keychain;
+mod logfile;
+mod logging;
+mod plain;
 mod providers;
 mod session_cmd;
 mod signals;
 mod startup;
+mod term;
+mod trace;
+
+use std::io::IsTerminal;
 
 use aibus_core::{AibusError, Redactor};
 use clap::{CommandFactory, FromArgMatches};
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, RunArgs, WorkflowCmd};
 
 fn main() -> std::process::ExitCode {
     let redactor = Redactor::new();
@@ -44,7 +55,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Ok(2)
     };
     match cli.command {
-        None => not_yet("the TUI"),
+        None => bare(cli.global, cli.prompt, redactor),
         Some(Command::Run(args)) => headless::run(cli.global, args, redactor.clone()),
         Some(Command::Version) => {
             let v = env!("CARGO_PKG_VERSION");
@@ -59,6 +70,36 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Agent(c)) => agent_cmd::agent(&c, &cli.global),
         Some(Command::Account(c)) => commands::account(&c, &cli.global, redactor),
         Some(Command::Session(c)) => session_cmd::session(&c, &cli.global, redactor),
+        Some(Command::Workflow(WorkflowCmd::List { names })) => {
+            commands::workflow_list(&cli.global, names)
+        }
+        Some(Command::Doctor { session }) => {
+            doctor::doctor(&cli.global, session.as_deref(), redactor, &keychain::OsKeychain)
+        }
+        Some(Command::Completions { shell }) => {
+            print!("{}", completions::script(shell));
+            Ok(0)
+        }
         Some(_) => not_yet(&path),
     }
+}
+
+/// No subcommand (06 section 5). With stdout piped this is `aibus run`, with a note on stderr;
+/// on a terminal it is the dashboard, which a `TERM=dumb` terminal cannot draw.
+fn bare(
+    global: cli::Global,
+    prompt: Option<String>,
+    redactor: &Redactor,
+) -> Result<u8, AibusError> {
+    if !std::io::stdout().is_terminal() {
+        eprintln!("aibus: stdout is not a terminal, running as `aibus run`");
+        let args = RunArgs {
+            prompt,
+            ..RunArgs::default()
+        };
+        return headless::run(global, args, redactor.clone());
+    }
+    term::check_tui(std::env::var("TERM").ok().as_deref())?;
+    eprintln!("aibus: the TUI: not yet");
+    Ok(2)
 }

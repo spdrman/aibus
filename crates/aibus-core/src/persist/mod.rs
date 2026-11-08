@@ -4,7 +4,6 @@ pub mod commits;
 pub mod frames;
 pub mod fs;
 pub mod index;
-pub mod logs;
 pub mod paths;
 pub mod retention;
 pub mod session;

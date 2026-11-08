@@ -5,11 +5,29 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
+/// The dashboard key map (05 section 4), short enough for `--help`.
+pub const KEY_MAP: &str = "\
+Keys in the dashboard:
+  Tab / Shift+Tab   cycle focus (prompt, cards, log, rail)
+  Enter             submit in the prompt; open the transcript on a card or log row
+  j k / arrows      move selection or scroll
+  x                 stop the selected run (dismiss it when finished)
+  r  m  R           retry a failed run; message a run; resume a partial run
+  t  a  p           lead transcript; advisor rail; oldest open permission
+  y  n  a  e        in the permission modal: allow, deny, always, edit
+  :  /  f           command palette; filter; follow
+  A  K              agents screen; accounts screen
+  ?                 key map
+  Ctrl+c            cancel the focused run; twice within 2 s quits
+  q                 quit (asks for the outcome if the session did work)
+  Esc               close a modal; clear the prompt";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "aibus",
     version,
-    about = "Run agents against a shared graph, in a terminal or headless"
+    about = "Run agents against a shared graph, in a terminal or headless",
+    after_help = KEY_MAP
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -141,14 +159,18 @@ pub enum Command {
     #[command(subcommand)]
     Config(ConfigCmd),
     /// Check the install and the config
-    Doctor,
+    Doctor {
+        /// Also print the live memory numbers of this session
+        #[arg(long, value_name = "ID")]
+        session: Option<String>,
+    },
     /// Print a shell completion script
     Completions { shell: Shell },
     /// Print the version
     Version,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub struct RunArgs {
     /// The prompt; `-` or no prompt on a non-tty stdin reads it from stdin
     pub prompt: Option<String>,
@@ -186,7 +208,11 @@ pub enum AgentCmd {
 #[derive(Subcommand, Debug)]
 pub enum AccountCmd {
     Add(AccountAdd),
-    List,
+    List {
+        /// Names only, one per line (the completion scripts call this)
+        #[arg(long, hide = true)]
+        names: bool,
+    },
     Show { name: String },
     Test { name: String },
     Remove { name: String },
@@ -220,6 +246,9 @@ pub enum SessionCmd {
         /// Read the session directories again instead of trusting index.sqlite
         #[arg(long)]
         rebuild: bool,
+        /// Ids only, one per line (the completion scripts call this)
+        #[arg(long, hide = true)]
+        names: bool,
     },
     Show {
         id: String,
@@ -288,7 +317,11 @@ pub enum MemoryCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkflowCmd {
-    List,
+    List {
+        /// Names only, one per line (the completion scripts call this)
+        #[arg(long, hide = true)]
+        names: bool,
+    },
     Run { name: String, input: String },
 }
 
@@ -487,6 +520,23 @@ mod tests {
             "aibus", "account", "add", "w", "--provider", "p", "--env", "X", "--key-stdin"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn doctor_takes_a_session_and_the_name_helpers_parse() {
+        let cli = Cli::try_parse_from(["aibus", "doctor", "--session", "01JC0000000000000000000000"]).unwrap();
+        let Some(Command::Doctor { session }) = cli.command else { panic!() };
+        assert_eq!(session.as_deref(), Some("01JC0000000000000000000000"));
+        for sub in ["agent", "account", "session", "workflow"] {
+            assert!(Cli::try_parse_from(["aibus", sub, "list", "--names"]).is_ok(), "{sub}");
+        }
+    }
+
+    #[test]
+    fn the_root_help_ends_with_the_key_map() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("Keys in the dashboard"), "{help}");
+        assert!(help.trim_end().ends_with("Esc               close a modal; clear the prompt"));
     }
 
     #[test]

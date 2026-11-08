@@ -40,6 +40,9 @@ pub struct SessionMeta {
     pub lead: String,
     pub outcome: Option<String>,
     pub ended: Option<String>,
+    /// The outcome given for the handoff (`--outcome`, `AIBUS_OUTCOME`), canonical.
+    #[serde(default)]
+    pub handoff_outcome: Option<String>,
     /// A pinned session is never pruned.
     #[serde(default)]
     pub pinned: bool,
@@ -56,6 +59,7 @@ impl SessionMeta {
             lead: lead.into(),
             outcome: None,
             ended: None,
+            handoff_outcome: None,
             pinned: false,
         }
     }

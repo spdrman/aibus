@@ -51,7 +51,7 @@ fn state(home: &Path) -> PathBuf {
 
 /// Runs the built-in explore script and returns the session id.
 fn run(home: &Path, extra: &[&str], prompt: &str) -> String {
-    let mut args = vec!["run", "--agent", "explore"];
+    let mut args = vec!["run", "--json", "--agent", "explore"];
     args.extend_from_slice(extra);
     args.push(prompt);
     let out = aibus(home, &args);
@@ -97,6 +97,7 @@ fn list_and_show_read_the_index_and_deleting_it_loses_nothing() {
 
     let shown = json(home.path(), &["session", "show", &id]);
     assert_eq!(shown["session"]["id"], id.as_str());
+    assert_eq!(shown["session"]["lead"], "explore");
     assert_eq!(shown["runs"][0]["agent"], "explore");
     assert_eq!(shown["runs"][0]["status"], "completed");
     assert_eq!(shown["runs"][0]["turns"], 2);
@@ -124,7 +125,7 @@ fn log_prints_the_commits_as_ndjson_and_replay_prints_the_recorded_hash() {
     let lines = ndjson(&out);
     assert!(lines.len() >= 6);
     for l in &lines {
-        assert!(l["time"].is_u64() && l["intent"].is_string() && l["changed"].is_array());
+        assert!(l["time"].is_u64() && l["intent"].is_string() && l["changed"].is_u64());
         assert!(l["at"].as_str().unwrap().ends_with('Z'));
     }
     assert!(lines.iter().any(|l| l["intent"] == "RunFinished"));

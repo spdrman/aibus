@@ -159,6 +159,8 @@ pub struct RunResult {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum RunErrorKind {
     Provider,
+    /// The credential was rejected (06 section 3, exit 4). Never retried.
+    Auth,
     Tool,
     Budget,
     Denied,
@@ -169,6 +171,7 @@ impl RunErrorKind {
     pub fn as_str(self) -> &'static str {
         match self {
             RunErrorKind::Provider => "provider",
+            RunErrorKind::Auth => "auth",
             RunErrorKind::Tool => "tool",
             RunErrorKind::Budget => "budget",
             RunErrorKind::Denied => "denied",

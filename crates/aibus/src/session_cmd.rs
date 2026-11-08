@@ -12,11 +12,11 @@ use aibus_core::persist::frames::read_lines;
 use aibus_core::persist::index::Index;
 use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::persist::retention::{parse_age, prune, worktrees};
-use aibus_core::persist::session::{load, read_snapshot, MSGS};
+use aibus_core::persist::session::{load, read_snapshot, SessionMeta, MSGS};
 use aibus_core::replay::replay_hash;
 use aibus_core::state::value::{get, value_to_json};
 use aibus_core::state::{HANDOFF_LATEST, LEDGER};
-use aibus_core::{AibusError, App, Redactor};
+use aibus_core::{AibusError, App, Redactor, SessionId};
 use aibus_graph::mini::MiniGraph;
 use serde_json::{json, Value as Json};
 
@@ -26,21 +26,31 @@ use crate::startup::now_ms;
 pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
     let paths = g.paths()?;
     let mut out = std::io::stdout().lock();
+    // Only a well-formed id gets to name a path.
     let dir_of = |id: &str| -> Result<PathBuf, AibusError> {
+        id.parse::<SessionId>()
+            .map_err(|_| AibusError::Usage(format!("session {id}: not a session id")))?;
         let dir = paths.state.join("sessions").join(id);
-        // `id` comes from the command line and becomes a path: only a plain name is one.
-        if id.is_empty() || id.contains(['/', '\\']) || id.starts_with('.') || !dir.is_dir() {
-            return Err(AibusError::Usage(format!("no session {id}")));
+        if dir.join("session.json").is_file() {
+            Ok(dir)
+        } else {
+            Err(AibusError::Usage(format!("no session {id}")))
         }
-        Ok(dir)
     };
     match cmd {
-        SessionCmd::List { rebuild } => {
-            let rows = index(&paths, *rebuild)?.list()?;
-            if g.json {
-                writeln!(out, "{}", Json::Array(rows))?;
-            } else {
+        SessionCmd::List { rebuild, names } => {
+            let mut rows = index(&paths, *rebuild)?.list()?;
+            if *names {
                 for r in &rows {
+                    writeln!(out, "{}", r["id"].as_str().unwrap_or_default())?;
+                }
+            } else if g.json {
+                let mut all = Json::Array(rows);
+                redactor.redact_json(&mut all);
+                writeln!(out, "{all}")?;
+            } else {
+                for r in &mut rows {
+                    redactor.redact_json(r);
                     let col = |k: &str| r[k].as_str().unwrap_or("-").to_owned();
                     writeln!(
                         out,
@@ -60,6 +70,8 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
             let mut shown = index(&paths, false)?
                 .show(id)?
                 .ok_or_else(|| AibusError::Usage(format!("no session {id}")))?;
+            // `session` is session.json as it is on disk, which has `started`, `lead` and `cwd`.
+            shown["session"] = serde_json::to_value(SessionMeta::read(&dir)?).map_err(std::io::Error::other)?;
             // The latest handoff and the ledger are what the graph held at the last snapshot.
             let snap = read_snapshot(&dir).ok();
             let input = |k: &str| snap.as_ref().and_then(|s| s.inputs.get(k));
@@ -67,6 +79,7 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                 .and_then(|h| get(h, "path"))
                 .map_or(Json::Null, value_to_json);
             shown["ledger"] = input(LEDGER).map_or(Json::Null, value_to_json);
+            redactor.redact_json(&mut shown);
             if g.json {
                 writeln!(out, "{shown}")?;
             } else {
@@ -78,8 +91,7 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
         }
         SessionCmd::Log { id } => {
             for rec in commits::read_all(&dir_of(id)?)? {
-                let keys: Vec<&str> = rec.changed.iter().map(|(k, _)| k.as_str()).collect();
-                writeln!(out, "{}", json!({"time": rec.time, "intent": rec.intent, "changed": keys, "at": rec.at}))?;
+                writeln!(out, "{}", json!({"time": rec.time, "intent": rec.intent, "changed": rec.changed.len(), "at": rec.at}))?;
             }
         }
         SessionCmd::Replay { id, .. } => {

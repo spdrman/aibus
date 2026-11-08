@@ -506,6 +506,7 @@ async fn auth_never_retries_and_commits_the_account_banner() {
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Failed);
     assert_eq!(r.error.as_ref().unwrap().message, banner);
+    assert_eq!(r.error.as_ref().unwrap().kind, RunErrorKind::Auth);
     let failed = done.msgs.iter().find_map(|m| match m {
         Msg::RunFailed { error, .. } => Some(error.message.clone()),
         _ => None,

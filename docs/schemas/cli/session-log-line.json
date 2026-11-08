@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus session log --json (one line)",
+  "type": "object",
+  "required": [
+    "time",
+    "intent",
+    "changed",
+    "at"
+  ],
+  "properties": {
+    "time": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "intent": {
+      "type": "string"
+    },
+    "changed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    }
+  }
+}

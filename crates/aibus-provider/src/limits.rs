@@ -255,6 +255,10 @@ impl Provider for Gated {
     fn price(&self, model: &ModelId) -> Option<Price> {
         self.inner.price(model)
     }
+
+    fn estimate_tokens(&self, req: &ChatRequest) -> u64 {
+        self.inner.estimate_tokens(req)
+    }
 }
 
 #[cfg(test)]

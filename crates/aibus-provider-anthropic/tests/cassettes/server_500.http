@@ -1,0 +1,5 @@
+HTTP 500
+content-type: application/json
+request-id: req_011CTx2nK7MvXe9Rb4Dq2SfT
+
+{"type":"error","error":{"type":"api_error","message":"Internal server error"}}

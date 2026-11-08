@@ -105,9 +105,13 @@ pub enum MessageRole {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ContentBlock {
     Text(String),
+    /// `signature` is what the API needs back to accept the block in a later request; for a
+    /// redacted block `text` carries the opaque payload instead.
     Thinking {
         text: String,
         redacted: bool,
+        #[serde(default)]
+        signature: Option<String>,
     },
     ToolUse {
         id: ToolCallId,

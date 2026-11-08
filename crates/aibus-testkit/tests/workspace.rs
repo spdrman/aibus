@@ -60,7 +60,7 @@ fn closure(name: &str) -> BTreeSet<String> {
 #[test]
 fn core_never_sees_ratatui_or_a_concrete_provider() {
     let deps = closure("aibus-core");
-    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai"] {
+    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http", "reqwest"] {
         assert!(!deps.contains(banned), "aibus-core depends on {banned}");
     }
     let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
@@ -69,8 +69,10 @@ fn core_never_sees_ratatui_or_a_concrete_provider() {
 
 #[test]
 fn provider_crate_has_no_network_crates() {
+    // Not socket2 or mio: tokio has its `net` feature on workspace-wide because reqwest needs it,
+    // and cargo metadata shows that feature set to every crate that depends on tokio.
     let deps = closure("aibus-provider");
-    for banned in ["reqwest", "hyper", "h2", "ureq", "isahc", "surf", "curl", "native-tls", "rustls", "openssl", "socket2", "mio"] {
+    for banned in ["reqwest", "hyper", "h2", "ureq", "isahc", "surf", "curl", "native-tls", "rustls", "openssl"] {
         assert!(!deps.contains(banned), "aibus-provider depends on {banned}");
     }
 }
@@ -78,8 +80,32 @@ fn provider_crate_has_no_network_crates() {
 #[test]
 fn tui_never_sees_reqwest_or_a_provider_crate() {
     let deps = closure("aibus-tui");
-    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai"] {
+    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http"] {
         assert!(!deps.contains(banned), "aibus-tui depends on {banned}");
+    }
+}
+
+/// TLS is rustls with ring (docs/BUILD.md): no OpenSSL and no platform TLS stack. `schannel` and
+/// `security-framework` stay allowed, because rustls-native-certs reads the system's root
+/// certificates through them; they do no TLS.
+#[test]
+fn provider_crates_use_rustls_and_never_openssl() {
+    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http"] {
+        let deps = closure(krate);
+        assert!(deps.contains("rustls") && deps.contains("reqwest"), "{krate} lost its TLS stack");
+        for banned in ["openssl", "openssl-sys", "openssl-src", "native-tls", "hyper-tls"] {
+            assert!(!deps.contains(banned), "{krate} depends on {banned}");
+        }
+    }
+}
+
+#[test]
+fn only_the_provider_http_crates_open_sockets() {
+    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider"] {
+        let deps = closure(krate);
+        for banned in ["reqwest", "hyper", "h2", "rustls"] {
+            assert!(!deps.contains(banned), "{krate} depends on {banned}");
+        }
     }
 }
 
@@ -107,8 +133,8 @@ fn every_crate_forbids_unsafe_code() {
             }
         }
     }
-    // Eight workspace members plus aibus-graph-causl, which sits outside the workspace.
-    assert_eq!(checked, 9, "expected one root file per crate");
+    // Nine workspace members plus aibus-graph-causl, which sits outside the workspace.
+    assert_eq!(checked, 10, "expected one root file per crate");
 }
 
 #[test]

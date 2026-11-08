@@ -53,6 +53,10 @@ pub const MODAL: &str = "ctrl:modal";
 pub const PALETTE_TEXT: &str = "ctrl:palette:text";
 pub const LOG_FILTER: &str = "ctrl:log:filter";
 pub const SIZE: &str = "ctrl:size";
+/// Whether the 3-column rail strip is opened to the full rail (`a`, a click on the strip).
+pub const RAIL_EXPANDED: &str = "ctrl:rail:expanded";
+/// Dragged sizes: `{ rail, log }`, each null until the user drags that border.
+pub const LAYOUT: &str = "ctrl:layout";
 // eng:
 pub const TICK: &str = "eng:tick";
 pub const TICKS_DROPPED: &str = "eng:ticks_dropped";
@@ -194,6 +198,8 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         (PALETTE_TEXT, s("")),
         (LOG_FILTER, s("")),
         (SIZE, map([("cols", n(80)), ("rows", n(24))])),
+        (RAIL_EXPANDED, Value::Bool(false)),
+        (LAYOUT, map([("rail", Value::Null), ("log", Value::Null)])),
         (TICK, n(0)),
         (TICKS_DROPPED, n(0)),
         (MSG_SEQ, n(0)),
@@ -209,7 +215,7 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         g.input(&NodeKey::from(key), v);
         keys.push(NodeKey::from(key));
     }
-    for pane in ["advisor", "forks", "cards", "log", "input"] {
+    for pane in ["advisor", "forks", "cards", "log", "input", "cards:x"] {
         let key = scroll_key(pane);
         g.input(&key, n(0));
         keys.push(key);

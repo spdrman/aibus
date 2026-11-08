@@ -24,6 +24,7 @@ mod signals;
 mod startup;
 mod term;
 mod trace;
+mod tui;
 
 use std::io::IsTerminal;
 
@@ -101,6 +102,5 @@ fn bare(
         return headless::run(global, args, redactor.clone());
     }
     term::check_tui(std::env::var("TERM").ok().as_deref())?;
-    eprintln!("aibus: the TUI: not yet");
-    Ok(2)
+    tui::run(global, prompt, redactor.clone())
 }

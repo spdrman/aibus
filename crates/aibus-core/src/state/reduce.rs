@@ -16,7 +16,7 @@ use super::*;
 use crate::agent::{AgentDef, Isolation, Role};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{PermissionId, RunId};
-use crate::msg::{AccountView, Command, Decision, Msg, Pane, Selection};
+use crate::msg::{AccountView, Command, Decision, Msg, Pane, Selection, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
 
@@ -311,6 +311,98 @@ impl R<'_> {
         self.put(TOOLS_PENDING, list(next));
     }
 
+    fn scroll(&mut self, pane: Pane, lines: i32, sideways: bool) {
+        let key = scroll_key(&if sideways {
+            format!("{}:x", pane.as_str())
+        } else {
+            pane.as_str().to_owned()
+        });
+        let mut next = (as_i64(self.cur(&key)).unwrap_or(0) + i64::from(lines)).max(0);
+        // The log cannot be scrolled past its oldest row.
+        if pane == Pane::Log && !sideways {
+            next = next.min(self.store.log_len().saturating_sub(1) as i64);
+        }
+        self.put(key, n(next));
+    }
+
+    fn select(&mut self, pane: Pane, sel: Selection) {
+        let (key, clear) = match pane {
+            Pane::Cards => (SELECTED_CARD, n(0)),
+            Pane::Log => (SELECTED_LOG, Value::Null),
+            _ => return,
+        };
+        let cur = as_i64(self.cur(key)).unwrap_or(0);
+        let v = match sel {
+            Selection::Index(i) => n(i.max(0)),
+            Selection::Next => n(cur + 1),
+            Selection::Prev => n((cur - 1).max(0)),
+            Selection::Clear => clear,
+        };
+        // The card row shows three at a time: move the window so the selection stays in it.
+        if let (Pane::Cards, Some(i)) = (pane, as_i64(&v)) {
+            let x_key = scroll_key("cards:x");
+            let x = as_i64(self.cur(&x_key)).unwrap_or(0);
+            if i < x {
+                self.put(x_key, n(i));
+            } else if i >= x + 3 {
+                self.put(x_key, n(i - 2));
+            }
+        }
+        self.put(key, v);
+    }
+
+    /// The run id of the `index`th worker card, in the order the cards view lists them.
+    fn card_run(&self, index: usize) -> Option<String> {
+        as_list(self.cur(RUNS_ORDER))
+            .iter()
+            .filter_map(as_str)
+            .filter(|id| {
+                get(self.cur(&run_key(id, "meta")), "role").and_then(as_str) == Some("worker")
+            })
+            .nth(index)
+            .map(str::to_owned)
+    }
+
+    fn ui(&mut self, i: UiIntent) {
+        const ORDER: [Pane; 4] = [Pane::Input, Pane::Cards, Pane::Log, Pane::Advisor];
+        match i {
+            UiIntent::Focus(p) => self.put(FOCUS, s(p.as_str())),
+            UiIntent::FocusNext | UiIntent::FocusPrev => {
+                let cur = as_str(&self.now(FOCUS))
+                    .and_then(|f| ORDER.iter().position(|p| p.as_str() == f))
+                    .unwrap_or(0);
+                let next = if i == UiIntent::FocusNext {
+                    (cur + 1) % ORDER.len()
+                } else {
+                    (cur + ORDER.len() - 1) % ORDER.len()
+                };
+                self.put(FOCUS, s(ORDER[next].as_str()));
+            }
+            UiIntent::Select(pane, sel) => self.select(pane, sel),
+            UiIntent::Scroll { pane, lines, sideways } => self.scroll(pane, lines, sideways),
+            UiIntent::Open(Pane::Cards) => {
+                let index = as_i64(self.cur(SELECTED_CARD)).unwrap_or(0).max(0) as usize;
+                if let Some(id) = self.card_run(index) {
+                    self.put(MODAL, s(&format!("transcript:{id}")));
+                }
+            }
+            UiIntent::Open(Pane::Advisor) => self.put(MODAL, s("advice")),
+            UiIntent::Open(_) => {}
+            UiIntent::ToggleRail => {
+                let open = matches!(self.cur(RAIL_EXPANDED), Value::Bool(true));
+                self.put(RAIL_EXPANDED, Value::Bool(!open));
+            }
+            UiIntent::SetRailWidth(w) => {
+                let l = with(self.cur(LAYOUT), "rail", n(w.clamp(22, 80)));
+                self.put(LAYOUT, l);
+            }
+            UiIntent::SetLogRows(h) => {
+                let l = with(self.cur(LAYOUT), "log", n(h.clamp(5, 80)));
+                self.put(LAYOUT, l);
+            }
+        }
+    }
+
     fn command(&mut self, c: &Command) {
         match c {
             Command::Delegate {
@@ -354,26 +446,8 @@ impl R<'_> {
             }
             Command::Permission { id, decision } => self.decide(*id, *decision),
             Command::Focus(p) => self.put(FOCUS, s(p.as_str())),
-            Command::Scroll(p, d) => {
-                let key = scroll_key(p.as_str());
-                let next = (as_i64(self.cur(&key)).unwrap_or(0) + i64::from(*d)).max(0);
-                self.put(key, n(next));
-            }
-            Command::Select(pane, sel) => {
-                let (key, clear) = match pane {
-                    Pane::Cards => (SELECTED_CARD, n(0)),
-                    Pane::Log => (SELECTED_LOG, Value::Null),
-                    _ => return,
-                };
-                let cur = as_i64(self.cur(key)).unwrap_or(0);
-                let v = match sel {
-                    Selection::Index(i) => n((*i).max(0)),
-                    Selection::Next => n(cur + 1),
-                    Selection::Prev => n((cur - 1).max(0)),
-                    Selection::Clear => clear,
-                };
-                self.put(key, v);
-            }
+            Command::Scroll(p, d) => self.scroll(*p, *d, false),
+            Command::Select(pane, sel) => self.select(*pane, *sel),
             Command::OpenTranscript(run) => self.put(MODAL, s(&format!("transcript:{run}"))),
             Command::CloseModal => self.put(MODAL, Value::Null),
             Command::OpenPalette => self.put(MODAL, s("palette")),
@@ -497,6 +571,7 @@ pub fn reduce(g: &dyn Graph, store: &Store, msg: &Msg, env: Env) -> Result<Write
 fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
     match msg {
         Msg::Key(_) | Msg::Mouse(_) | Msg::Persisted => {}
+        Msg::Ui(i) => r.ui(*i),
         Msg::Resize { cols, rows } => r.put(SIZE, map([("cols", n(*cols)), ("rows", n(*rows))])),
         Msg::Tick => {
             let t = as_i64(r.cur(TICK)).unwrap_or(0) + 1;

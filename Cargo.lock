@@ -214,6 +214,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "tokio",
+ "toml",
  "ulid",
 ]
 

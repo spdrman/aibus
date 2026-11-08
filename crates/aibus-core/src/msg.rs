@@ -83,6 +83,44 @@ pub enum Selection {
     Clear,
 }
 
+/// What a mouse gesture or a bound key asks of the UI state (05 section 6.1). The TUI turns a
+/// hit on its map into one of these, so a click and the key with the same meaning take the same
+/// path through `reduce`, and replay sees both alike.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UiIntent {
+    Focus(Pane),
+    FocusNext,
+    FocusPrev,
+    Select(Pane, Selection),
+    /// `lines` is positive towards older rows (up). `sideways` scrolls the card row.
+    Scroll {
+        pane: Pane,
+        lines: i32,
+        sideways: bool,
+    },
+    /// Enter, or a double click: open what the pane has selected.
+    Open(Pane),
+    ToggleRail,
+    SetRailWidth(u16),
+    SetLogRows(u16),
+}
+
+impl UiIntent {
+    pub fn name(self) -> &'static str {
+        match self {
+            UiIntent::Focus(_) => "focus",
+            UiIntent::FocusNext => "focus_next",
+            UiIntent::FocusPrev => "focus_prev",
+            UiIntent::Select(..) => "select",
+            UiIntent::Scroll { .. } => "scroll",
+            UiIntent::Open(_) => "open",
+            UiIntent::ToggleRail => "toggle_rail",
+            UiIntent::SetRailWidth(_) => "set_rail_width",
+            UiIntent::SetLogRows(_) => "set_log_rows",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Outcome {
     Succeeded,
@@ -352,6 +390,8 @@ pub enum Msg {
     // terminal
     Key(KeyEvent),
     Mouse(MouseEvent),
+    /// A gesture or key that only changes UI state.
+    Ui(UiIntent),
     Resize {
         cols: u16,
         rows: u16,
@@ -460,6 +500,7 @@ impl Msg {
         match self {
             Msg::Key(_) => "Key",
             Msg::Mouse(_) => "Mouse",
+            Msg::Ui(_) => "Ui",
             Msg::Resize { .. } => "Resize",
             Msg::Tick => "Tick",
             Msg::SubmitPrompt { .. } => "SubmitPrompt",
@@ -494,6 +535,7 @@ impl Msg {
         let len = |t: &str| n(t.len());
         match self {
             Msg::Key(_) | Msg::Mouse(_) | Msg::Tick | Msg::Persisted => map([("msg", name)]),
+            Msg::Ui(i) => map([("msg", name), ("intent", s(i.name()))]),
             Msg::Resize { cols, rows } => {
                 map([("msg", name), ("cols", n(*cols)), ("rows", n(*rows))])
             }

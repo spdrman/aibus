@@ -16,9 +16,10 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 26] = [
+pub const ALL_NAMES: [&str; 27] = [
     "Key",
     "Mouse",
+    "Ui",
     "Resize",
     "Tick",
     "SubmitPrompt",
@@ -310,6 +311,12 @@ pub fn cases() -> Vec<Case> {
                 row: 2,
             }),
             expect: vec![],
+        },
+        Case {
+            name: "Ui",
+            setup: none,
+            msg: Msg::Ui(UiIntent::Focus(Pane::Log)),
+            expect: vec!["ctrl:focus"],
         },
         Case {
             name: "Resize",

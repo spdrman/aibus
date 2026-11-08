@@ -37,7 +37,7 @@ fn colour(c: Color) -> String {
 }
 
 /// Rows of cell symbols with trailing blanks trimmed, and per row the runs of equal style.
-fn frame_of(buf: &Buffer) -> Frame {
+pub fn frame_of(buf: &Buffer) -> Frame {
     let (mut text, mut styles) = (String::new(), String::new());
     for y in 0..buf.area.height {
         let mut row = String::new();

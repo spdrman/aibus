@@ -1,0 +1,50 @@
+                                  AIBUS   ·   SONNET 5.5 LEADS   ·   HAIKU 5.5 SWARMS
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ advisor
+
+ ┌ ADVISOR ───────────┐                             ┌ Sonnet 5.5 · main session ───────────┐
+ │ advisor · reading  │                             │edits + runs tests                    │
+ │                    │                             │effort ▮▮▮▮ high                      │
+ │ ◆ before a plan    │                             └──────────────────────────────────────┘
+ │  reads the whole   │                                                 ·
+ │  session, every    │                             ┌ ROUTER · fork layer ─────forks 1,314─┐
+ │  tool call, result │                             │which file     █████████▍ 0.94 sharp  │
+ │ last advice:       │                             │which tool     █████████▍ 0.94 sharp  │
+ │ » plan skips auth  │                             │retry or stop  █████▊████ 0.58 split  │
+ │ calls            1 │                             │sharp → runs in code   split → lead   │
+ │ tokens read   122k │                             └──────────────────────────────────────┘
+ │   silent on every  │                                delegate to subagents · Haiku 5.5
+ │   routine turn     │                                                 ┼
+ │                    │                                                 ┼
+ │ ◇ same error x2    │                   ┌ ▸ search ───────┐ ┌ grep ───────────┐ ┌ audit ──────────┐
+ │ ◇ before done      │                   │Haiku 5.5        │ │Haiku 5.5        │ │Haiku 5.5        │
+ │                    │                   │█████▋   71%     │ │██▊      35%     │ │████████ 100%    │
+ │                    │                   │◑ running        │ │◒ running        │ │✓ done           │
+ │                    │                   │maps the repo    │ │finds call sites │ │runs in a        │
+ │                    │                   │                 │ │                 │ │worktree         │
+ │                    │                   └─────────────────┘ └─────────────────┘ └─────────────────┘
+ │                    │                                                 │
+ │                    │                                                 │
+ │                    │                             ┌ back to Sonnet 5.5 · lead ───────────┐
+ │                    │                             │review + verify                       │
+ │                    │                             └──────────────────────────────────────┘
+ │                    │
+ │                    │
+ │                    │
+ └────────────────────┘
+
+┌ session log ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│22:13:20  info     started grep                                                                                       │
+│22:13:20  info     queued audit                                                                                       │
+│22:13:20  info     started audit                                                                                      │
+│22:13:20  info     router which_file answered                                                                         │
+│22:13:20  info     router which_tool answered                                                                         █
+│22:13:20  info     router retry_or_stop answered                                                                      █
+│22:13:20  info     advisor spoke at before_plan                                                                       █
+│22:13:20  info     checkpoint before_plan                                                                             █
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ ~/app $ aibus --model sonnet --advisor opus ▌
+
+  haiku 5.5 [swarming]      subagents [2/3]      advisor [reading]      router [ 1,314 forks]

@@ -1,9 +1,9 @@
-use aibus_tui::areas;
+use aibus_tui::{areas, Layout};
 use ratatui::layout::Rect;
 
 #[test]
 fn row_budget_at_98x46() {
-    let a = areas(Rect::new(0, 0, 98, 46));
+    let a = areas(Rect::new(0, 0, 98, 46), &Layout::default(), false);
     assert_eq!((a.header.height, a.legend.height), (2, 1));
     assert_eq!(a.rail.height, 30);
     assert_eq!(a.centre.height, 30);
@@ -24,11 +24,11 @@ fn row_budget_at_98x46() {
 
 #[test]
 fn small_terminals_collapse_the_rail_and_shrink_the_log() {
-    let a = areas(Rect::new(0, 0, 80, 24));
+    let a = areas(Rect::new(0, 0, 80, 24), &Layout::default(), false);
     assert_eq!(a.rail.width, 3);
     assert_eq!(a.log.height, 5, "border plus 3 rows");
     assert_eq!(a.status.bottom(), 24);
-    let tall = areas(Rect::new(0, 0, 120, 50));
+    let tall = areas(Rect::new(0, 0, 120, 50), &Layout::default(), false);
     assert_eq!(tall.log.height, 10, "extra rows go to the log");
     assert_eq!(tall.centre.height, 30);
 }

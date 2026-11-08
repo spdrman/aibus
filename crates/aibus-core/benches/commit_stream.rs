@@ -26,7 +26,14 @@ fn pct(sorted: &[f64], p: usize) -> f64 {
 }
 
 fn main() {
-    let mut app = App::new(MiniGraph::new(), || 1_700_000_000_000);
+    run("mini", MiniGraph::new);
+}
+
+/// The whole measurement, generic over the backend so `aibus-graph-causl` can run it on `causl`
+/// by including this file (`#[path]`) and calling `run`.
+pub fn run<G: Graph>(label: &str, mk: fn() -> G) {
+    println!("backend: {label}");
+    let mut app = App::new(mk(), || 1_700_000_000_000);
     let runs: Vec<RunId> = (0..8).map(|_| RunId::new()).collect();
     for r in &runs {
         app.step(Msg::RunStarted {
@@ -149,7 +156,7 @@ fn main() {
     println!("stream_commit_100k_lines_8_runs_2000_log: p50 {p50:.0} us, p99 {p99:.0} us, max {max:.0} us (budget {BUDGET_US:.0} us p99)");
 
     // The alternative the spec writes (tail as a `Str` node): one commit of a 48 KiB string.
-    let mut g = MiniGraph::new();
+    let mut g = mk();
     let tail = g.input(&"alt:tail".into(), Value::Null);
     let mut alt = Vec::with_capacity(2000);
     for i in 0..2000 {

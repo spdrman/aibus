@@ -10,7 +10,8 @@ use smol_str::SmolStr;
 
 use crate::agent::{AgentDef, Isolation, Role};
 use crate::ids::{AccountName, AgentName, ForkId, ModelId, PermissionId, RunId, ToolCallId};
-use crate::run::{RunError, RunResult, Usage};
+use crate::run::{Progress, RunError, RunResult, Usage};
+use crate::tool::Artifact;
 use crate::state::value::{map, n, s};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -100,6 +101,7 @@ pub enum Decision {
 #[derive(Clone, PartialEq, Debug)]
 pub struct PermissionRequest {
     pub id: PermissionId,
+    pub agent: AgentName,
     pub run: RunId,
     pub call: ToolCallId,
     pub tool: SmolStr,
@@ -117,10 +119,14 @@ pub struct ToolCall {
     pub needs_permission: bool,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct ToolResult {
     pub content: String,
     pub is_error: bool,
+    /// Files the call reported; they land in the run's `meta`.
+    pub artifacts: Vec<Artifact>,
+    /// Set by `report_artifact`; becomes the card's percentage.
+    pub progress: Option<Progress>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -343,6 +349,8 @@ pub enum Msg {
     PermissionDecided {
         id: PermissionId,
         decision: Decision,
+        /// Why, when nobody was asked (`"no tty"`).
+        reason: Option<String>,
     },
     RunFinished {
         run: RunId,
@@ -488,7 +496,7 @@ impl Msg {
                 ("id", s(&request.id.to_string())),
                 ("run", s(&request.run.to_string())),
             ]),
-            Msg::PermissionDecided { id, decision } => map([
+            Msg::PermissionDecided { id, decision, .. } => map([
                 ("msg", name),
                 ("id", s(&id.to_string())),
                 ("allowed", Value::Bool(*decision != Decision::Deny)),

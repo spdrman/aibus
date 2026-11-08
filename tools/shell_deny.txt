@@ -1,0 +1,40 @@
+# Destructive shell commands that `bash` refuses before any prompt, in every permission mode
+# (09 section 3). One rule per line: `name: glob`. `*` crosses `/`; write `\*` for a literal star
+# and `\{` `\}` for literal braces. Each rule is tried against the whole command and against
+# every word-boundary suffix of it, so `sudo rm -rf /` trips `rm * /`.
+# `[tools] deny_patterns` in the config extends this list. A match is logged with its name.
+
+rm-root: rm * /
+rm-root-glob: rm * /\*
+rm-home: rm * ~
+rm-home-slash: rm * ~/
+rm-home-glob: rm * ~/\*
+rm-home-var: rm * $HOME
+rm-home-var-slash: rm * $HOME/
+rm-home-var-quoted: rm * "$HOME"
+rm-star: rm -[rRf]* \*
+rm-star-long: rm --recursive* \*
+
+force-push-main: git push *--force* main
+force-push-main-more: git push *--force* main *
+force-push-master: git push *--force* master
+force-push-master-more: git push *--force* master *
+force-push-short-main: git push *-f* main
+force-push-short-master: git push *-f* master
+force-push-plus-main: git push * +main
+force-push-plus-master: git push * +master
+force-push-flag-last-main: git push * main *--force*
+force-push-flag-last-master: git push * master *--force*
+force-push-short-last-main: git push * main -f
+force-push-short-last-master: git push * master -f
+
+reset-hard-no-ref: git reset --hard
+
+fork-bomb: :()\{ :|:& \};:
+
+mkfs: mkfs
+mkfs-args: mkfs *
+mkfs-fs: mkfs.*
+
+dd-to-device: dd of=/dev/*
+dd-to-device-args: dd *of=/dev/*

@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "edit",
+  "type": "object",
+  "required": [
+    "path",
+    "old",
+    "new"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "old": {
+      "type": "string",
+      "minLength": 1
+    },
+    "new": {
+      "type": "string"
+    },
+    "all": {
+      "type": "boolean"
+    }
+  }
+}

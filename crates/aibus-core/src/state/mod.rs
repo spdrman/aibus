@@ -27,6 +27,8 @@ pub const ACCOUNTS: &str = "model:accounts";
 pub const RUNS_ORDER: &str = "model:runs:order";
 pub const TOOLS_PENDING: &str = "model:tools:pending";
 pub const PERMISSIONS_OPEN: &str = "model:permissions:open";
+/// True for the whole session when `bypass` is on, so the status bar can show `BYPASS`.
+pub const PERMISSIONS_BYPASS: &str = "model:permissions:bypass";
 pub const HOOKS_DUE: &str = "model:hooks:due";
 pub const ROUTER_QUEUE: &str = "model:router:queue";
 pub const ROUTER_FORKS: &str = "model:router:forks";
@@ -154,6 +156,7 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         (RUNS_ORDER, list(vec![])),
         (TOOLS_PENDING, list(vec![])),
         (PERMISSIONS_OPEN, list(vec![])),
+        (PERMISSIONS_BYPASS, Value::Bool(false)),
         (HOOKS_DUE, list(vec![])),
         (ROUTER_QUEUE, list(vec![])),
         (ROUTER_FORKS, n(0)),

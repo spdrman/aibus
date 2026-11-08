@@ -10,6 +10,33 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+/// The A2.2 tests exercise the allow-list boundary only, so they run in `bypass`, where the
+/// permission layer never asks.
+trait Ungated {
+    async fn call(
+        &self,
+        eff: &EffectiveTools,
+        cx: &ToolCx,
+        name: &str,
+        input: Value,
+    ) -> Result<ToolOutput, ToolError>;
+}
+
+impl Ungated for ToolExecutor {
+    async fn call(
+        &self,
+        eff: &EffectiveTools,
+        cx: &ToolCx,
+        name: &str,
+        input: Value,
+    ) -> Result<ToolOutput, ToolError> {
+        self.call_gated(eff, cx, PermissionMode::Bypass, name, input, |_| async {
+            Decision::Deny
+        })
+        .await
+    }
+}
+
 fn def(allow: Option<&[&str]>, deny: &[&str]) -> AgentDef {
     AgentDef {
         name: "t".parse().unwrap(),

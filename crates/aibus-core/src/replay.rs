@@ -173,6 +173,7 @@ pub fn msg_from_json(v: &Value) -> Result<Msg, String> {
             result: ToolResult {
                 content: "?".repeat(field(v, "content_len")?.as_u64().ok_or("len")? as usize),
                 is_error: field(v, "is_error")?.as_bool().ok_or("flag")?,
+                ..Default::default()
             },
             duration: Duration::from_millis(field(v, "ms")?.as_u64().ok_or("ms")?),
         },

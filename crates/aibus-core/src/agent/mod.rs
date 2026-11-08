@@ -1,4 +1,9 @@
-//! Agent definitions (02 section 5). Parsing and discovery land with A3.
+//! Agent definitions (01 section 1): the types here, `def` parses one file, `discover` walks the
+//! scopes, `builtin` holds the compiled-in nine.
+
+pub mod builtin;
+pub mod def;
+pub mod discover;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

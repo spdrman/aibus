@@ -181,7 +181,7 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                 writeln!(out, "{} sessions removed", removed.len())?;
             }
         }
-        SessionCmd::Resume { id, run, message } => {
+        SessionCmd::Resume { id, run, message, .. } => {
             let dir = dir_of(id)?;
             let (snap, tail) = load(&dir)?;
             let mut app = App::new(MiniGraph::new(), now_ms);

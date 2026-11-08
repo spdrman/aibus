@@ -74,8 +74,10 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             id,
             run: Some(run),
             message,
+            script,
         })) => {
-            let args = session_cmd::resume_args(&cli.global, &id, &run, message)?;
+            let mut args = session_cmd::resume_args(&cli.global, &id, &run, message)?;
+            args.script = script;
             headless::run(cli.global, args, redactor.clone())
         }
         Some(Command::Session(c)) => session_cmd::session(&c, &cli.global, redactor),

@@ -262,6 +262,9 @@ pub enum SessionCmd {
         #[arg(long, value_name = "RUN")]
         run: Option<String>,
         message: Option<String>,
+        /// Play this RON script on the fake provider (for tests)
+        #[arg(long, value_name = "FILE", hide = true)]
+        script: Option<PathBuf>,
     },
     Export {
         id: String,

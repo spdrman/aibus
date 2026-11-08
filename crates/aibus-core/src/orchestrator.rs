@@ -352,7 +352,7 @@ impl Orchestrator {
         if again.is_none() && g.tally.total + pending >= l.max_runs_per_session {
             return Err(format!("session run limit reached ({})", l.max_runs_per_session));
         }
-        let id = again.unwrap_or_else(RunId::new);
+        let id = again.unwrap_or_default();
         if again.is_none() {
             g.pending.insert(id);
         }

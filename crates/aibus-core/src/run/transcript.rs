@@ -53,6 +53,7 @@ pub enum Line {
 
 /// What a transcript holds: the conversation as the run would send it now, and the latest
 /// `start` line (for a fork that is the fork's, for a resumed run the resume's).
+#[derive(Debug)]
 pub struct Loaded {
     pub conv: Conversation,
     pub meta: RunMeta,

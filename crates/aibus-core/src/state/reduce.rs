@@ -224,9 +224,12 @@ impl R<'_> {
             ("background", Value::Bool(background)),
             ("isolation", s(q.isolation.as_str())),
             ("prompt", self.store.inline_or_handle(q.prompt)),
-            ("fork", Value::Bool(q.fork)),
-            ("resume", Value::Bool(false)),
         ]);
+        let meta = if q.fork {
+            with(&meta, "fork", Value::Bool(true))
+        } else {
+            meta
+        };
         // A parent that already ended can no longer take the result: the run is never started.
         let orphan = q.parent.is_some_and(|p| {
             self.status(&p.to_string())
@@ -618,9 +621,12 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 ("background", base("background", Value::Bool(false))),
                 ("isolation", base("isolation", s("none"))),
                 ("prompt", base("prompt", s(""))),
-                ("fork", base("fork", Value::Bool(false))),
-                ("resume", Value::Bool(false)),
             ]);
+            // Only a fork carries the mark, and a resume's is spent once the run starts.
+            let meta = match get(&old, "fork") {
+                Some(f) => with(&meta, "fork", f.clone()),
+                None => meta,
+            };
             if had {
                 r.put(run_key(&id, "meta"), meta);
                 r.set_status(&id, RunStatus::Starting);

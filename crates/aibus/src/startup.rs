@@ -1043,6 +1043,7 @@ mod tests {
                 script: None,
                 record: None,
                 session_dir: None,
+                resume: None,
             },
             Redactor::new(),
         )

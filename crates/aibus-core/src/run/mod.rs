@@ -162,6 +162,7 @@ pub struct RunResult {
     pub error: Option<RunError>,
     /// The run's worktree when it was dirty and so was kept (09 section 7); a clean one is
     /// removed at the end of the run and not reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeInfo>,
 }
 

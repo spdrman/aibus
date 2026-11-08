@@ -3,7 +3,7 @@
 use aibus_graph::{Compute, Graph, NodeKey, Tracker, Value};
 
 use super::store::Store;
-use super::value::{as_i64, as_list, as_str, get, list, map, n, s};
+use super::value::{as_i64, as_list, as_str, get, list, map, n, s, with};
 use super::*;
 use crate::run::RunStatus;
 
@@ -91,7 +91,7 @@ fn runnable(t: &mut Tracker) -> Value {
             continue;
         }
         let field = |k: &str| get(meta, k).cloned().unwrap_or(Value::Null);
-        out.push(map([
+        let mut item = map([
             ("run", s(id)),
             ("agent", field("agent")),
             ("parent", field("parent")),
@@ -99,11 +99,16 @@ fn runnable(t: &mut Tracker) -> Value {
             ("background", field("background")),
             ("isolation", field("isolation")),
             ("prompt", field("prompt")),
-            ("fork", field("fork")),
-            ("resume", field("resume")),
             ("model", field("model")),
             ("account", field("account")),
-        ]));
+        ]);
+        // Only a fork or a resume says so, so an ordinary run's entry is what it always was.
+        for flag in ["fork", "resume"] {
+            if field(flag) == Value::Bool(true) {
+                item = with(&item, flag, Value::Bool(true));
+            }
+        }
+        out.push(item);
         active += 1;
         used += 1;
         if !account.is_empty() {

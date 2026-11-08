@@ -8,3 +8,15 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait = "0.1"
+bytes = { version = "1", features = ["serde"] }
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+smol_str = { version = "0.3", features = ["serde"] }
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+tokio-util = "0.7"
+tracing = "0.1"
+ulid = { version = "1", features = ["serde"] }
+zeroize = "1"

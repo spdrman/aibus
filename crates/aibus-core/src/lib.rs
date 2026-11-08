@@ -10,6 +10,7 @@ pub mod msg;
 pub mod run;
 pub mod state;
 pub mod tool;
+pub mod tools;
 
 pub use agent::*;
 pub use app::{App, Ticker, MSG_CAPACITY};
@@ -19,3 +20,4 @@ pub use ids::*;
 pub use msg::*;
 pub use run::*;
 pub use tool::*;
+pub use tools::{effective_tools, EffectiveTools, ToolExecutor, ToolRegistry};

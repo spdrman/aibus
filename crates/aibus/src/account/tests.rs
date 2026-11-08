@@ -312,13 +312,13 @@ auth = { none = true }
     )
     .unwrap();
 
-    let text = rig.run(&AccountCmd::List, "", None).out;
+    let text = rig.run(&AccountCmd::List { names: false }, "", None).out;
     let rows: Vec<Vec<&str>> = text.lines().map(|l| l.split("  ").filter(|c| !c.is_empty()).map(str::trim).collect()).collect();
     assert_eq!(rows[0], ["a-ok", "fake", "Fine", "env", "-", "ok"]);
     assert_eq!(rows[1][5], "missing credential");
     assert_eq!(rows[2][5], "disabled");
 
-    let json = rig.json(&AccountCmd::List);
+    let json = rig.json(&AccountCmd::List { names: false });
     let statuses: Vec<&str> = json.as_array().unwrap().iter().map(|r| r["status"].as_str().unwrap()).collect();
     assert_eq!(statuses, ["ok", "missing credential", "disabled"]);
     assert!(!json.to_string().contains(KEY));

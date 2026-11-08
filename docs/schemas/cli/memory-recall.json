@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus memory recall --json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "path",
+      "score",
+      "snippet"
+    ],
+    "properties": {
+      "path": {
+        "type": "string"
+      },
+      "score": {
+        "type": "number"
+      },
+      "snippet": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -32,16 +32,15 @@ use aibus_provider::{
 };
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::Layer;
 
 use crate::agent_watch::{self, AgentWatch};
 use crate::cli::{Global, RunArgs};
+use crate::control::{self, Line};
 use crate::events;
 use crate::keychain::OsKeychain;
 use crate::providers::{builtin_factories, provider_configs, refresh_stale_models};
 use crate::signals::Signals;
+use crate::trace::TraceGuard;
 
 pub struct Session {
     pub id: SessionId,
@@ -81,6 +80,12 @@ pub struct Ctx {
     pub handle: Option<RunHandle>,
     pub finished: Option<RunResult>,
     pub interrupted: bool,
+    /// The control channel on stdin (`--json` with the prompt on the command line).
+    pub control: Option<mpsc::UnboundedReceiver<Line>>,
+    /// The outcome for the handoff from `--outcome` or `AIBUS_OUTCOME`, canonical.
+    pub outcome: Option<String>,
+    /// Closes the `--trace` file when the session's context is dropped.
+    pub trace_guard: Option<TraceGuard>,
     /// `start <name>` and `stop <name>`, in the order they happened.
     pub trace: Vec<String>,
 }
@@ -108,6 +113,9 @@ impl Ctx {
             handle: None,
             finished: None,
             interrupted: false,
+            control: None,
+            outcome: None,
+            trace_guard: None,
             trace: Vec::new(),
         }
     }
@@ -202,11 +210,16 @@ impl Step for ParseCli {
         {
             return Err(usage("bypass also needs AIBUS_I_KNOW=1 in the environment"));
         }
-        let g = &ctx.global;
-        if g.trace.is_some() {
-            eprintln!("aibus: warning: --trace: not yet, ignored");
+        ctx.outcome = crate::env::outcome(ctx.run.outcome.as_deref(), |v| std::env::var(v).ok())?;
+        ctx.cwd = ctx.global.project_dir()?;
+        // With `--json` and the prompt on the command line, what follows on stdin is the control
+        // channel (06 section 2). A prompt read from stdin uses all of it.
+        let stdin_is_input = matches!(ctx.run.prompt.as_deref(), None | Some("-"));
+        if ctx.global.json && !stdin_is_input && !std::io::stdin().is_terminal() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            control::spawn(std::io::BufReader::new(std::io::stdin()), tx);
+            ctx.control = Some(rx);
         }
-        ctx.cwd = g.project_dir()?;
         ctx.prompt = match ctx.run.prompt.as_deref() {
             Some(p) if p != "-" => p.to_owned(),
             None if std::io::stdin().is_terminal() => String::new(),
@@ -237,40 +250,21 @@ impl Step for LoadConfig {
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let paths = ctx.global.paths()?;
         let project = project_dir(&ctx.cwd).join("settings.toml");
-        let loaded = config::load(&paths.config_file(), Some(&project))?;
+        let mut loaded = config::load(&paths.config_file(), Some(&project))?;
         for w in &loaded.warnings {
             eprintln!("aibus: warning: {w}");
         }
+        crate::env::apply_limits(&mut loaded.config, |v| std::env::var(v).ok())?;
 
-        // `-v`, `-vv`, `-q` pick the level; the file is private and everything written to it
-        // passes the redactor. Never the terminal. Rotation (7 files kept) comes with the
-        // persistence task.
-        let level = match (ctx.global.quiet, ctx.global.verbose) {
-            (true, _) => LevelFilter::ERROR,
-            (_, 0) => LevelFilter::WARN,
-            (_, 1) => LevelFilter::INFO,
-            (_, 2) => LevelFilter::DEBUG,
-            _ => LevelFilter::TRACE,
-        };
-        let dir = paths.state.join("logs");
-        let mut opts = std::fs::OpenOptions::new();
-        opts.create(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        match create_private_dir(&dir).and_then(|()| opts.open(dir.join("aibus.log"))) {
-            Ok(f) => {
-                let layer = aibus_core::redact::layer(ctx.redactor.clone(), Arc::new(f))
-                    .with_filter(level);
-                // A second call in one process (the tests) keeps the first subscriber.
-                let _ = tracing::subscriber::set_global_default(
-                    tracing_subscriber::registry().with(layer),
-                );
-            }
-            Err(e) => eprintln!("aibus: warning: no log file in {}: {e}", dir.display()),
-        }
+        // The log file is private, rotated, and everything written to it passes the redactor.
+        // Never the terminal.
+        ctx.trace_guard = crate::logging::init(
+            &ctx.global,
+            &paths,
+            loaded.config.persist.log_files_kept,
+            &ctx.redactor,
+            std::env::var("AIBUS_LOG").ok().as_deref(),
+        );
         ctx.paths = Some(paths);
         ctx.loaded = Some(loaded);
         Ok(())
@@ -292,6 +286,19 @@ impl OpenSession {
             "cwd": ctx.cwd,
             "lead": ctx.global.agent.as_deref().unwrap_or("lead"),
             "outcome": outcome,
+            "ended": outcome.map(|_| events::rfc3339(SystemTime::now())),
+            "runs": ctx.finished.iter().map(|r| serde_json::json!({
+                "id": r.run_id.to_string(),
+                "agent": r.agent.as_str(),
+                "status": r.status.as_value(),
+                "turns": r.turns,
+                "usage": {
+                    "input_tokens": r.usage.input_tokens,
+                    "output_tokens": r.usage.output_tokens,
+                    "cost_usd": r.usage.cost_usd,
+                },
+            })).collect::<Vec<_>>(),
+            "handoff_outcome": ctx.outcome,
         });
         write_private(
             s.dir.join("session.json"),
@@ -649,8 +656,8 @@ impl Step for EnterLoop {
             budgets: Budgets::from(&cfg.limits),
             context: Vec::new(),
         };
-        // Nobody can answer a prompt in `aibus run` (the `--json` control channel is not wired
-        // yet), so `default` mode refuses what would ask, with `PermissionNeeded` then
+        // Only the `--json` control channel can answer a prompt in `aibus run`. Without it
+        // `default` mode refuses what would ask, with `PermissionNeeded` then
         // `PermissionDecided { denied, "no tty" }`.
         let bash = Arc::new(Bash::new(
             cfg.tools.bash_timeout_secs,
@@ -662,7 +669,7 @@ impl Step for EnterLoop {
         let gate = Gate {
             allow: pre_approved,
             deny_patterns: cfg.tools.deny_patterns.clone(),
-            tty: false,
+            tty: ctx.control.is_some(),
             redactor: Some(ctx.redactor.clone()),
             home: std::env::var_os("HOME").map(PathBuf::from),
         };

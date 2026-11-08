@@ -127,6 +127,16 @@ impl Effects {
         let live: HashSet<SmolStr> = found.iter().map(|(k, _)| k.clone()).collect();
         for (key, effect) in found {
             if self.started.insert(key) {
+                let kind = match &effect {
+                    Effect::Spawn(_) => "spawn",
+                    Effect::Tool(_) => "tool",
+                    Effect::Hook(_) => "hook",
+                    Effect::Router(_) => "router",
+                    Effect::Advise { .. } => "advise",
+                    Effect::Persist => "persist",
+                    Effect::Cancel(_) => "cancel",
+                };
+                let _span = tracing::trace_span!(target: "aibus_trace", "effect", kind);
                 (self.sink)(effect);
             }
         }

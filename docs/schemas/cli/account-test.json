@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus account test --json",
+  "type": "object",
+  "required": [
+    "name",
+    "ok"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "if": {
+    "properties": {
+      "ok": {
+        "const": true
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "label",
+      "org",
+      "models",
+      "latency_ms"
+    ],
+    "properties": {
+      "label": {
+        "type": "string"
+      },
+      "org": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "latency_ms": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "else": {
+    "required": [
+      "error"
+    ],
+    "properties": {
+      "error": {
+        "type": "object",
+        "required": [
+          "kind",
+          "message"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

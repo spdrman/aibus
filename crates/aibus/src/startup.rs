@@ -7,6 +7,7 @@
 //! SQLite index (B2.4) at 3, hydrating a snapshot (B2.4) at 4, the hook runner and file watcher
 //! (B1.3) at 7 and 9, the TUI at 8.
 
+use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,14 +19,16 @@ use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
-    resolve_model, AccountName, AccountView, AgentName, AibusError, App, Bash, CredentialError,
-    Gate, Msg, ModelDefaults, ModelId, PermissionMode, Redactor, RunConfig, RunDeps, RunHandle,
-    RunResult, SessionId, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, MSG_CAPACITY,
+    expand, AccountCredential, AccountName, AccountRegistry, AccountView, AgentName, AibusError,
+    App, Bash, CredentialSource, CredentialStore, Gate, Msg, ModelDefaults, ModelId,
+    PermissionMode, Redactor, RunConfig, RunDeps, RunHandle, RunResult, SelectHints, SessionId,
+    ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, MSG_CAPACITY,
 };
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script, FAKE_KEY};
 use aibus_provider::{
-    AuthMethodKind, ConfigError, Credential, ModelRef, Provider, Secret,
+    AuthMethodKind, ConfigError, Credential, ModelRef, Provider, ProviderConfig, ProviderFactory,
+    ProviderId, ProviderRegistry, Secret,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -35,6 +38,7 @@ use tracing_subscriber::Layer;
 
 use crate::cli::{Global, RunArgs};
 use crate::events;
+use crate::keychain::OsKeychain;
 use crate::providers::builtin_factories;
 use crate::signals::Signals;
 
@@ -44,11 +48,13 @@ pub struct Session {
     started: String,
 }
 
-/// What step 6 settles: the lead's provider and credential.
-pub struct Lead {
-    pub provider: Arc<dyn Provider>,
-    pub creds: Arc<Credential>,
+/// What step 6 settles: the accounts a session can pick from, and where their keys come from.
+pub struct Accounts {
+    pub registry: AccountRegistry,
+    pub store: Arc<CredentialStore>,
     pub script_text: String,
+    /// No account is configured, so the built-in fake stands in with its fixed key.
+    pub builtin: bool,
 }
 
 /// Everything the steps hand to each other. A field is `None` until its step has run.
@@ -63,7 +69,7 @@ pub struct Ctx {
     pub session: Option<Session>,
     pub app: Option<App<MiniGraph>>,
     pub agents: Option<Discovered>,
-    pub lead: Option<Lead>,
+    pub accounts: Option<Accounts>,
     pub rt: Option<Runtime>,
     pub signals: Option<Signals>,
     pub plan: Option<(RunConfig, RunDeps)>,
@@ -88,7 +94,7 @@ impl Ctx {
             session: None,
             app: None,
             agents: None,
-            lead: None,
+            accounts: None,
             rt: None,
             signals: None,
             plan: None,
@@ -380,18 +386,20 @@ impl Step for DiscoverAgents {
 
 struct LoadAccounts;
 
-/// `keyring:aibus/<name>`, `env:<VAR>` or `file:<path>`; an account with no `auth` reads
-/// `AIBUS_ACCOUNT_<NAME>_KEY` (06 section 7).
-fn key_ref(a: &config::Account) -> String {
-    if let Some(var) = &a.auth.env {
-        format!("env:{var}")
-    } else if let Some(path) = &a.auth.file {
-        format!("file:{path}")
-    } else if a.auth.keyring {
-        format!("keyring:aibus/{}", a.name)
-    } else {
-        let name = a.name.to_uppercase().replace('-', "_");
-        format!("env:AIBUS_ACCOUNT_{name}_KEY")
+/// Hands out the one scripted fake the session was started with, whatever its config.
+struct Scripted(Arc<dyn Provider>);
+
+impl ProviderFactory for Scripted {
+    fn id(&self) -> ProviderId {
+        ProviderId("fake")
+    }
+
+    fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        Ok(self.0.clone())
+    }
+
+    fn auth_methods(&self) -> &'static [AuthMethodKind] {
+        &[AuthMethodKind::ApiKey, AuthMethodKind::None]
     }
 }
 
@@ -402,36 +410,6 @@ impl Step for LoadAccounts {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
-        let enabled: Vec<&config::Account> = cfg.accounts.iter().filter(|a| a.enabled).collect();
-        let registered: Vec<&str> = builtin_factories().iter().map(|f| f.id().0).collect();
-
-        // The lead's account: `--account`, else `defaults.account`, else the built-in fake.
-        let wanted = ctx.global.account.as_deref().or(cfg.defaults.account.as_deref());
-        let account = match wanted {
-            None => AccountName("fake".into()),
-            Some(name) => {
-                let a = enabled
-                    .iter()
-                    .find(|a| a.name == name)
-                    .ok_or_else(|| CredentialError::Missing(AccountName(name.into())))?;
-                if !registered.contains(&a.provider.as_str()) {
-                    return Err(ConfigError::UnknownProvider(a.provider.clone()).into());
-                }
-                AccountName(a.name.as_str().into())
-            }
-        };
-        for a in enabled.iter().filter(|a| !registered.contains(&a.provider.as_str())) {
-            // Existence only; a keychain cannot be checked without opening it.
-            let r = key_ref(a);
-            let present = match r.split_once(':') {
-                Some(("env", var)) => std::env::var(var).is_ok_and(|v| !v.is_empty()),
-                Some(("file", path)) => std::path::Path::new(path).is_file(),
-                _ => true,
-            };
-            if !present {
-                eprintln!("aibus: warning: account {}: no credential found ({r})", a.name);
-            }
-        }
 
         let script_text = match &ctx.run.script {
             Some(p) => std::fs::read_to_string(p)?,
@@ -439,35 +417,63 @@ impl Step for LoadAccounts {
         };
         let script = Script::from_ron(&script_text)
             .map_err(|e| AibusError::Usage(format!("script: {e}")))?;
-        ctx.redactor.register(&account, FAKE_KEY);
-        ctx.lead = Some(Lead {
-            provider: Arc::new(FakeProvider::new(script)),
-            creds: Arc::new(Credential {
-                account,
-                secret: Secret::new(FAKE_KEY.to_owned()),
-                kind: AuthMethodKind::None,
-                resolved_at: Instant::now(),
-            }),
-            script_text,
-        });
+        let mut factories: Vec<Box<dyn ProviderFactory>> =
+            vec![Box::new(Scripted(Arc::new(FakeProvider::new(script))))];
+        factories.extend(builtin_factories().into_iter().filter(|f| f.id().0 != "fake"));
+        // One base URL per provider until the real providers land (B1.5).
+        let mut configs = BTreeMap::new();
+        for a in cfg.accounts.iter().filter(|a| a.enabled) {
+            if let Some(url) = &a.base_url {
+                configs
+                    .entry(a.provider.clone())
+                    .or_insert_with(|| ProviderConfig {
+                        base_url: Some(url.clone()),
+                    });
+            }
+        }
+        let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
 
-        let views = enabled
+        let builtin = cfg.accounts.is_empty();
+        let mut effective = cfg.clone();
+        if builtin {
+            effective.accounts.push(config::Account {
+                name: "fake".into(),
+                provider: "fake".into(),
+                auth: config::Auth {
+                    none: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+        let views = effective
+            .accounts
             .iter()
+            .filter(|a| a.enabled)
             .map(|a| AccountView {
-                name: AccountName(a.name.as_str().into()),
+                name: a.account_name(),
                 provider: a.provider.as_str().into(),
                 label: a.label.clone().unwrap_or_else(|| a.name.clone()),
                 default_model: a.default_model.as_deref().map(|m| ModelId(m.into())),
-                key_ref: key_ref(a),
+                key_ref: a.key_ref().map_or_else(|| "none".into(), |k| k.to_string()),
             })
             .collect();
+        ctx.accounts = Some(Accounts {
+            registry: AccountRegistry::new(&effective, providers),
+            store: Arc::new(CredentialStore::new(
+                Arc::new(OsKeychain),
+                ctx.redactor.clone(),
+            )),
+            script_text,
+            builtin,
+        });
         let app = ctx.app.as_mut().ok_or_else(|| not_ready("graph"))?;
         app.step(Msg::AccountsReloaded { accounts: views })
     }
 
     fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
-        if let Some(lead) = &ctx.lead {
-            ctx.redactor.unregister(&lead.creds.account);
+        if ctx.accounts.as_ref().is_some_and(|a| a.builtin) {
+            ctx.redactor.unregister(&AccountName("fake".into()));
         }
         Ok(())
     }
@@ -516,7 +522,7 @@ impl Step for EnterLoop {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
-        let lead = ctx.lead.as_ref().ok_or_else(|| not_ready("accounts"))?;
+        let acc = ctx.accounts.as_ref().ok_or_else(|| not_ready("accounts"))?;
         let agents = ctx.agents.as_ref().ok_or_else(|| not_ready("agents"))?;
         let session = ctx.session.as_ref().ok_or_else(|| not_ready("session"))?;
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
@@ -555,15 +561,7 @@ impl Step for EnterLoop {
             pre_approved.push(pattern("--allow", text)?);
         }
 
-        let aliases = cfg.models.clone();
-        let to_ref = |s: &str| {
-            if aliases.contains_key(s) {
-                ModelRef::Alias(s.into())
-            } else {
-                ModelRef::Full(ModelId(s.into()))
-            }
-        };
-        let session_default = to_ref(
+        let session_default = acc.registry.model_ref(
             ctx.global
                 .model
                 .as_deref()
@@ -573,7 +571,7 @@ impl Step for EnterLoop {
         let pick = |cli: &Option<String>, conf: &Option<String>| match cli.as_ref().or(conf.as_ref())
         {
             Some(s) if s == "off" => None,
-            Some(s) => Some(to_ref(s)),
+            Some(s) => Some(acc.registry.model_ref(s)),
             None => Some(session_default.clone()),
         };
         let defaults = ModelDefaults {
@@ -582,17 +580,53 @@ impl Step for EnterLoop {
             router_model: pick(&ctx.global.router, &cfg.defaults.router_model),
             swarm_model: pick(&None, &cfg.defaults.swarm_model),
         };
-        let model = resolve_model(&def.model, &defaults, None, &*lead.provider, &aliases)
-            .ok_or_else(|| {
-            AibusError::Usage(format!(
-                "no model {}",
-                ctx.global
-                    .model
-                    .as_deref()
-                    .or(cfg.defaults.model.as_deref())
-                    .unwrap_or("fake-small")
-            ))
-        })?;
+
+        // The roles that are not the lead only warn: nothing runs them yet.
+        for (role, cli, conf, picked) in [
+            ("advisor", &ctx.global.advisor, &cfg.defaults.advisor_model, &defaults.advisor_model),
+            ("router", &ctx.global.router, &cfg.defaults.router_model, &defaults.router_model),
+        ] {
+            if let (Some(model), true) = (picked, cli.is_some() || conf.is_some()) {
+                if let Err(e) = acc.registry.select(model, &SelectHints::default()) {
+                    eprintln!("aibus: warning: {role} model: {e}");
+                }
+            }
+        }
+
+        // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
+        // `inherit` has no parent here, so it means the session's model.
+        let target = match expand(&def.model, &defaults) {
+            ModelRef::Inherit => session_default.clone(),
+            r => r,
+        };
+        let hints = SelectHints {
+            explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
+            agent: def.account.clone(),
+            ..SelectHints::default()
+        };
+        let (account, model) = acc.registry.select(&target, &hints)?;
+        let provider = acc.registry.provider(&account)?;
+        let creds: Arc<dyn CredentialSource> = if acc.builtin {
+            ctx.redactor.register(&account, FAKE_KEY);
+            Arc::new(Credential {
+                account: account.clone(),
+                secret: Secret::new(FAKE_KEY.to_owned()),
+                kind: AuthMethodKind::None,
+                resolved_at: Instant::now(),
+            })
+        } else {
+            let configured = acc
+                .registry
+                .account(&account)
+                .cloned()
+                .ok_or_else(|| not_ready("account"))?;
+            Arc::new(AccountCredential {
+                store: acc.store.clone(),
+                account: configured,
+            })
+        };
+        // Fail now, with exit 4, rather than on the first request.
+        creds.credential()?;
 
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let run_cfg = RunConfig {
@@ -602,7 +636,7 @@ impl Step for EnterLoop {
             parent: None,
             depth: 0,
             model,
-            account: lead.creds.account.clone(),
+            account,
             cwd: ctx.cwd.clone(),
             runs_dir: session.dir.join("runs"),
             limits: ToolLimits {
@@ -632,8 +666,8 @@ impl Step for EnterLoop {
         let tools = ToolExecutor::with_gate(ToolRegistry::standard(bash), gate)
             .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
         let deps = RunDeps {
-            provider: lead.provider.clone(),
-            creds: lead.creds.clone(),
+            provider,
+            creds,
             tools: Arc::new(tools),
             tx,
         };
@@ -815,23 +849,5 @@ mod tests {
             *log.lock().unwrap(),
             ["up a", "up b", "up c", "down c", "down b", "down a"]
         );
-    }
-
-    #[test]
-    fn an_account_without_auth_reads_the_conventional_variable() {
-        let a = config::Account {
-            name: "anthropic-work".into(),
-            provider: "anthropic".into(),
-            ..Default::default()
-        };
-        assert_eq!(key_ref(&a), "env:AIBUS_ACCOUNT_ANTHROPIC_WORK_KEY");
-        let k = config::Account {
-            auth: config::Auth {
-                keyring: true,
-                ..Default::default()
-            },
-            ..a
-        };
-        assert_eq!(key_ref(&k), "keyring:aibus/anthropic-work");
     }
 }

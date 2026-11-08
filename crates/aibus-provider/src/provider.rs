@@ -100,6 +100,9 @@ pub enum StreamChunk {
         logprob: f32,
     },
     Done(StopReason),
+    /// The account's rate limit holds the request back: "waiting for work slot". Empty once it
+    /// is let through. Sent by the gate (`limits::Gated`), never by a provider.
+    Waiting(String),
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

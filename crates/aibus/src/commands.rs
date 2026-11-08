@@ -1,11 +1,36 @@
 //! The `config` subcommands, which need no engine.
 
+use std::io::IsTerminal;
+use std::sync::Arc;
+
 use aibus_core::config;
 use aibus_core::persist::paths::project_dir;
-use aibus_core::AibusError;
+use aibus_core::{AibusError, Redactor};
 use serde_json::json;
 
-use crate::cli::{ConfigCmd, Global};
+use crate::account::{self, Io};
+use crate::cli::{AccountCmd, ConfigCmd, Global};
+use crate::keychain::OsKeychain;
+use crate::providers::builtin_factories;
+
+/// The account commands against the real keychain, environment, terminal and providers.
+pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let mut stdout = std::io::stdout().lock();
+    let ask = || rpassword::prompt_password("key (input hidden): ");
+    let mut io = Io {
+        paths: g.paths()?,
+        keychain: Arc::new(OsKeychain),
+        factories: builtin_factories(),
+        env: Arc::new(|v| std::env::var(v).ok()),
+        redactor: redactor.clone(),
+        stdin: &mut input,
+        prompt: std::io::stdin().is_terminal().then_some(&ask),
+        out: &mut stdout,
+    };
+    account::run(cmd, g.json, &mut io)
+}
 
 pub fn config(cmd: &ConfigCmd, g: &Global) -> Result<u8, AibusError> {
     let paths = g.paths()?;

@@ -172,8 +172,8 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     if let (Some(dir), Some(_)) = (&ctx.run.record, &ctx.finished) {
         create_private_dir(dir)?;
         write_private(dir.join("msgs.jsonl"), &recorded)?;
-        if let Some(lead) = &ctx.lead {
-            write_private(dir.join("script.ron"), &lead.script_text)?;
+        if let Some(accounts) = &ctx.accounts {
+            write_private(dir.join("script.ron"), &accounts.script_text)?;
         }
         let hash = replay_hash(&recorded).map_err(AibusError::Usage)?;
         write_private(dir.join("snapshot.hash"), format!("{hash}\n"))?;

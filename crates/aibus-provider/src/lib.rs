@@ -4,11 +4,13 @@
 pub mod degrade;
 pub mod error;
 pub mod fake;
+pub mod limits;
 pub mod provider;
 pub mod secret;
 pub mod types;
 
 pub use error::{ConfigError, ProviderError, ProviderErrorKind};
+pub use limits::{Gated, Limiter, Permit, RateLimits};
 pub use provider::{
     AccountInfo, Capabilities, ChatRequest, ChatResponse, ModelInfo, Price, Provider,
     ProviderConfig, ProviderFactory, ProviderRegistry, StopReason, StreamChunk, SystemRole,

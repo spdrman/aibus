@@ -1,11 +1,11 @@
 //! What a run hands back to whoever started it (01 section 5.3): the summary is capped, and the
 //! text the parent reads is wrapped so a child's words cannot pass for the user's or for aibus's.
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use super::RunResult;
+use crate::persist::fs::{create_private_dir, write_private};
 
 /// Cuts `summary` to its first `max` bytes (on a character boundary). When it was cut, the full
 /// text goes to `<dir>/result.md` and the path comes back beside the head.
@@ -17,9 +17,9 @@ pub fn cap(summary: String, max: usize, dir: &Path) -> io::Result<(String, Optio
     while !summary.is_char_boundary(end) {
         end -= 1;
     }
-    fs::create_dir_all(dir)?;
+    create_private_dir(dir)?;
     let path = dir.join("result.md");
-    fs::write(&path, &summary)?;
+    write_private(&path, &summary)?;
     Ok((summary[..end].to_owned(), Some(path)))
 }
 

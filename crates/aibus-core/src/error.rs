@@ -25,6 +25,9 @@ pub enum AibusError {
     Usage(String),
     #[error("config: {0}")]
     Config(#[from] ConfigError),
+    /// The config or settings file is invalid; the message carries `path:line`.
+    #[error("config: {0}")]
+    ConfigFile(#[from] crate::config::ConfigFileError),
     #[error("auth: {0}")]
     Auth(#[from] CredentialError),
     #[error("provider: {0}")]
@@ -48,7 +51,7 @@ impl AibusError {
         match self {
             AibusError::Io(_) => 1,
             AibusError::Usage(_) => 2,
-            AibusError::Config(_) => 3,
+            AibusError::Config(_) | AibusError::ConfigFile(_) => 3,
             AibusError::Auth(_) => 4,
             AibusError::Provider(_) => 5,
             AibusError::Denied(_) => 6,

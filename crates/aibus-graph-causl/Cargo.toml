@@ -1,0 +1,35 @@
+# The `causl-rs` backend lives in its own crate, outside the workspace (see `exclude` in the root
+# Cargo.toml). Cargo resolves optional remote sources into the lockfile even when the feature is
+# off, so keeping the private dependency here means the root `Cargo.lock` never mentions it and
+# `cargo build --workspace --locked` stays independent of the private source.
+[package]
+name = "aibus-graph-causl"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/spdrman/aibus"
+publish = false
+
+[features]
+default = []
+causl-rs = ["dep:causl-engine-core", "dep:smallvec"]
+
+[dependencies]
+aibus-graph = { path = "../aibus-graph" }
+base64 = "0.22"
+indexmap = "2"
+smallvec = { version = "1", optional = true }
+# Private: git.opsite.ca needs a token, so only the causl-spike workflow fetches this.
+causl-engine-core = { git = "https://git.opsite.ca/causl/causl-core-rs.git", rev = "a6247b36b38dda4d97017d0577210aa8c724e4f2", optional = true }
+
+[dev-dependencies]
+aibus-core = { path = "../aibus-core" }
+aibus-provider = { path = "../aibus-provider" }
+proptest = { version = "1", default-features = false, features = ["std"] }
+serde_json = "1"
+
+[[bench]]
+name = "commit_stream"
+harness = false
+required-features = ["causl-rs"]

@@ -107,7 +107,8 @@ fn every_crate_forbids_unsafe_code() {
             }
         }
     }
-    assert_eq!(checked, 8, "expected one root file per crate");
+    // Eight workspace members plus aibus-graph-causl, which sits outside the workspace.
+    assert_eq!(checked, 9, "expected one root file per crate");
 }
 
 #[test]

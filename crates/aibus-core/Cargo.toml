@@ -11,18 +11,24 @@ publish.workspace = true
 aibus-graph.workspace = true
 aibus-provider.workspace = true
 async-trait = "0.1"
+base64 = "0.22"
 bytes = { version = "1", features = ["serde"] }
 globset = "0.4"
 grep-regex = "0.1"
 grep-searcher = "0.1"
 ignore = "0.4"
 indexmap = { version = "2", features = ["serde"] }
+regex = "1"
 serde = { version = "1", features = ["derive", "rc"] }
+serde_ignored = "0.1"
 serde_json = "1"
 smol_str = { version = "0.3", features = ["serde"] }
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 tokio-util = "0.7"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 ulid = { version = "1", features = ["serde"] }
 yaml-rust2 = "0.10"
 

@@ -26,7 +26,7 @@ pub struct ContextInput<'a> {
     /// `YYYY-MM-DD`; the caller reads the clock so a test can pin it.
     pub date: &'a str,
     pub git: Option<Git>,
-    /// `$XDG_DATA_HOME`, where `user` scope memory lives.
+    /// The aibus data dir (`~/.local/share/aibus`), where `user` scope memory lives.
     pub data_home: Option<&'a Path>,
 }
 
@@ -150,7 +150,7 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
         let dir = match scope {
             MemoryScope::User => input
                 .data_home?
-                .join("aibus/agent-memory")
+                .join("agent-memory")
                 .join(def.name.as_str()),
             MemoryScope::Project => root.join(".aibus/agent-memory").join(def.name.as_str()),
             MemoryScope::Local => root

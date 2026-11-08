@@ -3,11 +3,14 @@
 
 pub mod agent;
 pub mod app;
+pub mod config;
 pub mod context;
 pub mod effects;
 pub mod error;
 pub mod ids;
 pub mod msg;
+pub mod persist;
+pub mod redact;
 pub mod replay;
 pub mod run;
 pub mod state;
@@ -16,6 +19,7 @@ pub mod tools;
 
 pub use agent::*;
 pub use app::{App, Ticker, MSG_CAPACITY};
+pub use redact::Redactor;
 pub use effects::{Effect, Effects, PendingTool, SpawnSpec};
 pub use error::{AibusError, CredentialError};
 pub use ids::*;

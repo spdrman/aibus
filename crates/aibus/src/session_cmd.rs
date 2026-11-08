@@ -1,13 +1,14 @@
 //! `aibus session list | show | log`: reads what a headless run leaves in its session directory
-//! (`session.json`, `commits.jsonl`). `resume`, `export`, `replay` and `prune` arrive with the
-//! persistence task.
+//! (`session.json`, `commits.jsonl`). `resume <id> --run <run>` starts a headless run that
+//! continues one run from its transcript; `export`, `replay` and `prune`, and resuming a whole
+//! session, arrive with the persistence task.
 
 use std::path::{Path, PathBuf};
 
-use aibus_core::{AibusError, Redactor, SessionId};
+use aibus_core::{AibusError, Redactor, RunId, SessionId};
 use serde_json::{json, Value};
 
-use crate::cli::{Global, SessionCmd};
+use crate::cli::{Global, RunArgs, SessionCmd};
 
 fn sessions_dir(g: &Global) -> Result<PathBuf, AibusError> {
     Ok(g.paths()?.state.join("sessions"))
@@ -34,6 +35,32 @@ fn cost(session: &Value) -> f64 {
     session["runs"]
         .as_array()
         .map_or(0.0, |runs| runs.iter().filter_map(|r| r["usage"]["cost_usd"].as_f64()).sum())
+}
+
+/// `session resume <id> --run <run> "<message>"` as the arguments of a headless run that
+/// continues that run in that session (01 section 5.4).
+pub fn resume_args(
+    g: &Global,
+    id: &str,
+    run: &str,
+    message: Option<String>,
+) -> Result<RunArgs, AibusError> {
+    let dir = find(g, id)?;
+    let run_id: RunId = run
+        .parse()
+        .map_err(|_| AibusError::Usage(format!("run {run}: not a run id")))?;
+    if !dir.join("runs").join(run).join("transcript.jsonl").is_file() {
+        return Err(AibusError::Usage(format!("session {id} has no transcript for run {run}")));
+    }
+    let message = message
+        .filter(|m| !m.trim().is_empty())
+        .ok_or_else(|| AibusError::Usage("session resume --run <run> needs a message".into()))?;
+    Ok(RunArgs {
+        prompt: Some(message),
+        session_dir: Some(dir),
+        resume: Some(run_id),
+        ..RunArgs::default()
+    })
 }
 
 pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {

@@ -4,11 +4,13 @@
 //! Around the plain tool loop sit the hooks (01 section 6), the retry rules (02 section 6) and
 //! the budgets (01 section 1.1). Mail is read at turn boundaries: a user message is appended
 //! (through `user_prompt_submit` for a lead), `Compact` compacts, and a permission answer is
-//! only ever consumed while the run waits for it. Compaction itself is B2.2: this file calls
-//! whatever `RunDeps::compactor` holds.
+//! only ever consumed while the run waits for it. Compaction itself lives in `compact.rs`: this
+//! file decides when (a `Compact` mail, `auto_compact_at`, `ContextTooLong`) and calls whatever
+//! `RunDeps::compactor` holds. A run also keeps its transcript on disk (`transcript.rs`) and can
+//! start from a parent's conversation (a fork) or from its own transcript (a resume).
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use aibus_provider::{
@@ -16,7 +18,7 @@ use aibus_provider::{
     RequestMetadata, StreamChunk, ToolChoice, ToolSpec,
 };
 use serde_json::{json, Map, Value};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, sleep_until, Instant};
 use tokio_util::sync::CancellationToken;
@@ -24,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 use super::budget::Budgets;
 use super::coalesce::Coalescer;
 use super::result;
+use super::transcript::{self, Kind, Line, RunMeta, Transcript};
 use super::{
     AccountName, AgentName, ContentBlock, Conversation, Message, MessageRole, ModelId, RunError,
     RunErrorKind, RunId, RunResult, RunStatus,
@@ -36,6 +39,7 @@ use crate::ids::PermissionId;
 use crate::msg::{Decision, HookEvent, Msg, PermissionRequest, ToolCall, ToolResult};
 use crate::tool::{Signal, ToolCx, ToolError, ToolLimits};
 use crate::tools::{effective_tools, EffectiveTools, ToolExecutor};
+use crate::worktree::{self, WorktreeInfo};
 
 /// Slots in a run's mailbox (08 section 3).
 pub const MAILBOX_CAPACITY: usize = 64;
@@ -55,6 +59,9 @@ pub enum RunMail {
     /// A background child ended: its wrapped result (01 section 5.3) goes to the model as a
     /// message before the next request.
     ChildFinished(String),
+    /// A fork is starting from this run (01 section 5.2): at the next turn boundary the run
+    /// answers with a copy of its conversation.
+    Fork { reply: oneshot::Sender<Conversation> },
 }
 
 pub struct RunHandle {
@@ -62,6 +69,16 @@ pub struct RunHandle {
     pub cancel: CancellationToken,
     pub mailbox: mpsc::Sender<RunMail>,
     pub join: JoinHandle<()>,
+}
+
+/// Where a run's conversation comes from.
+pub enum Start {
+    /// Built from the definition and the task (01 section 5.1).
+    New,
+    /// The parent's conversation with the task already added (01 section 5.2).
+    Fork(Box<Conversation>),
+    /// The run's own transcript, plus `RunConfig::prompt` as a new user message (01 section 5.4).
+    Resume,
 }
 
 /// Everything that names this run.
@@ -94,6 +111,9 @@ pub struct RunConfig {
     /// `@agent-<name> <rest>` as the first prompt (01 section 4.2): the run opens with a
     /// foreground `delegate` to this agent with this prompt, and then goes on with the result.
     pub forced: Option<(AgentName, String)>,
+    pub start: Start,
+    /// The worktree `cwd` points into, removed when the run ends if nothing in it changed.
+    pub worktree: Option<WorktreeInfo>,
 }
 
 /// What the run talks to.
@@ -117,6 +137,12 @@ pub trait Compactor: Send + Sync {
         conv: &mut Conversation,
         cancel: &CancellationToken,
     ) -> Result<(), String>;
+
+    /// The auto-handoff of 01 section 5.5, which a lead run writes between `pre_compact` and the
+    /// summary. The path of what it wrote, if it wrote one; the default writes nothing.
+    async fn handoff(&self, _conv: &Conversation) -> Result<Option<PathBuf>, String> {
+        Ok(None)
+    }
 }
 
 /// Starts the run's task. Must be called inside a tokio runtime.
@@ -152,6 +178,8 @@ struct Task<'a> {
     cfg: &'a RunConfig,
     deps: &'a RunDeps,
     cancel: &'a CancellationToken,
+    /// `None` when it could not be opened or a write failed (reported once).
+    transcript: Mutex<Option<Transcript>>,
 }
 
 async fn task(
@@ -165,6 +193,7 @@ async fn task(
         cfg: &cfg,
         deps: &deps,
         cancel: &cancel,
+        transcript: Mutex::new(None),
     };
     t.send(Msg::RunStarted {
         run: cfg.run,
@@ -183,18 +212,52 @@ async fn task(
         cfg.date.clone(),
         cfg.data_home.clone(),
     );
-    let built = tokio::task::spawn_blocking(move || {
-        context::build(&ContextInput {
-            def: &def,
-            prompt: &prompt,
-            cwd: &cwd,
-            platform: std::env::consts::OS,
-            date: &date,
-            git: context::gather_git(&cwd),
-            data_home: data_home.as_deref(),
-        })
-    })
-    .await;
+    let path = cfg
+        .runs_dir
+        .join(cfg.run.to_string())
+        .join("transcript.jsonl");
+    let kind = match &cfg.start {
+        Start::New => Kind::Run,
+        Start::Fork(_) => Kind::Fork,
+        Start::Resume => Kind::Resume,
+    };
+    // For a resume: how many messages the file holds, and how many blocks its last one has.
+    let mut resumed = None;
+    let built: Result<Conversation, String> = match &cfg.start {
+        Start::Fork(seed) => Ok((**seed).clone()),
+        start => {
+            let from = matches!(start, Start::Resume).then(|| path.clone());
+            let loaded = tokio::task::spawn_blocking(move || match from {
+                Some(path) => {
+                    let mut conv = transcript::load(&path)?.conv;
+                    let held = (conv.messages.len(), conv.messages.last().map_or(0, |m| m.blocks.len()));
+                    conv.push_user_text(prompt);
+                    Ok((conv, Some(held)))
+                }
+                None => Ok((
+                    context::build(&ContextInput {
+                        def: &def,
+                        prompt: &prompt,
+                        cwd: &cwd,
+                        platform: std::env::consts::OS,
+                        date: &date,
+                        git: context::gather_git(&cwd),
+                        data_home: data_home.as_deref(),
+                    }),
+                    None,
+                )),
+            })
+            .await;
+            match loaded {
+                Ok(Ok((conv, held))) => {
+                    resumed = held;
+                    Ok(conv)
+                }
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+    };
     let mut conv = match built {
         Ok(conv) => conv,
         Err(e) => {
@@ -211,15 +274,61 @@ async fn task(
         }
     };
 
-    let eff = effective_tools(
+    let mut eff = effective_tools(
         &cfg.def,
         cfg.def.role,
         cfg.depth,
         cfg.background || cfg.def.background,
         cfg.max_spawn_depth,
     );
+    // A fork cannot fork (01 section 5.2).
+    if kind == Kind::Fork {
+        eff.allow.retain(|p| p.tool != "fork");
+    }
+
+    // The transcript: who the run is, the system prompt, then the messages as they come. A
+    // resumed run only adds to what is there.
+    match Transcript::open(&path) {
+        Ok(mut tr) => {
+            let meta = Line::Start(RunMeta {
+                kind,
+                agent: cfg.def.name.clone(),
+                model: cfg.model.clone(),
+                account: cfg.account.clone(),
+                parent: cfg.parent,
+                depth: cfg.depth,
+            });
+            let redact = |s: &str| deps.hooks.redact(s).into_owned();
+            let head = tr.write(&meta, redact).and_then(|()| {
+                if let Some((held, _)) = resumed {
+                    // What was loaded is in the file already.
+                    tr.mark(held);
+                    Ok(())
+                } else {
+                    tr.write(&Line::System { text: conv.system.clone() }, redact)
+                }
+            });
+            match head {
+                Ok(()) => *t.lock() = Some(tr),
+                Err(e) => t.transcript_failed(&e).await,
+            }
+        }
+        Err(e) => t.transcript_failed(&e).await,
+    }
+
     let mut turns = 0;
-    let end = match t.begin(&mut conv).await {
+    let begun = match kind {
+        Kind::Fork => None,
+        _ => t.begin(&mut conv).await,
+    };
+    // A resume's message that joined the last message of the file goes in as an extension.
+    if let Some((held, blocks)) = resumed {
+        if conv.messages.len() == held {
+            let added = conv.messages[held - 1].blocks[blocks..].to_vec();
+            t.write_line(&Line::Extend { blocks: added }).await;
+        }
+    }
+    let end = match begun {
         Some(end) => end,
         None => drive(&t, &mut mail, &eff, &mut conv, &mut turns).await,
     };
@@ -227,6 +336,49 @@ async fn task(
 }
 
 impl Task<'_> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Transcript>> {
+        self.transcript.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The transcript could not be written: say so once and stop trying. The run goes on, it
+    /// just cannot be resumed from the file.
+    async fn transcript_failed(&self, e: &std::io::Error) {
+        *self.lock() = None;
+        self.send(Msg::IoError {
+            context: "writing transcript.jsonl".into(),
+            error: e.to_string(),
+        })
+        .await;
+    }
+
+    /// Appends `line` to the transcript.
+    async fn write_line(&self, line: &Line) {
+        let done = self
+            .lock()
+            .as_mut()
+            .map(|t| t.write(line, |s| self.deps.hooks.redact(s).into_owned()));
+        if let Some(Err(e)) = done {
+            self.transcript_failed(&e).await;
+        }
+    }
+
+    /// Appends the messages the conversation gained since the last call.
+    async fn sync(&self, conv: &Conversation) {
+        let done = self
+            .lock()
+            .as_mut()
+            .map(|t| t.sync(conv, |s| self.deps.hooks.redact(s).into_owned()));
+        if let Some(Err(e)) = done {
+            self.transcript_failed(&e).await;
+        }
+    }
+
+    /// A run a person talks to: the lead, not a fork of it. Only its user messages go through
+    /// `user_prompt_submit`, and it is the one that ends with `stop`.
+    fn user_facing(&self) -> bool {
+        self.cfg.def.role == Role::Lead && !matches!(self.cfg.start, Start::Fork(_))
+    }
+
     /// Sends `msg`; a closed channel means nobody is listening any more, so the run stops.
     async fn send(&self, msg: Msg) {
         if self.deps.tx.send(msg).await.is_err() {
@@ -285,7 +437,7 @@ impl Task<'_> {
             self.fire(HookEvent::SubagentStart, Some(name.as_str()), mode, Map::new())
                 .await;
         }
-        if cfg.def.role == Role::Lead {
+        if self.user_facing() {
             let extra = Map::from_iter([("prompt".to_owned(), json!(cfg.prompt))]);
             let fired = self
                 .fire(HookEvent::UserPromptSubmit, None, mode, extra)
@@ -331,7 +483,7 @@ impl Task<'_> {
                     let mut blocks = Vec::new();
                     // Only the user's own prompt goes past `user_prompt_submit`; a worker's
                     // `send_message` text comes from another run.
-                    if self.cfg.def.role == Role::Lead {
+                    if self.user_facing() {
                         let extra = Map::from_iter([("prompt".to_owned(), json!(text))]);
                         let fired = self
                             .fire(HookEvent::UserPromptSubmit, None, mode, extra)
@@ -352,6 +504,10 @@ impl Task<'_> {
                 RunMail::ChildFinished(report) => {
                     conv.messages.push(Message::text(MessageRole::User, &report));
                 }
+                RunMail::Fork { reply } => {
+                    // The fork starts from the conversation as it stands, mail so far included.
+                    let _ = reply.send(conv.clone());
+                }
                 // Only meaningful while a prompt is open; a late answer is stale.
                 RunMail::Permission { .. } => {}
             }
@@ -359,7 +515,7 @@ impl Task<'_> {
         if compact {
             if let Err(why) = self.compact(conv, "manual", mode, pre_tokens).await {
                 self.send(Msg::IoError {
-                    context: "compacting".into(),
+                    context: format!("compacting {}", self.cfg.run),
                     error: why,
                 })
                 .await;
@@ -367,7 +523,9 @@ impl Task<'_> {
         }
     }
 
-    /// `pre_compact`, then the compactor, then `Compacted`.
+    /// The order of 01 section 5.5: `pre_compact` hooks, the lead's auto-handoff, the summary,
+    /// the `compact_boundary` line, then `Compacted`. The transcript keeps every message that
+    /// was there; only the live context shrinks.
     async fn compact(
         &self,
         conv: &mut Conversation,
@@ -384,13 +542,57 @@ impl Task<'_> {
         ]);
         self.fire(HookEvent::PreCompact, Some(trigger), mode, extra)
             .await;
+        self.sync(conv).await;
+        if self.user_facing() {
+            match compactor.handoff(conv).await {
+                Ok(Some(path)) => self.send(Msg::HandoffWritten { path }).await,
+                Ok(None) => {}
+                Err(why) => {
+                    self.send(Msg::IoError {
+                        context: "writing the auto-handoff".into(),
+                        error: why,
+                    })
+                    .await
+                }
+            }
+        }
         compactor.compact(conv, self.cancel).await?;
+        self.write_line(&Line::CompactBoundary {
+            pre_tokens,
+            messages: conv.messages.clone(),
+        })
+        .await;
+        if let Some(t) = self.lock().as_mut() {
+            t.mark(conv.messages.len());
+        }
         self.send(Msg::Compacted {
             run: self.cfg.run,
             pre_tokens,
         })
         .await;
         Ok(())
+    }
+
+    /// What goes to the provider for `conv`.
+    fn chat_request(&self, conv: &Conversation, specs: &[ToolSpec], max_output: u32) -> ChatRequest {
+        let cfg = self.cfg;
+        ChatRequest {
+            model: cfg.model.clone(),
+            system: conv.system.clone(),
+            messages: conv.messages.clone(),
+            tools: specs.to_vec(),
+            tool_choice: ToolChoice::Auto,
+            max_output_tokens: max_output,
+            temperature: None,
+            effort: cfg.def.effort,
+            thinking: None,
+            cache_hint: CacheHint::AfterSystem,
+            logprobs: false,
+            metadata: RequestMetadata {
+                run_id: Some(cfg.run.to_string()),
+                session_id: None,
+            },
+        }
     }
 
     /// One provider request, with the retry rules of 02 section 6: a retryable error waits
@@ -418,23 +620,7 @@ impl Task<'_> {
         let mut compacted = false;
         let mut waiting = false;
         loop {
-            let req = ChatRequest {
-                model: cfg.model.clone(),
-                system: conv.system.clone(),
-                messages: conv.messages.clone(),
-                tools: specs.to_vec(),
-                tool_choice: ToolChoice::Auto,
-                max_output_tokens: max_output,
-                temperature: None,
-                effort: cfg.def.effort,
-                thinking: None,
-                cache_hint: CacheHint::AfterSystem,
-                logprobs: false,
-                metadata: RequestMetadata {
-                    run_id: Some(cfg.run.to_string()),
-                    session_id: None,
-                },
-            };
+            let req = self.chat_request(conv, specs, max_output);
             if waiting {
                 // The card stops saying "retrying" once the next attempt starts.
                 self.note_waiting("").await;
@@ -552,7 +738,7 @@ impl Task<'_> {
                         self.send(decided(decision, None)).await;
                         return decision;
                     }
-                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::ChildFinished(_))) => queued.push(m),
+                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
                     Some(RunMail::Permission { .. }) => {}
                     None => return Decision::Deny,
                 },
@@ -564,9 +750,18 @@ impl Task<'_> {
     /// provider is why the run stopped).
     async fn finish(&self, conv: Conversation, turns: u32, started: Instant, end: End) {
         let (cfg, deps) = (self.cfg, self.deps);
+        self.sync(&conv).await;
         let usage = conv.usage;
         let text = last_text(&conv);
         drop(conv);
+        // A clean worktree goes; one with changes stays and is reported (09 section 7).
+        let worktree = match cfg.worktree.clone() {
+            Some(w) => tokio::task::spawn_blocking(move || worktree::release(w))
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        };
 
         let dir = cfg.runs_dir.join(cfg.run.to_string());
         let (summary, summary_file) =
@@ -616,6 +811,7 @@ impl Task<'_> {
                     summary_file,
                     duration: started.elapsed(),
                     error: end.error,
+                    worktree,
                 },
             })
             .await;
@@ -687,12 +883,48 @@ async fn drive(
     // Input tokens of the latest request: what a compaction started now would be shrinking.
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
+    let window = deps
+        .provider
+        .models()
+        .iter()
+        .find(|m| m.id == cfg.model)
+        .map(|m| u64::from(m.context_window));
+    let auto_limit = cfg
+        .def
+        .auto_compact_at
+        .map(u64::from)
+        .or(window.map(|w| w / 10 * 8))
+        .filter(|_| deps.compactor.is_some());
 
     loop {
         if cancel.is_cancelled() {
             return End::of(RunStatus::Cancelled);
         }
         t.boundary(mail, &mut queued, conv, mode, pre_tokens).await;
+        // `auto_compact_at`, else 80 % of the window (01 section 5.5). The count is what the
+        // last response said the request was; before there is one, the heuristic's estimate
+        // (which already carries a 10 % margin).
+        if let Some(limit) = auto_limit {
+            let used = if pre_tokens > 0 {
+                pre_tokens
+            } else {
+                aibus_provider::tokens::estimate(&t.chat_request(conv, &specs, max_output), 0.0)
+            };
+            if used >= limit && conv.messages.len() > 1 {
+                match t.compact(conv, "auto", mode, used).await {
+                    Ok(()) => pre_tokens = 0,
+                    Err(why) => {
+                        // Not fatal: the request may still fit, and `ContextTooLong` tries once more.
+                        t.send(Msg::IoError {
+                            context: format!("compacting {}", cfg.run),
+                            error: why,
+                        })
+                        .await;
+                    }
+                }
+            }
+        }
+        t.sync(conv).await;
 
         // A forced delegate opens the run in place of the first request.
         let (resp, seeded) = match forced.take() {
@@ -746,12 +978,15 @@ async fn drive(
             })
             .collect();
         conv.messages.push(resp.message);
+        t.sync(conv).await;
 
         if calls.is_empty() {
             // The run would end here: the `stop` hooks may send it round again.
             let stop = match cfg.def.role {
-                Role::Lead => Some((HookEvent::Stop, None)),
-                Role::Worker => Some((HookEvent::SubagentStop, Some(cfg.def.name.to_string()))),
+                Role::Lead if t.user_facing() => Some((HookEvent::Stop, None)),
+                Role::Lead | Role::Worker => {
+                    Some((HookEvent::SubagentStop, Some(cfg.def.name.to_string())))
+                }
                 Role::Advisor | Role::Router => None,
             };
             let mut again = false;
@@ -772,8 +1007,16 @@ async fn drive(
             if !again {
                 // A message that came in during the last turn is answered rather than dropped.
                 while let Ok(m) = mail.try_recv() {
-                    again |= matches!(m, RunMail::UserMessage(_) | RunMail::ChildFinished(_));
-                    queued.push(m);
+                    match m {
+                        // The conversation will not change again, so the fork can have it now.
+                        RunMail::Fork { reply } => {
+                            let _ = reply.send(conv.clone());
+                        }
+                        m => {
+                            again |= matches!(m, RunMail::UserMessage(_) | RunMail::ChildFinished(_));
+                            queued.push(m);
+                        }
+                    }
                 }
             }
             if !again {
@@ -923,7 +1166,7 @@ async fn drive(
                                     () = cancel.cancelled() => break None,
                                     m = mail.recv() => match m {
                                         Some(RunMail::UserMessage(text)) => break Some(text),
-                                        Some(m @ RunMail::ChildFinished(_)) => queued.push(m),
+                                        Some(m @ (RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
                                         Some(_) => {}
                                         None => break None,
                                     },

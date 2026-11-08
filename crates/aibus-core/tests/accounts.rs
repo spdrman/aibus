@@ -126,6 +126,8 @@ impl Rig {
                 background: false,
                 max_spawn_depth: 3,
                 forced: None,
+                start: Start::New,
+                worktree: None,
             },
             RunDeps {
                 provider: self.registry.provider(&chosen).unwrap(),

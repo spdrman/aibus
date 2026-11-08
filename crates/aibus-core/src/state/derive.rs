@@ -99,6 +99,8 @@ fn runnable(t: &mut Tracker) -> Value {
             ("background", field("background")),
             ("isolation", field("isolation")),
             ("prompt", field("prompt")),
+            ("fork", field("fork")),
+            ("resume", field("resume")),
             ("model", field("model")),
             ("account", field("account")),
         ]));

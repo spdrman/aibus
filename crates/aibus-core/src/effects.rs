@@ -38,6 +38,10 @@ pub struct SpawnSpec {
     pub model: Option<String>,
     /// An account the caller asked for, or the definition's.
     pub account: Option<AccountName>,
+    /// Starts from the parent's conversation (01 section 5.2); `agent` is the parent's.
+    pub fork: bool,
+    /// Continues the run from its transcript; `prompt` is the new message (01 section 5.4).
+    pub resume: bool,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -64,6 +68,8 @@ pub enum Effect {
     Cancel(RunId),
     /// A run is (or was made) a background run: a foreground wait on it ends.
     Detach(RunId),
+    /// The run's status says `compacting` (`/compact`): it is told to at its next turn.
+    Compact(RunId),
 }
 
 /// What starts runs when the executor is wired to an orchestrator.
@@ -110,7 +116,7 @@ impl Effects {
     /// live does nothing.
     pub fn spawn_run(&mut self, spec: SpawnSpec) {
         match &self.wired {
-            Some(w) => w.orch.start(&*w.launcher, &w.store, spec),
+            Some(w) => w.orch.start(&w.launcher, &w.store, spec),
             None => (self.sink)(Effect::Spawn(spec)),
         }
     }
@@ -184,11 +190,14 @@ impl Effects {
                 .read_key(&run_key(id, "meta"))
                 .and_then(|m| get(m, "background"))
                 == Some(&Value::Bool(true));
-            let ended = graph
+            let status = graph
                 .read_key(&run_key(id, "status"))
                 .and_then(as_str)
-                .and_then(RunStatus::parse)
-                .is_none_or(RunStatus::is_terminal);
+                .and_then(RunStatus::parse);
+            let ended = status.is_none_or(RunStatus::is_terminal);
+            if status == Some(RunStatus::Compacting) {
+                found.push((format!("compact:{id}").into(), Effect::Compact(run)));
+            }
             if background && !ended {
                 found.push((format!("detach:{id}").into(), Effect::Detach(run)));
             }
@@ -209,14 +218,16 @@ impl Effects {
                 Effect::Persist => "persist",
                 Effect::Cancel(_) => "cancel",
                 Effect::Detach(_) => "detach",
+                Effect::Compact(_) => "compact",
             };
             let _span = tracing::trace_span!(target: "aibus_trace", "effect", kind);
             match (effect, &orch) {
                 (Effect::Spawn(spec), _) => self.spawn_run(spec),
                 (Effect::Cancel(run), Some(o)) => o.cancel(run),
                 (Effect::Detach(run), Some(o)) => o.detach(run),
-                // Nothing to detach without an orchestrator.
-                (Effect::Detach(_), None) => {}
+                (Effect::Compact(run), Some(o)) => o.compact(run),
+                // Nothing to detach or compact without an orchestrator.
+                (Effect::Detach(_) | Effect::Compact(_), None) => {}
                 (other, _) => (self.sink)(other),
             }
         }
@@ -248,6 +259,8 @@ fn spawn_spec(v: &Value) -> Option<SpawnSpec> {
             .and_then(as_str)
             .filter(|a| !a.is_empty())
             .map(|a| AccountName(a.into())),
+        fork: get(v, "fork") == Some(&Value::Bool(true)),
+        resume: get(v, "resume") == Some(&Value::Bool(true)),
     })
 }
 

@@ -113,6 +113,8 @@ fn plan(script: Script, def: AgentDef) -> (Plan, mpsc::Receiver<Msg>) {
             background: false,
             max_spawn_depth: 3,
             forced: None,
+            start: Start::New,
+            worktree: None,
         },
         deps: RunDeps {
             provider: fake.clone(),
@@ -748,6 +750,8 @@ impl Tool for Relay {
                 background: false,
                 max_spawn_depth: 3,
                 forced: None,
+                start: Start::New,
+                worktree: None,
             },
             RunDeps {
                 provider: self.fake.clone(),

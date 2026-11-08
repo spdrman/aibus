@@ -122,6 +122,8 @@ impl Launcher for TestLauncher {
                 background: spec.background,
                 max_spawn_depth: 3,
                 forced: None,
+                start: Start::New,
+                worktree: None,
             },
             RunDeps {
                 provider: fake,
@@ -273,6 +275,8 @@ impl Rig {
                 background: false,
                 max_spawn_depth: 3,
                 forced: forced.map(|(a, r)| (a.parse().unwrap(), r.into())),
+                start: Start::New,
+                worktree: None,
             },
             RunDeps {
                 provider: self.lead_fake.clone(),

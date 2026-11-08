@@ -23,6 +23,7 @@ use crate::permission::{self, Verdict};
 use crate::redact::Redactor;
 use crate::tool::{Tool, ToolCx, ToolError, ToolOutput};
 
+pub(crate) use bash::{kill_group, scrubbed_env, Tail};
 pub use bash::{Bash, JobView};
 pub use readonly::{Glob, Grep, Ls, Read};
 pub use shell::ShellDeny;

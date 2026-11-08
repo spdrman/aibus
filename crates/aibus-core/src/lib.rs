@@ -9,6 +9,7 @@ pub mod context;
 pub mod credentials;
 pub mod effects;
 pub mod error;
+pub mod hooks;
 pub mod ids;
 pub mod msg;
 pub mod permission;
@@ -30,6 +31,7 @@ pub use credentials::{
 pub use redact::Redactor;
 pub use effects::{Effect, Effects, PendingTool, SpawnSpec};
 pub use error::{AibusError, CredentialError};
+pub use hooks::{Blocked, Fired, HookInput, HookRunner, Ran};
 pub use ids::*;
 pub use msg::*;
 pub use run::*;

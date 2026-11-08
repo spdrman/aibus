@@ -1,11 +1,15 @@
 //! Runs and conversations (02 section 5), and the task that drives one (02 section 3.3).
 
+mod budget;
 mod coalesce;
 mod loop_;
 mod model;
 pub mod result;
 
-pub use loop_::{spawn, RunConfig, RunDeps, RunHandle, RunMail, MAILBOX_CAPACITY, STREAM_CAPACITY};
+pub use budget::Budgets;
+pub use loop_::{
+    spawn, Compactor, RunConfig, RunDeps, RunHandle, RunMail, MAILBOX_CAPACITY, STREAM_CAPACITY,
+};
 pub use model::{expand, resolve_model, ModelDefaults};
 
 use std::path::PathBuf;

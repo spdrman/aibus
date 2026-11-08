@@ -39,9 +39,11 @@ fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
         [
             "RunStarted",
             "Stream",
+            "UsageUpdate",
             "ToolCallRequested",
             "ToolCallFinished",
             "Stream",
+            "UsageUpdate",
             "RunFinished",
             "SessionEnd"
         ]
@@ -116,6 +118,81 @@ fn a_failing_provider_exits_5_and_says_so_on_the_last_line() {
     let done = lines.iter().find(|l| l["type"] == "RunFinished").unwrap();
     assert_eq!(done["status"], "failed");
     assert_eq!(lines.last().unwrap()["exit_code"], 5);
+}
+
+fn user_config(home: &Path, text: &str) {
+    let dir = home.join(".config/aibus");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("config.toml"), text).unwrap();
+}
+
+#[test]
+fn configured_hooks_run_for_the_session_and_a_block_reaches_the_tool_result() {
+    let home = TempDir::new().unwrap();
+    user_config(
+        home.path(),
+        r#"[hooks]
+session_start = [{ command = "echo started-by-hook" }]
+pre_tool_use = [{ matcher = "ls", command = "echo no ls today >&2; exit 2" }]
+session_end = [{ command = "touch ../ended" }]
+"#,
+    );
+    let out = aibus(home.path(), &["run", "--agent", "explore", "map this repo"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    let lines = ndjson(&out);
+    let fin = lines.iter().find(|l| l["type"] == "ToolCallFinished").unwrap();
+    assert_eq!(fin["ok"], false, "the hook blocked the call");
+    assert!(lines.iter().any(|l| l["type"] == "HookFired"), "{lines:?}");
+    assert!(home.path().join("ended").exists(), "session_end ran");
+    // Every run of a hook leaves a log under logs/hooks/<session>.
+    let session = lines.last().unwrap()["session"].as_str().unwrap();
+    let logs = home.path().join(".local/state/aibus/logs/hooks").join(session);
+    let mut names: Vec<String> = fs::read_dir(logs)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let events: Vec<&str> = names.iter().map(|n| n.split('-').next().unwrap()).collect();
+    assert!(
+        ["session_start", "pre_tool_use", "session_end"].iter().all(|e| events.contains(e)),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn no_hooks_warns_and_nothing_runs() {
+    let home = TempDir::new().unwrap();
+    user_config(home.path(), "[hooks]\nsession_start = [{ command = \"touch ../hooked\" }]\n");
+    let out = aibus(home.path(), &["run", "--no-hooks", "--agent", "explore", "hi"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stderr(&out).contains("--no-hooks: no hooks will run"), "{}", stderr(&out));
+    assert!(!home.path().join("hooked").exists());
+
+    let out = aibus(home.path(), &["run", "--agent", "explore", "hi"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(home.path().join("hooked").exists());
+}
+
+#[test]
+fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_is_gone() {
+    let script = r#"[ToolCall(name: "bash", input: {"command": "printf %s \"$MY_TOKEN\" > passed.txt"}), Stop(ToolUse), Text("done")]"#;
+    for (config, want) in [("[hooks]\npass_env = [\"MY_TOKEN\"]\n", "hunter2-hunter2"), ("", "")] {
+        let home = TempDir::new().unwrap();
+        user_config(home.path(), config);
+        let script_path = home.path().join("bash.ron");
+        fs::write(&script_path, script).unwrap();
+        let out = command(home.path())
+            .env("AIBUS_I_KNOW", "1")
+            .env("MY_TOKEN", "hunter2-hunter2")
+            .args(["run", "--agent", "general", "--permission-mode", "bypass", "--script"])
+            .arg(&script_path)
+            .arg("hi")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        assert_eq!(fs::read_to_string(home.path().join("proj/passed.txt")).unwrap(), want);
+    }
 }
 
 #[test]

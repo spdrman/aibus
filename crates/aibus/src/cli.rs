@@ -171,7 +171,11 @@ pub struct RunArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum AgentCmd {
-    List,
+    List {
+        /// Names only, one per line (the completion scripts call this)
+        #[arg(long, hide = true)]
+        names: bool,
+    },
     Show { name: String },
     New { name: String },
     Validate { path: Option<PathBuf> },

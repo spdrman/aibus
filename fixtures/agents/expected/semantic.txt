@@ -1,0 +1,8 @@
+error: corpus/semantic/checkpoints_on_worker.md: checkpoints: checkpoints are only for advisor agents
+error: corpus/semantic/hook_missing.md: hooks: pre_tool_use: `./scripts/missing.sh` does not exist
+error: corpus/semantic/hook_not_executable.md: hooks: pre_tool_use: `./scripts/plain.sh` is not executable
+error: corpus/semantic/router_on_worker.md: router: router settings are only for router agents
+error: corpus/semantic/twin_b.md: name: `twin` is already defined in corpus/semantic/twin_a.md
+error: corpus/semantic/unknown_account.md: account: account `nobody` does not exist
+error: corpus/semantic/unknown_model.md: model: model `nonexistent-9` does not resolve on any account
+error: corpus/semantic/unknown_tool.md: tools: unknown tool `teleport`

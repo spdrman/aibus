@@ -1,0 +1,3 @@
+warning: corpus/warnings/duplicate_spelling.md: max_turns: duplicate key `max_turns`, keeping the snake_case spelling
+warning: corpus/warnings/unknown_keys.md: flavour: unknown key `flavour`
+ok

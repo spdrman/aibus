@@ -36,6 +36,10 @@ The MSRV pins two versions in `Cargo.lock`: `smol_str` 0.3.2 (newer ones need ru
 
 `keyring` 3 is the keychain, and only the `aibus` binary links it (`crates/aibus/src/keychain.rs`), so `aibus-core` stays free of it and the workspace boundary tests keep passing. I turned on `apple-native`, `windows-native` and `sync-secret-service` with `crypto-rust` (no OpenSSL at run time; `Cargo.lock` still lists `openssl` and `openssl-src` because the optional feature graph does, but a Linux build never compiles them, and I did not check macOS or Windows). I did not use `linux-native` (kernel keyutils) because that one forgets keys on reboot. `rpassword` reads the key with the echo off and `toml_edit` rewrites the `[[account]]` tables without losing the user's comments. None of the three adds a `build.rs` of its own.
 
+## Agent directory watcher (B1.1)
+
+`notify` watches the agent directories for `agents.reload_on_change`. The only new crate with a `build.rs` on Linux is `inotify-sys`, whose script only decides whether to link `libinotify` on NetBSD and OpenBSD. I unpacked `fsevent-sys` (macOS) and `filetime` and neither has one; `kqueue` and `kqueue-sys` only build on the BSDs and I did not unpack them. The MSRV pins `notify` at 8.0.0 and `notify-types` at 2.0.0 in `Cargo.lock` (8.2 needs rustc 1.88); like the other pins, use `cargo update -p <crate> --precise` rather than a bare `cargo update` until the MSRV moves.
+
 ## CI
 
 `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.

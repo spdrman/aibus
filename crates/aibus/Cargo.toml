@@ -20,6 +20,7 @@ notify = "8"
 rpassword = "7"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tokio-util = "0.7"
 toml = "0.8"
 toml_edit = "0.22"
 tracing = "0.1"

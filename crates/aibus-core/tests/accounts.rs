@@ -121,6 +121,8 @@ impl Rig {
                 limits: ToolLimits::default(),
                 date: "2026-11-08".into(),
                 data_home: None,
+                budgets: Budgets::default(),
+                context: Vec::new(),
             },
             RunDeps {
                 provider: self.registry.provider(&chosen).unwrap(),
@@ -130,6 +132,8 @@ impl Rig {
                 }),
                 tools: Arc::new(ToolExecutor::new(ToolRegistry::read_only())),
                 tx,
+                hooks: Arc::new(HookRunner::default()),
+                compactor: None,
             },
         );
         let mut msgs = Vec::new();

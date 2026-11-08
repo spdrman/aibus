@@ -28,15 +28,46 @@ const DRAIN_GRACE: Duration = Duration::from_millis(250);
 /// Room kept inside the cap for the `[... N bytes truncated ...]` line.
 const MARKER_ROOM: usize = 64;
 
+/// The environment a command (a `bash` call or a hook) starts from: `env` without the
+/// `*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD` and `AIBUS_ACCOUNT_*` variables, unless
+/// `pass_env` names them (09 section 1), plus the three `AIBUS_*` variables.
+pub(crate) fn scrubbed_env(
+    env: &[(String, String)],
+    pass_env: &[String],
+    project_dir: &Path,
+    session: &str,
+    run: &str,
+) -> Vec<(String, String)> {
+    let secret = |name: &str| {
+        let upper = name.to_ascii_uppercase();
+        upper.starts_with("AIBUS_ACCOUNT_")
+            || ["KEY", "TOKEN", "SECRET", "PASSWORD"]
+                .iter()
+                .any(|s| upper == *s || upper.ends_with(&format!("_{s}")))
+    };
+    let mut out: Vec<(String, String)> = env
+        .iter()
+        .filter(|(k, _)| pass_env.contains(k) || !secret(k))
+        .cloned()
+        .collect();
+    out.push((
+        "AIBUS_PROJECT_DIR".into(),
+        project_dir.to_string_lossy().into_owned(),
+    ));
+    out.push(("AIBUS_SESSION_ID".into(), session.to_owned()));
+    out.push(("AIBUS_RUN_ID".into(), run.to_owned()));
+    out
+}
+
 /// The last `cap` bytes of what a command printed.
-struct Tail {
+pub(crate) struct Tail {
     buf: Vec<u8>,
     cap: usize,
     dropped: u64,
 }
 
 impl Tail {
-    fn new(cap: usize) -> Self {
+    pub(crate) fn new(cap: usize) -> Self {
         Self {
             buf: Vec::new(),
             cap: cap.saturating_sub(MARKER_ROOM),
@@ -44,7 +75,7 @@ impl Tail {
         }
     }
 
-    fn push(&mut self, data: &[u8]) {
+    pub(crate) fn push(&mut self, data: &[u8]) {
         self.buf.extend_from_slice(data);
         if self.buf.len() > self.cap.saturating_mul(2).max(self.cap + 4096) {
             self.trim();
@@ -65,7 +96,7 @@ impl Tail {
 
     /// The text, behind a head marker when anything was cut. Never longer than the cap the
     /// tail was made with.
-    fn text(&mut self) -> (String, bool) {
+    pub(crate) fn text(&mut self) -> (String, bool) {
         self.trim();
         let body = String::from_utf8_lossy(&self.buf);
         if self.dropped == 0 {
@@ -178,7 +209,7 @@ fn exec(
 
 /// `kill -KILL -- -<pgid>` through the shell's builtin, since this crate forbids `unsafe` and
 /// so cannot call `killpg`.
-fn kill_group(pgid: u32) {
+pub(crate) fn kill_group(pgid: u32) {
     let _ = Command::new("sh")
         .arg("-c")
         .arg(format!("kill -s KILL -- -{pgid}"))
@@ -321,27 +352,13 @@ impl Tool for Bash {
         if i.timeout == Some(0) {
             return Err(ToolError::Invalid("timeout must be at least 1 second".into()));
         }
-        // `*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD` and `AIBUS_ACCOUNT_*` stay out of the
-        // child's environment unless `pass_env` names them.
-        let secret = |name: &str| {
-            let upper = name.to_ascii_uppercase();
-            upper.starts_with("AIBUS_ACCOUNT_")
-                || ["KEY", "TOKEN", "SECRET", "PASSWORD"]
-                    .iter()
-                    .any(|s| upper == *s || upper.ends_with(&format!("_{s}")))
-        };
-        let mut env: Vec<(String, String)> = self
-            .env
-            .iter()
-            .filter(|(k, _)| self.pass_env.contains(k) || !secret(k))
-            .cloned()
-            .collect();
-        env.push((
-            "AIBUS_PROJECT_DIR".into(),
-            self.project_dir.to_string_lossy().into_owned(),
-        ));
-        env.push(("AIBUS_SESSION_ID".into(), self.session.clone()));
-        env.push(("AIBUS_RUN_ID".into(), cx.run.to_string()));
+        let env = scrubbed_env(
+            &self.env,
+            &self.pass_env,
+            &self.project_dir,
+            &self.session,
+            &cx.run.to_string(),
+        );
         let cap = cx.limits.bash_max_output_bytes;
         let out = Arc::new(Mutex::new(Tail::new(cap)));
         let stop = Arc::new(AtomicBool::new(false));

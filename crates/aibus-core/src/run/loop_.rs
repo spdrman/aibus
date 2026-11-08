@@ -1,34 +1,39 @@
 //! A run as an actor (02 section 3.3): one tokio task that owns its `Conversation`, talks to
 //! the provider and the tool executor, and tells the rest of the engine only through `Msg`.
 //!
-//! Hooks, retries and budgets are not here yet (B1.3), so `RunMail::Compact` is accepted and
-//! dropped. Permission prompts are: a call that the mode says to ask about parks the run in
-//! `WaitingPermission` until `RunMail::Permission` answers it.
+//! Around the plain tool loop sit the hooks (01 section 6), the retry rules (02 section 6) and
+//! the budgets (01 section 1.1). Mail is read at turn boundaries: a user message is appended
+//! (through `user_prompt_submit` for a lead), `Compact` compacts, and a permission answer is
+//! only ever consumed while the run waits for it. Compaction itself is B2.2: this file calls
+//! whatever `RunDeps::compactor` holds.
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use aibus_provider::{
     CacheHint, ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind,
-    RequestMetadata, StreamChunk, ToolChoice,
+    RequestMetadata, StreamChunk, ToolChoice, ToolSpec,
 };
+use serde_json::{json, Map, Value};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep_until, Instant};
+use tokio::time::{sleep, sleep_until, Instant};
 use tokio_util::sync::CancellationToken;
 
+use super::budget::Budgets;
 use super::coalesce::Coalescer;
 use super::result;
 use super::{
     AccountName, AgentName, ContentBlock, Conversation, Message, MessageRole, ModelId, RunError,
     RunErrorKind, RunId, RunResult, RunStatus,
 };
-use crate::agent::{AgentDef, PermissionMode};
+use crate::agent::{AgentDef, PermissionMode, Role};
 use crate::context::{self, ContextInput};
 use crate::credentials::CredentialSource;
+use crate::hooks::{Fired, HookInput, HookRunner};
 use crate::ids::PermissionId;
-use crate::msg::{Decision, Msg, PermissionRequest, ToolCall, ToolResult};
+use crate::msg::{Decision, HookEvent, Msg, PermissionRequest, ToolCall, ToolResult};
 use crate::tool::{Signal, ToolCx, ToolError, ToolLimits};
 use crate::tools::{effective_tools, EffectiveTools, ToolExecutor};
 
@@ -45,6 +50,7 @@ pub enum RunMail {
         id: PermissionId,
         decision: Decision,
     },
+    /// Compacts at the next turn boundary.
     Compact,
 }
 
@@ -68,9 +74,14 @@ pub struct RunConfig {
     /// `<session>/runs`; a capped summary is written to `<runs_dir>/<run id>/result.md`.
     pub runs_dir: PathBuf,
     pub limits: ToolLimits,
+    /// The `[limits]` defaults; the definition's own `max_*` win.
+    pub budgets: Budgets,
     /// `YYYY-MM-DD` for the environment block.
     pub date: String,
     pub data_home: Option<PathBuf>,
+    /// Text that goes in front of the task as it is (`session_start` hook output, already
+    /// labelled `[hook <name>]`).
+    pub context: Vec<String>,
 }
 
 /// What the run talks to.
@@ -79,6 +90,21 @@ pub struct RunDeps {
     pub creds: Arc<dyn CredentialSource>,
     pub tools: Arc<ToolExecutor>,
     pub tx: mpsc::Sender<Msg>,
+    pub hooks: Arc<HookRunner>,
+    /// What compacts a conversation (B2.2). Without one a `ContextTooLong` fails the run and
+    /// `RunMail::Compact` is dropped.
+    pub compactor: Option<Arc<dyn Compactor>>,
+}
+
+/// Summarises the start of a conversation into a `compact_boundary` message (01 section 5.5).
+#[async_trait::async_trait]
+pub trait Compactor: Send + Sync {
+    /// Shrinks `conv` in place. `Err` is why it could not.
+    async fn compact(
+        &self,
+        conv: &mut Conversation,
+        cancel: &CancellationToken,
+    ) -> Result<(), String>;
 }
 
 /// Starts the run's task. Must be called inside a tokio runtime.
@@ -109,6 +135,13 @@ impl End {
     }
 }
 
+/// The three things every step of the run needs.
+struct Task<'a> {
+    cfg: &'a RunConfig,
+    deps: &'a RunDeps,
+    cancel: &'a CancellationToken,
+}
+
 async fn task(
     cfg: RunConfig,
     deps: RunDeps,
@@ -116,19 +149,19 @@ async fn task(
     mut mail: mpsc::Receiver<RunMail>,
 ) {
     let started = Instant::now();
-    let run = cfg.run;
-    send(
-        &deps.tx,
-        &cancel,
-        Msg::RunStarted {
-            run,
-            agent: cfg.def.name.clone(),
-            role: cfg.def.role,
-            parent: cfg.parent,
-            model: cfg.model.clone(),
-            account: cfg.account.clone(),
-        },
-    )
+    let t = Task {
+        cfg: &cfg,
+        deps: &deps,
+        cancel: &cancel,
+    };
+    t.send(Msg::RunStarted {
+        run: cfg.run,
+        agent: cfg.def.name.clone(),
+        role: cfg.def.role,
+        parent: cfg.parent,
+        model: cfg.model.clone(),
+        account: cfg.account.clone(),
+    })
     .await;
 
     let (cwd, def, prompt, date, data_home) = (
@@ -162,28 +195,439 @@ async fn task(
                 status: RunStatus::Failed,
                 error: Some(error),
             };
-            return finish(&cfg, &deps, &cancel, Conversation::default(), 0, started, end).await;
+            return t.finish(Conversation::default(), 0, started, end).await;
         }
     };
 
     let eff = effective_tools(&cfg.def, cfg.def.role, cfg.depth, cfg.def.background);
     let mut turns = 0;
-    let end = drive(&cfg, &deps, &cancel, &mut mail, &eff, &mut conv, &mut turns).await;
-    finish(&cfg, &deps, &cancel, conv, turns, started, end).await;
+    let end = match t.begin(&mut conv).await {
+        Some(end) => end,
+        None => drive(&t, &mut mail, &eff, &mut conv, &mut turns).await,
+    };
+    t.finish(conv, turns, started, end).await;
+}
+
+impl Task<'_> {
+    /// Sends `msg`; a closed channel means nobody is listening any more, so the run stops.
+    async fn send(&self, msg: Msg) {
+        if self.deps.tx.send(msg).await.is_err() {
+            self.cancel.cancel();
+        }
+    }
+
+    /// Runs the hooks of `event` for this run and reports each one that ran as `HookFired`.
+    async fn fire(
+        &self,
+        event: HookEvent,
+        matcher: Option<&str>,
+        mode: PermissionMode,
+        extra: Map<String, Value>,
+    ) -> Fired {
+        let cfg = self.cfg;
+        let input = HookInput {
+            event,
+            matcher,
+            run: Some(cfg.run),
+            agent: cfg.def.name.as_str(),
+            role: cfg.def.role,
+            cwd: &cfg.cwd,
+            transcript_path: Some(
+                cfg.runs_dir
+                    .join(cfg.run.to_string())
+                    .join("transcript.jsonl"),
+            ),
+            permission_mode: mode,
+            extra,
+        };
+        let fired = self
+            .deps
+            .hooks
+            .fire(&input, &cfg.def.hooks, self.cancel)
+            .await;
+        for ran in &fired.ran {
+            self.send(Msg::HookFired {
+                run: Some(cfg.run),
+                event,
+                outcome: ran.outcome.clone(),
+            })
+            .await;
+        }
+        fired
+    }
+
+    /// `subagent_start` for a worker, then `user_prompt_submit` and the `session_start` text
+    /// for the lead's first prompt. `Some` when a hook refused the prompt.
+    async fn begin(&self, conv: &mut Conversation) -> Option<End> {
+        let cfg = self.cfg;
+        let mode = cfg.def.permission_mode;
+        let mut context = cfg.context.clone();
+        if cfg.def.role == Role::Worker {
+            let name = cfg.def.name.to_string();
+            self.fire(HookEvent::SubagentStart, Some(name.as_str()), mode, Map::new())
+                .await;
+        }
+        if cfg.def.role == Role::Lead {
+            let extra = Map::from_iter([("prompt".to_owned(), json!(cfg.prompt))]);
+            let fired = self
+                .fire(HookEvent::UserPromptSubmit, None, mode, extra)
+                .await;
+            if let Some(b) = fired.block {
+                return Some(End {
+                    status: RunStatus::Denied,
+                    error: Some(RunError {
+                        kind: RunErrorKind::Denied,
+                        message: format!("prompt refused by hook {}: {}", b.hook, b.reason),
+                        retryable: false,
+                    }),
+                });
+            }
+            context.extend(fired.context);
+        }
+        if let Some(task) = conv.messages.last_mut() {
+            // The task is the last block; the hook output goes in front of it.
+            let at = task.blocks.len().saturating_sub(1);
+            task.blocks
+                .splice(at..at, context.into_iter().map(ContentBlock::Text));
+        }
+        None
+    }
+
+    /// Reads the mailbox at a turn boundary: `queued` first (mail that arrived while the run
+    /// waited for a permission answer), then whatever is waiting now.
+    async fn boundary(
+        &self,
+        mail: &mut mpsc::Receiver<RunMail>,
+        queued: &mut Vec<RunMail>,
+        conv: &mut Conversation,
+        mode: PermissionMode,
+        pre_tokens: u64,
+    ) {
+        while let Ok(m) = mail.try_recv() {
+            queued.push(m);
+        }
+        let mut compact = false;
+        for m in queued.drain(..) {
+            match m {
+                RunMail::UserMessage(text) => {
+                    let mut blocks = Vec::new();
+                    // Only the user's own prompt goes past `user_prompt_submit`; a worker's
+                    // `send_message` text comes from another run.
+                    if self.cfg.def.role == Role::Lead {
+                        let extra = Map::from_iter([("prompt".to_owned(), json!(text))]);
+                        let fired = self
+                            .fire(HookEvent::UserPromptSubmit, None, mode, extra)
+                            .await;
+                        if fired.block.is_some() {
+                            continue;
+                        }
+                        blocks.extend(fired.context.into_iter().map(ContentBlock::Text));
+                    }
+                    blocks.push(ContentBlock::Text(text));
+                    conv.messages.push(Message {
+                        role: MessageRole::User,
+                        blocks,
+                        at: SystemTime::UNIX_EPOCH,
+                    });
+                }
+                RunMail::Compact => compact = true,
+                // Only meaningful while a prompt is open; a late answer is stale.
+                RunMail::Permission { .. } => {}
+            }
+        }
+        if compact {
+            if let Err(why) = self.compact(conv, "manual", mode, pre_tokens).await {
+                self.send(Msg::IoError {
+                    context: "compacting".into(),
+                    error: why,
+                })
+                .await;
+            }
+        }
+    }
+
+    /// `pre_compact`, then the compactor, then `Compacted`.
+    async fn compact(
+        &self,
+        conv: &mut Conversation,
+        trigger: &str,
+        mode: PermissionMode,
+        pre_tokens: u64,
+    ) -> Result<(), String> {
+        let Some(compactor) = &self.deps.compactor else {
+            return Err("nothing is set up to compact this conversation".into());
+        };
+        let extra = Map::from_iter([
+            ("trigger".to_owned(), json!(trigger)),
+            ("pre_tokens".to_owned(), json!(pre_tokens)),
+        ]);
+        self.fire(HookEvent::PreCompact, Some(trigger), mode, extra)
+            .await;
+        compactor.compact(conv, self.cancel).await?;
+        self.send(Msg::Compacted {
+            run: self.cfg.run,
+            pre_tokens,
+        })
+        .await;
+        Ok(())
+    }
+
+    /// One provider request, with the retry rules of 02 section 6: a retryable error waits
+    /// 500 ms, 1 s, 2 s ... (30 s at most, longer when the provider says so) and tries again up
+    /// to five times; `ContextTooLong` compacts once and tries again; `Auth` never retries.
+    async fn request(
+        &self,
+        conv: &mut Conversation,
+        specs: &[ToolSpec],
+        max_output: u32,
+        mode: PermissionMode,
+        pre_tokens: u64,
+    ) -> Result<ChatResponse, End> {
+        // A retryable provider error is retried this many times (02 section 6) ...
+        const MAX_RETRIES: u32 = 5;
+        // ... after 500 ms, doubling each time, never waiting more than 30 s ...
+        const BACKOFF_BASE: Duration = Duration::from_millis(500);
+        const BACKOFF_CAP: Duration = Duration::from_secs(30);
+        // ... unless the provider asked for longer. A server that asks for an hour gets five
+        // minutes.
+        const RETRY_AFTER_CAP: Duration = Duration::from_secs(300);
+
+        let cfg = self.cfg;
+        let mut retries = 0;
+        let mut compacted = false;
+        let mut waiting = false;
+        loop {
+            let req = ChatRequest {
+                model: cfg.model.clone(),
+                system: conv.system.clone(),
+                messages: conv.messages.clone(),
+                tools: specs.to_vec(),
+                tool_choice: ToolChoice::Auto,
+                max_output_tokens: max_output,
+                temperature: None,
+                effort: cfg.def.effort,
+                thinking: None,
+                cache_hint: CacheHint::AfterSystem,
+                logprobs: false,
+                metadata: RequestMetadata {
+                    run_id: Some(cfg.run.to_string()),
+                    session_id: None,
+                },
+            };
+            if waiting {
+                // The card stops saying "retrying" once the next attempt starts.
+                self.note_waiting("").await;
+                waiting = false;
+            }
+            let e = match stream_turn(self.deps, cfg.run, req, self.cancel).await {
+                Ok(resp) => return Ok(resp),
+                Err(e) => e,
+            };
+            if e.kind == ProviderErrorKind::Cancelled || self.cancel.is_cancelled() {
+                return Err(End::of(RunStatus::Cancelled));
+            }
+            match e.kind {
+                ProviderErrorKind::Auth => {
+                    let who = &cfg.account;
+                    let what = if e.message.is_empty() {
+                        "authentication failed"
+                    } else {
+                        &e.message
+                    };
+                    let banner = format!("account {who}: {what}, run aibus account test {who}");
+                    return Err(failed(conv, banner, false));
+                }
+                ProviderErrorKind::ContextTooLong if !compacted => {
+                    compacted = true;
+                    match self.compact(conv, "auto", mode, pre_tokens).await {
+                        Ok(()) => continue,
+                        Err(why) => {
+                            return Err(failed(
+                                conv,
+                                format!("run ended early: {} (compacting failed: {why})", e.message),
+                                false,
+                            ))
+                        }
+                    }
+                }
+                _ if e.retryable && retries < MAX_RETRIES => {
+                    retries += 1;
+                    let backoff = BACKOFF_BASE
+                        .saturating_mul(1 << (retries - 1))
+                        .min(BACKOFF_CAP);
+                    let wait = backoff.max(e.retry_after.unwrap_or_default().min(RETRY_AFTER_CAP));
+                    self.note_waiting(&format!(
+                        "retrying in {} s ({retries}/{MAX_RETRIES})",
+                        wait.as_secs_f32().ceil()
+                    ))
+                    .await;
+                    waiting = true;
+                    tokio::select! {
+                        biased;
+                        () = self.cancel.cancelled() => return Err(End::of(RunStatus::Cancelled)),
+                        () = sleep(wait) => {}
+                    }
+                }
+                _ => {
+                    return Err(failed(
+                        conv,
+                        format!("run ended early: {}", e.message),
+                        e.retryable,
+                    ))
+                }
+            }
+        }
+    }
+
+    /// The card's "waiting for ..." note (empty clears it).
+    async fn note_waiting(&self, note: &str) {
+        self.send(Msg::Stream {
+            run: self.cfg.run,
+            chunks: vec![StreamChunk::Waiting(note.to_owned())],
+        })
+        .await;
+    }
+
+    /// Puts a `PermissionNeeded` into the graph and waits for the answer. A headless run (no
+    /// terminal) is refused on the spot with `PermissionDecided { Deny, "no tty" }`. Mail that
+    /// arrives meanwhile is kept for the next turn.
+    async fn ask(
+        &self,
+        mail: &mut mpsc::Receiver<RunMail>,
+        queued: &mut Vec<RunMail>,
+        call: aibus_provider::ToolCallId,
+        tool: &str,
+        summary: String,
+    ) -> Decision {
+        let perm = PermissionId::new();
+        let request = PermissionRequest {
+            id: perm,
+            agent: self.cfg.def.name.clone(),
+            run: self.cfg.run,
+            call,
+            tool: tool.into(),
+            summary,
+        };
+        self.send(Msg::PermissionNeeded { request }).await;
+        let decided = |decision, reason| Msg::PermissionDecided {
+            id: perm,
+            decision,
+            reason,
+        };
+        if !self.deps.tools.tty() {
+            self.send(decided(Decision::Deny, Some("no tty".into()))).await;
+            return Decision::Deny;
+        }
+        loop {
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => return Decision::Deny,
+                m = mail.recv() => match m {
+                    Some(RunMail::Permission { id: got, decision }) if got == perm => {
+                        self.send(decided(decision, None)).await;
+                        return decision;
+                    }
+                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact)) => queued.push(m),
+                    Some(RunMail::Permission { .. }) => {}
+                    None => return Decision::Deny,
+                },
+            }
+        }
+    }
+
+    /// Drops the conversation, then sends the one `RunFinished` (after a `RunFailed` when the
+    /// provider is why the run stopped).
+    async fn finish(&self, conv: Conversation, turns: u32, started: Instant, end: End) {
+        let (cfg, deps) = (self.cfg, self.deps);
+        let usage = conv.usage;
+        let text = last_text(&conv);
+        drop(conv);
+
+        let dir = cfg.runs_dir.join(cfg.run.to_string());
+        let (summary, summary_file) =
+            match result::cap(text.clone(), cfg.limits.result_max_bytes, &dir) {
+                Ok(capped) => capped,
+                Err(e) => {
+                    self.send(Msg::IoError {
+                        context: format!("writing {}", dir.join("result.md").display()),
+                        error: e.to_string(),
+                    })
+                    .await;
+                    let mut end = cfg.limits.result_max_bytes.min(text.len());
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    (text[..end].to_owned(), None)
+                }
+            };
+        // A run that had text still reports the provider failure (the account banner for an
+        // auth error, for one); a budget stop is not a failure.
+        let provider_error = end
+            .error
+            .as_ref()
+            .filter(|e| e.kind == RunErrorKind::Provider);
+        if end.status == RunStatus::Failed || provider_error.is_some() {
+            if let Some(error) = &end.error {
+                self.send(Msg::RunFailed {
+                    run: cfg.run,
+                    error: error.clone(),
+                })
+                .await;
+            }
+        }
+        let agent: AgentName = cfg.def.name.clone();
+        // The final send ignores a closed channel: there is nothing left to stop.
+        let _ = deps
+            .tx
+            .send(Msg::RunFinished {
+                run: cfg.run,
+                result: RunResult {
+                    run_id: cfg.run,
+                    agent,
+                    status: end.status,
+                    turns,
+                    usage,
+                    summary,
+                    summary_file,
+                    duration: started.elapsed(),
+                    error: end.error,
+                },
+            })
+            .await;
+    }
+}
+
+/// A run the provider stopped: `Partial` with the text it had, or `Failed` without any.
+fn failed(conv: &Conversation, message: String, retryable: bool) -> End {
+    let status = if last_text(conv).is_empty() {
+        RunStatus::Failed
+    } else {
+        RunStatus::Partial
+    };
+    End {
+        status,
+        error: Some(RunError {
+            kind: RunErrorKind::Provider,
+            message,
+            retryable,
+        }),
+    }
 }
 
 /// The tool loop. `turns` counts provider requests.
 async fn drive(
-    cfg: &RunConfig,
-    deps: &RunDeps,
-    cancel: &CancellationToken,
+    t: &Task<'_>,
     mail: &mut mpsc::Receiver<RunMail>,
     eff: &EffectiveTools,
     conv: &mut Conversation,
     turns: &mut u32,
 ) -> End {
-    // 50 is the `max_turns` default from config (01 section 1.1).
-    let max_turns = cfg.def.max_turns.unwrap_or(50);
+    let (cfg, deps, cancel) = (t.cfg, t.deps, t.cancel);
+    let budgets = Budgets {
+        max_turns: cfg.def.max_turns.unwrap_or(cfg.budgets.max_turns),
+        max_tokens_total: cfg.def.max_tokens_total.unwrap_or(cfg.budgets.max_tokens_total),
+        max_cost_usd: cfg.def.max_cost_usd.unwrap_or(cfg.budgets.max_cost_usd),
+    };
     let max_output = deps
         .provider
         .models()
@@ -195,80 +639,50 @@ async fn drive(
     // `enter_plan_mode` switches `mode` to plan and `exit_plan_mode` goes back to `base_mode`.
     let base_mode = cfg.def.permission_mode;
     let mut mode = base_mode;
-    // User messages that arrived while the run was waiting for a permission answer.
-    let mut queued: Vec<String> = Vec::new();
+    // Mail that arrived while the run was waiting for a permission answer.
+    let mut queued: Vec<RunMail> = Vec::new();
+    // Input tokens of the latest request: what a compaction started now would be shrinking.
+    let mut pre_tokens = 0;
 
     loop {
         if cancel.is_cancelled() {
             return End::of(RunStatus::Cancelled);
         }
-        for text in queued.drain(..) {
-            conv.messages.push(Message::text(MessageRole::User, &text));
-        }
-        while let Ok(m) = mail.try_recv() {
-            if let RunMail::UserMessage(text) = m {
-                conv.messages.push(Message::text(MessageRole::User, &text));
-            }
-        }
+        t.boundary(mail, &mut queued, conv, mode, pre_tokens).await;
 
-        let req = ChatRequest {
-            model: cfg.model.clone(),
-            system: conv.system.clone(),
-            messages: conv.messages.clone(),
-            tools: specs.clone(),
-            tool_choice: ToolChoice::Auto,
-            max_output_tokens: max_output,
-            temperature: None,
-            effort: cfg.def.effort,
-            thinking: None,
-            cache_hint: CacheHint::AfterSystem,
-            logprobs: false,
-            metadata: RequestMetadata {
-                run_id: Some(cfg.run.to_string()),
-                session_id: None,
-            },
-        };
-        let resp = match stream_turn(deps, cfg.run, req, cancel).await {
+        let resp = match t.request(conv, &specs, max_output, mode, pre_tokens).await {
             Ok(resp) => resp,
-            Err(e) if e.kind == ProviderErrorKind::Cancelled || cancel.is_cancelled() => {
-                return End::of(RunStatus::Cancelled)
-            }
-            Err(e) => {
-                let error = RunError {
-                    kind: RunErrorKind::Provider,
-                    message: format!("run ended early: {}", e.message),
-                    retryable: e.retryable,
-                };
-                let status = if last_text(conv).is_empty() {
-                    RunStatus::Failed
-                } else {
-                    RunStatus::Partial
-                };
-                return End {
-                    status,
-                    error: Some(error),
-                };
-            }
+            Err(end) => return end,
         };
         *turns += 1;
+        pre_tokens = resp.usage.input_tokens + resp.usage.cache_read;
         {
             let (total, turn) = (&mut conv.usage, &resp.usage);
             total.input_tokens += turn.input_tokens;
             total.output_tokens += turn.output_tokens;
             total.cache_read += turn.cache_read;
             total.cache_write += turn.cache_write;
-            total.cost_usd += turn.cost_usd;
-            // A provider that costed the turn itself (the real ones do) has been counted above.
-            if let (Some(p), true) = (price, turn.cost_usd == 0.0) {
-                let m = 1_000_000.0;
-                total.cost_usd += turn.input_tokens as f64 * p.input_per_mtok / m
-                    + turn.output_tokens as f64 * p.output_per_mtok / m
-                    + turn.cache_read as f64 * p.cache_read_per_mtok.unwrap_or(p.input_per_mtok) / m
-                    + turn.cache_write as f64
-                        * p.cache_write_per_mtok.unwrap_or(p.input_per_mtok)
-                        / m;
-            }
+            // The provider's own figure when it has one, otherwise the price table's.
+            total.cost_usd += match price {
+                Some(p) if turn.cost_usd == 0.0 => {
+                    let m = 1_000_000.0;
+                    turn.input_tokens as f64 * p.input_per_mtok / m
+                        + turn.output_tokens as f64 * p.output_per_mtok / m
+                        + turn.cache_read as f64
+                            * p.cache_read_per_mtok.unwrap_or(p.input_per_mtok)
+                            / m
+                        + turn.cache_write as f64
+                            * p.cache_write_per_mtok.unwrap_or(p.input_per_mtok)
+                            / m
+                }
+                _ => turn.cost_usd,
+            };
         }
+        t.send(Msg::UsageUpdate {
+            run: cfg.run,
+            usage: conv.usage,
+        })
+        .await;
 
         let calls: Vec<(aibus_provider::ToolCallId, smol_str::SmolStr, serde_json::Value)> = resp
             .message
@@ -282,26 +696,113 @@ async fn drive(
             })
             .collect();
         conv.messages.push(resp.message);
+
         if calls.is_empty() {
-            return End::of(RunStatus::Completed);
+            // The run would end here: the `stop` hooks may send it round again.
+            let stop = match cfg.def.role {
+                Role::Lead => Some((HookEvent::Stop, None)),
+                Role::Worker => Some((HookEvent::SubagentStop, Some(cfg.def.name.to_string()))),
+                Role::Advisor | Role::Router => None,
+            };
+            let mut again = false;
+            if let Some((event, matcher)) = stop {
+                let extra = Map::from_iter([(
+                    "last_assistant_message".to_owned(),
+                    json!(last_text(conv)),
+                )]);
+                let fired = t.fire(event, matcher.as_deref(), mode, extra).await;
+                if let Some(b) = fired.block {
+                    conv.messages.push(Message::text(
+                        MessageRole::User,
+                        &format!("[hook {}] {}", b.hook, b.reason),
+                    ));
+                    again = true;
+                }
+            }
+            if !again {
+                // A message that came in during the last turn is answered rather than dropped.
+                while let Ok(m) = mail.try_recv() {
+                    again |= matches!(m, RunMail::UserMessage(_));
+                    queued.push(m);
+                }
+            }
+            if !again {
+                return End::of(RunStatus::Completed);
+            }
+        }
+
+        // Only a run that wants to go on is stopped by its budget: a final answer is kept.
+        let spent = conv.usage.input_tokens + conv.usage.output_tokens;
+        let over = if spent >= budgets.max_tokens_total {
+            Some(format!(
+                "max_tokens_total reached: {spent} of {} tokens",
+                budgets.max_tokens_total
+            ))
+        } else if conv.usage.cost_usd >= budgets.max_cost_usd {
+            Some(format!(
+                "max_cost_usd reached: ${:.4} of ${:.2}",
+                conv.usage.cost_usd, budgets.max_cost_usd
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = over {
+            // Every tool use needs a result, or the conversation could not be resumed.
+            if !calls.is_empty() {
+                conv.messages.push(Message {
+                    role: MessageRole::User,
+                    blocks: calls
+                        .iter()
+                        .map(|(id, _, _)| ContentBlock::ToolResult {
+                            id: *id,
+                            content: "not run: the run's budget was used up".into(),
+                            is_error: true,
+                        })
+                        .collect(),
+                    at: SystemTime::UNIX_EPOCH,
+                });
+            }
+            return End {
+                status: RunStatus::Partial,
+                error: Some(RunError {
+                    kind: RunErrorKind::Budget,
+                    message,
+                    retryable: false,
+                }),
+            };
+        }
+        if calls.is_empty() {
+            if *turns >= budgets.max_turns {
+                return End::of(RunStatus::Partial);
+            }
+            continue;
         }
 
         let mut results = Vec::with_capacity(calls.len());
-        for (id, name, input) in calls {
+        for (id, name, mut input) in calls {
+            let tool_event = |input: &Value| {
+                Map::from_iter([
+                    ("tool_name".to_owned(), json!(name)),
+                    ("tool_input".to_owned(), input.clone()),
+                    ("tool_use_id".to_owned(), json!(id.0.to_string())),
+                ])
+            };
+            let fired = t
+                .fire(HookEvent::PreToolUse, Some(name.as_str()), mode, tool_event(&input))
+                .await;
+            if let Some(updated) = fired.updated_input {
+                input = updated;
+            }
             let call = ToolCall {
                 id,
                 name: name.clone(),
                 input: input.clone(),
                 needs_permission: false,
             };
-            send(
-                &deps.tx,
-                cancel,
-                Msg::ToolCallRequested {
-                    run: cfg.run,
-                    call,
-                },
-            )
+            t.send(Msg::ToolCallRequested {
+                run: cfg.run,
+                call,
+            })
             .await;
             let cx = ToolCx {
                 run: cfg.run,
@@ -311,56 +812,53 @@ async fn drive(
                 tx: deps.tx.clone(),
             };
             let t0 = Instant::now();
-            // Puts a `PermissionNeeded` into the graph and waits for the answer. A headless run
-            // (no terminal) is refused on the spot with `PermissionDecided { Deny, "no tty" }`.
-            // Other mail that arrives meanwhile is kept for the next turn or dropped.
-            let (mail_ref, queue_ref, tool_name) = (&mut *mail, &mut queued, &name);
-            let ask = move |summary: String| async move {
-                let perm = PermissionId::new();
-                let request = PermissionRequest {
-                    id: perm,
-                    agent: cfg.def.name.clone(),
-                    run: cfg.run,
-                    call: id,
-                    tool: tool_name.clone(),
-                    summary,
-                };
-                send(&deps.tx, cancel, Msg::PermissionNeeded { request }).await;
-                let decided = |decision, reason| Msg::PermissionDecided {
-                    id: perm,
-                    decision,
-                    reason,
-                };
-                if !deps.tools.tty() {
-                    send(&deps.tx, cancel, decided(Decision::Deny, Some("no tty".into()))).await;
-                    return Decision::Deny;
-                }
-                loop {
-                    tokio::select! {
-                        biased;
-                        () = cancel.cancelled() => return Decision::Deny,
-                        m = mail_ref.recv() => match m {
-                            Some(RunMail::Permission { id: got, decision }) if got == perm => {
-                                send(&deps.tx, cancel, decided(decision, None)).await;
-                                return decision;
-                            }
-                            Some(RunMail::UserMessage(text)) => queue_ref.push(text),
-                            Some(_) => {}
-                            None => return Decision::Deny,
-                        },
+            let mut result = ToolResult::default();
+
+            // A hook can force a prompt; its answer then also answers the executor's own, so
+            // the user is asked once.
+            let mut prior = None;
+            let mut called = None;
+            if let Some(b) = &fired.block {
+                called = Some(Err(ToolError::Blocked {
+                    hook: b.hook.clone(),
+                    reason: b.reason.clone(),
+                }));
+            } else if fired.ask {
+                // The same one line the executor's own prompt shows: scrubbed, 200 characters.
+                let summary = deps.hooks.redact(&format!("{name}: {input}")).into_owned();
+                let summary: String = summary.chars().take(200).collect();
+                match t.ask(mail, &mut queued, id, &name, summary).await {
+                    Decision::Deny => {
+                        called = Some(Err(ToolError::Denied {
+                            reason: "permission denied".into(),
+                        }))
                     }
+                    d => prior = Some(d),
+                }
+            }
+            let called = match called {
+                Some(denied) => denied,
+                None => {
+                    let (mail_ref, queue_ref, tool_name) = (&mut *mail, &mut queued, &name);
+                    let ask = move |summary: String| async move {
+                        match prior {
+                            Some(d) => d,
+                            None => t.ask(mail_ref, queue_ref, id, tool_name, summary).await,
+                        }
+                    };
+                    deps.tools
+                        .call_gated(eff, &cx, mode, &name, input.clone(), ask)
+                        .await
                 }
             };
-            let called = deps
-                .tools
-                .call_gated(eff, &cx, mode, &name, input, ask)
-                .await;
-            let mut result = ToolResult::default();
+            let mut event = HookEvent::PostToolUse;
+            let mut response = Map::new();
             match called {
                 Ok(out) => {
                     result.content = out.content;
                     result.artifacts = out.artifacts;
                     result.progress = out.progress;
+                    response.insert("tool_response".into(), json!(result.content));
                     match out.signal {
                         Some(Signal::EnterPlan) => mode = PermissionMode::Plan,
                         Some(Signal::ExitPlan) => mode = base_mode,
@@ -389,22 +887,30 @@ async fn drive(
                 Err(e) => {
                     result.content = e.to_string();
                     result.is_error = true;
+                    event = HookEvent::PostToolUseFailure;
+                    response.insert("error".into(), json!(result.content));
                 }
             }
             if cancel.is_cancelled() {
                 return End::of(RunStatus::Cancelled);
             }
+            // A call a hook blocked never ran, so there is nothing to follow up on.
+            if fired.block.is_none() {
+                let mut extra = tool_event(&input);
+                extra.extend(response);
+                let after = t.fire(event, Some(name.as_str()), mode, extra).await;
+                for note in after.notes {
+                    result.content.push('\n');
+                    result.content.push_str(&note);
+                }
+            }
             let (content, is_error) = (result.content.clone(), result.is_error);
-            send(
-                &deps.tx,
-                cancel,
-                Msg::ToolCallFinished {
-                    run: cfg.run,
-                    call_id: id,
-                    result,
-                    duration: t0.elapsed(),
-                },
-            )
+            t.send(Msg::ToolCallFinished {
+                run: cfg.run,
+                call_id: id,
+                result,
+                duration: t0.elapsed(),
+            })
             .await;
             results.push(ContentBlock::ToolResult {
                 id,
@@ -418,7 +924,7 @@ async fn drive(
             at: SystemTime::UNIX_EPOCH,
         });
 
-        if *turns >= max_turns {
+        if *turns >= budgets.max_turns {
             return End::of(RunStatus::Partial);
         }
     }
@@ -441,7 +947,16 @@ async fn stream_turn(
     tokio::pin!(call);
 
     let mut co = Coalescer::default();
-    let emit = |batch: Vec<StreamChunk>| send(&deps.tx, cancel, Msg::Stream { run, chunks: batch });
+    let send = |batch: Vec<StreamChunk>| async move {
+        if deps
+            .tx
+            .send(Msg::Stream { run, chunks: batch })
+            .await
+            .is_err()
+        {
+            cancel.cancel();
+        }
+    };
     let result = loop {
         let due = co.due();
         tokio::select! {
@@ -452,32 +967,25 @@ async fn stream_turn(
             r = &mut call => break r,
             Some(chunk) = chunks.recv() => {
                 if let Some(batch) = co.push(chunk, Instant::now()) {
-                    emit(batch).await;
+                    send(batch).await;
                 }
             }
             () = async { sleep_until(due.expect("guarded")).await }, if due.is_some() => {
                 if let Some(batch) = co.take() {
-                    emit(batch).await;
+                    send(batch).await;
                 }
             }
         }
     };
     while let Ok(chunk) = chunks.try_recv() {
         if let Some(batch) = co.push(chunk, Instant::now()) {
-            emit(batch).await;
+            send(batch).await;
         }
     }
     if let Some(batch) = co.take() {
-        emit(batch).await;
+        send(batch).await;
     }
     result
-}
-
-/// Sends `msg`; a closed channel means nobody is listening any more, so the run stops.
-async fn send(tx: &mpsc::Sender<Msg>, cancel: &CancellationToken, msg: Msg) {
-    if tx.send(msg).await.is_err() {
-        cancel.cancel();
-    }
 }
 
 fn last_text(conv: &Conversation) -> String {
@@ -497,72 +1005,4 @@ fn last_text(conv: &Conversation) -> String {
         })
         .find(|t| !t.is_empty())
         .unwrap_or_default()
-}
-
-/// Drops the conversation, then sends the one `RunFinished` (after a `RunFailed` when the run
-/// produced nothing).
-async fn finish(
-    cfg: &RunConfig,
-    deps: &RunDeps,
-    cancel: &CancellationToken,
-    conv: Conversation,
-    turns: u32,
-    started: Instant,
-    end: End,
-) {
-    let usage = conv.usage;
-    let text = last_text(&conv);
-    drop(conv);
-
-    let dir = cfg.runs_dir.join(cfg.run.to_string());
-    let (summary, summary_file) = match result::cap(text.clone(), cfg.limits.result_max_bytes, &dir)
-    {
-        Ok(capped) => capped,
-        Err(e) => {
-            send(
-                &deps.tx,
-                cancel,
-                Msg::IoError {
-                    context: format!("writing {}", dir.join("result.md").display()),
-                    error: e.to_string(),
-                },
-            )
-            .await;
-            let mut end = cfg.limits.result_max_bytes.min(text.len());
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            (text[..end].to_owned(), None)
-        }
-    };
-    if let (RunStatus::Failed, Some(error)) = (end.status, &end.error) {
-        send(
-            &deps.tx,
-            cancel,
-            Msg::RunFailed {
-                run: cfg.run,
-                error: error.clone(),
-            },
-        )
-        .await;
-    }
-    let agent: AgentName = cfg.def.name.clone();
-    // The final send ignores a closed channel: there is nothing left to stop.
-    let _ = deps
-        .tx
-        .send(Msg::RunFinished {
-            run: cfg.run,
-            result: RunResult {
-                run_id: cfg.run,
-                agent,
-                status: end.status,
-                turns,
-                usage,
-                summary,
-                summary_file,
-                duration: started.elapsed(),
-                error: end.error,
-            },
-        })
-        .await;
 }

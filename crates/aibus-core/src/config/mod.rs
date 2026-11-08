@@ -28,8 +28,7 @@ pub struct Config {
     pub continuity: Continuity,
     pub memory: Memory,
     pub tools: Tools,
-    /// Event name to its hooks. Project hooks come after the user's.
-    pub hooks: BTreeMap<String, Vec<Hook>>,
+    pub hooks: Hooks,
     pub persist: Persist,
     pub ui: Ui,
     /// Action name to key, overriding the defaults (05 section 4).
@@ -250,6 +249,18 @@ impl Default for Tools {
     }
 }
 
+/// `[hooks]`: the one `pass_env` list, and every other key is an event name (01 section 6.1).
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Hooks {
+    /// Variables that stay in a hook's (and `bash`'s) environment although their names look
+    /// secret (09 section 1).
+    pub pass_env: Vec<String>,
+    /// Event name to its hooks. Project hooks come after the user's.
+    #[serde(flatten)]
+    pub events: BTreeMap<String, Vec<Hook>>,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Hook {
@@ -384,6 +395,11 @@ impl Config {
         }
         if self.limits.max_turns == 0 {
             bad("limits.max_turns", "must be at least 1".into());
+        }
+        for event in self.hooks.events.keys() {
+            if crate::msg::HookEvent::parse(event).is_none() {
+                bad(&format!("hooks.{event}"), "not a hook event".into());
+            }
         }
         if self.ui.tick_hz == 0 {
             bad("ui.tick_hz", "must be at least 1".into());

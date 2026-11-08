@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
 use aibus_core::config::{self, Loaded};
@@ -19,17 +19,17 @@ use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
-    expand, AccountCredential, AccountName, AccountRegistry, AccountView, AgentName, AibusError,
-    App, Bash, Budgets, CredentialSource, CredentialStore, Gate, HookEvent, HookInput, HookRunner,
-    Msg, ModelDefaults, ModelId, PermissionMode, Redactor, RunConfig, RunDeps, RunHandle,
-    RunResult, SelectHints, SessionId, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry,
-    MSG_CAPACITY,
+    expand, parse_mention, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
+    Bash, Budgets, CredentialStore, Delegate, Effects, Gate, HookEvent, HookInput, HookRunner,
+    Limits, Msg, ModelDefaults, ModelId, Orchestrator, PermissionMode, Redactor, Roster,
+    RunConfig, RunDeps, RunHandle, RunResult, SelectHints, SessionId, ToolExecutor, ToolLimits,
+    ToolPattern, ToolRegistry, MSG_CAPACITY,
 };
 use aibus_graph::mini::MiniGraph;
-use aibus_provider::fake::{FakeProvider, Script, FAKE_KEY};
+use aibus_provider::fake::{FakeProvider, Script};
 use aibus_provider::{
-    AuthMethodKind, ConfigError, Credential, ModelRef, Provider, ProviderConfig, ProviderFactory,
-    ProviderId, ProviderRegistry, Secret,
+    AuthMethodKind, ConfigError, ModelRef, Provider, ProviderConfig, ProviderFactory, ProviderId,
+    ProviderRegistry,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -41,6 +41,7 @@ use crate::agent_watch::{self, AgentWatch};
 use crate::cli::{Global, RunArgs};
 use crate::events;
 use crate::keychain::OsKeychain;
+use crate::launch::ChildLauncher;
 use crate::providers::builtin_factories;
 use crate::signals::Signals;
 
@@ -52,7 +53,7 @@ pub struct Session {
 
 /// What step 6 settles: the accounts a session can pick from, and where their keys come from.
 pub struct Accounts {
-    pub registry: AccountRegistry,
+    pub registry: Arc<AccountRegistry>,
     pub store: Arc<CredentialStore>,
     pub script_text: String,
     /// No account is configured, so the built-in fake stands in with its fixed key.
@@ -76,6 +77,9 @@ pub struct Ctx {
     pub signals: Option<Signals>,
     pub agent_watch: Option<AgentWatch>,
     pub plan: Option<(RunConfig, RunDeps)>,
+    /// Starts the lead's children, hands their results back and holds the limits.
+    pub orch: Option<Arc<Orchestrator>>,
+    pub launcher: Option<Arc<ChildLauncher>>,
     /// What runs `[hooks]` and the definitions' hooks; runs nothing under `--no-hooks`.
     pub hooks: Option<Arc<HookRunner>>,
     pub rx: Option<mpsc::Receiver<Msg>>,
@@ -104,6 +108,8 @@ impl Ctx {
             signals: None,
             agent_watch: None,
             plan: None,
+            orch: None,
+            launcher: None,
             hooks: None,
             rx: None,
             handle: None,
@@ -217,7 +223,8 @@ impl Step for ParseCli {
                 text.trim_end_matches(['\n', '\r']).to_owned()
             }
         };
-        if ctx.prompt.trim().is_empty() {
+        // `--agent` may bring its own `initial_prompt`, which the loop step looks up.
+        if ctx.prompt.trim().is_empty() && ctx.global.agent.is_none() {
             return Err(usage(
                 "aibus run [OPTIONS] <PROMPT>  (or pipe the prompt on stdin)",
             ));
@@ -466,7 +473,7 @@ impl Step for LoadAccounts {
             })
             .collect();
         ctx.accounts = Some(Accounts {
-            registry: AccountRegistry::new(&effective, providers),
+            registry: Arc::new(AccountRegistry::new(&effective, providers)),
             store: Arc::new(CredentialStore::new(
                 Arc::new(OsKeychain),
                 ctx.redactor.clone(),
@@ -544,8 +551,40 @@ impl Step for EnterLoop {
         let mut def = agents
             .agents
             .get(&name)
-            .ok_or_else(|| AibusError::Usage(format!("no agent named {name}")))?
+            .ok_or_else(|| AibusError::UnknownAgent(name.to_string()))?
             .clone();
+
+        // `--agent` submits the definition's `initial_prompt` first (01 section 4.2); a prompt
+        // on the command line follows it.
+        let mut prompt = ctx.prompt.clone();
+        if let (Some(_), Some(initial)) = (&ctx.global.agent, &def.initial_prompt) {
+            prompt = if prompt.trim().is_empty() {
+                initial.clone()
+            } else {
+                format!("{initial}\n\n{prompt}")
+            };
+        }
+        if prompt.trim().is_empty() {
+            return Err(AibusError::Usage(
+                "aibus run [OPTIONS] <PROMPT>  (or pipe the prompt on stdin)".into(),
+            ));
+        }
+        // `@agent-<name> <rest>` opens the lead with a delegate to that agent (01 section 4.2).
+        let forced = match parse_mention(&prompt) {
+            Some((agent, rest)) => {
+                if !agents.agents.contains_key(&agent) {
+                    return Err(AibusError::UnknownAgent(agent.to_string()));
+                }
+                if rest.is_empty() {
+                    return Err(AibusError::Usage(format!(
+                        "@agent-{agent}: say what it should do"
+                    )));
+                }
+                Some((agent, rest.to_owned()))
+            }
+            None => None,
+        };
+        let limits = Limits::resolve(cfg, |k| std::env::var(k).ok())?;
 
         // `--permission-mode` overrides the definition; `bypass` from either needs the variable.
         if let Some(mode) = ctx.global.permission_mode.as_deref() {
@@ -600,60 +639,12 @@ impl Step for EnterLoop {
             }
         }
 
-        // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
-        // `inherit` has no parent here, so it means the session's model.
-        let target = match expand(&def.model, &defaults) {
-            ModelRef::Inherit => session_default.clone(),
-            r => r,
-        };
-        let hints = SelectHints {
-            explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
-            agent: def.account.clone(),
-            ..SelectHints::default()
-        };
-        let (account, model) = acc.registry.select(&target, &hints)?;
-        let provider = acc.registry.provider(&account)?;
-        let creds: Arc<dyn CredentialSource> = if acc.builtin {
-            ctx.redactor.register(&account, FAKE_KEY);
-            Arc::new(Credential {
-                account: account.clone(),
-                secret: Secret::new(FAKE_KEY.to_owned()),
-                kind: AuthMethodKind::None,
-                resolved_at: Instant::now(),
-            })
-        } else {
-            let configured = acc
-                .registry
-                .account(&account)
-                .cloned()
-                .ok_or_else(|| not_ready("account"))?;
-            Arc::new(AccountCredential {
-                store: acc.store.clone(),
-                account: configured,
-            })
-        };
-        // Fail now, with exit 4, rather than on the first request.
-        creds.credential()?;
-
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
-        let run_cfg = RunConfig {
-            run: aibus_core::RunId::new(),
-            def,
-            prompt: ctx.prompt.clone(),
-            parent: None,
-            depth: 0,
-            model,
-            account,
-            cwd: ctx.cwd.clone(),
-            runs_dir: session.dir.join("runs"),
-            limits: ToolLimits {
-                result_max_bytes: cfg.limits.result_max_bytes,
-                bash_max_output_bytes: cfg.tools.bash_max_output_bytes,
-            },
-            date: events::date(SystemTime::now()),
-            data_home: Some(paths.data.clone()),
-            budgets: Budgets::from(&cfg.limits),
-            context: Vec::new(),
+        let orch = Orchestrator::new(limits.clone(), tx.clone());
+        orch.set_roster(Roster::of(agents.agents.values()));
+        let tool_limits = ToolLimits {
+            result_max_bytes: cfg.limits.result_max_bytes,
+            bash_max_output_bytes: cfg.tools.bash_max_output_bytes,
         };
         // Nobody can answer a prompt in `aibus run` (the `--json` control channel is not wired
         // yet), so `default` mode refuses what would ask, with `PermissionNeeded` then
@@ -672,7 +663,9 @@ impl Step for EnterLoop {
             redactor: Some(ctx.redactor.clone()),
             home: std::env::var_os("HOME").map(PathBuf::from),
         };
-        let tools = ToolExecutor::with_gate(ToolRegistry::standard(bash), gate)
+        let mut registry = ToolRegistry::standard(bash);
+        registry.register(Arc::new(Delegate::new(orch.clone())));
+        let tools = ToolExecutor::with_gate(registry, gate)
             .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
         // `--no-hooks` leaves the runner's default in place, which runs nothing.
         let hooks = Arc::new(if ctx.global.no_hooks {
@@ -687,14 +680,82 @@ impl Step for EnterLoop {
                 Some(ctx.redactor.clone()),
             )
         });
+        let tools = Arc::new(tools);
+        let launcher = Arc::new(ChildLauncher {
+            agents: std::sync::RwLock::new(
+                agents
+                    .agents
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
+            registry: acc.registry.clone(),
+            store: acc.store.clone(),
+            builtin: acc.builtin,
+            redactor: ctx.redactor.clone(),
+            defaults: defaults.clone(),
+            session_default: session_default.clone(),
+            tools: tools.clone(),
+            hooks: hooks.clone(),
+            deny: ctx.global.deny.iter().filter_map(|t| t.parse().ok()).collect(),
+            cwd: ctx.cwd.clone(),
+            runs_dir: session.dir.join("runs"),
+            limits: tool_limits,
+            budgets: Budgets::from(&cfg.limits),
+            data_home: Some(paths.data.clone()),
+            max_spawn_depth: limits.max_spawn_depth,
+            chosen: Default::default(),
+        });
+
+        // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
+        // `inherit` has no parent here, so it means the session's model.
+        let target = match expand(&def.model, &defaults) {
+            ModelRef::Inherit => session_default.clone(),
+            r => r,
+        };
+        let hints = SelectHints {
+            explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
+            agent: def.account.clone(),
+            ..SelectHints::default()
+        };
+        // A missing key fails here, with exit 4, rather than on the first request.
+        let picked = launcher.pick(&target, &hints)?;
+        let run = aibus_core::RunId::new();
+        launcher.remember(run, &picked.account, &picked.model);
+        let run_cfg = RunConfig {
+            run,
+            def,
+            prompt,
+            parent: None,
+            depth: 0,
+            model: picked.model,
+            account: picked.account,
+            cwd: ctx.cwd.clone(),
+            runs_dir: session.dir.join("runs"),
+            limits: tool_limits,
+            date: events::date(SystemTime::now()),
+            data_home: Some(paths.data.clone()),
+            budgets: Budgets::from(&cfg.limits),
+            context: Vec::new(),
+            background: false,
+            max_spawn_depth: limits.max_spawn_depth,
+            forced,
+        };
         let deps = RunDeps {
-            provider,
-            creds,
-            tools: Arc::new(tools),
+            provider: picked.provider,
+            creds: picked.creds,
+            tools,
             tx: tx.clone(),
             hooks: hooks.clone(),
             compactor: None,
         };
+        if let Some(app) = ctx.app.as_mut() {
+            app.set_limits(&limits)?;
+            app.effects =
+                Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
+        }
+        ctx.orch = Some(orch);
+        ctx.launcher = Some(launcher);
         ctx.hooks = Some(hooks);
         ctx.plan = Some((run_cfg, deps));
         ctx.rx = Some(rx);
@@ -834,12 +895,21 @@ impl Step for SubmitPrompt {
         let rt = ctx.rt.as_ref().ok_or_else(|| not_ready("runtime"))?;
         let (cfg, deps) = ctx.plan.take().ok_or_else(|| not_ready("loop"))?;
         let _in_runtime = rt.enter();
-        ctx.handle = Some(aibus_core::spawn(cfg, deps));
+        let handle = aibus_core::spawn(cfg, deps);
+        // The lead is the parent of the runs it delegates: they report to its mailbox.
+        if let Some(orch) = &ctx.orch {
+            orch.adopt(handle.id, handle.mailbox.clone(), handle.cancel.clone());
+        }
+        ctx.handle = Some(handle);
         Ok(())
     }
 
-    /// Cancels the run if it is still going and waits a moment for it to flush.
+    /// Cancels the run, and the runs it started, if they are still going and waits a moment for
+    /// the lead to flush.
     fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
+        if let Some(orch) = &ctx.orch {
+            orch.cancel_all();
+        }
         if let (Some(h), Some(rt)) = (ctx.handle.take(), ctx.rt.as_ref()) {
             h.cancel.cancel();
             // `drive` may already have joined it; a finished handle must not be polled again.

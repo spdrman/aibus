@@ -52,6 +52,9 @@ pub enum RunMail {
     },
     /// Compacts at the next turn boundary.
     Compact,
+    /// A background child ended: its wrapped result (01 section 5.3) goes to the model as a
+    /// message before the next request.
+    ChildFinished(String),
 }
 
 pub struct RunHandle {
@@ -82,6 +85,15 @@ pub struct RunConfig {
     /// Text that goes in front of the task as it is (`session_start` hook output, already
     /// labelled `[hook <name>]`).
     pub context: Vec<String>,
+    /// Runs in the background: no `ask_user`, `enter_plan_mode` or `exit_plan_mode` (01
+    /// section 4.3). The definition's `background: true` and the caller's `background` both
+    /// end up here.
+    pub background: bool,
+    /// `limits.max_spawn_depth`: at `depth` this far down the run is not offered `delegate`.
+    pub max_spawn_depth: u8,
+    /// `@agent-<name> <rest>` as the first prompt (01 section 4.2): the run opens with a
+    /// foreground `delegate` to this agent with this prompt, and then goes on with the result.
+    pub forced: Option<(AgentName, String)>,
 }
 
 /// What the run talks to.
@@ -199,7 +211,13 @@ async fn task(
         }
     };
 
-    let eff = effective_tools(&cfg.def, cfg.def.role, cfg.depth, cfg.def.background);
+    let eff = effective_tools(
+        &cfg.def,
+        cfg.def.role,
+        cfg.depth,
+        cfg.background || cfg.def.background,
+        cfg.max_spawn_depth,
+    );
     let mut turns = 0;
     let end = match t.begin(&mut conv).await {
         Some(end) => end,
@@ -331,6 +349,9 @@ impl Task<'_> {
                     });
                 }
                 RunMail::Compact => compact = true,
+                RunMail::ChildFinished(report) => {
+                    conv.messages.push(Message::text(MessageRole::User, &report));
+                }
                 // Only meaningful while a prompt is open; a late answer is stale.
                 RunMail::Permission { .. } => {}
             }
@@ -527,7 +548,7 @@ impl Task<'_> {
                         self.send(decided(decision, None)).await;
                         return decision;
                     }
-                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact)) => queued.push(m),
+                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::ChildFinished(_))) => queued.push(m),
                     Some(RunMail::Permission { .. }) => {}
                     None => return Decision::Deny,
                 },
@@ -597,6 +618,24 @@ impl Task<'_> {
     }
 }
 
+/// The assistant turn a forced `@agent-<name>` stands for: one foreground `delegate` call.
+fn opening_delegate(agent: &AgentName, prompt: &str) -> ChatResponse {
+    ChatResponse {
+        message: Message {
+            role: MessageRole::Assistant,
+            blocks: vec![ContentBlock::ToolUse {
+                id: aibus_provider::ToolCallId(ulid::Ulid::new()),
+                name: "delegate".into(),
+                input: json!({"agent": agent, "prompt": prompt, "background": false}),
+            }],
+            at: SystemTime::UNIX_EPOCH,
+        },
+        usage: Default::default(),
+        stop: aibus_provider::StopReason::ToolUse,
+        request_id: None,
+    }
+}
+
 /// A run the provider stopped: `Partial` with the text it had, or `Failed` without any.
 fn failed(conv: &Conversation, message: String, retryable: bool) -> End {
     let status = if last_text(conv).is_empty() {
@@ -643,6 +682,7 @@ async fn drive(
     let mut queued: Vec<RunMail> = Vec::new();
     // Input tokens of the latest request: what a compaction started now would be shrinking.
     let mut pre_tokens = 0;
+    let mut forced = cfg.forced.clone();
 
     loop {
         if cancel.is_cancelled() {
@@ -650,11 +690,17 @@ async fn drive(
         }
         t.boundary(mail, &mut queued, conv, mode, pre_tokens).await;
 
-        let resp = match t.request(conv, &specs, max_output, mode, pre_tokens).await {
-            Ok(resp) => resp,
-            Err(end) => return end,
+        // A forced delegate opens the run in place of the first request.
+        let (resp, seeded) = match forced.take() {
+            Some((agent, prompt)) => (opening_delegate(&agent, &prompt), true),
+            None => match t.request(conv, &specs, max_output, mode, pre_tokens).await {
+                Ok(resp) => (resp, false),
+                Err(end) => return end,
+            },
         };
-        *turns += 1;
+        if !seeded {
+            *turns += 1;
+        }
         pre_tokens = resp.usage.input_tokens + resp.usage.cache_read;
         {
             let (total, turn) = (&mut conv.usage, &resp.usage);
@@ -722,7 +768,7 @@ async fn drive(
             if !again {
                 // A message that came in during the last turn is answered rather than dropped.
                 while let Ok(m) = mail.try_recv() {
-                    again |= matches!(m, RunMail::UserMessage(_));
+                    again |= matches!(m, RunMail::UserMessage(_) | RunMail::ChildFinished(_));
                     queued.push(m);
                 }
             }
@@ -870,6 +916,7 @@ async fn drive(
                                     () = cancel.cancelled() => break None,
                                     m = mail.recv() => match m {
                                         Some(RunMail::UserMessage(text)) => break Some(text),
+                                        Some(m @ RunMail::ChildFinished(_)) => queued.push(m),
                                         Some(_) => {}
                                         None => break None,
                                     },

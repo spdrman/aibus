@@ -177,6 +177,9 @@ pub fn replay_app() -> App<MiniGraph> {
             background: false,
             isolation: Isolation::None,
             parent: None,
+            run: None,
+            model: None,
+            account: None,
         }))
         .unwrap();
         start(&mut app, seq, agent, Role::Worker, "Haiku 5.5");
@@ -210,6 +213,9 @@ pub fn heavy_app() -> App<MiniGraph> {
             background: false,
             isolation: Isolation::None,
             parent: None,
+            run: None,
+            model: None,
+            account: None,
         }))
         .unwrap();
         start(&mut app, seq, "extra", Role::Worker, "Haiku 5.5");

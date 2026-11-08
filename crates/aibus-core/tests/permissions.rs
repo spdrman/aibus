@@ -375,7 +375,7 @@ fn interactive_and_plan_tools_are_lead_only_and_foreground_only() {
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     let get = |n: &str| found.agents[&n.parse::<AgentName>().unwrap()].clone();
     let names = |d: &AgentDef, role, bg| -> Vec<String> {
-        effective_tools(d, role, 0, bg).allow.iter().map(|p| p.tool.to_string()).collect()
+        effective_tools(d, role, 0, bg, 3).allow.iter().map(|p| p.tool.to_string()).collect()
     };
     let lead = names(&get("lead"), Role::Lead, false);
     for t in ["ask_user", "plan", "enter_plan_mode", "exit_plan_mode", "bash", "write", "edit", "report_artifact"] {
@@ -505,6 +505,9 @@ async fn drive(
             data_home: None,
             budgets: Budgets::default(),
             context: Vec::new(),
+            background: false,
+            max_spawn_depth: 3,
+            forced: None,
         },
         RunDeps {
             provider: fake,

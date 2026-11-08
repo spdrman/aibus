@@ -123,6 +123,9 @@ impl Rig {
                 data_home: None,
                 budgets: Budgets::default(),
                 context: Vec::new(),
+                background: false,
+                max_spawn_depth: 3,
+                forced: None,
             },
             RunDeps {
                 provider: self.registry.provider(&chosen).unwrap(),

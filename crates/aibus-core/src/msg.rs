@@ -281,13 +281,22 @@ impl ShutdownReason {
 /// The user-facing verb set the TUI and CLI both produce.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
-    /// `parent` is the run that asked (None for the user).
+    /// `parent` is the run that asked (None for the user). `run` is the id the caller already
+    /// handed out (the `delegate` tool answers with it before the loop has seen the command);
+    /// without one the reducer makes one. `model` and `account` override the definition's.
     Delegate {
         agent: AgentName,
         prompt: String,
         background: bool,
         isolation: Isolation,
         parent: Option<RunId>,
+        run: Option<RunId>,
+        model: Option<String>,
+        account: Option<AccountName>,
+    },
+    /// Moves a foreground wait to the background (`Ctrl+b`).
+    Background {
+        run: RunId,
     },
     Fork {
         prompt: String,
@@ -615,6 +624,7 @@ impl Msg {
 pub fn command_name(c: &Command) -> &'static str {
     match c {
         Command::Delegate { .. } => "delegate",
+        Command::Background { .. } => "background",
         Command::Fork { .. } => "fork",
         Command::Cancel { .. } => "cancel",
         Command::Resume { .. } => "resume",

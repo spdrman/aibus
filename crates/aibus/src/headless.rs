@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::replay::{msg_to_json, replay_hash};
-use aibus_core::{AibusError, Msg, Redactor, RunError, RunErrorKind, RunResult, RunStatus};
+use aibus_core::{AibusError, Msg, Redactor, Roster, RunError, RunErrorKind, RunResult, RunStatus};
 use aibus_provider::{ProviderError, ProviderErrorKind};
 use tokio::time::Instant;
 
@@ -109,6 +109,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         return Err(not_ready("run"));
     };
     let redactor = &ctx.redactor;
+    let (orch, launcher) = (ctx.orch.as_ref(), ctx.launcher.as_ref());
     // A second signal this soon after the first is a forced quit (06 section 5); a graceful
     // stop may take this long before we give up on the run.
     const FORCE_WITHIN: Duration = Duration::from_secs(2);
@@ -137,8 +138,19 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                         recorded.push_str(&line.to_string());
                         recorded.push('\n');
                     }
+                    // Only the lead's end ends the session; its children report through it.
                     let done = match &msg {
-                        Msg::RunFinished { result, .. } => Some(result.clone()),
+                        Msg::RunFinished { run, result } if *run == handle.id => {
+                            Some(result.clone())
+                        }
+                        Msg::AgentsReloaded { defs, .. } => {
+                            // The next `delegate` offers the new roster and starts from it.
+                            if let (Some(o), Some(l)) = (orch, launcher) {
+                                o.set_roster(Roster::of(defs.iter()));
+                                l.reload(defs);
+                            }
+                            None
+                        }
                         _ => None,
                     };
                     app.step(msg)?;

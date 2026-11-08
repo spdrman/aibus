@@ -111,6 +111,9 @@ pub fn delegate() -> Msg {
         background: false,
         isolation: Isolation::None,
         parent: None,
+        run: None,
+        model: None,
+        account: None,
     })
 }
 
@@ -600,6 +603,9 @@ pub fn cases() -> Vec<Case> {
                 background: true,
                 isolation: Isolation::Worktree,
                 parent: None,
+                run: None,
+                model: None,
+                account: None,
             },
             {
                 let mut k = new_run_keys();
@@ -666,6 +672,13 @@ pub fn cases() -> Vec<Case> {
                 "model:run:<id>:error",
                 "model:run:<id>:status",
             ],
+        ),
+        cmd_on(
+            setup_queued,
+            Command::Background {
+                run: first_delegated(),
+            },
+            vec!["model:log", "model:run:<id>:meta"],
         ),
         cmd(Command::Focus(Pane::Cards), vec!["ctrl:focus"]),
         cmd(Command::Scroll(Pane::Log, 3), vec!["ctrl:scroll:log"]),

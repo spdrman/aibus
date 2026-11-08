@@ -177,6 +177,9 @@ fn start(script: Script, def: AgentDef, cwd: &Path, runs_dir: &Path) -> Rig {
             data_home: None,
             budgets: Budgets::default(),
             context: Vec::new(),
+            background: false,
+            max_spawn_depth: 3,
+            forced: None,
         },
         RunDeps {
             provider: fake.clone(),

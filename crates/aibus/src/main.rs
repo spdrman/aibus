@@ -9,6 +9,7 @@ mod commands;
 mod events;
 mod headless;
 mod keychain;
+mod launch;
 mod providers;
 mod signals;
 mod startup;

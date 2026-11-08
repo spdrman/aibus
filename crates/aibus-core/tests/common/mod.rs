@@ -140,6 +140,7 @@ pub fn with_tool(a: &mut A) {
 pub fn permission_request() -> PermissionRequest {
     PermissionRequest {
         id: perm(),
+        agent: "worker".parse().unwrap(),
         run: R(),
         call: call(),
         tool: "bash".into(),
@@ -386,6 +387,7 @@ pub fn cases() -> Vec<Case> {
                 result: ToolResult {
                     content: t.clone(),
                     is_error: false,
+                    ..Default::default()
                 },
                 duration: Duration::from_millis(3),
             },
@@ -409,6 +411,7 @@ pub fn cases() -> Vec<Case> {
             msg: Msg::PermissionDecided {
                 id: perm(),
                 decision: Decision::Allow,
+                reason: None,
             },
             expect: vec![
                 "model:permissions:open",

@@ -15,6 +15,8 @@ These are the crates with a `build.rs` (or a proc macro we rely on) in our tree,
 | `serde`, `serde_core`, `serde_json`, `thiserror` | `build.rs` probes the compiler version to pick features |
 | `libc`, `getrandom`, `zerocopy`, `typeid`, `zmij` | `build.rs` probes for platform or compiler features (transitive, via tokio, ulid, ron and serde_json) |
 | `signal-hook` | `build.rs` probes the target for the signal numbers it exposes (the `aibus` binary uses it for SIGINT and SIGTERM; tokio's own `signal` feature is off because it enables `mio` workspace-wide) |
+| `libdbus-sys` | the `vendored` feature compiles libdbus from source with `cc`, so the Linux keychain (Secret Service) needs no system package, only a C compiler (B1.4, via `keyring`) |
+| `generic-array`, `rustix` | `build.rs` version and cfg probes: `generic-array` comes with the AES and SHA-2 that `keyring` uses to talk to Secret Service, `rustix` was already there through `crossterm` and `tempfile` and `aibus-core` now uses it directly for the owner check on key files (B1.4) |
 | `proc-macro2`, `quote` | `build.rs` for compiler feature detection, under every proc macro below |
 | `serde_derive`, `thiserror-impl`, `async-trait`, `tokio-macros`, `tracing-attributes`, `clap_derive` | proc macros for the derives and attributes the provider trait, the CLI and the tests use |
 
@@ -29,6 +31,10 @@ The MSRV pins two versions in `Cargo.lock`: `smol_str` 0.3.2 (newer ones need ru
 ## Config and CLI crates (A2.4)
 
 `toml` 0.8 reads the config (with `serde_ignored` to find unknown keys, `regex` for the redactor patterns) and `clap` 4 with `derive` parses the command line. None of them has a `build.rs` (checked in the unpacked sources, as is `signal-hook-registry`); `clap_derive` is the one proc macro, listed above. I picked `toml` 0.8 as the conservative line; it has the `Deserializer` and error spans the line numbers need, and I did not try 1.x. `etcetera` is not used: the XDG layout is a few lines in `persist/paths.rs` and I did not want a dependency for it.
+
+## Credentials (B1.4)
+
+`keyring` 3 is the keychain, and only the `aibus` binary links it (`crates/aibus/src/keychain.rs`), so `aibus-core` stays free of it and the workspace boundary tests keep passing. I turned on `apple-native`, `windows-native` and `sync-secret-service` with `crypto-rust` (no OpenSSL at run time; `Cargo.lock` still lists `openssl` and `openssl-src` because the optional feature graph does, but a Linux build never compiles them, and I did not check macOS or Windows). I did not use `linux-native` (kernel keyutils) because that one forgets keys on reboot. `rpassword` reads the key with the echo off and `toml_edit` rewrites the `[[account]]` tables without losing the user's comments. None of the three adds a `build.rs` of its own.
 
 ## Agent directory watcher (B1.1)
 

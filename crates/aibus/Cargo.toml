@@ -15,12 +15,16 @@ aibus-provider-anthropic.workspace = true
 aibus-provider-openai.workspace = true
 aibus-tui.workspace = true
 clap = { version = "4.5", features = ["derive"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
 notify = "8"
+rpassword = "7"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 toml = "0.8"
+toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"

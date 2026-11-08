@@ -6,7 +6,7 @@ mod model;
 pub mod result;
 
 pub use loop_::{spawn, RunConfig, RunDeps, RunHandle, RunMail, MAILBOX_CAPACITY, STREAM_CAPACITY};
-pub use model::{resolve_model, ModelDefaults};
+pub use model::{expand, resolve_model, ModelDefaults};
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};

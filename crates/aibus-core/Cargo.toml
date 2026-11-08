@@ -32,6 +32,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 ulid = { version = "1", features = ["serde"] }
 yaml-rust2 = "0.10"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
 [dev-dependencies]
 aibus-testkit.workspace = true
 tempfile = "3"

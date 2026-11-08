@@ -15,6 +15,21 @@ pub struct ModelDefaults {
     pub swarm_model: Option<ModelRef>,
 }
 
+/// `model` with a reserved alias replaced by its `defaults.*` value; an unset key is `inherit`.
+pub fn expand(model: &ModelRef, defaults: &ModelDefaults) -> ModelRef {
+    let named = match model {
+        ModelRef::Alias(a) => match a.as_str() {
+            "default_model" => &defaults.default_model,
+            "advisor_model" => &defaults.advisor_model,
+            "router_model" => &defaults.router_model,
+            "swarm_model" => &defaults.swarm_model,
+            _ => return model.clone(),
+        },
+        other => return other.clone(),
+    };
+    named.clone().unwrap_or(ModelRef::Inherit)
+}
+
 /// Resolves `model` for `provider`. A reserved alias becomes its `defaults.*` value, and an unset
 /// key falls back to `inherit`. `inherit` takes the parent's model, or the session default for a
 /// run without a parent. `None` when nothing names a model the provider knows.
@@ -25,17 +40,7 @@ pub fn resolve_model(
     provider: &dyn Provider,
     aliases: &AliasTable,
 ) -> Option<ModelId> {
-    let named = match model {
-        ModelRef::Alias(a) => match a.as_str() {
-            "default_model" => defaults.default_model.as_ref(),
-            "advisor_model" => defaults.advisor_model.as_ref(),
-            "router_model" => defaults.router_model.as_ref(),
-            "swarm_model" => defaults.swarm_model.as_ref(),
-            _ => Some(model),
-        },
-        other => Some(other),
-    };
-    match named.unwrap_or(&ModelRef::Inherit) {
+    match expand(model, defaults) {
         ModelRef::Inherit => match parent {
             Some(p) => Some(p.clone()),
             None => match defaults.default_model.as_ref()? {
@@ -43,6 +48,6 @@ pub fn resolve_model(
                 r => provider.resolve_model(r, aliases),
             },
         },
-        r => provider.resolve_model(r, aliases),
+        r => provider.resolve_model(&r, aliases),
     }
 }

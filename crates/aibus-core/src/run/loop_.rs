@@ -1,15 +1,16 @@
 //! A run as an actor (02 section 3.3): one tokio task that owns its `Conversation`, talks to
 //! the provider and the tool executor, and tells the rest of the engine only through `Msg`.
 //!
-//! Hooks, permission prompts, retries and budgets are not here yet (B1.3), so `RunMail::Permission`
-//! and `RunMail::Compact` are accepted and dropped.
+//! Hooks, retries and budgets are not here yet (B1.3), so `RunMail::Compact` is accepted and
+//! dropped. Permission prompts are: a call that the mode says to ask about parks the run in
+//! `WaitingPermission` until `RunMail::Permission` answers it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use aibus_provider::{
-    CacheHint, ChatRequest, ChatResponse, Credential, Provider, ProviderError, ProviderErrorKind,
+    CacheHint, ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind,
     RequestMetadata, StreamChunk, ToolChoice,
 };
 use tokio::sync::mpsc;
@@ -23,11 +24,12 @@ use super::{
     AccountName, AgentName, ContentBlock, Conversation, Message, MessageRole, ModelId, RunError,
     RunErrorKind, RunId, RunResult, RunStatus,
 };
-use crate::agent::AgentDef;
+use crate::agent::{AgentDef, PermissionMode};
 use crate::context::{self, ContextInput};
+use crate::credentials::CredentialSource;
 use crate::ids::PermissionId;
-use crate::msg::{Decision, Msg, ToolCall, ToolResult};
-use crate::tool::{ToolCx, ToolError, ToolLimits};
+use crate::msg::{Decision, Msg, PermissionRequest, ToolCall, ToolResult};
+use crate::tool::{Signal, ToolCx, ToolError, ToolLimits};
 use crate::tools::{effective_tools, EffectiveTools, ToolExecutor};
 
 /// Slots in a run's mailbox (08 section 3).
@@ -74,7 +76,7 @@ pub struct RunConfig {
 /// What the run talks to.
 pub struct RunDeps {
     pub provider: Arc<dyn Provider>,
-    pub creds: Arc<Credential>,
+    pub creds: Arc<dyn CredentialSource>,
     pub tools: Arc<ToolExecutor>,
     pub tx: mpsc::Sender<Msg>,
 }
@@ -190,10 +192,18 @@ async fn drive(
         .map_or(8_192, |m| m.max_output);
     let price = deps.provider.price(&cfg.model);
     let specs = deps.tools.specs(eff);
+    // `enter_plan_mode` switches `mode` to plan and `exit_plan_mode` goes back to `base_mode`.
+    let base_mode = cfg.def.permission_mode;
+    let mut mode = base_mode;
+    // User messages that arrived while the run was waiting for a permission answer.
+    let mut queued: Vec<String> = Vec::new();
 
     loop {
         if cancel.is_cancelled() {
             return End::of(RunStatus::Cancelled);
+        }
+        for text in queued.drain(..) {
+            conv.messages.push(Message::text(MessageRole::User, &text));
         }
         while let Ok(m) = mail.try_recv() {
             if let RunMail::UserMessage(text) = m {
@@ -300,21 +310,97 @@ async fn drive(
                 tx: deps.tx.clone(),
             };
             let t0 = Instant::now();
-            let (content, is_error) = match deps.tools.call(eff, &cx, &name, input).await {
-                Ok(out) => (out.content, false),
-                Err(ToolError::Cancelled) => return End::of(RunStatus::Cancelled),
-                Err(e) => (e.to_string(), true),
+            // Puts a `PermissionNeeded` into the graph and waits for the answer. A headless run
+            // (no terminal) is refused on the spot with `PermissionDecided { Deny, "no tty" }`.
+            // Other mail that arrives meanwhile is kept for the next turn or dropped.
+            let (mail_ref, queue_ref, tool_name) = (&mut *mail, &mut queued, &name);
+            let ask = move |summary: String| async move {
+                let perm = PermissionId::new();
+                let request = PermissionRequest {
+                    id: perm,
+                    agent: cfg.def.name.clone(),
+                    run: cfg.run,
+                    call: id,
+                    tool: tool_name.clone(),
+                    summary,
+                };
+                send(&deps.tx, cancel, Msg::PermissionNeeded { request }).await;
+                let decided = |decision, reason| Msg::PermissionDecided {
+                    id: perm,
+                    decision,
+                    reason,
+                };
+                if !deps.tools.tty() {
+                    send(&deps.tx, cancel, decided(Decision::Deny, Some("no tty".into()))).await;
+                    return Decision::Deny;
+                }
+                loop {
+                    tokio::select! {
+                        biased;
+                        () = cancel.cancelled() => return Decision::Deny,
+                        m = mail_ref.recv() => match m {
+                            Some(RunMail::Permission { id: got, decision }) if got == perm => {
+                                send(&deps.tx, cancel, decided(decision, None)).await;
+                                return decision;
+                            }
+                            Some(RunMail::UserMessage(text)) => queue_ref.push(text),
+                            Some(_) => {}
+                            None => return Decision::Deny,
+                        },
+                    }
+                }
             };
+            let called = deps
+                .tools
+                .call_gated(eff, &cx, mode, &name, input, ask)
+                .await;
+            let mut result = ToolResult::default();
+            match called {
+                Ok(out) => {
+                    result.content = out.content;
+                    result.artifacts = out.artifacts;
+                    result.progress = out.progress;
+                    match out.signal {
+                        Some(Signal::EnterPlan) => mode = PermissionMode::Plan,
+                        Some(Signal::ExitPlan) => mode = base_mode,
+                        Some(Signal::AskUser { .. }) => {
+                            // The next user message is the answer.
+                            let answer = loop {
+                                tokio::select! {
+                                    biased;
+                                    () = cancel.cancelled() => break None,
+                                    m = mail.recv() => match m {
+                                        Some(RunMail::UserMessage(text)) => break Some(text),
+                                        Some(_) => {}
+                                        None => break None,
+                                    },
+                                }
+                            };
+                            match answer {
+                                Some(answer) => result.content = answer,
+                                None => return End::of(RunStatus::Cancelled),
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                Err(ToolError::Cancelled) => return End::of(RunStatus::Cancelled),
+                Err(e) => {
+                    result.content = e.to_string();
+                    result.is_error = true;
+                }
+            }
+            if cancel.is_cancelled() {
+                return End::of(RunStatus::Cancelled);
+            }
+            let (content, is_error) = (result.content.clone(), result.is_error);
             send(
                 &deps.tx,
                 cancel,
                 Msg::ToolCallFinished {
                     run: cfg.run,
                     call_id: id,
-                    result: ToolResult {
-                        content: content.clone(),
-                        is_error,
-                    },
+                    result,
                     duration: t0.elapsed(),
                 },
             )
@@ -345,7 +431,12 @@ async fn stream_turn(
     cancel: &CancellationToken,
 ) -> Result<ChatResponse, ProviderError> {
     let (out, mut chunks) = mpsc::channel::<StreamChunk>(STREAM_CAPACITY);
-    let call = deps.provider.stream(&deps.creds, req, out, cancel.clone());
+    // Resolved for every request, so a rotated key is picked up within the store's cache time.
+    let creds = deps
+        .creds
+        .credential()
+        .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
+    let call = deps.provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
 
     let mut co = Coalescer::default();

@@ -17,7 +17,7 @@ use crate::agent::{AgentDef, Isolation, Role};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{PermissionId, RunId};
 use crate::msg::{AccountView, Command, Decision, Msg, Pane, Selection};
-use crate::run::{RunStatus, Usage};
+use crate::run::{Progress, RunStatus, Usage};
 
 /// What `reduce` may not read from the world itself.
 #[derive(Clone, Copy, Debug, Default)]
@@ -360,9 +360,10 @@ fn def_summary(store: &Store, d: &AgentDef) -> Value {
 }
 
 fn account_value(a: &AccountView) -> Result<Value, AibusError> {
-    let ok = ["keyring:", "env:", "file:"]
-        .iter()
-        .any(|p| a.key_ref.starts_with(p));
+    let ok = a.key_ref == "none"
+        || ["keyring:", "env:", "file:"]
+            .iter()
+            .any(|p| a.key_ref.starts_with(p));
     if !ok {
         return Err(CredentialError::NotAReference(a.name.clone()).into());
     }
@@ -472,9 +473,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             };
             let mut text = String::new();
             let mut usage: Option<Value> = None;
+            let mut waiting: Option<&str> = None;
             for c in chunks {
                 match c {
                     StreamChunk::TextDelta(t) => text.push_str(t),
+                    StreamChunk::Waiting(t) => waiting = Some(t),
                     StreamChunk::Usage(u) => {
                         let base = usage
                             .clone()
@@ -495,7 +498,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             if let Some(u) = usage {
                 r.put(run_key(&id, "usage"), u);
             }
-            if r.status(&id) == Some(RunStatus::Starting) {
+            // The card shows `waiting for <account> slot` while the rate limit holds it back.
+            if let Some(w) = waiting {
+                let note = if w.is_empty() { Value::Null } else { s(w) };
+                let meta = with(r.cur(&run_key(&id, "meta")), "waiting", note);
+                r.put(run_key(&id, "meta"), meta);
+            }
+            let started = chunks.iter().any(|c| !matches!(c, StreamChunk::Waiting(_)));
+            if started && r.status(&id) == Some(RunStatus::Starting) {
                 r.set_status(&id, RunStatus::Running);
             }
         }
@@ -509,12 +519,19 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             ]);
             r.put(TOOLS_PENDING, pushed(r.cur(TOOLS_PENDING), entry));
             r.log("info", &format!("tool {} requested", call.name));
+            // `ask_user` parks the run until the user answers.
+            let id = run.to_string();
+            if call.name == "ask_user"
+                && matches!(r.status(&id), Some(RunStatus::Running | RunStatus::Starting))
+            {
+                r.set_status(&id, RunStatus::WaitingUser);
+            }
         }
         Msg::ToolCallFinished {
+            run,
             call_id,
             result,
             duration,
-            ..
         } => {
             let key = call_id.0.to_string();
             let pending = as_list(r.cur(TOOLS_PENDING)).to_vec();
@@ -532,10 +549,33 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.put(TOOLS_PENDING, list(rest));
             let ok = if result.is_error { "failed" } else { "ok" };
             r.log("info", &format!("{name} {ok} {} ms", duration.as_millis()));
+            let id = run.to_string();
+            if name == "ask_user" && r.status(&id) == Some(RunStatus::WaitingUser) {
+                r.set_status(&id, RunStatus::Running);
+            }
+            if !result.artifacts.is_empty() {
+                let mut found = as_list(get(r.cur(&run_key(&id, "meta")), "artifacts").unwrap_or(&Value::Null)).to_vec();
+                for a in &result.artifacts {
+                    found.push(map([
+                        ("name", s(&a.name)),
+                        ("kind", s(&a.kind)),
+                        ("path", s(&a.path.to_string_lossy())),
+                    ]));
+                }
+                let meta = with(r.cur(&run_key(&id, "meta")), "artifacts", list(found));
+                r.put(run_key(&id, "meta"), meta);
+            }
+            match result.progress {
+                Some(Progress::Fraction(f)) => r.put(run_key(&id, "progress"), Value::F64(f64::from(f))),
+                Some(Progress::Done) => r.put(run_key(&id, "progress"), Value::F64(1.0)),
+                Some(Progress::Indeterminate) => r.put(run_key(&id, "progress"), Value::Null),
+                None => {}
+            }
         }
         Msg::PermissionNeeded { request } => {
             let entry = map([
                 ("id", s(&request.id.to_string())),
+                ("agent", s(request.agent.as_str())),
                 ("run", s(&request.run.to_string())),
                 ("call", s(&request.call.0.to_string())),
                 ("tool", s(&request.tool)),
@@ -556,7 +596,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .collect();
             r.put(TOOLS_PENDING, list(pending));
         }
-        Msg::PermissionDecided { id, decision } => r.decide(*id, *decision),
+        Msg::PermissionDecided { id, decision, .. } => r.decide(*id, *decision),
         Msg::RunFinished { run, result } => {
             let id = run.to_string();
             r.set_status(&id, result.status);

@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "write",
+  "type": "object",
+  "required": [
+    "path",
+    "content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content": {
+      "type": "string"
+    }
+  }
+}

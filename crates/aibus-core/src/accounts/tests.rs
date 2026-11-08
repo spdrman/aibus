@@ -108,6 +108,45 @@ fn logged(f: impl FnOnce()) -> String {
     text
 }
 
+/// Issue 55. A callsite's first hit registers it against whatever subscribers are alive at
+/// that moment. When another test thread does that while the capture is being installed, the
+/// callsite can end up cached as "never" and the capture sees nothing. Each of the 4096
+/// callsites below is fresh, so each round is one more chance for the race.
+#[test]
+fn issue_55_capture_sees_a_fresh_callsite_that_another_thread_hits_first() {
+    use std::sync::{Arc, Barrier};
+
+    // Every expansion of `one` is its own callsite; each level multiplies by four.
+    macro_rules! one { () => { (|| tracing::info!("hammer")) as fn() }; }
+    macro_rules! x4 { () => { vec![one!(), one!(), one!(), one!()] }; }
+    macro_rules! x16 { () => { [x4!(), x4!(), x4!(), x4!()].concat() }; }
+    macro_rules! x64 { () => { [x16!(), x16!(), x16!(), x16!()].concat() }; }
+    macro_rules! x256 { () => { [x64!(), x64!(), x64!(), x64!()].concat() }; }
+    macro_rules! x1024 { () => { [x256!(), x256!(), x256!(), x256!()].concat() }; }
+    let sites: Vec<fn()> = [x1024!(), x1024!(), x1024!(), x1024!()].concat();
+    let gate = Arc::new(Barrier::new(2));
+    let rival = {
+        let gate = gate.clone();
+        let sites = sites.clone();
+        std::thread::spawn(move || {
+            for fire in sites {
+                gate.wait();
+                fire();
+            }
+        })
+    };
+    let total = sites.len();
+    let mut missed = 0;
+    for fire in sites {
+        gate.wait();
+        if !logged(fire).contains("hammer") {
+            missed += 1;
+        }
+    }
+    rival.join().unwrap();
+    assert_eq!(missed, 0, "{missed} of {total} events never reached the capture");
+}
+
 #[test]
 fn step_1_the_explicit_account_beats_the_agent_the_parent_and_the_default() {
     let r = registry(|_| {});

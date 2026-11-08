@@ -12,7 +12,6 @@ use aibus_core::{
     AibusError, CredentialError, Decision, Msg, PermissionId, Redactor, Roster, RunError,
     RunErrorKind, RunId, RunMail, RunResult, RunStatus,
 };
-use aibus_graph::Graph;
 use aibus_provider::{ProviderError, ProviderErrorKind};
 use tokio::time::Instant;
 
@@ -174,17 +173,18 @@ impl Pump<'_> {
 /// first stops waiting at once. SIGWINCH is a `Resize`. With `--json` the control channel on
 /// stdin answers permission prompts and mails messages to the run.
 fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
-    let (Some(rt), Some(app), Some(rx), Some(handle), Some(signals), Some(loaded)) = (
+    let (Some(rt), Some(app), Some(rx), Some(handle), Some(signals), Some(loaded), Some(writer)) = (
         ctx.rt.as_ref(),
         ctx.app.as_mut(),
         ctx.rx.as_mut(),
         ctx.handle.as_mut(),
         ctx.signals.as_mut(),
         ctx.loaded.as_ref(),
+        ctx.writer.as_mut(),
     ) else {
         return Err(not_ready("run"));
     };
-    let redactor = &ctx.redactor;
+    let (redactor, prompt) = (&ctx.redactor, &ctx.prompt);
     let (orch, launcher) = (ctx.orch.as_ref(), ctx.launcher.as_ref());
     // A second signal this soon after the first is a forced quit (06 section 5); a graceful
     // stop may take this long before we give up on the run.
@@ -229,6 +229,8 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         let mut interrupted = false;
         let mut first_signal: Option<Instant> = None;
         let mut deadline: Option<Instant> = None;
+        // Buffered log lines go out within 2 s even when nothing is happening.
+        let mut idle = tokio::time::interval(Duration::from_secs(1));
         loop {
             let timeout = async {
                 match deadline {
@@ -258,7 +260,16 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                         }
                         _ => None,
                     };
+                    let at = SystemTime::now();
+                    writer.msg(&msg, at)?;
+                    // The prompt on the command line is the lead's; a child has its own.
+                    if let Msg::RunStarted { run, .. } = &msg {
+                        if *run == handle.id {
+                            writer.prompt(*run, at, prompt)?;
+                        }
+                    }
                     pump.handle(msg, redactor, app)?;
+                    writer.after_step(app)?;
                     if let Some((id, run)) = asked {
                         if deny(id, run).is_ok() {
                             pump.auto_denied.insert(id);
@@ -272,6 +283,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                     Signal::Resize => {
                         let (cols, rows) = term::size();
                         pump.handle(Msg::Resize { cols, rows }, redactor, app)?;
+                        writer.after_step(app)?;
                     }
                     Signal::Stop => {
                         let now = Instant::now();
@@ -310,6 +322,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                         }
                     }
                 },
+                _ = idle.tick() => writer.after_step(app)?,
                 () = timeout => break,
             }
         }
@@ -328,22 +341,6 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     });
     ctx.finished = finished;
     ctx.interrupted = interrupted;
-
-    // The commit log, for `aibus session log` (06 section 4): one line per commit.
-    if let Some(session) = &ctx.session {
-        let mut log = String::new();
-        for c in app.graph.commit_log() {
-            let line = serde_json::json!({
-                "time": c.time,
-                "intent": c.intent.as_str(),
-                "changed": c.changed_nodes.len(),
-                "at": events::rfc3339(c.at),
-            });
-            log.push_str(&line.to_string());
-            log.push('\n');
-        }
-        write_private(session.dir.join("commits.jsonl"), log)?;
-    }
 
     if let (Some(dir), Some(_)) = (&ctx.run.record, &ctx.finished) {
         create_private_dir(dir)?;

@@ -108,7 +108,7 @@ fn hydrate_plus_one_after_commit_restarts_queued_work() {
     let snap = a.graph.snapshot();
 
     let (mut b, blog) = wired();
-    b.hydrate(snap.clone()).unwrap();
+    b.hydrate(snap.clone(), &[]).unwrap();
     assert_eq!(spawns(&blog), 2, "both queued runs start again");
     let commit = b.graph.commit_log().last().unwrap().clone();
     b.effects.after_commit(&b.graph, &commit);

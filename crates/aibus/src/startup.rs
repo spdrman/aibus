@@ -14,8 +14,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
 use aibus_core::config::{self, Loaded};
-use aibus_core::persist::fs::{create_private_dir, write_private};
-use aibus_core::persist::paths::{project_dir, Paths};
+use aibus_core::persist::fs::create_private_dir;
+use aibus_core::persist::index::Index;
+use aibus_core::persist::paths::{continuity_dir, project_dir, Paths};
+use aibus_core::persist::retention::prune_if_due;
+use aibus_core::persist::session::{read_runs, SessionMeta, SessionWriter};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
     expand, parse_mention, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
@@ -30,6 +33,7 @@ use aibus_provider::{
     AuthMethodKind, ConfigError, ModelRef, Provider, ProviderConfig, ProviderFactory, ProviderId,
     ProviderRegistry,
 };
+use notify::RecursiveMode;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -37,6 +41,7 @@ use crate::agent_watch::{self, AgentWatch};
 use crate::cli::{Global, RunArgs};
 use crate::control::{self, Line};
 use crate::events;
+use crate::handoff;
 use crate::keychain::OsKeychain;
 use crate::launch::ChildLauncher;
 use crate::providers::{builtin_factories, provider_configs, refresh_stale_models};
@@ -46,7 +51,7 @@ use crate::trace::TraceGuard;
 pub struct Session {
     pub id: SessionId,
     pub dir: PathBuf,
-    started: String,
+    meta: SessionMeta,
 }
 
 /// What step 6 settles: the accounts a session can pick from, and where their keys come from.
@@ -74,6 +79,9 @@ pub struct Ctx {
     pub rt: Option<Runtime>,
     pub signals: Option<Signals>,
     pub agent_watch: Option<AgentWatch>,
+    pub handoff_watch: Option<AgentWatch>,
+    /// Everything the session writes to its directory; `None` until the graph exists.
+    pub writer: Option<SessionWriter>,
     pub plan: Option<(RunConfig, RunDeps)>,
     /// Starts the lead's children, hands their results back and holds the limits.
     pub orch: Option<Arc<Orchestrator>>,
@@ -111,6 +119,8 @@ impl Ctx {
             rt: None,
             signals: None,
             agent_watch: None,
+            handoff_watch: None,
+            writer: None,
             plan: None,
             orch: None,
             launcher: None,
@@ -191,7 +201,7 @@ pub fn stop(mut started: Vec<Box<dyn Step>>, ctx: &mut Ctx) -> Result<(), AibusE
     first.map_or(Ok(()), Err)
 }
 
-fn now_ms() -> u64 {
+pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)
@@ -282,39 +292,6 @@ impl Step for LoadConfig {
 
 struct OpenSession;
 
-impl OpenSession {
-    fn write(ctx: &Ctx, outcome: Option<&str>) -> Result<(), AibusError> {
-        let s = ctx.session.as_ref().ok_or_else(|| not_ready("session"))?;
-        let json = serde_json::json!({
-            "schema_version": 1,
-            "id": s.id.to_string(),
-            "started": s.started,
-            "topic": ctx.global.topic,
-            "cwd": ctx.cwd,
-            "lead": ctx.global.agent.as_deref().unwrap_or("lead"),
-            "outcome": outcome,
-            "ended": outcome.map(|_| events::rfc3339(SystemTime::now())),
-            "runs": ctx.finished.iter().map(|r| serde_json::json!({
-                "id": r.run_id.to_string(),
-                "agent": r.agent.as_str(),
-                "status": r.status.as_value(),
-                "turns": r.turns,
-                "usage": {
-                    "input_tokens": r.usage.input_tokens,
-                    "output_tokens": r.usage.output_tokens,
-                    "cost_usd": r.usage.cost_usd,
-                },
-            })).collect::<Vec<_>>(),
-            "handoff_outcome": ctx.outcome,
-        });
-        write_private(
-            s.dir.join("session.json"),
-            serde_json::to_string_pretty(&json).unwrap_or_default(),
-        )?;
-        Ok(())
-    }
-}
-
 impl Step for OpenSession {
     fn name(&self) -> &'static str {
         "session"
@@ -322,6 +299,12 @@ impl Step for OpenSession {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
+        // Sessions past their retention go first, at most once a day (07 section 4).
+        let days = u64::from(cfg.persist.session_retention_days);
+        if let Err(e) = prune_if_due(paths, SystemTime::now(), Duration::from_secs(days * 86_400)) {
+            eprintln!("aibus: warning: pruning old sessions: {e}");
+        }
         let id = SessionId::new();
         let dir = ctx
             .run
@@ -329,24 +312,41 @@ impl Step for OpenSession {
             .clone()
             .unwrap_or_else(|| paths.state.join("sessions").join(id.to_string()));
         create_private_dir(&dir.join("runs"))?;
-        ctx.session = Some(Session {
+        let meta = SessionMeta::new(
             id,
-            dir,
-            started: events::rfc3339(SystemTime::now()),
-        });
-        Self::write(ctx, None)
+            events::rfc3339(SystemTime::now()),
+            ctx.global.topic.clone(),
+            ctx.cwd.clone(),
+            ctx.global.agent.as_deref().unwrap_or("lead"),
+        );
+        meta.write(&dir)?;
+        ctx.session = Some(Session { id, dir, meta });
+        Ok(())
     }
 
+    /// The last snapshot, the outcome in `session.json`, and the index row. The index is a
+    /// cache, so a failure there is a warning.
     fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
-        if ctx.session.is_none() {
+        let (Some(session), Some(paths)) = (ctx.session.as_mut(), ctx.paths.as_ref()) else {
             return Ok(());
+        };
+        if let (Some(w), Some(app)) = (ctx.writer.as_mut(), ctx.app.as_mut()) {
+            w.finish(app)?;
         }
-        let outcome = match (&ctx.finished, ctx.interrupted) {
+        session.meta.outcome = Some(match (&ctx.finished, ctx.interrupted) {
             (Some(r), _) => r.status.as_value(),
             (None, true) => "interrupted".to_owned(),
             (None, false) => "unknown".to_owned(),
-        };
-        Self::write(ctx, Some(&outcome))
+        });
+        session.meta.handoff_outcome = ctx.outcome.clone();
+        session.meta.ended = Some(events::rfc3339(SystemTime::now()));
+        session.meta.write(&session.dir)?;
+        let indexed = Index::open(&paths.data.join("index.sqlite"))
+            .and_then(|mut i| i.upsert(&session.meta, &read_runs(&session.dir)));
+        if let Err(e) = indexed {
+            eprintln!("aibus: warning: {e}");
+        }
+        Ok(())
     }
 }
 
@@ -363,7 +363,17 @@ impl Step for BuildGraph {
     /// task executes its own tool calls and also sends `ToolCallRequested`, which the reducer
     /// turns into an approved `Effect::Tool`; a sink that executed it would run every tool twice.
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
-        ctx.app = Some(App::new(MiniGraph::new(), now_ms));
+        let session = ctx.session.as_ref().ok_or_else(|| not_ready("session"))?;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
+        let mut app = App::new(MiniGraph::new(), now_ms);
+        app.record_commits();
+        ctx.writer = Some(SessionWriter::open(
+            &session.dir,
+            ctx.redactor.clone(),
+            &cfg.persist,
+            cfg.limits.transcript_result_max_bytes,
+        )?);
+        ctx.app = Some(app);
         Ok(())
     }
 }
@@ -779,16 +789,32 @@ impl Step for EnterLoop {
                     warnings: found.warnings,
                 })
             };
-            match agent_watch::start(&watched, &tx, reload) {
+            match agent_watch::start(&watched, RecursiveMode::NonRecursive, &tx, reload) {
                 Ok(w) => ctx.agent_watch = Some(w),
                 Err(e) => eprintln!("aibus: warning: not watching agent directories: {e}"),
             }
+        }
+
+        // The newest handoff is `model:handoff:latest`; a second aibus in the same project can
+        // write one at any time, so the directory is watched too (07 section 5).
+        let handoffs = continuity_dir(&ctx.cwd, &cfg.continuity.dir).join("shared/handoffs");
+        if let (Some(app), Some(path)) = (ctx.app.as_mut(), handoff::latest(&handoffs)) {
+            app.step(Msg::HandoffWritten { path })?;
+        }
+        let reload = {
+            let dir = handoffs.clone();
+            move || handoff::latest(&dir).map(|path| Msg::HandoffWritten { path })
+        };
+        match agent_watch::start(&[handoffs], RecursiveMode::Recursive, &tx, reload) {
+            Ok(w) => ctx.handoff_watch = Some(w),
+            Err(e) => eprintln!("aibus: warning: not watching the handoff directory: {e}"),
         }
         Ok(())
     }
 
     fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         ctx.agent_watch = None;
+        ctx.handoff_watch = None;
         Ok(())
     }
 }

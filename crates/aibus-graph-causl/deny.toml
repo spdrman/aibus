@@ -1,6 +1,6 @@
 # cargo-deny for the `causl-rs` backend crate, which is outside the workspace and has its own
 # lockfile. Run it from the repo root with:
-#   cargo deny --manifest-path crates/aibus-graph-causl/Cargo.toml check --config crates/aibus-graph-causl/deny.toml
+#   cargo deny --config crates/aibus-graph-causl/deny.toml --manifest-path crates/aibus-graph-causl/Cargo.toml check
 # The root deny.toml keeps `allow-git = []`: the workspace never sees the private source.
 [graph]
 all-features = true

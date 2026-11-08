@@ -59,20 +59,16 @@ jobs:
           esac
           basic=$(printf '%s' "$basic_src" | base64 | tr -d '\n')
           echo "::add-mask::$basic"
-          basic2=$(printf '%s' "$CAUSL_CI_BUILD_1:x" | base64 | tr -d '\n')
-          echo "::add-mask::$basic2"
           status() { # $1 = header line; prints only the HTTP status
             printf 'header = "%s"\n' "$1" | curl -sS -o /dev/null -w '%{http_code}' -K - \
               "$remote/info/refs?service=git-upload-pack" || true
           }
           echo "no auth: HTTP $(curl -sS -o /dev/null -w '%{http_code}' "$remote/info/refs?service=git-upload-pack" || true)"
           style=
-          for s in basic basic2 token bearer; do
+          for s in basic token; do
             case $s in
               basic) h="Authorization: Basic $basic" ;;
-              basic2) h="Authorization: Basic $basic2" ;;
               token) h="Authorization: token $CAUSL_CI_BUILD_1" ;;
-              bearer) h="Authorization: Bearer $CAUSL_CI_BUILD_1" ;;
             esac
             code=$(status "$h")
             echo "style $s: HTTP $code"
@@ -136,7 +132,7 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: |
           set -o pipefail
-          cargo deny --manifest-path "$CAUSL_MANIFEST" check --config crates/aibus-graph-causl/deny.toml 2>&1 | tee results/deny.txt
+          cargo deny --config crates/aibus-graph-causl/deny.toml --manifest-path "$CAUSL_MANIFEST" check 2>&1 | tee results/deny.txt
 
       - name: Summary
         if: always()

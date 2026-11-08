@@ -63,6 +63,16 @@ fn core_never_sees_ratatui_or_a_concrete_provider() {
     for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai"] {
         assert!(!deps.contains(banned), "aibus-core depends on {banned}");
     }
+    let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
+    assert!(providers.is_empty(), "aibus-core depends on provider crates {providers:?}");
+}
+
+#[test]
+fn provider_crate_has_no_network_crates() {
+    let deps = closure("aibus-provider");
+    for banned in ["reqwest", "hyper", "h2", "ureq", "isahc", "surf", "curl", "native-tls", "rustls", "openssl", "socket2", "mio"] {
+        assert!(!deps.contains(banned), "aibus-provider depends on {banned}");
+    }
 }
 
 #[test]

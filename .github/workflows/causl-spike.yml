@@ -1,0 +1,169 @@
+name: causl-spike
+
+# A1.5: build the causl-rs backend against the private causl-engine-core, run the A1.2
+# conformance suite on it and repeat the A1.3 stream-commit measurement next to mini.
+# Manual only. The private source (git.opsite.ca) is fetched in exactly one step, which is the
+# only step that sees the secret; every later step builds offline from the cargo cache.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CAUSL_MANIFEST: crates/aibus-graph-causl/Cargo.toml
+
+jobs:
+  causl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Toolchains
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          rustup toolchain install 1.99.1 --profile minimal --component clippy
+          rustup default 1.85.0
+          mkdir -p results
+
+      # The only step with the secret. It is never echoed, never written to disk and never passed
+      # on the command line of anything but the child processes' environment. The header is
+      # built in memory and handed to git through GIT_CONFIG_* so nothing lands in a config file.
+      - name: Fetch the private source
+        env:
+          CAUSL_CI_BUILD_1: ${{ secrets.CAUSL_CI_BUILD_1 }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set +x
+          host=https://git.opsite.ca
+          remote=$host/causl/causl-core-rs.git
+          if [ -z "$CAUSL_CI_BUILD_1" ]; then
+            echo "CAUSL_CI_BUILD_1 is empty (secret missing or not exposed to this run)"
+            exit 1
+          fi
+          case $CAUSL_CI_BUILD_1 in
+            *:*) echo "secret shape: contains a colon (treated as user:password)"; basic_src=$CAUSL_CI_BUILD_1 ;;
+            *) echo "secret shape: single token"; basic_src="x-access-token:$CAUSL_CI_BUILD_1" ;;
+          esac
+          basic=$(printf '%s' "$basic_src" | base64 | tr -d '\n')
+          echo "::add-mask::$basic"
+          basic2=$(printf '%s' "$CAUSL_CI_BUILD_1:x" | base64 | tr -d '\n')
+          echo "::add-mask::$basic2"
+          status() { # $1 = header line; prints only the HTTP status
+            printf 'header = "%s"\n' "$1" | curl -sS -o /dev/null -w '%{http_code}' -K - \
+              "$remote/info/refs?service=git-upload-pack" || true
+          }
+          echo "no auth: HTTP $(curl -sS -o /dev/null -w '%{http_code}' "$remote/info/refs?service=git-upload-pack" || true)"
+          style=
+          for s in basic basic2 token bearer; do
+            case $s in
+              basic) h="Authorization: Basic $basic" ;;
+              basic2) h="Authorization: Basic $basic2" ;;
+              token) h="Authorization: token $CAUSL_CI_BUILD_1" ;;
+              bearer) h="Authorization: Bearer $CAUSL_CI_BUILD_1" ;;
+            esac
+            code=$(status "$h")
+            echo "style $s: HTTP $code"
+            if [ "$code" = 200 ] && [ -z "$style" ]; then style=$s; header=$h; fi
+          done
+          if [ -z "$style" ]; then
+            echo "no auth style got HTTP 200 from $remote"
+            exit 1
+          fi
+          echo "auth style used: $style"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.$host/.extraheader"
+          export GIT_CONFIG_VALUE_0=$header
+          cargo fetch --locked --manifest-path "$CAUSL_MANIFEST"
+          echo "fetched"
+
+      - name: Resolved source
+        run: |
+          {
+            echo "remote: https://git.opsite.ca/causl/causl-core-rs.git (private, needs CAUSL_CI_BUILD_1)"
+            grep -A3 'name = "causl-engine-core"' crates/aibus-graph-causl/Cargo.lock
+            rustc --version
+            cargo +1.99.1 --version
+          } | tee results/source.txt
+
+      - name: Build on the MSRV
+        run: |
+          set -o pipefail
+          if cargo build --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs 2>&1 | tee results/build-1.85.txt; then
+            echo "TC=1.85.0" >> "$GITHUB_ENV"
+            echo "msrv: causl-rs builds on 1.85" | tee results/msrv.txt
+          else
+            echo "TC=1.99.1" >> "$GITHUB_ENV"
+            echo "msrv: causl-rs does NOT build on 1.85, falling back to 1.99.1 (see build-1.85.txt)" | tee results/msrv.txt
+          fi
+
+      - name: Conformance suite on causl
+        id: conformance
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo +"$TC" test --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs 2>&1 | tee results/conformance.txt
+
+      - name: Stream-commit measurement, mini then causl
+        run: |
+          set -o pipefail
+          cargo +"$TC" bench --locked -p aibus-core --bench commit_stream 2>&1 | tee results/bench-mini.txt
+          cargo +"$TC" bench --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs --bench commit_stream 2>&1 | tee results/bench-causl.txt
+
+      - name: Clippy on 1.99.1
+        run: |
+          set -o pipefail
+          RUSTFLAGS="-D warnings" cargo +1.99.1 clippy --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs --all-targets -- -D warnings 2>&1 | tee results/clippy.txt
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny on the causl crate
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          set -o pipefail
+          cargo deny --manifest-path "$CAUSL_MANIFEST" check --config crates/aibus-graph-causl/deny.toml 2>&1 | tee results/deny.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## causl-spike"
+            echo
+            echo '```'
+            cat results/source.txt 2>/dev/null || true
+            cat results/msrv.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "### Conformance (A1.2) on causl"
+            echo '```'
+            grep -E '^test |^test result' results/conformance.txt 2>/dev/null || echo "no result"
+            echo '```'
+            echo
+            echo "### Stream commit (A1.3), mini then causl"
+            echo '```'
+            grep -E '^(backend|stream_commit|alt_tail|store content)' results/bench-mini.txt results/bench-causl.txt 2>/dev/null || echo "no result"
+            echo '```'
+            echo
+            echo "### Clippy 1.99.1 and cargo deny"
+            echo '```'
+            tail -n 3 results/clippy.txt 2>/dev/null || echo "clippy did not run"
+            tail -n 3 results/deny.txt 2>/dev/null || echo "deny did not run"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cp "$GITHUB_STEP_SUMMARY" results/summary.md
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: causl-spike-results
+          path: results/
+          if-no-files-found: warn

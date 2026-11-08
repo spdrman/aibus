@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# Own lockfile and the private causl source: see crates/aibus-graph-causl/Cargo.toml.
+exclude = ["crates/aibus-graph-causl"]
 
 [workspace.package]
 version = "0.0.0"

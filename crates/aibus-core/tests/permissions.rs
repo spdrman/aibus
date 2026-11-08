@@ -503,12 +503,16 @@ async fn drive(
             limits: ToolLimits::default(),
             date: "2026-11-08".into(),
             data_home: None,
+            budgets: Budgets::default(),
+            context: Vec::new(),
         },
         RunDeps {
             provider: fake,
             creds: Arc::new(fake_credential()),
             tools: ex,
             tx,
+            hooks: Arc::new(HookRunner::default()),
+            compactor: None,
         },
     );
     let mut app = common::app();
@@ -586,7 +590,7 @@ async fn a_prompt_parks_the_run_until_the_answer_arrives() {
     )
     .await;
     assert!(saw_open);
-    let names: Vec<_> = msgs.iter().map(Msg::name).filter(|n| *n != "Stream").collect();
+    let names: Vec<_> = msgs.iter().map(Msg::name).filter(|n| !matches!(*n, "Stream" | "UsageUpdate")).collect();
     assert_eq!(
         names,
         ["RunStarted", "ToolCallRequested", "PermissionNeeded", "PermissionDecided", "ToolCallFinished", "RunFinished"]
@@ -636,7 +640,7 @@ async fn headless_default_emits_needed_then_denied_with_no_tty() {
         |_, _, _| {},
     )
     .await;
-    let names: Vec<_> = msgs.iter().map(Msg::name).filter(|n| *n != "Stream").collect();
+    let names: Vec<_> = msgs.iter().map(Msg::name).filter(|n| !matches!(*n, "Stream" | "UsageUpdate")).collect();
     assert_eq!(
         names,
         ["RunStarted", "ToolCallRequested", "PermissionNeeded", "PermissionDecided", "ToolCallFinished", "RunFinished"]

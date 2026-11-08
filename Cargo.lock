@@ -40,6 +40,7 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml",
  "toml_edit 0.22.27",
  "tracing",

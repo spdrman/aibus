@@ -648,10 +648,15 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .cloned()
                 .collect();
             r.put(HOOKS_DUE, list(due));
-            r.log(
-                "info",
-                &format!("hook {} exit {}", event.as_str(), outcome.exit_code),
-            );
+            // A hook that failed to run says so (`hook error: <name>`); one that ran just
+            // reports its exit code.
+            match &outcome.message {
+                Some(m) if m.starts_with("hook error: ") => r.log("warn", m),
+                _ => r.log(
+                    "info",
+                    &format!("hook {} exit {}", event.as_str(), outcome.exit_code),
+                ),
+            }
         }
         Msg::RouterAnswered {
             fork,

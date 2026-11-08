@@ -72,6 +72,10 @@ pub fn verdict(result: Option<&RunResult>, interrupted: bool) -> Result<(), Aibu
         RunStatus::Completed => Ok(()),
         RunStatus::Cancelled if interrupted => Err(AibusError::Interrupted),
         RunStatus::Cancelled => Err(failure("cancelled").into()),
+        // A run stopped by its token or cost budget keeps its text (`Partial`) but exits 8.
+        RunStatus::Partial if r.error.as_ref().is_some_and(|e| e.kind == RunErrorKind::Budget) => {
+            Err(AibusError::Budget(failure("budget exceeded").message))
+        }
         RunStatus::Partial => Err(failure("ended with a partial result").into()),
         RunStatus::Denied => Err(AibusError::Denied(
             r.error.as_ref().map_or("run denied".into(), |e| e.message.clone()),
@@ -224,6 +228,8 @@ mod tests {
         assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Tool)), 10);
         assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Internal)), 10);
         assert_eq!(c(RunStatus::Partial, err(RunErrorKind::Provider)), 10);
+        assert_eq!(c(RunStatus::Partial, err(RunErrorKind::Budget)), 8);
+        assert_eq!(c(RunStatus::Partial, None), 10);
         assert_eq!(c(RunStatus::Cancelled, None), 10);
     }
 

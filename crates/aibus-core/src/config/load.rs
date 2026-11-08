@@ -308,6 +308,7 @@ mod tests {
             [hooks]
             session_start = [{ command = "user.sh" }]
             stop = [{ command = "only-user.sh" }]
+            pass_env = ["GH_TOKEN"]
             "#,
         )
         .unwrap();
@@ -323,6 +324,7 @@ mod tests {
             [hooks]
             session_start = [{ command = "project.sh" }]
             pre_tool_use = [{ command = "guard.sh" }]
+            pass_env = ["NPM_TOKEN"]
             "#,
         )
         .unwrap();
@@ -333,8 +335,10 @@ mod tests {
         assert_eq!(c.accounts.len(), 1);
         assert_eq!(c.accounts[0].name, "u");
         let cmds = |e: &str| -> Vec<&str> {
-            c.hooks[e].iter().map(|h| h.command.as_str()).collect()
+            c.hooks.events[e].iter().map(|h| h.command.as_str()).collect()
         };
+        assert_eq!(c.hooks.pass_env, ["GH_TOKEN", "NPM_TOKEN"]);
+        assert!(c.problems().is_empty());
         assert_eq!(cmds("session_start"), ["user.sh", "project.sh"]);
         assert_eq!(cmds("stop"), ["only-user.sh"]);
         assert_eq!(cmds("pre_tool_use"), ["guard.sh"]);

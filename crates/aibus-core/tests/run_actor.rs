@@ -175,12 +175,16 @@ fn start(script: Script, def: AgentDef, cwd: &Path, runs_dir: &Path) -> Rig {
             limits: ToolLimits::default(),
             date: "2026-11-08".into(),
             data_home: None,
+            budgets: Budgets::default(),
+            context: Vec::new(),
         },
         RunDeps {
             provider: fake.clone(),
             creds: Arc::new(fake_credential()),
             tools: Arc::new(ToolExecutor::new(ToolRegistry::read_only())),
             tx,
+            hooks: Arc::new(HookRunner::default()),
+            compactor: None,
         },
     );
     Rig { fake, rx, handle }
@@ -241,9 +245,11 @@ async fn tool_call_then_answer_completes_and_the_request_holds_only_this_run() {
         [
             "RunStarted",
             "Stream",
+            "UsageUpdate",
             "ToolCallRequested",
             "ToolCallFinished",
             "Stream",
+            "UsageUpdate",
             "RunFinished"
         ]
     );
@@ -321,11 +327,11 @@ async fn max_turns_ends_partial_with_the_last_text() {
 async fn a_provider_error_fails_the_run_or_leaves_it_partial() {
     let _clock = FakeClock::new();
     let dir = repo();
+    // Not retryable: the retry rules have their own tests (tests/run_loop.rs).
     let boom = || {
-        Step::Error(ProviderError::new(
-            ProviderErrorKind::Server,
-            "upstream fell over",
-        ))
+        let mut e = ProviderError::new(ProviderErrorKind::InvalidRequest, "upstream fell over");
+        e.retryable = false;
+        Step::Error(e)
     };
 
     let done = run_to_end(Script::new().then(boom()), builtin("explore"), dir.path()).await;
@@ -336,7 +342,7 @@ async fn a_provider_error_fails_the_run_or_leaves_it_partial() {
     let e = r.error.as_ref().unwrap();
     assert_eq!(e.kind, RunErrorKind::Provider);
     assert_eq!(e.message, "run ended early: upstream fell over");
-    assert!(e.retryable);
+    assert!(!e.retryable);
 
     let script = Script::new()
         .then(Step::Text("half an answer".into()))
@@ -351,7 +357,8 @@ async fn a_provider_error_fails_the_run_or_leaves_it_partial() {
     assert_eq!(r.status, RunStatus::Partial);
     assert_eq!(r.summary, "half an answer");
     assert!(r.error.is_some());
-    assert!(!done.names().contains(&"RunFailed"));
+    // The provider failure is committed even though the run keeps its text.
+    assert!(done.names().contains(&"RunFailed"));
 }
 
 #[tokio::test]

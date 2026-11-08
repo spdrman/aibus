@@ -132,29 +132,64 @@ pub struct ToolResult {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum HookEvent {
     SessionStart,
-    SessionEnd,
     UserPromptSubmit,
     PreToolUse,
     PostToolUse,
+    PostToolUseFailure,
+    SubagentStart,
     SubagentStop,
     Stop,
     PreCompact,
     Checkpoint,
+    SessionEnd,
 }
 
 impl HookEvent {
+    /// Every event, in the order of the table in 01 section 6.1.
+    pub const ALL: [HookEvent; 11] = [
+        HookEvent::SessionStart,
+        HookEvent::UserPromptSubmit,
+        HookEvent::PreToolUse,
+        HookEvent::PostToolUse,
+        HookEvent::PostToolUseFailure,
+        HookEvent::SubagentStart,
+        HookEvent::SubagentStop,
+        HookEvent::Stop,
+        HookEvent::PreCompact,
+        HookEvent::Checkpoint,
+        HookEvent::SessionEnd,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             HookEvent::SessionStart => "session_start",
-            HookEvent::SessionEnd => "session_end",
             HookEvent::UserPromptSubmit => "user_prompt_submit",
             HookEvent::PreToolUse => "pre_tool_use",
             HookEvent::PostToolUse => "post_tool_use",
+            HookEvent::PostToolUseFailure => "post_tool_use_failure",
+            HookEvent::SubagentStart => "subagent_start",
             HookEvent::SubagentStop => "subagent_stop",
             HookEvent::Stop => "stop",
             HookEvent::PreCompact => "pre_compact",
             HookEvent::Checkpoint => "checkpoint",
+            HookEvent::SessionEnd => "session_end",
         }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|e| e.as_str() == s)
+    }
+
+    /// The "Can block" column of 01 section 6.1. A timeout on one of these blocks (fail closed).
+    pub fn can_block(self) -> bool {
+        matches!(
+            self,
+            HookEvent::UserPromptSubmit
+                | HookEvent::PreToolUse
+                | HookEvent::SubagentStop
+                | HookEvent::Stop
+                | HookEvent::Checkpoint
+        )
     }
 }
 

@@ -20,9 +20,10 @@ use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
     expand, AccountCredential, AccountName, AccountRegistry, AccountView, AgentName, AibusError,
-    App, Bash, CredentialSource, CredentialStore, Gate, Msg, ModelDefaults, ModelId,
-    PermissionMode, Redactor, RunConfig, RunDeps, RunHandle, RunResult, SelectHints, SessionId,
-    ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, MSG_CAPACITY,
+    App, Bash, Budgets, CredentialSource, CredentialStore, Gate, HookEvent, HookInput, HookRunner,
+    Msg, ModelDefaults, ModelId, PermissionMode, Redactor, RunConfig, RunDeps, RunHandle,
+    RunResult, SelectHints, SessionId, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry,
+    MSG_CAPACITY,
 };
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script, FAKE_KEY};
@@ -75,6 +76,8 @@ pub struct Ctx {
     pub signals: Option<Signals>,
     pub agent_watch: Option<AgentWatch>,
     pub plan: Option<(RunConfig, RunDeps)>,
+    /// What runs `[hooks]` and the definitions' hooks; runs nothing under `--no-hooks`.
+    pub hooks: Option<Arc<HookRunner>>,
     pub rx: Option<mpsc::Receiver<Msg>>,
     pub handle: Option<RunHandle>,
     pub finished: Option<RunResult>,
@@ -101,6 +104,7 @@ impl Ctx {
             signals: None,
             agent_watch: None,
             plan: None,
+            hooks: None,
             rx: None,
             handle: None,
             finished: None,
@@ -134,7 +138,7 @@ pub fn steps() -> Vec<Box<dyn Step>> {
         Box::new(LoadAccounts),
         Box::new(StartRuntime),
         Box::new(EnterLoop),
-        Box::new(StartHooks),
+        Box::new(StartHooks::default()),
         Box::new(SubmitPrompt),
     ]
 }
@@ -648,13 +652,15 @@ impl Step for EnterLoop {
             },
             date: events::date(SystemTime::now()),
             data_home: Some(paths.data.clone()),
+            budgets: Budgets::from(&cfg.limits),
+            context: Vec::new(),
         };
         // Nobody can answer a prompt in `aibus run` (the `--json` control channel is not wired
         // yet), so `default` mode refuses what would ask, with `PermissionNeeded` then
         // `PermissionDecided { denied, "no tty" }`.
         let bash = Arc::new(Bash::new(
             cfg.tools.bash_timeout_secs,
-            Vec::new(),
+            cfg.hooks.pass_env.clone(),
             std::env::vars().collect(),
             ctx.cwd.clone(),
             session.id.to_string(),
@@ -668,12 +674,28 @@ impl Step for EnterLoop {
         };
         let tools = ToolExecutor::with_gate(ToolRegistry::standard(bash), gate)
             .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
+        // `--no-hooks` leaves the runner's default in place, which runs nothing.
+        let hooks = Arc::new(if ctx.global.no_hooks {
+            HookRunner::default()
+        } else {
+            HookRunner::new(
+                &cfg.hooks,
+                std::env::vars().collect(),
+                ctx.cwd.clone(),
+                session.id.to_string(),
+                Some(paths.state.join("logs/hooks").join(session.id.to_string())),
+                Some(ctx.redactor.clone()),
+            )
+        });
         let deps = RunDeps {
             provider,
             creds,
             tools: Arc::new(tools),
             tx: tx.clone(),
+            hooks: hooks.clone(),
+            compactor: None,
         };
+        ctx.hooks = Some(hooks);
         ctx.plan = Some((run_cfg, deps));
         ctx.rx = Some(rx);
         if bypass {
@@ -714,9 +736,57 @@ impl Step for EnterLoop {
 
 // 9 ---------------------------------------------------------------------------------------
 
-/// `session_start` hooks and the latest handoff arrive with the hook runner (B1.3) and the
-/// continuity files (B2.x). Until then the step says what it is skipping.
-struct StartHooks;
+/// `session_start` hooks (what they print goes in front of the lead's task), and `session_end`
+/// when the steps stop. The latest handoff arrives with the continuity files (B2.x).
+#[derive(Default)]
+struct StartHooks {
+    /// The lead's name and role, kept for `session_end` once the plan has been taken.
+    lead: Option<(String, aibus_core::Role)>,
+}
+
+impl StartHooks {
+    /// Fires `event` for the session, tells the user about hooks that failed to run, and
+    /// returns what they said.
+    fn fire(ctx: &mut Ctx, lead: &(String, aibus_core::Role), event: HookEvent, trigger: &str) -> aibus_core::Fired {
+        let (Some(rt), Some(hooks)) = (ctx.rt.as_ref(), ctx.hooks.clone()) else {
+            return aibus_core::Fired::default();
+        };
+        let def_hooks = ctx
+            .plan
+            .as_ref()
+            .map(|(cfg, _)| cfg.def.hooks.clone())
+            .unwrap_or_default();
+        let input = HookInput {
+            event,
+            matcher: Some(trigger),
+            run: None,
+            agent: &lead.0,
+            role: lead.1,
+            cwd: &ctx.cwd,
+            transcript_path: None,
+            permission_mode: ctx
+                .plan
+                .as_ref()
+                .map_or(PermissionMode::Default, |(cfg, _)| cfg.def.permission_mode),
+            extra: serde_json::Map::new(),
+        };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let fired = rt.block_on(hooks.fire(&input, &def_hooks, &cancel));
+        for ran in &fired.ran {
+            if let Some(m) = ran.outcome.message.as_deref().filter(|m| m.starts_with("hook error: ")) {
+                eprintln!("aibus: warning: {m}");
+            }
+            if let Some(app) = ctx.app.as_mut() {
+                let _ = app.step(Msg::HookFired {
+                    run: None,
+                    event,
+                    outcome: ran.outcome.clone(),
+                });
+            }
+        }
+        fired
+    }
+}
 
 impl Step for StartHooks {
     fn name(&self) -> &'static str {
@@ -724,12 +794,27 @@ impl Step for StartHooks {
     }
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
-        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
-        let n: usize = cfg.hooks.values().map(Vec::len).sum();
         if ctx.global.no_hooks {
             eprintln!("aibus: warning: --no-hooks: no hooks will run");
-        } else if n > 0 {
-            eprintln!("aibus: warning: {n} hooks configured, the hook runner is not wired yet");
+            return Ok(());
+        }
+        let (cfg, _) = ctx.plan.as_ref().ok_or_else(|| not_ready("loop"))?;
+        let lead = (cfg.def.name.to_string(), cfg.def.role);
+        let fired = Self::fire(ctx, &lead, HookEvent::SessionStart, "startup");
+        if let Some((cfg, _)) = ctx.plan.as_mut() {
+            cfg.context.extend(fired.context);
+        }
+        self.lead = Some(lead);
+        Ok(())
+    }
+
+    fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
+        if let Some(lead) = self.lead.take() {
+            let failed = ctx
+                .finished
+                .as_ref()
+                .is_none_or(|r| r.status == aibus_core::RunStatus::Failed);
+            Self::fire(ctx, &lead, HookEvent::SessionEnd, if failed { "error" } else { "exit" });
         }
         Ok(())
     }

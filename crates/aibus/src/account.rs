@@ -3,7 +3,6 @@
 //! The config file gets `auth = { keyring = true }` (or `env`, `file`) and never a key. A key goes
 //! from stdin or a hidden prompt to the keychain, and only after the provider accepted it.
 
-use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,7 +15,7 @@ use aibus_core::{
     AibusError, CredentialError, CredentialStore, KeyRef, Keychain, Redactor, StoreHealth,
 };
 use aibus_provider::{
-    AccountInfo, AccountName, AuthMethodKind, Credential, ProviderConfig, ProviderErrorKind,
+    AccountInfo, AccountName, AuthMethodKind, Credential, ProviderErrorKind,
     ProviderFactory, ProviderRegistry, Secret,
 };
 use serde_json::{json, Value};
@@ -24,6 +23,7 @@ use toml_edit::{value, ArrayOfTables, DocumentMut, InlineTable, Item, Table};
 use zeroize::Zeroize;
 
 use crate::cli::{AccountAdd, AccountCmd};
+use crate::providers::provider_configs;
 
 /// Everything the commands reach outside the process for, so a test can stand in for each.
 pub struct Io<'a> {
@@ -77,12 +77,7 @@ fn verify(
     account: &Account,
     cred: &Credential,
 ) -> Result<(AccountInfo, Duration), AibusError> {
-    let configs = BTreeMap::from([(
-        account.provider.clone(),
-        ProviderConfig {
-            base_url: account.base_url.clone(),
-        },
-    )]);
+    let configs = provider_configs(std::slice::from_ref(account), &io.paths)?;
     let provider = ProviderRegistry::new(&io.factories, &configs)?.get(&account.provider)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -92,7 +87,11 @@ fn verify(
         ProviderErrorKind::Auth => CredentialError::Rejected(account.account_name()).into(),
         _ => AibusError::Provider(e),
     })?;
-    Ok((info, t0.elapsed()))
+    let took = t0.elapsed();
+    // The model cache is refreshed on `account test` (07 section 4). A failure only leaves the
+    // list as it was.
+    let _ = rt.block_on(provider.refresh_models(cred));
+    Ok((info, took))
 }
 
 fn read_key(from_stdin: bool, io: &mut Io) -> Result<Secret<String>, AibusError> {

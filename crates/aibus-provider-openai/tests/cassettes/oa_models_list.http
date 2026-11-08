@@ -1,0 +1,28 @@
+HTTP 200
+content-type: application/json
+x-request-id: req_oa_models
+openai-organization: org-TestOrg
+
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "gpt-4.1-2025-04-14",
+      "object": "model",
+      "created": 1744315746,
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5",
+      "object": "model",
+      "created": 1754425777,
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-6-preview",
+      "object": "model",
+      "created": 1790000000,
+      "owned_by": "system"
+    }
+  ]
+}

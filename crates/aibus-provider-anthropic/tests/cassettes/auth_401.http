@@ -1,0 +1,5 @@
+HTTP 401
+content-type: application/json
+request-id: req_011CTx2n9aTq7LmB2sRe5YdX
+
+{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}

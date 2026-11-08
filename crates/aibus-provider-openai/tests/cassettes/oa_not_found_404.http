@@ -1,0 +1,5 @@
+HTTP 404
+content-type: application/json
+x-request-id: req_oa_404
+
+{"error":{"message":"The model `gpt-nope` does not exist or you do not have access to it.","type":"invalid_request_error","param":null,"code":"model_not_found"}}

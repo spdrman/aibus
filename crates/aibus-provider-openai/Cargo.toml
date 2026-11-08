@@ -7,5 +7,25 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# The nightly suite against a real account: AIBUS_LIVE_ACCOUNT=<name> (see tests/live.rs).
+live-tests = []
+
 [dependencies]
 aibus-provider.workspace = true
+aibus-provider-http.workspace = true
+async-trait = "0.1"
+base64 = "0.22"
+serde_json = "1"
+smol_str = { version = "0.3", features = ["serde"] }
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+tokio-util = "0.7"
+tracing = "0.1"
+ulid = "1"
+zeroize = "1"
+
+[dev-dependencies]
+bytes = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt", "test-util"] }
+wiremock = "0.6"

@@ -1,7 +1,6 @@
 //! The `agent` subcommands that need no engine: list, show, new, validate and where
 //! (06 section 1). `agent import` is C1.5.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -10,19 +9,20 @@ use aibus_core::agent::def::{model_str, to_json, to_markdown};
 use aibus_core::agent::discover::{discover, project_root, scope_dirs, Discovered};
 use aibus_core::agent::validate::{validate_path, Report, ValidateCx};
 use aibus_core::config::{self, Config};
-use aibus_core::persist::paths::project_dir;
+use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::{AccountName, AgentName, AibusError, ModelRef, Scope};
 use aibus_provider::ProviderRegistry;
 use serde_json::{json, Value};
 
 use crate::cli::{AgentCmd, Global};
-use crate::providers::builtin_factories;
+use crate::providers::{builtin_factories, provider_configs};
 
 /// What every subcommand starts from: where definitions live and the config that says so.
 struct Env {
     cwd: PathBuf,
     user_dir: PathBuf,
     config: Config,
+    paths: Paths,
 }
 
 impl Env {
@@ -37,6 +37,7 @@ impl Env {
             user_dir: paths.config.join("agents"),
             cwd,
             config: loaded.config,
+            paths,
         })
     }
 
@@ -209,7 +210,8 @@ fn check(env: &Env, path: &Path) -> Result<Report, AibusError> {
 
     // "Resolves on some account": the fake account and every enabled one. A provider this
     // build does not have cannot be asked, so its accounts give the benefit of the doubt.
-    let registry = ProviderRegistry::new(&builtin_factories(), &BTreeMap::new())?;
+    let configs = provider_configs(&cfg.accounts, &env.paths)?;
+    let registry = ProviderRegistry::new(&builtin_factories(), &configs)?;
     let mut ids = vec!["fake"];
     ids.extend(
         cfg.accounts

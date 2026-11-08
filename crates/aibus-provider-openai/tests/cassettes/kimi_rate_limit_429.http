@@ -1,0 +1,6 @@
+HTTP 429
+content-type: application/json
+x-request-id: kimi_rate
+retry-after: 1
+
+{"error":{"message":"Your account org-TestOrg request reached max concurrency: 3, please try again after 1 seconds","type":"rate_limit_reached_error"}}

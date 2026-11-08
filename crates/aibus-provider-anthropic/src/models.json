@@ -1,0 +1,21 @@
+{
+  "models": [
+    {"id": "claude-opus-4-5", "context_window": 200000, "max_output": 64000, "family": "opus", "deprecated": false, "effort": true,
+     "price": {"input_per_mtok": 5.0, "output_per_mtok": 25.0, "cache_read_per_mtok": 0.5, "cache_write_per_mtok": 6.25}},
+    {"id": "claude-opus-4-1", "context_window": 200000, "max_output": 32000, "family": "opus", "deprecated": false,
+     "price": {"input_per_mtok": 15.0, "output_per_mtok": 75.0, "cache_read_per_mtok": 1.5, "cache_write_per_mtok": 18.75}},
+    {"id": "claude-opus-4-0", "context_window": 200000, "max_output": 32000, "family": "opus", "deprecated": false,
+     "price": {"input_per_mtok": 15.0, "output_per_mtok": 75.0, "cache_read_per_mtok": 1.5, "cache_write_per_mtok": 18.75}},
+    {"id": "claude-sonnet-4-5", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": false,
+     "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0, "cache_read_per_mtok": 0.3, "cache_write_per_mtok": 3.75}},
+    {"id": "claude-sonnet-4-0", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": false,
+     "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0, "cache_read_per_mtok": 0.3, "cache_write_per_mtok": 3.75}},
+    {"id": "claude-haiku-4-5", "context_window": 200000, "max_output": 64000, "family": "haiku", "deprecated": false,
+     "price": {"input_per_mtok": 1.0, "output_per_mtok": 5.0, "cache_read_per_mtok": 0.1, "cache_write_per_mtok": 1.25}},
+    {"id": "claude-3-7-sonnet-latest", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": true,
+     "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0, "cache_read_per_mtok": 0.3, "cache_write_per_mtok": 3.75}},
+    {"id": "claude-3-5-haiku-latest", "context_window": 200000, "max_output": 8192, "family": "haiku", "deprecated": true,
+     "price": {"input_per_mtok": 0.8, "output_per_mtok": 4.0, "cache_read_per_mtok": 0.08, "cache_write_per_mtok": 1.0}}
+  ],
+  "families": {}
+}

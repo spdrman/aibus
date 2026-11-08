@@ -1,0 +1,400 @@
+//! Request bodies for Chat Completions and the Responses API.
+
+use aibus_provider::{ChatRequest, ContentBlock, Effort, Message, MessageRole, ToolCallId, ToolChoice};
+use base64::Engine;
+use serde_json::{json, Map, Value};
+
+/// What differs between OpenAI, Kimi and a local server for one request.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Opts {
+    /// `max_completion_tokens` instead of `max_tokens` (OpenAI's name for it).
+    pub completion_tokens: bool,
+    /// The model reasons: it takes `reasoning_effort` and refuses `temperature`.
+    pub reasoning: bool,
+    /// Send the run and session ids as `user`.
+    pub user: bool,
+    /// Send earlier reasoning back as `reasoning_content` (Kimi's thinking models want it).
+    pub keep_reasoning: bool,
+    /// Ask for token logprobs.
+    pub logprobs: bool,
+}
+
+/// The id the API sees for a call, derived from ours so a result finds its call.
+pub fn wire_id(id: ToolCallId) -> String {
+    format!("call_{}", id.0)
+}
+
+fn effort(e: Effort) -> &'static str {
+    match e {
+        Effort::Low => "low",
+        Effort::Medium => "medium",
+        Effort::High | Effort::Max => "high",
+    }
+}
+
+fn data_url(media_type: &str, data: &[u8]) -> String {
+    format!("data:{media_type};base64,{}", base64::engine::general_purpose::STANDARD.encode(data))
+}
+
+fn user_id(req: &ChatRequest) -> Option<String> {
+    let ids: Vec<&str> = [req.metadata.session_id.as_deref(), req.metadata.run_id.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect();
+    (!ids.is_empty()).then(|| format!("aibus:{}", ids.join(":")))
+}
+
+fn chat_messages(req: &ChatRequest, o: Opts) -> Vec<Value> {
+    let mut out = Vec::new();
+    if !req.system.is_empty() {
+        out.push(json!({"role": "system", "content": req.system}));
+    }
+    for m in &req.messages {
+        match m.role {
+            MessageRole::Assistant => out.extend(chat_assistant(m, o)),
+            MessageRole::User => out.extend(chat_user(m)),
+            MessageRole::System => {
+                let text = m.plain_text();
+                if !text.is_empty() {
+                    out.push(json!({"role": "system", "content": text}));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Tool results are messages of their own, and come before the user's text in the turn.
+fn chat_user(m: &Message) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut parts = Vec::new();
+    for b in &m.blocks {
+        match b {
+            ContentBlock::ToolResult { id, content, .. } => {
+                out.push(json!({"role": "tool", "tool_call_id": wire_id(*id), "content": content}));
+            }
+            ContentBlock::Text(t) if !t.is_empty() => parts.push(json!({"type": "text", "text": t})),
+            ContentBlock::Image { media_type, data } => parts.push(
+                json!({"type": "image_url", "image_url": {"url": data_url(media_type, data)}}),
+            ),
+            _ => {}
+        }
+    }
+    let only_text = parts.iter().all(|p| p["type"] == "text");
+    if only_text && !parts.is_empty() {
+        let joined: Vec<&str> = parts.iter().filter_map(|p| p["text"].as_str()).collect();
+        out.push(json!({"role": "user", "content": joined.join("\n")}));
+    } else if !parts.is_empty() {
+        out.push(json!({"role": "user", "content": parts}));
+    }
+    out
+}
+
+fn chat_assistant(m: &Message, o: Opts) -> Option<Value> {
+    let mut text = String::new();
+    let mut thinking = String::new();
+    let mut calls = Vec::new();
+    for b in &m.blocks {
+        match b {
+            ContentBlock::Text(t) => text.push_str(t),
+            ContentBlock::Thinking { text, redacted: false, .. } => thinking.push_str(text),
+            ContentBlock::ToolUse { id, name, input } => calls.push(json!({
+                "id": wire_id(*id),
+                "type": "function",
+                "function": {"name": name, "arguments": input.to_string()},
+            })),
+            _ => {}
+        }
+    }
+    if text.is_empty() && calls.is_empty() {
+        return None;
+    }
+    let mut v = json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { json!(text) }});
+    if !calls.is_empty() {
+        v["tool_calls"] = Value::Array(calls);
+    }
+    if o.keep_reasoning && !thinking.is_empty() {
+        v["reasoning_content"] = json!(thinking);
+    }
+    Some(v)
+}
+
+fn tool_choice(c: &ToolChoice) -> Value {
+    match c {
+        ToolChoice::Auto => json!("auto"),
+        ToolChoice::None => json!("none"),
+        ToolChoice::Required => json!("required"),
+        ToolChoice::Named(n) => json!({"type": "function", "function": {"name": n}}),
+    }
+}
+
+/// The body for `POST /chat/completions`.
+pub fn chat_body(req: &ChatRequest, o: Opts) -> Value {
+    let mut body = Map::new();
+    body.insert("model".into(), json!(req.model.0));
+    body.insert("messages".into(), Value::Array(chat_messages(req, o)));
+    body.insert("stream".into(), json!(true));
+    body.insert("stream_options".into(), json!({"include_usage": true}));
+    let key = if o.completion_tokens { "max_completion_tokens" } else { "max_tokens" };
+    body.insert(key.into(), json!(req.max_output_tokens));
+    if o.reasoning {
+        if let Some(e) = req.effort {
+            body.insert("reasoning_effort".into(), json!(effort(e)));
+        }
+    } else if let Some(t) = req.temperature {
+        body.insert("temperature".into(), json!(t));
+    }
+    if !req.tools.is_empty() {
+        let tools: Vec<Value> = req
+            .tools
+            .iter()
+            .map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.schema}}))
+            .collect();
+        body.insert("tools".into(), Value::Array(tools));
+        body.insert("tool_choice".into(), tool_choice(&req.tool_choice));
+    }
+    if o.logprobs {
+        body.insert("logprobs".into(), json!(true));
+        body.insert("top_logprobs".into(), json!(5));
+    }
+    if let (true, Some(u)) = (o.user, user_id(req)) {
+        body.insert("user".into(), json!(u));
+    }
+    Value::Object(body)
+}
+
+/// The body for `POST /responses`. The conversation is sent whole each time (`store: false`),
+/// so nothing depends on the server remembering it.
+pub fn responses_body(req: &ChatRequest, o: Opts) -> Value {
+    let mut input = Vec::new();
+    for m in &req.messages {
+        match m.role {
+            MessageRole::Assistant => {
+                let mut text = String::new();
+                for b in &m.blocks {
+                    match b {
+                        ContentBlock::Text(t) => text.push_str(t),
+                        ContentBlock::ToolUse { id, name, input: args } => {
+                            if !text.is_empty() {
+                                input.push(json!({"role": "assistant", "content": [{"type": "output_text", "text": std::mem::take(&mut text)}]}));
+                            }
+                            input.push(json!({"type": "function_call", "call_id": wire_id(*id), "name": name, "arguments": args.to_string()}));
+                        }
+                        _ => {}
+                    }
+                }
+                if !text.is_empty() {
+                    input.push(json!({"role": "assistant", "content": [{"type": "output_text", "text": text}]}));
+                }
+            }
+            MessageRole::User | MessageRole::System => {
+                let role = if m.role == MessageRole::User { "user" } else { "developer" };
+                let mut parts = Vec::new();
+                for b in &m.blocks {
+                    match b {
+                        ContentBlock::ToolResult { id, content, .. } => {
+                            input.push(json!({"type": "function_call_output", "call_id": wire_id(*id), "output": content}));
+                        }
+                        ContentBlock::Text(t) if !t.is_empty() => parts.push(json!({"type": "input_text", "text": t})),
+                        ContentBlock::Image { media_type, data } => {
+                            parts.push(json!({"type": "input_image", "image_url": data_url(media_type, data)}));
+                        }
+                        _ => {}
+                    }
+                }
+                if !parts.is_empty() {
+                    input.push(json!({"role": role, "content": parts}));
+                }
+            }
+        }
+    }
+    let mut body = Map::new();
+    body.insert("model".into(), json!(req.model.0));
+    body.insert("input".into(), Value::Array(input));
+    body.insert("stream".into(), json!(true));
+    body.insert("store".into(), json!(false));
+    body.insert("max_output_tokens".into(), json!(req.max_output_tokens));
+    if !req.system.is_empty() {
+        body.insert("instructions".into(), json!(req.system));
+    }
+    if o.reasoning {
+        if let Some(e) = req.effort {
+            body.insert("reasoning".into(), json!({"effort": effort(e)}));
+        }
+    } else if let Some(t) = req.temperature {
+        body.insert("temperature".into(), json!(t));
+    }
+    if !req.tools.is_empty() {
+        let tools: Vec<Value> = req
+            .tools
+            .iter()
+            .map(|t| json!({"type": "function", "name": t.name, "description": t.description, "parameters": t.schema, "strict": false}))
+            .collect();
+        body.insert("tools".into(), Value::Array(tools));
+        let choice = match &req.tool_choice {
+            ToolChoice::Named(n) => json!({"type": "function", "name": n}),
+            other => tool_choice(other),
+        };
+        body.insert("tool_choice".into(), choice);
+    }
+    if o.logprobs {
+        body.insert("top_logprobs".into(), json!(5));
+        body.insert("include".into(), json!(["message.output_text.logprobs"]));
+    }
+    if let (true, Some(u)) = (o.user, user_id(req)) {
+        body.insert("user".into(), json!(u));
+    }
+    Value::Object(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aibus_provider::{CacheHint, ModelId, RequestMetadata, ToolSpec};
+    use ulid::Ulid;
+
+    const PLAIN: Opts = Opts { completion_tokens: false, reasoning: false, user: false, keep_reasoning: false, logprobs: false };
+
+    fn req() -> ChatRequest {
+        ChatRequest {
+            model: ModelId("gpt-4.1".into()),
+            system: "Be terse.".into(),
+            messages: vec![Message::text(MessageRole::User, "hi")],
+            tools: vec![ToolSpec { name: "read".into(), description: "Read".into(), schema: json!({"type": "object"}) }],
+            tool_choice: ToolChoice::Auto,
+            max_output_tokens: 256,
+            temperature: Some(0.5),
+            effort: Some(Effort::Max),
+            thinking: None,
+            cache_hint: CacheHint::None,
+            logprobs: false,
+            metadata: RequestMetadata { run_id: Some("RUN".into()), session_id: Some("SES".into()) },
+        }
+    }
+
+    fn history() -> ChatRequest {
+        let id = ToolCallId(Ulid::from_parts(1, 2));
+        let mut r = req();
+        r.messages.push(Message {
+            role: MessageRole::Assistant,
+            blocks: vec![
+                ContentBlock::Thinking { text: "hmm".into(), redacted: false, signature: None },
+                ContentBlock::Text("looking".into()),
+                ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}) },
+            ],
+            at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        r.messages.push(Message {
+            role: MessageRole::User,
+            blocks: vec![
+                ContentBlock::ToolResult { id, content: "contents".into(), is_error: false },
+                ContentBlock::Text("and then?".into()),
+            ],
+            at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        r
+    }
+
+    #[test]
+    fn chat_body_has_system_tools_and_usage_streaming() {
+        let b = chat_body(&req(), PLAIN);
+        assert_eq!(b["messages"][0], json!({"role": "system", "content": "Be terse."}));
+        assert_eq!(b["messages"][1], json!({"role": "user", "content": "hi"}));
+        assert_eq!(b["tools"][0]["function"]["parameters"], json!({"type": "object"}));
+        assert_eq!(b["tool_choice"], "auto");
+        assert_eq!(b["stream_options"], json!({"include_usage": true}));
+        assert_eq!(b["max_tokens"], 256);
+        assert!(b.get("max_completion_tokens").is_none() && b.get("user").is_none() && b.get("logprobs").is_none());
+        assert!((b["temperature"].as_f64().unwrap() - 0.5).abs() < 1e-6);
+        assert!(b.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn a_reasoning_model_takes_effort_and_completion_tokens_but_no_temperature() {
+        let o = Opts { completion_tokens: true, reasoning: true, ..PLAIN };
+        let b = chat_body(&req(), o);
+        assert_eq!(b["max_completion_tokens"], 256);
+        assert_eq!(b["reasoning_effort"], "high");
+        assert!(b.get("temperature").is_none() && b.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn logprobs_and_user_ids_are_sent_only_when_asked() {
+        let o = Opts { logprobs: true, user: true, ..PLAIN };
+        let b = chat_body(&req(), o);
+        assert_eq!((b["logprobs"].clone(), b["top_logprobs"].clone()), (json!(true), json!(5)));
+        assert_eq!(b["user"], "aibus:SES:RUN");
+    }
+
+    #[test]
+    fn history_becomes_assistant_tool_calls_and_tool_messages_before_user_text() {
+        let b = chat_body(&history(), PLAIN);
+        let m = b["messages"].as_array().unwrap();
+        assert_eq!(m[2]["role"], "assistant");
+        assert_eq!(m[2]["content"], "looking");
+        assert_eq!(m[2]["tool_calls"][0]["function"]["arguments"], "{\"p\":1}");
+        assert!(m[2].get("reasoning_content").is_none());
+        assert_eq!(m[3]["role"], "tool");
+        assert_eq!(m[3]["tool_call_id"], m[2]["tool_calls"][0]["id"]);
+        assert_eq!(m[4], json!({"role": "user", "content": "and then?"}));
+
+        let k = Opts { keep_reasoning: true, ..PLAIN };
+        assert_eq!(chat_body(&history(), k)["messages"][2]["reasoning_content"], "hmm");
+    }
+
+    #[test]
+    fn an_assistant_turn_with_only_calls_has_null_content_and_an_empty_one_is_dropped() {
+        let id = ToolCallId(Ulid::from_parts(1, 3));
+        let mut r = req();
+        r.messages.push(Message {
+            role: MessageRole::Assistant,
+            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({}) }],
+            at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        r.messages.push(Message::text(MessageRole::Assistant, ""));
+        let m = chat_body(&r, PLAIN)["messages"].clone();
+        assert_eq!(m.as_array().unwrap().len(), 3);
+        assert!(m[2]["content"].is_null());
+    }
+
+    #[test]
+    fn images_make_the_user_content_an_array_of_parts() {
+        let mut r = req();
+        r.messages[0].blocks.push(ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") });
+        let c = &chat_body(&r, PLAIN)["messages"][1]["content"];
+        assert_eq!(c[0]["type"], "text");
+        assert_eq!(c[1]["image_url"]["url"], "data:image/png;base64,iVBORw==");
+    }
+
+    #[test]
+    fn tool_choice_maps() {
+        let mut r = req();
+        r.tool_choice = ToolChoice::Named("read".into());
+        assert_eq!(chat_body(&r, PLAIN)["tool_choice"]["function"]["name"], "read");
+        assert_eq!(responses_body(&r, PLAIN)["tool_choice"], json!({"type": "function", "name": "read"}));
+        r.tool_choice = ToolChoice::Required;
+        assert_eq!(chat_body(&r, PLAIN)["tool_choice"], "required");
+        r.tools.clear();
+        assert!(chat_body(&r, PLAIN).get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn responses_body_sends_items_instructions_and_no_server_state() {
+        let o = Opts { reasoning: true, logprobs: true, ..PLAIN };
+        let b = responses_body(&history(), o);
+        assert_eq!(b["instructions"], "Be terse.");
+        assert_eq!(b["store"], false);
+        assert_eq!(b["max_output_tokens"], 256);
+        assert_eq!(b["reasoning"], json!({"effort": "high"}));
+        assert!(b.get("temperature").is_none());
+        assert_eq!(b["include"][0], "message.output_text.logprobs");
+        let i = b["input"].as_array().unwrap();
+        assert_eq!(i[0], json!({"role": "user", "content": [{"type": "input_text", "text": "hi"}]}));
+        assert_eq!(i[1]["content"][0], json!({"type": "output_text", "text": "looking"}));
+        assert_eq!(i[2]["type"], "function_call");
+        assert_eq!(i[3]["type"], "function_call_output");
+        assert_eq!(i[2]["call_id"], i[3]["call_id"]);
+        assert_eq!(i[4]["content"][0]["text"], "and then?");
+        assert_eq!(b["tools"][0]["name"], "read");
+    }
+}

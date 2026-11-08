@@ -5,8 +5,11 @@ pub mod degrade;
 pub mod error;
 pub mod fake;
 pub mod limits;
+pub mod models;
 pub mod provider;
 pub mod secret;
+pub mod sse;
+pub mod tokens;
 pub mod types;
 
 pub use error::{ConfigError, ProviderError, ProviderErrorKind};

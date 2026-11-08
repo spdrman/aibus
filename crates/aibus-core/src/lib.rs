@@ -3,10 +3,12 @@
 
 pub mod agent;
 pub mod app;
+pub mod context;
 pub mod effects;
 pub mod error;
 pub mod ids;
 pub mod msg;
+pub mod replay;
 pub mod run;
 pub mod state;
 pub mod tool;

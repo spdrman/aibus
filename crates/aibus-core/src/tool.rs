@@ -26,7 +26,7 @@ pub struct ToolLimits {
 impl Default for ToolLimits {
     fn default() -> Self {
         Self {
-            result_max_bytes: 64 * 1024,
+            result_max_bytes: 32 * 1024,
             bash_max_output_bytes: 256 * 1024,
         }
     }

@@ -1,0 +1,10 @@
+// What `aibus run --agent explore` plays back against the fake when no --script is given:
+// look at the top of the tree, then answer.
+[
+    Text("I'll start with the top level of the repo."),
+    ToolCall(name: "ls", input: {"path": "."}),
+    Usage(input: 140, output: 22),
+    Stop(ToolUse),
+    Text("The repo is a Rust workspace: crates/ holds the engine, the providers and the binary."),
+    Usage(input: 260, output: 24),
+]

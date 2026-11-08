@@ -16,10 +16,14 @@ name = "aibus"
 version = "0.0.0"
 dependencies = [
  "aibus-core",
+ "aibus-graph",
  "aibus-provider",
  "aibus-provider-anthropic",
  "aibus-provider-openai",
  "aibus-tui",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

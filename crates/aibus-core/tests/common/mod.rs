@@ -422,10 +422,15 @@ pub fn cases() -> Vec<Case> {
             msg: Msg::RunFinished {
                 run: R(),
                 result: RunResult {
+                    run_id: R(),
+                    agent: "worker".parse().unwrap(),
                     status: RunStatus::Completed,
                     turns: 4,
                     usage: Usage::default(),
                     summary: t.clone(),
+                    summary_file: None,
+                    duration: Duration::from_secs(1),
+                    error: None,
                 },
             },
             expect: vec![

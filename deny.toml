@@ -1,0 +1,40 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# cargo-deny 0.20 dropped the `vulnerability` key: vulnerabilities are always denied.
+# `unmaintained` is now a scope ("all" checks every crate), not a level, so the spec's
+# `unmaintained = "warn"` cannot be written literally; a hit fails the check until reviewed.
+unmaintained = "all"
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[[bans.deny]]
+crate = "tokio"
+deny-multiple-versions = true
+
+[[bans.deny]]
+crate = "reqwest"
+deny-multiple-versions = true
+
+[[bans.deny]]
+crate = "serde"
+deny-multiple-versions = true
+
+[[bans.deny]]
+crate = "ratatui"
+deny-multiple-versions = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

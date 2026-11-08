@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/spdrman/aibus"
+publish = false
+
+[workspace.dependencies]
+aibus-core = { path = "crates/aibus-core" }
+aibus-graph = { path = "crates/aibus-graph" }
+aibus-provider = { path = "crates/aibus-provider" }
+aibus-provider-anthropic = { path = "crates/aibus-provider-anthropic" }
+aibus-provider-openai = { path = "crates/aibus-provider-openai" }
+aibus-tui = { path = "crates/aibus-tui" }
+aibus-testkit = { path = "crates/aibus-testkit" }

@@ -1,0 +1,15 @@
+[package]
+name = "aibus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+aibus-core.workspace = true
+aibus-provider.workspace = true
+aibus-provider-anthropic.workspace = true
+aibus-provider-openai.workspace = true
+aibus-tui.workspace = true

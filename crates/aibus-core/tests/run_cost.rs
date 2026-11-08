@@ -78,12 +78,16 @@ async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
             limits: ToolLimits::default(),
             date: "2026-11-08".into(),
             data_home: None,
+            budgets: Budgets::default(),
+            context: Vec::new(),
         },
         RunDeps {
             provider,
             creds: Arc::new(fake_credential()),
             tools: Arc::new(ToolExecutor::new(ToolRegistry::read_only())),
             tx,
+            hooks: Arc::new(HookRunner::default()),
+            compactor: None,
         },
     );
     let mut cost = None;

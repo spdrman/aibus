@@ -27,7 +27,7 @@ fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
     let rec = home.path().join("rec");
     let out = aibus(
         home.path(),
-        &["run", "--agent", "explore", "--record", rec.to_str().unwrap(), "map this repo"],
+        &["run", "--json", "--agent", "explore", "--record", rec.to_str().unwrap(), "map this repo"],
     );
     assert!(out.status.success(), "{}", stderr(&out));
 
@@ -93,13 +93,13 @@ fn bad_usage_exits_2() {
     let home = TempDir::new().unwrap();
     let h = home.path();
     assert_eq!(aibus(h, &["run"]).status.code(), Some(2));
-    assert_eq!(aibus(h, &["run", "--agent", "nope", "hi"]).status.code(), Some(3), "an unknown agent is a config error");
+    assert_eq!(aibus(h, &["run", "--json", "--agent", "nope", "hi"]).status.code(), Some(3), "an unknown agent is a config error");
     // A model no account serves is exit 4 (04 section 4.1, step 7), not a usage error.
-    let nobody = aibus(h, &["run", "--model", "gpt-9", "hi"]);
+    let nobody = aibus(h, &["run", "--json", "--model", "gpt-9", "hi"]);
     assert_eq!(nobody.status.code(), Some(4));
     assert!(stderr(&nobody).contains("no account serves model gpt-9"), "{}", stderr(&nobody));
-    assert_eq!(aibus(h, &["--permission-mode", "yolo", "run", "hi"]).status.code(), Some(2));
-    let bypass = aibus(h, &["run", "--permission-mode", "bypass", "hi"]);
+    assert_eq!(aibus(h, &["--permission-mode", "yolo", "run", "--json", "hi"]).status.code(), Some(2));
+    let bypass = aibus(h, &["run", "--json", "--permission-mode", "bypass", "hi"]);
     assert_eq!(bypass.status.code(), Some(2));
     assert!(stderr(&bypass).contains("AIBUS_I_KNOW"));
 }
@@ -111,7 +111,7 @@ fn a_failing_provider_exits_5_and_says_so_on_the_last_line() {
     fs::write(&script, r#"[Error((kind: Server, retryable: false, message: "down"))]"#).unwrap();
     let out = aibus(
         home.path(),
-        &["run", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"],
+        &["run", "--json", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"],
     );
     assert_eq!(out.status.code(), Some(5));
     let lines = ndjson(&out);
@@ -137,7 +137,7 @@ pre_tool_use = [{ matcher = "ls", command = "echo no ls today >&2; exit 2" }]
 session_end = [{ command = "touch ../ended" }]
 "#,
     );
-    let out = aibus(home.path(), &["run", "--agent", "explore", "map this repo"]);
+    let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "map this repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
 
     let lines = ndjson(&out);
@@ -164,12 +164,12 @@ session_end = [{ command = "touch ../ended" }]
 fn no_hooks_warns_and_nothing_runs() {
     let home = TempDir::new().unwrap();
     user_config(home.path(), "[hooks]\nsession_start = [{ command = \"touch ../hooked\" }]\n");
-    let out = aibus(home.path(), &["run", "--no-hooks", "--agent", "explore", "hi"]);
+    let out = aibus(home.path(), &["run", "--json", "--no-hooks", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stderr(&out).contains("--no-hooks: no hooks will run"), "{}", stderr(&out));
     assert!(!home.path().join("hooked").exists());
 
-    let out = aibus(home.path(), &["run", "--agent", "explore", "hi"]);
+    let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(home.path().join("hooked").exists());
 }
@@ -185,7 +185,7 @@ fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_
         let out = command(home.path())
             .env("AIBUS_I_KNOW", "1")
             .env("MY_TOKEN", "hunter2-hunter2")
-            .args(["run", "--agent", "general", "--permission-mode", "bypass", "--script"])
+            .args(["run", "--json", "--agent", "general", "--permission-mode", "bypass", "--script"])
             .arg(&script_path)
             .arg("hi")
             .output()
@@ -197,7 +197,7 @@ fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_
 
 #[test]
 fn the_prompt_can_come_from_stdin() {
-    for args in [vec!["run", "--agent", "explore"], vec!["run", "--agent", "explore", "-"]] {
+    for args in [vec!["run", "--json", "--agent", "explore"], vec!["run", "--json", "--agent", "explore", "-"]] {
         let home = TempDir::new().unwrap();
         let mut child = command(home.path())
             .args(&args)
@@ -216,7 +216,7 @@ fn the_prompt_can_come_from_stdin() {
 #[test]
 fn sessions_land_under_the_xdg_state_dir_with_private_modes() {
     let home = TempDir::new().unwrap();
-    let out = aibus(home.path(), &["run", "--agent", "explore", "hi"]);
+    let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let id = ndjson(&out).last().unwrap()["session"].as_str().unwrap().to_owned();
 
@@ -243,7 +243,7 @@ fn every_xdg_variable_moves_its_directory() {
         .env("XDG_CONFIG_HOME", x("config"))
         .env("XDG_DATA_HOME", x("data"))
         .env("XDG_CACHE_HOME", x("cache"))
-        .args(["-vv", "run", "--agent", "explore", "hi"])
+        .args(["-vv", "run", "--json", "--agent", "explore", "hi"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -255,7 +255,7 @@ fn every_xdg_variable_moves_its_directory() {
 #[test]
 fn the_log_file_is_private_and_holds_no_credential() {
     let home = TempDir::new().unwrap();
-    let out = aibus(home.path(), &["-vv", "run", "--agent", "explore", "hi"]);
+    let out = aibus(home.path(), &["-vv", "run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let log = home.path().join(".local/state/aibus/logs/aibus.log");
     assert_eq!(mode(&log), 0o600);
@@ -289,7 +289,7 @@ fn user_scope_memory_comes_from_the_xdg_data_dir() {
     let out = command(home.path())
         .env("XDG_DATA_HOME", &data)
         .env("XDG_CONFIG_HOME", &config)
-        .args(["run", "--agent", "mem", "--script", script.to_str().unwrap(), "go"])
+        .args(["run", "--json", "--agent", "mem", "--script", script.to_str().unwrap(), "go"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -304,7 +304,7 @@ fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
     fs::write(&cfg, "[defaults]\nmodel = \"tiny\"\n[models]\ntiny = \"fake-small\"\n").unwrap();
     let out = command(home.path())
         .env("AIBUS_CONFIG", &cfg)
-        .args(["run", "--agent", "explore", "hi"])
+        .args(["run", "--json", "--agent", "explore", "hi"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -315,7 +315,7 @@ fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
     fs::write(&other, "[defaults]\nmodel = \"nope\"\n").unwrap();
     let out = command(home.path())
         .env("AIBUS_CONFIG", &cfg)
-        .args(["--config", other.to_str().unwrap(), "run", "--agent", "explore", "hi"])
+        .args(["--config", other.to_str().unwrap(), "run", "--json", "--agent", "explore", "hi"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
@@ -328,7 +328,7 @@ fn a_bad_config_exits_3_with_the_line_and_unknown_keys_only_warn() {
     fs::write(&cfg, "[limits]\nmax_turns = \"many\"\n").unwrap();
     let out = command(home.path())
         .env("AIBUS_CONFIG", &cfg)
-        .args(["run", "hi"])
+        .args(["run", "--json", "hi"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
@@ -338,7 +338,7 @@ fn a_bad_config_exits_3_with_the_line_and_unknown_keys_only_warn() {
     fs::write(&cfg, "[limits]\nmax_turn = 5\n").unwrap();
     let out = command(home.path())
         .env("AIBUS_CONFIG", &cfg)
-        .args(["run", "--agent", "explore", "hi"])
+        .args(["run", "--json", "--agent", "explore", "hi"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -350,7 +350,7 @@ fn hanging_run(home: &Path) -> (std::process::Child, BufReader<std::process::Chi
     let script = home.join("slow.ron");
     fs::write(&script, "[Delay((secs: 60, nanos: 0)), Text(\"late\")]").unwrap();
     let mut child = command(home)
-        .args(["run", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"])
+        .args(["run", "--json", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()

@@ -200,6 +200,17 @@ impl Effects {
             if !self.started.insert(key) {
                 continue;
             }
+            let kind = match &effect {
+                Effect::Spawn(_) => "spawn",
+                Effect::Tool(_) => "tool",
+                Effect::Hook(_) => "hook",
+                Effect::Router(_) => "router",
+                Effect::Advise { .. } => "advise",
+                Effect::Persist => "persist",
+                Effect::Cancel(_) => "cancel",
+                Effect::Detach(_) => "detach",
+            };
+            let _span = tracing::trace_span!(target: "aibus_trace", "effect", kind);
             match (effect, &orch) {
                 (Effect::Spawn(spec), _) => self.spawn_run(spec),
                 (Effect::Cancel(run), Some(o)) => o.cancel(run),

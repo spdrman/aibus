@@ -456,7 +456,11 @@ impl Task<'_> {
                         &e.message
                     };
                     let banner = format!("account {who}: {what}, run aibus account test {who}");
-                    return Err(failed(conv, banner, false));
+                    let mut end = failed(conv, banner, false);
+                    if let Some(e) = end.error.as_mut() {
+                        e.kind = RunErrorKind::Auth;
+                    }
+                    return Err(end);
                 }
                 ProviderErrorKind::ContextTooLong if !compacted => {
                     compacted = true;
@@ -586,7 +590,7 @@ impl Task<'_> {
         let provider_error = end
             .error
             .as_ref()
-            .filter(|e| e.kind == RunErrorKind::Provider);
+            .filter(|e| matches!(e.kind, RunErrorKind::Provider | RunErrorKind::Auth));
         if end.status == RunStatus::Failed || provider_error.is_some() {
             if let Some(error) = &end.error {
                 self.send(Msg::RunFailed {
@@ -892,6 +896,9 @@ async fn drive(
                             None => t.ask(mail_ref, queue_ref, id, tool_name, summary).await,
                         }
                     };
+                    let _span = tracing::trace_span!(
+                        target: "aibus_trace", "tool_call", tool = name.as_str()
+                    );
                     deps.tools
                         .call_gated(eff, &cx, mode, &name, input.clone(), ask)
                         .await
@@ -990,6 +997,14 @@ async fn stream_turn(
         .creds
         .credential()
         .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
+    let span = tracing::trace_span!(
+        target: "aibus_trace",
+        "provider_call",
+        ttfb_ms = tracing::field::Empty,
+        tokens = tracing::field::Empty,
+    );
+    let began = Instant::now();
+    let mut first = span.is_disabled();
     let call = deps.provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
 
@@ -1013,6 +1028,9 @@ async fn stream_turn(
             }
             r = &mut call => break r,
             Some(chunk) = chunks.recv() => {
+                if !std::mem::replace(&mut first, true) {
+                    span.record("ttfb_ms", began.elapsed().as_millis() as u64);
+                }
                 if let Some(batch) = co.push(chunk, Instant::now()) {
                     send(batch).await;
                 }
@@ -1025,12 +1043,18 @@ async fn stream_turn(
         }
     };
     while let Ok(chunk) = chunks.try_recv() {
+        if !std::mem::replace(&mut first, true) {
+            span.record("ttfb_ms", began.elapsed().as_millis() as u64);
+        }
         if let Some(batch) = co.push(chunk, Instant::now()) {
             send(batch).await;
         }
     }
     if let Some(batch) = co.take() {
         send(batch).await;
+    }
+    if let Ok(resp) = &result {
+        span.record("tokens", resp.usage.input_tokens + resp.usage.output_tokens);
     }
     result
 }

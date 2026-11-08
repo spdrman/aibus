@@ -33,6 +33,9 @@ pub enum CredentialError {
     NoKeychain(String),
     #[error("keychain: {0}")]
     Keychain(String),
+    /// A run's provider refused the credential; the text is the run's banner.
+    #[error("{0}")]
+    RunRejected(String),
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1,0 +1,18 @@
+HTTP 200
+content-type: text/event-stream; charset=utf-8
+cache-control: no-cache
+x-request-id: req_6f1d0c7a4b8e49c2a1d3e5f7a9b2c4d6
+openai-organization: org-TestOrg
+
+data: {"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","created":1730000000,"model":"gpt-4.1-2025-04-14","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","created":1730000000,"model":"gpt-4.1-2025-04-14","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{"content":"Hello"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","created":1730000000,"model":"gpt-4.1-2025-04-14","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{"content":", world"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","created":1730000000,"model":"gpt-4.1-2025-04-14","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","created":1730000000,"model":"gpt-4.1-2025-04-14","system_fingerprint":"fp_b3f1157249","choices":[],"usage":{"prompt_tokens":125,"completion_tokens":15,"total_tokens":140,"prompt_tokens_details":{"cached_tokens":100,"audio_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}
+
+data: [DONE]
+

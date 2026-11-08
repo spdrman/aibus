@@ -1,0 +1,5 @@
+HTTP 500
+content-type: application/json
+x-request-id: kimi_500
+
+{"error":{"message":"Internal server error","type":"server_error"}}

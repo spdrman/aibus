@@ -1,0 +1,27 @@
+HTTP 200
+content-type: text/event-stream; charset=utf-8
+cache-control: no-cache
+x-request-id: req_6f1d0c7a4b8e49c2a1d3e5f7a9b2c4d6
+openai-organization: org-TestOrg
+
+event: response.created
+data: {"sequence_number":0,"response":{"id":"resp_68a1b2c3d4e5","object":"response","status":"in_progress","model":"gpt-5-2025-08-07"},"type":"response.created"}
+
+event: response.output_item.added
+data: {"sequence_number":1,"output_index":0,"item":{"id":"fc_1","type":"function_call","status":"in_progress","arguments":"","call_id":"call_RS1","name":"read_file"},"type":"response.output_item.added"}
+
+event: response.function_call_arguments.delta
+data: {"sequence_number":2,"item_id":"fc_1","output_index":0,"delta":"{\"path\":","type":"response.function_call_arguments.delta"}
+
+event: response.function_call_arguments.delta
+data: {"sequence_number":3,"item_id":"fc_1","output_index":0,"delta":"\"src/main.rs\"}","type":"response.function_call_arguments.delta"}
+
+event: response.function_call_arguments.done
+data: {"sequence_number":4,"item_id":"fc_1","output_index":0,"arguments":"{\"path\":\"src/main.rs\"}","type":"response.function_call_arguments.done"}
+
+event: response.output_item.done
+data: {"sequence_number":5,"output_index":0,"item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"path\":\"src/main.rs\"}","call_id":"call_RS1","name":"read_file"},"type":"response.output_item.done"}
+
+event: response.completed
+data: {"sequence_number":6,"response":{"id":"resp_68a1b2c3d4e5","object":"response","status":"completed","model":"gpt-5-2025-08-07","usage":{"input_tokens":80,"output_tokens":22,"total_tokens":102}},"type":"response.completed"}
+

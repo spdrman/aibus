@@ -7,7 +7,6 @@
 //! SQLite index (B2.4) at 3, hydrating a snapshot (B2.4) at 4, the hook runner and file watcher
 //! (B1.3) at 7 and 9, the TUI at 8.
 
-use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,7 +41,7 @@ use crate::cli::{Global, RunArgs};
 use crate::events;
 use crate::keychain::OsKeychain;
 use crate::launch::ChildLauncher;
-use crate::providers::builtin_factories;
+use crate::providers::{builtin_factories, provider_configs, refresh_stale_models};
 use crate::signals::Signals;
 
 pub struct Session {
@@ -434,20 +433,18 @@ impl Step for LoadAccounts {
         let mut factories: Vec<Box<dyn ProviderFactory>> =
             vec![Box::new(Scripted(Arc::new(FakeProvider::new(script))))];
         factories.extend(builtin_factories().into_iter().filter(|f| f.id().0 != "fake"));
-        // One base URL per provider until the real providers land (B1.5).
-        let mut configs = BTreeMap::new();
-        for a in cfg.accounts.iter().filter(|a| a.enabled) {
-            if let Some(url) = &a.base_url {
-                configs
-                    .entry(a.provider.clone())
-                    .or_insert_with(|| ProviderConfig {
-                        base_url: Some(url.clone()),
-                    });
-            }
-        }
+        let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
+        let configs = provider_configs(&cfg.accounts, paths)?;
         let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
-
+        let store = Arc::new(CredentialStore::new(
+            Arc::new(OsKeychain),
+            ctx.redactor.clone(),
+        ));
         let builtin = cfg.accounts.is_empty();
+        if !builtin {
+            refresh_stale_models(&cfg.accounts, providers.clone(), store.clone(), paths.cache.join("models"));
+        }
+
         let mut effective = cfg.clone();
         if builtin {
             effective.accounts.push(config::Account {
@@ -474,10 +471,7 @@ impl Step for LoadAccounts {
             .collect();
         ctx.accounts = Some(Accounts {
             registry: Arc::new(AccountRegistry::new(&effective, providers)),
-            store: Arc::new(CredentialStore::new(
-                Arc::new(OsKeychain),
-                ctx.redactor.clone(),
-            )),
+            store,
             script_text,
             builtin,
         });

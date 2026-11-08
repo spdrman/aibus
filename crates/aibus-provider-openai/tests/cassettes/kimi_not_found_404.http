@@ -1,0 +1,5 @@
+HTTP 404
+content-type: application/json
+x-request-id: kimi_404
+
+{"error":{"message":"Not found the model kimi-nope or Permission denied","type":"resource_not_found_error"}}

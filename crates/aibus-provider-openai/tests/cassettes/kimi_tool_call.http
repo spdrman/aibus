@@ -1,0 +1,15 @@
+HTTP 200
+content-type: text/event-stream; charset=utf-8
+server: nginx
+x-msh-request-id: 6720a1b2c3d4e5f6
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"read_file:0","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\": \"src/main.rs\"}"}}]},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls","usage":{"prompt_tokens":90,"completion_tokens":18,"total_tokens":108}}],"system_fingerprint":"fpv0_x"}
+
+data: [DONE]
+

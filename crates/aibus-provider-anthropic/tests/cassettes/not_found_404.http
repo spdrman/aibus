@@ -1,0 +1,5 @@
+HTTP 404
+content-type: application/json
+request-id: req_011CTx2nU6BrZf3Gx7Ks1PmW
+
+{"type":"error","error":{"type":"not_found_error","message":"model: claude-nope-1"}}

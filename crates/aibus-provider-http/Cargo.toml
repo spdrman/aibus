@@ -1,0 +1,21 @@
+[package]
+name = "aibus-provider-http"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+aibus-provider.workspace = true
+# rustls with the system's root certificates: no OpenSSL anywhere (docs/BUILD.md, TLS).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+tokio-util = "0.7"
+tracing = "0.1"
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt", "test-util"] }

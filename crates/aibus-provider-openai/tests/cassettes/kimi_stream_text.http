@@ -1,0 +1,19 @@
+HTTP 200
+content-type: text/event-stream; charset=utf-8
+server: nginx
+x-msh-request-id: 6720a1b2c3d4e5f6
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"reasoning_content":"The user says hi."},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"reasoning_content":" Reply briefly."},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"content":", world"},"finish_reason":null}],"system_fingerprint":"fpv0_x"}
+
+data: {"id":"cmpl-4f8a2b1c9d3e","object":"chat.completion.chunk","created":1730000000,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":125,"completion_tokens":40,"total_tokens":165,"cached_tokens":100}}],"system_fingerprint":"fpv0_x"}
+
+data: [DONE]
+

@@ -1,0 +1,6 @@
+HTTP 429
+content-type: application/json
+x-request-id: req_oa_rate
+retry-after: 20
+
+{"error":{"message":"Rate limit reached for gpt-4.1 in organization org-TestOrg on tokens per min (TPM): Limit 30000, Used 29000, Requested 5000. Please try again in 8s.","type":"tokens","param":null,"code":"rate_limit_exceeded"}}

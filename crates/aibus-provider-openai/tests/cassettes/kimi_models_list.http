@@ -1,0 +1,26 @@
+HTTP 200
+content-type: application/json
+
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "kimi-k2-0905-preview",
+      "object": "model",
+      "created": 1757000000,
+      "owned_by": "moonshot"
+    },
+    {
+      "id": "moonshot-v1-8k",
+      "object": "model",
+      "created": 1700000000,
+      "owned_by": "moonshot"
+    },
+    {
+      "id": "kimi-k3-preview",
+      "object": "model",
+      "created": 1790000000,
+      "owned_by": "moonshot"
+    }
+  ]
+}

@@ -1,0 +1,471 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus run --json event",
+  "description": "One line of `aibus run --json` (06 section 2). `type` is the Msg name; messages the spec does not list carry `type` and `t` plus their redacted summary.",
+  "type": "object",
+  "required": [
+    "type",
+    "t"
+  ],
+  "definitions": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  },
+  "properties": {
+    "type": {
+      "type": "string"
+    },
+    "t": {
+      "$ref": "#/definitions/timestamp"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "RunStarted"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "run",
+          "agent",
+          "model",
+          "account"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "run": {
+            "$ref": "#/definitions/ulid"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "Stream"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "run",
+          "text"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "run": {
+            "$ref": "#/definitions/ulid"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ToolCallRequested"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "run",
+          "call"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "run": {
+            "$ref": "#/definitions/ulid"
+          },
+          "call": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "input"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/ulid"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ToolCallFinished"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "run",
+          "call_id",
+          "ok",
+          "bytes",
+          "ms"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "run": {
+            "$ref": "#/definitions/ulid"
+          },
+          "call_id": {
+            "$ref": "#/definitions/ulid"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "RouterAnswered"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "fork",
+          "kind",
+          "choice",
+          "p",
+          "verdict"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "fork": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "choice": {
+            "type": "string"
+          },
+          "p": {
+            "type": "number"
+          },
+          "verdict": {
+            "enum": [
+              "sharp",
+              "soft",
+              "split"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AdvisorSpoke"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "checkpoint",
+          "advice",
+          "tokens_read"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "checkpoint": {
+            "type": "string"
+          },
+          "advice": {
+            "type": "string"
+          },
+          "tokens_read": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PermissionNeeded"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "id",
+          "run",
+          "tool",
+          "input"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "id": {
+            "$ref": "#/definitions/ulid"
+          },
+          "run": {
+            "$ref": "#/definitions/ulid"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PermissionDecided"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "id",
+          "decision",
+          "reason"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "id": {
+            "$ref": "#/definitions/ulid"
+          },
+          "decision": {
+            "enum": [
+              "allowed",
+              "allowed_session",
+              "denied"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "RunFinished"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "run",
+          "status",
+          "turns",
+          "usage",
+          "summary"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "run": {
+            "$ref": "#/definitions/ulid"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "partial",
+              "failed",
+              "cancelled",
+              "denied"
+            ]
+          },
+          "turns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "usage": {
+            "type": "object",
+            "required": [
+              "input_tokens",
+              "output_tokens",
+              "cost_usd"
+            ],
+            "properties": {
+              "input_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "output_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cost_usd": {
+                "type": "number"
+              }
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "summary_file": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SessionEnd"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "type",
+          "t",
+          "session",
+          "exit_code",
+          "handoff"
+        ],
+        "properties": {
+          "t": {
+            "$ref": "#/definitions/timestamp"
+          },
+          "session": {
+            "$ref": "#/definitions/ulid"
+          },
+          "exit_code": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 12
+          },
+          "handoff": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

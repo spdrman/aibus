@@ -203,6 +203,9 @@ impl HookRunner {
                 ),
                 stdin: body.clone().into_bytes(),
             };
+            let _span = tracing::trace_span!(
+                target: "aibus_trace", "hook", event = event.as_str(), hook = name.as_str()
+            );
             let done = exec::run(job, Duration::from_secs(u64::from(secs)), cancel).await;
             self.log(event, &spec.command, &body, done.as_ref().ok()).await;
 

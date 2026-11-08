@@ -116,20 +116,20 @@ fn run_uses_the_named_account_and_exits_4_when_its_key_is_missing() {
     )
     .unwrap();
 
-    let ok = with_key(h, &["run", "--agent", "explore", "--account", "work", "map this repo"]);
+    let ok = with_key(h, &["run", "--json", "--agent", "explore", "--account", "work", "map this repo"]);
     assert_eq!(ok.status.code(), Some(0), "{}", stderr(&ok));
     assert_eq!(ndjson(&ok)[0]["account"], "work");
     assert!(!stdout(&ok).contains(KEY));
 
     // The default account is the first that serves the model when nothing says otherwise.
-    let none = with_key(h, &["run", "--agent", "explore", "map this repo"]);
+    let none = with_key(h, &["run", "--json", "--agent", "explore", "map this repo"]);
     assert_eq!(none.status.code(), Some(0), "{}", stderr(&none));
     assert_eq!(ndjson(&none)[0]["account"], "work");
 
-    let missing = with_key(h, &["run", "--agent", "explore", "--account", "other", "x"]);
+    let missing = with_key(h, &["run", "--json", "--agent", "explore", "--account", "other", "x"]);
     assert_eq!(missing.status.code(), Some(4));
     assert!(stderr(&missing).contains("no credential for account other"));
 
-    let unknown = with_key(h, &["run", "--agent", "explore", "--account", "ghost", "x"]);
+    let unknown = with_key(h, &["run", "--json", "--agent", "explore", "--account", "ghost", "x"]);
     assert_eq!(unknown.status.code(), Some(4));
 }

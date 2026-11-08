@@ -43,7 +43,7 @@ pub fn run(cmd: &AccountCmd, json: bool, io: &mut Io) -> Result<u8, AibusError> 
     let file = io.paths.config_file();
     match cmd {
         AccountCmd::Add(a) => add(a, &file, io)?,
-        AccountCmd::List => list(&file, json, io)?,
+        AccountCmd::List { names } => list(&file, json, *names, io)?,
         AccountCmd::Show { name } => show(name, &file, json, io)?,
         AccountCmd::Test { name } => test(name, &file, json, io)?,
         AccountCmd::Remove { name } => remove(name, &file, io)?,
@@ -233,7 +233,13 @@ fn view(a: &Account, status: &str) -> Value {
     })
 }
 
-fn list(file: &Path, json: bool, io: &mut Io) -> Result<(), AibusError> {
+fn list(file: &Path, json: bool, names: bool, io: &mut Io) -> Result<(), AibusError> {
+    if names {
+        for a in accounts(file)? {
+            writeln!(io.out, "{}", a.name)?;
+        }
+        return Ok(());
+    }
     let store = store(io);
     let rows: Vec<(Account, &str)> = accounts(file)?
         .into_iter()
@@ -312,7 +318,15 @@ fn test(name: &str, file: &Path, json: bool, io: &mut Io) -> Result<(), AibusErr
         }
         Err(e) => {
             if json {
-                let error = io.redactor.redact(&e.to_string()).into_owned();
+                let message = io.redactor.redact(&e.to_string()).into_owned();
+                let kind = match &e {
+                    AibusError::Auth(_) => "auth",
+                    AibusError::Provider(_) => "provider",
+                    AibusError::Config(_) | AibusError::ConfigFile(_) => "config",
+                    AibusError::Io(_) => "io",
+                    _ => "error",
+                };
+                let error = json!({ "kind": kind, "message": message });
                 writeln!(io.out, "{}", json!({ "name": a.name, "ok": false, "error": error }))?;
             }
             Err(e)

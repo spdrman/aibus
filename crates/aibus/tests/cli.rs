@@ -41,18 +41,11 @@ fn help_lists_every_top_level_command() {
 fn everything_else_says_not_yet_and_exits_2() {
     let home = TempDir::new().unwrap();
     let cases: &[&[&str]] = &[
-        &[],
-        &["a prompt for the tui"],
         &["agent", "import", "somewhere"],
-        &["session", "list"],
         &["session", "resume", "01ABC", "carry on"],
         &["handoff", "list"],
         &["ledger", "show"],
         &["memory", "recall", "auth", "-k", "3"],
-        &["workflow", "list"],
-        &["config", "edit"],
-        &["doctor"],
-        &["completions", "zsh"],
     ];
     for args in cases {
         let out = aibus(home.path(), args);

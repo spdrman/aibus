@@ -32,6 +32,33 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
     account::run(cmd, g.json, &mut io)
 }
 
+/// `workflow list`: the names of `workflows/*.toml` in the project and the user config (01
+/// section 8), sorted and without repeats. `--names` is the helper the completion scripts call.
+pub fn workflow_list(g: &Global, names: bool) -> Result<u8, AibusError> {
+    let dirs = [
+        project_dir(&g.project_dir()?).join("workflows"),
+        g.paths()?.config.join("workflows"),
+    ];
+    let mut found: Vec<String> = dirs
+        .iter()
+        .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+        .filter_map(|e| {
+            let p = e.path();
+            (p.extension()? == "toml").then(|| p.file_stem()?.to_str().map(str::to_owned))?
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    if g.json && !names {
+        println!("{}", json!(found));
+    } else {
+        for n in &found {
+            println!("{n}");
+        }
+    }
+    Ok(0)
+}
+
 pub fn config(cmd: &ConfigCmd, g: &Global) -> Result<u8, AibusError> {
     let paths = g.paths()?;
     let user = paths.config_file();
@@ -46,7 +73,8 @@ pub fn config(cmd: &ConfigCmd, g: &Global) -> Result<u8, AibusError> {
             }
         }
         ConfigCmd::Show => {
-            let loaded = config::load(&user, Some(&project))?;
+            let mut loaded = config::load(&user, Some(&project))?;
+            crate::env::apply_limits(&mut loaded.config, |v| std::env::var(v).ok())?;
             for w in &loaded.warnings {
                 eprintln!("aibus: warning: {w}");
             }
@@ -91,8 +119,29 @@ pub fn config(cmd: &ConfigCmd, g: &Global) -> Result<u8, AibusError> {
             }
         }
         ConfigCmd::Edit => {
-            eprintln!("aibus: config edit: not yet");
-            return Ok(2);
+            // `$EDITOR` may carry arguments ("code -w"), so the shell splits it; the path is
+            // passed as $1 and never spliced into the script.
+            let editor = std::env::var("EDITOR")
+                .ok()
+                .filter(|e| !e.trim().is_empty())
+                .unwrap_or_else(|| "vi".into());
+            if let Some(dir) = user.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("{editor} \"$1\""))
+                .arg("sh")
+                .arg(&user)
+                .status()?;
+            if !status.success() {
+                return Err(std::io::Error::other(format!("{editor}: {status}")).into());
+            }
+            // A config that no longer parses is exit 3 now, not at the next run.
+            let loaded = config::load(&user, Some(&project))?;
+            for w in &loaded.warnings {
+                eprintln!("aibus: warning: {w}");
+            }
         }
     }
     Ok(0)

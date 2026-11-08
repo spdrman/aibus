@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus config show --json",
+  "type": "object",
+  "required": [
+    "defaults",
+    "limits",
+    "tools",
+    "hooks"
+  ],
+  "properties": {
+    "limits": {
+      "type": "object",
+      "required": [
+        "max_turns",
+        "result_max_bytes"
+      ],
+      "properties": {
+        "max_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "result_max_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

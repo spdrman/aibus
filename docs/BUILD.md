@@ -8,13 +8,14 @@ I started this file with the two things the spec says have to live here from day
 
 ## Dependencies that run code at build time
 
-These are the crates with a `build.rs` (or a proc macro we rely on) in our tree, with the reason each is there. The skeleton has no third-party dependencies in the normal graph yet, so the list is empty... I add a line here in the same PR that brings in the first such crate.
+These are the crates with a `build.rs` (or a proc macro we rely on) in our tree, with the reason each is there. `aibus-provider` brought in the first batch (A1.4), and I add a line here in the same PR that brings in the next one.
 
 | Crate | Reason |
 |---|---|
-| (none yet) | |
-
-`serde_json` (dev-dependency of `aibus-testkit`, used by the workspace boundary tests) is the only third-party crate so far, and it only runs in tests.
+| `serde`, `serde_core`, `serde_json`, `thiserror` | `build.rs` probes the compiler version to pick features |
+| `libc`, `getrandom`, `zerocopy`, `typeid`, `zmij` | `build.rs` probes for platform or compiler features (transitive, via tokio, ulid, ron and serde_json) |
+| `proc-macro2`, `quote` | `build.rs` for compiler feature detection, under every proc macro below |
+| `serde_derive`, `thiserror-impl`, `async-trait`, `tokio-macros`, `tracing-attributes` | proc macros for the derives and attributes the provider trait and the tests use |
 
 ## YAML crate decision (Q15)
 

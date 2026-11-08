@@ -1,0 +1,6 @@
+// A retryable 429 with a 30 s retry-after, then a clean turn.
+[
+    Error((kind: RateLimit, retryable: true, retry_after: Some((secs: 30, nanos: 0)), message: "slow down")),
+    Delay((secs: 1, nanos: 0)),
+    Text("recovered"),
+]

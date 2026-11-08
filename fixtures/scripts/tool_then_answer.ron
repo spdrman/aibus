@@ -1,0 +1,11 @@
+// Turn one calls a tool, turn two answers once the tool result is in the request.
+[
+    Text("Looking at the repo."),
+    ToolCall(name: "read", input: {"path": "src/main.rs", "lines": [1, 20]}),
+    Usage(input: 120, output: 18),
+    Stop(ToolUse),
+    MatchPrompt(contains: "fn main", then: [
+        Text("It prints the version."),
+        Usage(input: 200, output: 6),
+    ]),
+]

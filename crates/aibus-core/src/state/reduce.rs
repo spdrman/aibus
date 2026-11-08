@@ -784,17 +784,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .cloned()
                 .collect();
             r.put(ROUTER_QUEUE, list(queue));
-            r.log(
-                "info",
-                &format!(
-                    "router {} -> {}  p={:.2} ({})  {}",
-                    question.kind.as_str(),
-                    answer.choice,
-                    answer.p,
-                    answer.source.as_str(),
-                    answer.verdict.as_str()
-                ),
-            );
+            r.log("info", &format!("router {} answered", question.kind.as_str()));
         }
         Msg::CheckpointHit { checkpoint, .. } => {
             let a = with(

@@ -258,7 +258,8 @@ async fn drive(
             total.cache_read += turn.cache_read;
             total.cache_write += turn.cache_write;
             total.cost_usd += turn.cost_usd;
-            if let Some(p) = price {
+            // A provider that costed the turn itself (the real ones do) has been counted above.
+            if let (Some(p), true) = (price, turn.cost_usd == 0.0) {
                 let m = 1_000_000.0;
                 total.cost_usd += turn.input_tokens as f64 * p.input_per_mtok / m
                     + turn.output_tokens as f64 * p.output_per_mtok / m

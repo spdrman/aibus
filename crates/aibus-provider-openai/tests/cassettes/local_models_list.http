@@ -1,0 +1,4 @@
+HTTP 200
+content-type: application/json
+
+{"object": "list", "data": [{"id": "llama3.2:latest", "object": "model", "created": 1730000000, "owned_by": "library"}]}

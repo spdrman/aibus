@@ -1,0 +1,5 @@
+HTTP 429
+content-type: application/json
+x-request-id: req_oa_quota
+
+{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}

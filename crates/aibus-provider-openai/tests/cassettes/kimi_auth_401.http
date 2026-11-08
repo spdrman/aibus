@@ -1,0 +1,5 @@
+HTTP 401
+content-type: application/json
+x-request-id: kimi_auth
+
+{"error":{"message":"Invalid Authentication","type":"invalid_authentication_error"}}

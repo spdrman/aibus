@@ -1,0 +1,30 @@
+HTTP 200
+content-type: application/json
+request-id: req_011CTx2nc1
+anthropic-organization-id: 3f5a1c52-6c1d-4d1e-9d0e-0b6f5f1a2c77
+
+{
+  "data": [
+    {
+      "type": "model",
+      "id": "claude-sonnet-4-5-20250929",
+      "display_name": "Claude Sonnet 4.5",
+      "created_at": "2025-09-29T00:00:00Z"
+    },
+    {
+      "type": "model",
+      "id": "claude-haiku-4-5-20251001",
+      "display_name": "Claude Haiku 4.5",
+      "created_at": "2025-10-01T00:00:00Z"
+    },
+    {
+      "type": "model",
+      "id": "claude-future-9",
+      "display_name": "Claude Future",
+      "created_at": "2026-10-01T00:00:00Z"
+    }
+  ],
+  "has_more": false,
+  "first_id": "claude-sonnet-4-5-20250929",
+  "last_id": "claude-future-9"
+}

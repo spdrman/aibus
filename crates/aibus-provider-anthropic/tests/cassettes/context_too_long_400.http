@@ -1,0 +1,5 @@
+HTTP 400
+content-type: application/json
+request-id: req_011CTx2nQ2HdYa5Cw8Lt6VnE
+
+{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 213482 tokens > 200000 maximum"}}

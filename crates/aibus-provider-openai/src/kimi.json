@@ -1,0 +1,16 @@
+{
+  "models": [
+    {"id": "kimi-k2-0905-preview", "context_window": 262144, "max_output": 32768, "family": "kimi-k2", "deprecated": false,
+     "price": {"input_per_mtok": 0.6, "output_per_mtok": 2.5, "cache_read_per_mtok": 0.15}},
+    {"id": "kimi-k2-turbo-preview", "context_window": 262144, "max_output": 32768, "family": "kimi-k2", "deprecated": false,
+     "price": {"input_per_mtok": 1.15, "output_per_mtok": 8.0, "cache_read_per_mtok": 0.15}},
+    {"id": "kimi-k2-thinking", "context_window": 262144, "max_output": 32768, "family": "kimi-k2", "deprecated": false,
+     "price": {"input_per_mtok": 0.6, "output_per_mtok": 2.5, "cache_read_per_mtok": 0.15}},
+    {"id": "kimi-k2-thinking-turbo", "context_window": 262144, "max_output": 32768, "family": "kimi-k2", "deprecated": false},
+    {"id": "kimi-latest", "context_window": 131072, "max_output": 32768, "family": "kimi-latest", "deprecated": false},
+    {"id": "moonshot-v1-8k", "context_window": 8192, "max_output": 4096, "family": "moonshot-v1", "deprecated": false},
+    {"id": "moonshot-v1-32k", "context_window": 32768, "max_output": 8192, "family": "moonshot-v1", "deprecated": false},
+    {"id": "moonshot-v1-128k", "context_window": 131072, "max_output": 16384, "family": "moonshot-v1", "deprecated": false}
+  ],
+  "families": {}
+}

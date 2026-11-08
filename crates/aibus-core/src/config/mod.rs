@@ -70,6 +70,9 @@ pub struct Account {
     pub provider: String,
     pub label: Option<String>,
     pub base_url: Option<String>,
+    /// The wire dialect for providers with more than one: `openai` takes "chat" (the default)
+    /// or "responses".
+    pub api: Option<String>,
     pub default_model: Option<String>,
     /// `sonnet = "claude-sonnet-4-5"`, tried after the global `[models]` table.
     pub aliases: AliasTable,
@@ -311,6 +314,7 @@ impl Default for Account {
             provider: String::new(),
             label: None,
             base_url: None,
+            api: None,
             default_model: None,
             aliases: AliasTable::new(),
             rate: RateLimits::default(),

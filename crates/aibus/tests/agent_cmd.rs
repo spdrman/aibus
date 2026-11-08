@@ -254,12 +254,12 @@ fn scrub(text: &str, home: &Path) -> String {
     text.replace(&home.display().to_string(), "$HOME")
 }
 
-/// An `anthropic` account is for a provider this build does not have, so every model gets the
-/// benefit of the doubt; a `fake` account only knows its own two models.
+/// An `anthropic` account knows the `claude-` models and the aliases the config gives it; a
+/// `fake` account only knows its own two models.
 #[cfg(unix)]
 #[test]
 fn validate_on_the_fixture_corpus_matches_the_expected_output() {
-    let unverifiable = "[[account]]\nname = \"anthropic-work\"\nprovider = \"anthropic\"\n";
+    let unverifiable = "[models]\nopus = \"claude-opus-4-1\"\nhaiku = \"claude-haiku-4-5\"\n\n[[account]]\nname = \"anthropic-work\"\nprovider = \"anthropic\"\n";
     let fake_only = "[[account]]\nname = \"work\"\nprovider = \"fake\"\n";
     let cases = [
         ("valid", unverifiable, 0),

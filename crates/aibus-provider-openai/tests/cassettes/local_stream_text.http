@@ -1,0 +1,9 @@
+HTTP 200
+content-type: text/event-stream
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1730000000,"model":"llama3.2","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1730000000,"model":"llama3.2","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{"content":" there"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1730000000,"model":"llama3.2","system_fingerprint":"fp_b3f1157249","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}
+

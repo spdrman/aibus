@@ -33,7 +33,7 @@ fn a_mention_delegates_and_the_lead_answers_with_the_result_in_hand() {
     // The scripted fake is shared: the child takes the first turn, the lead the second.
     fs::write(&script, r#"[Text("the child report"), Stop(EndTurn), Text("all done")]"#).unwrap();
     let out = command(home.path())
-        .args(["run", "--script"])
+        .args(["run", "--json", "--script"])
         .arg(&script)
         .arg("@agent-explore map the repo")
         .output()
@@ -79,7 +79,7 @@ fn agent_submits_its_initial_prompt() {
     .unwrap();
     // No prompt on the command line: the definition's is sent.
     let out = command(home.path())
-        .args(["run", "--agent", "greeter", "--script"])
+        .args(["run", "--json", "--agent", "greeter", "--script"])
         .arg(&script)
         .output()
         .unwrap();
@@ -89,7 +89,7 @@ fn agent_submits_its_initial_prompt() {
     assert_eq!(done["summary"], "matched");
 
     // Without `--agent` it is not sent, and an empty prompt is still a usage error.
-    let out = command(home.path()).args(["run", "--script"]).arg(&script).output().unwrap();
+    let out = command(home.path()).args(["run", "--json", "--script"]).arg(&script).output().unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
 }
 
@@ -110,7 +110,7 @@ fn a_prompt_on_the_command_line_follows_the_initial_prompt() {
     )
     .unwrap();
     let out = command(home.path())
-        .args(["run", "--agent", "greeter", "--script"])
+        .args(["run", "--json", "--agent", "greeter", "--script"])
         .arg(&script)
         .arg("and be brief")
         .output()
@@ -141,7 +141,7 @@ fn a_depth_of_zero_takes_delegate_away_from_the_lead() {
     fs::write(&script, r#"[Text("on my own")]"#).unwrap();
     let out = command(home.path())
         .env("AIBUS_MAX_SPAWN_DEPTH", "0")
-        .args(["run", "--script"])
+        .args(["run", "--json", "--script"])
         .arg(&script)
         .arg("hi")
         .output()

@@ -5,12 +5,11 @@ pub mod tui;
 
 use std::cell::RefCell;
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::{AccountName, AuthMethodKind, Credential, Secret};
-use tracing::subscriber::DefaultGuard;
 
 /// Virtual time over `tokio::time::pause()`. Sleeps, timeouts and backoffs in the code under
 /// test finish as soon as every task is idle, and the clock jumps forward by exactly what
@@ -64,11 +63,17 @@ pub fn fake_credential() -> Credential {
 
 type Buffer = Arc<Mutex<Vec<u8>>>;
 
-struct Writer(Buffer);
+/// Writes into the buffer of the capture active on the calling thread, and drops the line
+/// when there is none.
+struct Writer;
 
 impl io::Write for Writer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
+        ACTIVE.with(|a| {
+            if let Some(active) = a.borrow().as_ref() {
+                active.buf.lock().unwrap().extend_from_slice(buf);
+            }
+        });
         Ok(buf.len())
     }
 
@@ -92,25 +97,29 @@ thread_local! {
 /// runtime (all of them, since `FakeClock` needs one) log on the thread that holds it.
 pub struct LogCapture {
     buf: Buffer,
-    _guard: DefaultGuard,
 }
 
+/// The subscriber is global and installed once. A scoped one is only seen by callsites
+/// registered after it exists, and a callsite another test thread hits first can be cached as
+/// "never", so the capture would miss events now and then (#55).
 pub fn capture_logs() -> LogCapture {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(|| Writer)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+    });
     let buf: Buffer = Arc::default();
-    let writer = buf.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_ansi(false)
-        .with_writer(move || Writer(writer.clone()))
-        .finish();
-    let guard = tracing::subscriber::set_default(subscriber);
     ACTIVE.with(|a| {
         *a.borrow_mut() = Some(Active {
             buf: buf.clone(),
             forbidden: vec![FAKE_KEY.to_owned()],
         });
     });
-    LogCapture { buf, _guard: guard }
+    LogCapture { buf }
 }
 
 impl LogCapture {

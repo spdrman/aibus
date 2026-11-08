@@ -2,10 +2,9 @@
 //! fake provider (models `fake-small` and `fake-large`), told apart by its alias table: an alias
 //! resolves only on the accounts that define it, a full id on all of them.
 
+use std::cell::RefCell;
 use std::io;
-use std::sync::Mutex;
-
-use tracing_subscriber::fmt::MakeWriter;
+use std::sync::Once;
 
 use super::*;
 
@@ -47,6 +46,7 @@ aliases = { dormant = "fake-small" }
 "#;
 
 fn registry(edit: impl FnOnce(&mut Config)) -> AccountRegistry {
+    install_log_router();
     let mut cfg: Config = toml::from_str(CONFIG).unwrap();
     edit(&mut cfg);
     let providers = ProviderRegistry::new(
@@ -77,12 +77,16 @@ fn hints() -> SelectHints {
     SelectHints::default()
 }
 
-#[derive(Clone, Default)]
-struct Log(Arc<Mutex<Vec<u8>>>);
+thread_local! {
+    static CAPTURED: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
 
-impl io::Write for Log {
+/// Writes into the calling thread's `CAPTURED`, so parallel tests never see each other's lines.
+struct Route;
+
+impl io::Write for Route {
     fn write(&mut self, b: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(b);
+        CAPTURED.with(|c| c.borrow_mut().extend_from_slice(b));
         Ok(b.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -90,22 +94,22 @@ impl io::Write for Log {
     }
 }
 
-impl<'a> MakeWriter<'a> for Log {
-    type Writer = Log;
-    fn make_writer(&'a self) -> Log {
-        self.clone()
-    }
+/// A scoped subscriber is only seen by callsites that are registered after it exists, and a
+/// callsite another test thread hits first can be cached as "never" (#55). One global
+/// subscriber, installed before any test fires an event, is alive at every registration.
+fn install_log_router() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let sub = tracing_subscriber::fmt().with_writer(|| Route).with_ansi(false).finish();
+        tracing::subscriber::set_global_default(sub).unwrap();
+    });
 }
 
 fn logged(f: impl FnOnce()) -> String {
-    let log = Log::default();
-    let sub = tracing_subscriber::fmt()
-        .with_writer(log.clone())
-        .with_ansi(false)
-        .finish();
-    tracing::subscriber::with_default(sub, f);
-    let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
-    text
+    install_log_router();
+    CAPTURED.with(|c| c.borrow_mut().clear());
+    f();
+    String::from_utf8(CAPTURED.with(|c| c.take())).unwrap()
 }
 
 /// Issue 55. A callsite's first hit registers it against whatever subscribers are alive at
@@ -114,7 +118,7 @@ fn logged(f: impl FnOnce()) -> String {
 /// callsites below is fresh, so each round is one more chance for the race.
 #[test]
 fn issue_55_capture_sees_a_fresh_callsite_that_another_thread_hits_first() {
-    use std::sync::{Arc, Barrier};
+    use std::sync::Barrier;
 
     // Every expansion of `one` is its own callsite; each level multiplies by four.
     macro_rules! one { () => { (|| tracing::info!("hammer")) as fn() }; }
@@ -124,6 +128,8 @@ fn issue_55_capture_sees_a_fresh_callsite_that_another_thread_hits_first() {
     macro_rules! x256 { () => { [x64!(), x64!(), x64!(), x64!()].concat() }; }
     macro_rules! x1024 { () => { [x256!(), x256!(), x256!(), x256!()].concat() }; }
     let sites: Vec<fn()> = [x1024!(), x1024!(), x1024!(), x1024!()].concat();
+    // Every real test gets this from `registry`, before it fires anything.
+    install_log_router();
     let gate = Arc::new(Barrier::new(2));
     let rival = {
         let gate = gate.clone();

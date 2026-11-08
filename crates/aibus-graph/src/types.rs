@@ -54,9 +54,10 @@ impl<'de> Deserialize<'de> for Bytes {
     }
 }
 
-/// Dense index inside `aibus-graph`; a backend may map it to its own id.
+/// Dense index inside `aibus-graph`; a backend may map it to its own id. The field is public
+/// so a backend that lives in another crate (`aibus-graph-causl`) can mint nodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Node(pub(crate) u32);
+pub struct Node(pub u32);
 
 impl Node {
     pub(crate) fn idx(self) -> usize {
@@ -179,7 +180,7 @@ impl std::error::Error for CommitError {}
 impl std::error::Error for HydrateError {}
 
 /// Cancels a subscription. Dropping it does nothing; call `unsubscribe`.
-pub struct Unsubscribe(pub(crate) Arc<AtomicBool>);
+pub struct Unsubscribe(pub Arc<AtomicBool>);
 
 impl Unsubscribe {
     pub fn unsubscribe(self) {
@@ -201,7 +202,7 @@ pub struct Tracker<'a> {
 
 /// What a finished compute touched: dependencies in read order, a node it needed that is not
 /// settled yet, and a failure message.
-pub(crate) struct Tracked {
+pub struct Tracked {
     pub deps: Vec<Node>,
     pub blocked: Option<Node>,
     pub error: Option<String>,
@@ -209,7 +210,7 @@ pub(crate) struct Tracked {
 
 impl<'a> Tracker<'a> {
     /// `read` returns `None` for a node whose value is not settled in this commit yet.
-    pub(crate) fn new(
+    pub fn new(
         read: &'a dyn Fn(Node) -> Option<&'a Value>,
         keys: &'a HashMap<NodeKey, Node>,
         commit: Option<&'a Commit>,
@@ -255,7 +256,7 @@ impl<'a> Tracker<'a> {
         Value::Null
     }
 
-    pub(crate) fn finish(self) -> Tracked {
+    pub fn finish(self) -> Tracked {
         Tracked {
             deps: self.deps,
             blocked: self.blocked,

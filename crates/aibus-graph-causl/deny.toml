@@ -1,0 +1,34 @@
+# cargo-deny for the `causl-rs` backend crate, which is outside the workspace and has its own
+# lockfile. Run it from the repo root with:
+#   cargo deny --config crates/aibus-graph-causl/deny.toml --manifest-path crates/aibus-graph-causl/Cargo.toml check
+# The root deny.toml keeps `allow-git = []`: the workspace never sees the private source.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+unmaintained = "all"
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[[bans.deny]]
+crate = "tokio"
+deny-multiple-versions = true
+
+[[bans.deny]]
+crate = "serde"
+deny-multiple-versions = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The one remote for `causl-engine-core`, pinned by commit in Cargo.toml. Private: fetching it needs a token.
+allow-git = ["https://git.opsite.ca/causl/causl-core-rs.git"]

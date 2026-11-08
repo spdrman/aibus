@@ -1,0 +1,266 @@
+{
+  "now": 8,
+  "inputs": {
+    "model:session:id": {
+      "Str": ""
+    },
+    "model:session:topic": {
+      "Str": ""
+    },
+    "model:agents:defs": {
+      "List": []
+    },
+    "model:agents:warnings": {
+      "List": []
+    },
+    "model:accounts": {
+      "List": []
+    },
+    "model:runs:order": {
+      "List": [
+        {
+          "Str": "01M6XG5WDJ0ENN7MH8Q7W4RDX6"
+        }
+      ]
+    },
+    "model:tools:pending": {
+      "List": []
+    },
+    "model:permissions:open": {
+      "List": []
+    },
+    "model:permissions:bypass": {
+      "Bool": false
+    },
+    "model:hooks:due": {
+      "List": []
+    },
+    "model:router:queue": {
+      "List": []
+    },
+    "model:router:forks": {
+      "I64": 0
+    },
+    "model:advisor:state": {
+      "Map": {
+        "status": {
+          "Str": "on_call"
+        },
+        "calls": {
+          "I64": 0
+        },
+        "tokens_read": {
+          "I64": 0
+        },
+        "active_checkpoint": "Null"
+      }
+    },
+    "model:advisor:advice": {
+      "List": []
+    },
+    "model:log": {
+      "Handle": {
+        "store": "log",
+        "id": 0,
+        "version": 4
+      }
+    },
+    "model:ledger": {
+      "Map": {
+        "goal": {
+          "Str": ""
+        },
+        "now": {
+          "Str": ""
+        },
+        "in_progress": {
+          "Str": ""
+        }
+      }
+    },
+    "model:handoff:latest": "Null",
+    "model:limits": {
+      "Map": {
+        "max_spawn_depth": {
+          "I64": 3
+        },
+        "max_concurrent_runs": {
+          "I64": 8
+        },
+        "max_per_account": {
+          "I64": 4
+        },
+        "max_runs_per_session": {
+          "I64": 500
+        }
+      }
+    },
+    "model:last_msg": {
+      "Map": {
+        "msg": {
+          "Str": "RunFinished"
+        },
+        "run": {
+          "Str": "01M6XG5WDJ0ENN7MH8Q7W4RDX6"
+        },
+        "turns": {
+          "I64": 2
+        },
+        "summary_len": {
+          "I64": 85
+        },
+        "seq": {
+          "I64": 8
+        }
+      }
+    },
+    "ctrl:focus": {
+      "Str": "input"
+    },
+    "ctrl:selected:card": {
+      "I64": 0
+    },
+    "ctrl:selected:log": "Null",
+    "ctrl:modal": "Null",
+    "ctrl:palette:text": {
+      "Str": ""
+    },
+    "ctrl:log:filter": {
+      "Str": ""
+    },
+    "ctrl:size": {
+      "Map": {
+        "cols": {
+          "I64": 80
+        },
+        "rows": {
+          "I64": 24
+        }
+      }
+    },
+    "eng:tick": {
+      "I64": 0
+    },
+    "eng:ticks_dropped": {
+      "I64": 0
+    },
+    "eng:msg_seq": {
+      "I64": 8
+    },
+    "eng:clock_ms": {
+      "I64": 0
+    },
+    "eng:snapshot_seq": {
+      "I64": 0
+    },
+    "eng:snapshot_ms": {
+      "I64": 0
+    },
+    "eng:run_seq": {
+      "I64": 0
+    },
+    "eng:shutdown": "Null",
+    "eng:schema_version": {
+      "I64": 1
+    },
+    "ctrl:scroll:advisor": {
+      "I64": 0
+    },
+    "ctrl:scroll:forks": {
+      "I64": 0
+    },
+    "ctrl:scroll:cards": {
+      "I64": 0
+    },
+    "ctrl:scroll:log": {
+      "I64": 0
+    },
+    "ctrl:scroll:input": {
+      "I64": 0
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:meta": {
+      "Map": {
+        "agent": {
+          "Str": "explore"
+        },
+        "role": {
+          "Str": "worker"
+        },
+        "parent": "Null",
+        "depth": {
+          "I64": 0
+        },
+        "model": {
+          "Str": "fake-small"
+        },
+        "account": {
+          "Str": "fake"
+        },
+        "label": {
+          "Str": "explore"
+        },
+        "started_at": {
+          "I64": 0
+        },
+        "background": {
+          "Bool": false
+        },
+        "isolation": {
+          "Str": "none"
+        },
+        "prompt": {
+          "Str": ""
+        },
+        "ended_at": {
+          "I64": 0
+        }
+      }
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:status": {
+      "Str": "completed"
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:turns": {
+      "I64": 2
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:usage": {
+      "Map": {
+        "input_tokens": {
+          "I64": 400
+        },
+        "output_tokens": {
+          "I64": 46
+        },
+        "cache_read": {
+          "I64": 0
+        },
+        "cache_write": {
+          "I64": 0
+        },
+        "cost_usd": {
+          "F64": 0.0006299999999999999
+        }
+      }
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:progress": {
+      "F64": 1.0
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:blocks": {
+      "Handle": {
+        "store": "transcript",
+        "id": 1,
+        "version": 1
+      }
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:tail": {
+      "Handle": {
+        "store": "tail",
+        "id": 1,
+        "version": 3
+      }
+    },
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:error": "Null",
+    "model:run:01M6XG5WDJ0ENN7MH8Q7W4RDX6:cancel_requested": {
+      "Bool": false
+    }
+  }
+}

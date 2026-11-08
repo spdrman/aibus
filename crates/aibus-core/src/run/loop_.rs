@@ -215,7 +215,7 @@ async fn task(
     let path = cfg
         .runs_dir
         .join(cfg.run.to_string())
-        .join("transcript.jsonl");
+        .join("conversation.jsonl");
     let kind = match &cfg.start {
         Start::New => Kind::Run,
         Start::Fork(_) => Kind::Fork,
@@ -345,7 +345,7 @@ impl Task<'_> {
     async fn transcript_failed(&self, e: &std::io::Error) {
         *self.lock() = None;
         self.send(Msg::IoError {
-            context: "writing transcript.jsonl".into(),
+            context: "writing conversation.jsonl".into(),
             error: e.to_string(),
         })
         .await;

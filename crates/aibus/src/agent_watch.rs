@@ -1,6 +1,6 @@
-//! Watching the agent directories (`agents.reload_on_change`): a change to a definition file
-//! sends `Msg::AgentsReloaded` into the loop. Events are batched, since an editor save is
-//! several of them.
+//! Watching directories for a change that sends a `Msg` into the loop: the agent directories
+//! (`agents.reload_on_change`, `Msg::AgentsReloaded`) and the handoff directory
+//! (`Msg::HandoffWritten`). Events are batched, since an editor save is several of them.
 
 use std::path::PathBuf;
 use std::sync::mpsc as std_mpsc;
@@ -23,6 +23,7 @@ pub struct AgentWatch {
 /// the watch never keeps the loop's channel open.
 pub fn start(
     dirs: &[PathBuf],
+    mode: RecursiveMode,
     tx: &mpsc::Sender<Msg>,
     reload: impl Fn() -> Option<Msg> + Send + 'static,
 ) -> notify::Result<AgentWatch> {
@@ -33,7 +34,7 @@ pub fn start(
         }
     })?;
     for dir in dirs.iter().filter(|d| d.is_dir()) {
-        watcher.watch(dir, RecursiveMode::NonRecursive)?;
+        watcher.watch(dir, mode)?;
     }
     let tx = tx.downgrade();
     std::thread::spawn(move || {
@@ -78,7 +79,7 @@ mod tests {
     fn a_new_file_in_a_watched_directory_sends_agents_reloaded() {
         let dir = tempfile::tempdir().unwrap();
         let (tx, mut rx) = mpsc::channel(8);
-        let _watch = start(&[dir.path().to_owned()], &tx, || Some(reloaded())).unwrap();
+        let _watch = start(&[dir.path().to_owned()], RecursiveMode::NonRecursive, &tx, || Some(reloaded())).unwrap();
         std::fs::write(dir.path().join("a.md"), "---\nname: a\n---\n").unwrap();
         let msg = wait_for_one(&mut rx, Duration::from_secs(10)).expect("no AgentsReloaded within 10s");
         assert_eq!(msg.name(), "AgentsReloaded");
@@ -89,7 +90,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (tx, mut rx) = mpsc::channel(8);
         let dirs = [dir.path().join("not-there"), dir.path().to_owned()];
-        let _watch = start(&dirs, &tx, || None).unwrap();
+        let _watch = start(&dirs, RecursiveMode::NonRecursive, &tx, || None).unwrap();
         std::fs::write(dir.path().join("a.md"), "x").unwrap();
         assert!(wait_for_one(&mut rx, Duration::from_secs(1)).is_none());
     }

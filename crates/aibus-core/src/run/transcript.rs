@@ -1,6 +1,8 @@
-//! A run's transcript on disk (01 section 5.4): `<session>/runs/<run>/transcript.jsonl`, one JSON
-//! object per line. It is what `resume_run` reloads, and it keeps everything: compaction only
-//! cuts the live context and adds a `compact_boundary` line.
+//! A run's conversation on disk (01 section 5.4): `<session>/runs/<run>/conversation.jsonl`, one
+//! JSON object per line. It sits beside the display transcript (`transcript.jsonl`, written by
+//! `persist::transcript` from the `Msg`s, with long results cut), because a resume needs the
+//! messages exactly as the provider saw them. It keeps everything: compaction only cuts the live
+//! context and adds a `compact_boundary` line.
 //!
 //! Lines: `start` (who the run is, once per start or resume), `system` (the system prompt, once),
 //! `message` (one conversation message) and `compact_boundary` (`pre_tokens` and the messages

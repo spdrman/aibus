@@ -17,6 +17,7 @@ This is the index. The spec is split into sections under `docs/spec/`; read them
 | 10 | [Testing](spec/10-testing.md) | Layers, fake provider, integration set, replay, `TestBackend` snapshots, conformance, benchmark gates |
 | 11 | [Delivery](spec/11-delivery.md) | Milestones M0 to M6 with exit criteria, out of scope for v1, dependency risks |
 | 12 | [Open questions](spec/12-open-questions.md) | Each with the panel's recommended default |
+| 13 | [Issue map](spec/13-issue-map.md) | How the spec became GitHub issues: the EPIC, phase and task scheme, the panel's decisions, the task table with issue numbers, milestone mapping, coverage |
 
 Contested decisions and why they went the way they did: [DECISIONS.md](DECISIONS.md).
 

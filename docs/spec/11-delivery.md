@@ -2,6 +2,8 @@
 
 Milestones are cumulative. Each one ends with something runnable and a tag. Estimates are deliberately absent; the order and the exit criteria are what matter.
 
+The milestones are how I read the scope, not how the work is tracked. The tracker uses three EPICs (a spike, the engine, the surface and release), each with two phases of at most five tasks; section 13 maps every milestone deliverable to its task issue.
+
 ## 1. Milestones
 
 ### M0: skeleton and contracts

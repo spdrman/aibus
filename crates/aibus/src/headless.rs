@@ -15,8 +15,6 @@ use aibus_provider::{AuthMethodKind, Credential, ModelRef, Secret};
 use serde_json::json;
 use tokio::sync::mpsc;
 
-const DEFAULT_SCRIPT: &str = include_str!("../../../fixtures/scripts/explore.ron");
-
 struct Args {
     agent: String,
     model: String,
@@ -60,20 +58,6 @@ fn parse(args: &[String]) -> Result<Args, AibusError> {
     Ok(out)
 }
 
-/// `YYYY-MM-DD` for a count of days since 1970-01-01 (proleptic Gregorian).
-fn civil_date(days: i64) -> String {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02}")
-}
-
 /// Returns the process exit code.
 pub fn run(args: &[String]) -> Result<u8, AibusError> {
     let args = parse(args)?;
@@ -99,7 +83,7 @@ async fn go(args: Args) -> Result<u8, AibusError> {
 
     let script_text = match &args.script {
         Some(p) => std::fs::read_to_string(p)?,
-        None => DEFAULT_SCRIPT.to_owned(),
+        None => include_str!("../../../fixtures/scripts/explore.ron").to_owned(),
     };
     let script = Script::from_ron(&script_text)
         .map_err(|e| AibusError::Usage(format!("script: {e}")))?;
@@ -133,7 +117,19 @@ async fn go(args: Args) -> Result<u8, AibusError> {
             cwd,
             runs_dir: session_dir.join("runs"),
             limits: ToolLimits::default(),
-            date: civil_date((now.as_secs() / 86_400) as i64),
+            date: {
+                // `YYYY-MM-DD` from days since 1970-01-01 (proleptic Gregorian).
+                let z = (now.as_secs() / 86_400) as i64 + 719_468;
+                let era = z.div_euclid(146_097);
+                let doe = z.rem_euclid(146_097);
+                let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+                let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                let mp = (5 * doy + 2) / 153;
+                let day = doy - (153 * mp + 2) / 5 + 1;
+                let month = if mp < 10 { mp + 3 } else { mp - 9 };
+                let year = yoe + era * 400 + i64::from(month <= 2);
+                format!("{year:04}-{month:02}-{day:02}")
+            },
             data_home: None,
         },
         RunDeps {

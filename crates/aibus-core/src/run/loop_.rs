@@ -21,7 +21,7 @@ use super::coalesce::Coalescer;
 use super::result;
 use super::{
     AccountName, AgentName, ContentBlock, Conversation, Message, MessageRole, ModelId, RunError,
-    RunErrorKind, RunId, RunResult, RunStatus, Usage,
+    RunErrorKind, RunId, RunResult, RunStatus,
 };
 use crate::agent::AgentDef;
 use crate::context::{self, ContextInput};
@@ -34,8 +34,6 @@ use crate::tools::{effective_tools, EffectiveTools, ToolExecutor};
 pub const MAILBOX_CAPACITY: usize = 64;
 /// Slots in the channel the provider streams chunks into (08 section 2).
 pub const STREAM_CAPACITY: usize = 1024;
-/// `max_turns` from config when the definition sets none (01 section 1.1).
-const DEFAULT_MAX_TURNS: u32 = 50;
 
 #[derive(Debug)]
 pub enum RunMail {
@@ -182,7 +180,8 @@ async fn drive(
     conv: &mut Conversation,
     turns: &mut u32,
 ) -> End {
-    let max_turns = cfg.def.max_turns.unwrap_or(DEFAULT_MAX_TURNS);
+    // 50 is the `max_turns` default from config (01 section 1.1).
+    let max_turns = cfg.def.max_turns.unwrap_or(50);
     let max_output = deps
         .provider
         .models()
@@ -242,7 +241,23 @@ async fn drive(
             }
         };
         *turns += 1;
-        add_usage(&mut conv.usage, &resp.usage, price);
+        {
+            let (total, turn) = (&mut conv.usage, &resp.usage);
+            total.input_tokens += turn.input_tokens;
+            total.output_tokens += turn.output_tokens;
+            total.cache_read += turn.cache_read;
+            total.cache_write += turn.cache_write;
+            total.cost_usd += turn.cost_usd;
+            if let Some(p) = price {
+                let m = 1_000_000.0;
+                total.cost_usd += turn.input_tokens as f64 * p.input_per_mtok / m
+                    + turn.output_tokens as f64 * p.output_per_mtok / m
+                    + turn.cache_read as f64 * p.cache_read_per_mtok.unwrap_or(p.input_per_mtok) / m
+                    + turn.cache_write as f64
+                        * p.cache_write_per_mtok.unwrap_or(p.input_per_mtok)
+                        / m;
+            }
+        }
 
         let calls: Vec<(aibus_provider::ToolCallId, smol_str::SmolStr, serde_json::Value)> = resp
             .message
@@ -390,21 +405,6 @@ fn last_text(conv: &Conversation) -> String {
         })
         .find(|t| !t.is_empty())
         .unwrap_or_default()
-}
-
-fn add_usage(total: &mut Usage, turn: &Usage, price: Option<aibus_provider::Price>) {
-    total.input_tokens += turn.input_tokens;
-    total.output_tokens += turn.output_tokens;
-    total.cache_read += turn.cache_read;
-    total.cache_write += turn.cache_write;
-    total.cost_usd += turn.cost_usd;
-    if let Some(p) = price {
-        let m = 1_000_000.0;
-        total.cost_usd += turn.input_tokens as f64 * p.input_per_mtok / m
-            + turn.output_tokens as f64 * p.output_per_mtok / m
-            + turn.cache_read as f64 * p.cache_read_per_mtok.unwrap_or(p.input_per_mtok) / m
-            + turn.cache_write as f64 * p.cache_write_per_mtok.unwrap_or(p.input_per_mtok) / m;
-    }
 }
 
 /// Drops the conversation, then sends the one `RunFinished` (after a `RunFailed` when the run

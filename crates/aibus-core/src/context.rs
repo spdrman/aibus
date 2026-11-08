@@ -17,11 +17,6 @@ pub struct Git {
     pub status: String,
 }
 
-/// The first 2,000 tokens of `MEMORY.md`, at the 4 bytes per token heuristic.
-const MEMORY_MAX_BYTES: usize = 8_000;
-/// Skills preloaded per run (01 section 1.1).
-const MAX_SKILLS: usize = 32;
-
 pub struct ContextInput<'a> {
     pub def: &'a AgentDef,
     /// The task message: the `prompt` the parent passed.
@@ -58,6 +53,53 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
     let root = project_root(input.cwd).unwrap_or(input.cwd);
     let lean = matches!(def.name.as_str(), "explore" | "plan");
 
+    // `AIBUS.md`, `.aibus/rules/*.md`, then `CLAUDE.md` and `.claude/rules/*.md` for
+    // compatibility; each under its path relative to the project.
+    fn project_rules(root: &Path) -> Option<String> {
+        let mut files: Vec<PathBuf> = vec![root.join("AIBUS.md")];
+        files.extend(markdown_in(&root.join(".aibus/rules")));
+        files.push(root.join("CLAUDE.md"));
+        files.extend(markdown_in(&root.join(".claude/rules")));
+        let parts: Vec<String> = files
+            .iter()
+            .filter_map(|f| {
+                let body = fs::read_to_string(f).ok()?;
+                let rel = f.strip_prefix(root).unwrap_or(f);
+                Some(format!("### {}\n{}", rel.display(), body.trim_end()))
+            })
+            .collect();
+        (!parts.is_empty()).then(|| format!("Project rules:\n\n{}", parts.join("\n\n")))
+    }
+
+    fn memory_block(dir: &Path) -> Option<String> {
+        let index = fs::read_to_string(dir.join("MEMORY.md")).ok();
+        let others: Vec<String> = fs::read_dir(dir)
+            .ok()?
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n != "MEMORY.md")
+            .collect();
+        if index.is_none() && others.is_empty() {
+            return None;
+        }
+        let mut others = others;
+        others.sort();
+        let mut out = format!("Memory directory {}:\n", dir.display());
+        if let Some(mut text) = index {
+            // The first 2,000 tokens, at the 4 bytes per token heuristic.
+            let mut end = text.len().min(8_000);
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+            out.push_str(&format!("\nMEMORY.md:\n{}\n", text.trim_end()));
+        }
+        if !others.is_empty() {
+            out.push_str(&format!("\nOther files: {}\n", others.join(", ")));
+        }
+        Some(out)
+    }
+
+
     let mut system = format!(
         "{}\n\n<environment>\ncwd: {}\nplatform: {}\ndate: {}\n",
         def.system_prompt.trim_end(),
@@ -77,7 +119,7 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
             && !name.starts_with('.');
-        if !safe || seen.contains(&name.as_str()) || seen.len() == MAX_SKILLS {
+        if !safe || seen.contains(&name.as_str()) || seen.len() == 32 {
             continue;
         }
         seen.push(name);
@@ -132,24 +174,6 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
     }
 }
 
-/// `AIBUS.md`, `.aibus/rules/*.md`, then `CLAUDE.md` and `.claude/rules/*.md` for
-/// compatibility; each under its path relative to the project.
-fn project_rules(root: &Path) -> Option<String> {
-    let mut files: Vec<PathBuf> = vec![root.join("AIBUS.md")];
-    files.extend(markdown_in(&root.join(".aibus/rules")));
-    files.push(root.join("CLAUDE.md"));
-    files.extend(markdown_in(&root.join(".claude/rules")));
-    let parts: Vec<String> = files
-        .iter()
-        .filter_map(|f| {
-            let body = fs::read_to_string(f).ok()?;
-            let rel = f.strip_prefix(root).unwrap_or(f);
-            Some(format!("### {}\n{}", rel.display(), body.trim_end()))
-        })
-        .collect();
-    (!parts.is_empty()).then(|| format!("Project rules:\n\n{}", parts.join("\n\n")))
-}
-
 /// The `*.md` files directly in `dir`, by name.
 fn markdown_in(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
@@ -160,31 +184,4 @@ fn markdown_in(dir: &Path) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
-}
-
-fn memory_block(dir: &Path) -> Option<String> {
-    let index = fs::read_to_string(dir.join("MEMORY.md")).ok();
-    let others: Vec<String> = fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter(|n| n != "MEMORY.md")
-        .collect();
-    if index.is_none() && others.is_empty() {
-        return None;
-    }
-    let mut others = others;
-    others.sort();
-    let mut out = format!("Memory directory {}:\n", dir.display());
-    if let Some(mut text) = index {
-        let mut end = text.len().min(MEMORY_MAX_BYTES);
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-        out.push_str(&format!("\nMEMORY.md:\n{}\n", text.trim_end()));
-    }
-    if !others.is_empty() {
-        out.push_str(&format!("\nOther files: {}\n", others.join(", ")));
-    }
-    Some(out)
 }

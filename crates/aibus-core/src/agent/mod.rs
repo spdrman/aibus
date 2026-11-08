@@ -4,6 +4,8 @@
 pub mod builtin;
 pub mod def;
 pub mod discover;
+pub mod roster;
+pub mod validate;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

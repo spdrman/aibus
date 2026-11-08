@@ -1,0 +1,1 @@
+{"ok":true,"errors":[],"warnings":[{"path":"corpus/warnings/duplicate_spelling.md","field":"max_turns","message":"duplicate key `max_turns`, keeping the snake_case spelling"},{"path":"corpus/warnings/unknown_keys.md","field":"flavour","message":"unknown key `flavour`"}]}

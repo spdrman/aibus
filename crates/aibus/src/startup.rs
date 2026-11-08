@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use aibus_core::agent::discover::{discover, Discovered};
+use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
 use aibus_core::config::{self, Loaded};
 use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::persist::paths::{project_dir, Paths};
@@ -36,6 +36,7 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
+use crate::agent_watch::{self, AgentWatch};
 use crate::cli::{Global, RunArgs};
 use crate::events;
 use crate::keychain::OsKeychain;
@@ -72,6 +73,7 @@ pub struct Ctx {
     pub accounts: Option<Accounts>,
     pub rt: Option<Runtime>,
     pub signals: Option<Signals>,
+    pub agent_watch: Option<AgentWatch>,
     pub plan: Option<(RunConfig, RunDeps)>,
     pub rx: Option<mpsc::Receiver<Msg>>,
     pub handle: Option<RunHandle>,
@@ -97,6 +99,7 @@ impl Ctx {
             accounts: None,
             rt: None,
             signals: None,
+            agent_watch: None,
             plan: None,
             rx: None,
             handle: None,
@@ -481,8 +484,8 @@ impl Step for LoadAccounts {
 
 // 7 ---------------------------------------------------------------------------------------
 
-/// The tokio runtime and the signal handlers. The hook runner and the file watcher on agent
-/// directories start here once they exist (B1.3).
+/// The tokio runtime and the signal handlers. The hook runner starts here once it exists (B1.3);
+/// the watcher on the agent directories starts with the loop, which owns the channel it feeds.
 struct StartRuntime;
 
 impl Step for StartRuntime {
@@ -669,7 +672,7 @@ impl Step for EnterLoop {
             provider,
             creds,
             tools: Arc::new(tools),
-            tx,
+            tx: tx.clone(),
         };
         ctx.plan = Some((run_cfg, deps));
         ctx.rx = Some(rx);
@@ -678,6 +681,33 @@ impl Step for EnterLoop {
                 app.enable_bypass()?;
             }
         }
+
+        if cfg.agents.reload_on_change {
+            let (cli_json, cwd) = (ctx.global.agents.clone(), ctx.cwd.clone());
+            let user_dir = paths.config.join("agents");
+            let dirs = |v: &[String]| -> Vec<PathBuf> { v.iter().map(|d| cwd.join(d)).collect() };
+            let (extra, trusted) = (dirs(&cfg.agents.extra_dirs), dirs(&cfg.agents.trusted_dirs));
+            let watched: Vec<PathBuf> = scope_dirs(&cwd, Some(&user_dir), &extra)
+                .into_iter()
+                .map(|(_, d)| d)
+                .collect();
+            let reload = move || {
+                let found = discover(cli_json.as_deref(), &cwd, Some(&user_dir), &extra, &trusted).ok()?;
+                Some(Msg::AgentsReloaded {
+                    defs: found.agents.values().cloned().collect(),
+                    warnings: found.warnings,
+                })
+            };
+            match agent_watch::start(&watched, &tx, reload) {
+                Ok(w) => ctx.agent_watch = Some(w),
+                Err(e) => eprintln!("aibus: warning: not watching agent directories: {e}"),
+            }
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
+        ctx.agent_watch = None;
         Ok(())
     }
 }

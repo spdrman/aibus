@@ -265,6 +265,191 @@ pub(crate) fn from_fields(
     ))
 }
 
+/// The definition as the frontmatter fields (snake_case) plus `prompt`, which is what
+/// `aibus agent show --json` prints. Unset optional fields and empty lists are left out.
+pub fn to_json(def: &AgentDef) -> Value {
+    let mut m = Map::new();
+    m.insert("name".into(), def.name.as_str().into());
+    m.insert("description".into(), def.description.clone().into());
+    m.insert("role".into(), snake(&def.role));
+    let pattern = |p: &ToolPattern| match &p.spec {
+        Some(s) => format!("{}({s})", p.tool),
+        None => p.tool.to_string(),
+    };
+    if let Some(allow) = &def.tools.allow {
+        m.insert("tools".into(), allow.iter().map(pattern).collect());
+    }
+    if !def.tools.deny.is_empty() {
+        m.insert(
+            "disallowed_tools".into(),
+            def.tools.deny.iter().map(pattern).collect(),
+        );
+    }
+    m.insert("model".into(), model_str(&def.model).into());
+    if let Some(a) = &def.account {
+        m.insert("account".into(), a.0.as_str().into());
+    }
+    m.insert("permission_mode".into(), snake(&def.permission_mode));
+    if let Some(n) = def.max_turns {
+        m.insert("max_turns".into(), n.into());
+    }
+    if let Some(n) = def.max_tokens_total {
+        m.insert("max_tokens_total".into(), n.into());
+    }
+    if let Some(n) = def.max_cost_usd {
+        m.insert("max_cost_usd".into(), n.into());
+    }
+    if let Some(e) = def.effort {
+        m.insert(
+            "effort".into(),
+            match e {
+                Effort::Low => "low",
+                Effort::Medium => "medium",
+                Effort::High => "high",
+                Effort::Max => "max",
+            }
+            .into(),
+        );
+    }
+    if !def.skills.is_empty() {
+        m.insert("skills".into(), def.skills.clone().into());
+    }
+    if !def.hooks.is_empty() {
+        let hooks: Map<String, Value> = def
+            .hooks
+            .iter()
+            .map(|(event, specs)| {
+                let list = specs.iter().map(|h| {
+                    let mut o = Map::new();
+                    if let Some(x) = &h.matcher {
+                        o.insert("matcher".into(), x.clone().into());
+                    }
+                    o.insert("command".into(), h.command.clone().into());
+                    if let Some(t) = h.timeout_secs {
+                        o.insert("timeout_secs".into(), t.into());
+                    }
+                    Value::Object(o)
+                });
+                (event.to_string(), list.collect())
+            })
+            .collect();
+        m.insert("hooks".into(), Value::Object(hooks));
+    }
+    if let Some(x) = &def.memory {
+        m.insert("memory".into(), snake(x));
+    }
+    m.insert("background".into(), def.background.into());
+    m.insert("isolation".into(), snake(&def.isolation));
+    m.insert("omit_project_rules".into(), def.omit_project_rules.into());
+    if let Some(c) = &def.color {
+        m.insert("color".into(), snake(c));
+    }
+    if !def.checkpoints.is_empty() {
+        let list = def.checkpoints.iter().map(|c| {
+            if c.on.is_none() && c.matcher.is_none() {
+                return Value::String(c.name.to_string());
+            }
+            let mut o = Map::new();
+            o.insert("name".into(), c.name.to_string().into());
+            if let Some(x) = &c.on {
+                o.insert("on".into(), x.to_string().into());
+            }
+            if let Some(x) = &c.matcher {
+                o.insert("matcher".into(), x.clone().into());
+            }
+            Value::Object(o)
+        });
+        m.insert("checkpoints".into(), list.collect());
+    }
+    if let Some(r) = &def.router {
+        let mut o = Map::new();
+        // Through its shortest decimal, so 0.85 stays 0.85 rather than 0.8500000238.
+        let threshold = r.threshold.to_string().parse::<f64>().unwrap_or_default();
+        o.insert("threshold".into(), threshold.into());
+        o.insert(
+            "questions".into(),
+            r.questions.iter().map(|q| q.to_string()).collect(),
+        );
+        m.insert("router".into(), Value::Object(o));
+    }
+    if let Some(p) = &def.initial_prompt {
+        m.insert("initial_prompt".into(), p.clone().into());
+    }
+    if let Some(n) = def.auto_compact_at {
+        m.insert("auto_compact_at".into(), n.into());
+    }
+    m.insert("prompt".into(), def.system_prompt.clone().into());
+    Value::Object(m)
+}
+
+/// The definition as a Markdown file that `parse` reads back to the same definition. Values
+/// are written as JSON, which is valid YAML, except plain words that need no quotes.
+pub fn to_markdown(def: &AgentDef) -> String {
+    let Value::Object(mut fields) = to_json(def) else {
+        unreachable!("to_json builds an object")
+    };
+    fields.remove("prompt");
+    // The order of the table in 01 section 1.1, not the map's alphabetical one.
+    const ORDER: [&str; 23] = [
+        "name",
+        "description",
+        "role",
+        "tools",
+        "disallowed_tools",
+        "model",
+        "account",
+        "permission_mode",
+        "max_turns",
+        "max_tokens_total",
+        "max_cost_usd",
+        "effort",
+        "skills",
+        "hooks",
+        "memory",
+        "background",
+        "isolation",
+        "omit_project_rules",
+        "color",
+        "checkpoints",
+        "router",
+        "initial_prompt",
+        "auto_compact_at",
+    ];
+    let mut out = String::from("---\n");
+    for (k, v) in ORDER.iter().filter_map(|k| fields.get_key_value(*k)) {
+        let plain = |s: &str| {
+            !s.is_empty()
+                && s.starts_with(|c: char| c.is_ascii_lowercase())
+                && s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+                && !matches!(s, "true" | "false" | "null" | "yes" | "no" | "on" | "off")
+        };
+        let text = match v {
+            Value::String(s) if plain(s) => s.clone(),
+            v => v.to_string(),
+        };
+        out.push_str(&format!("{k}: {text}\n"));
+    }
+    out.push_str("---\n\n");
+    out.push_str(&def.system_prompt);
+    out.push('\n');
+    out
+}
+
+/// A unit enum variant as its snake_case serde name.
+fn snake<T: serde::Serialize>(v: &T) -> Value {
+    serde_json::to_value(v).unwrap_or(Value::Null)
+}
+
+/// How a `ModelRef` is written in a definition.
+pub fn model_str(m: &ModelRef) -> &str {
+    match m {
+        ModelRef::Alias(a) => a,
+        ModelRef::Full(id) => &id.0,
+        ModelRef::Inherit => "inherit",
+    }
+}
+
 fn want(field: &str, want: &'static str) -> DefError {
     DefError::Field {
         field: field.into(),

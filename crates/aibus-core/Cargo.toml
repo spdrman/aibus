@@ -12,6 +12,10 @@ aibus-graph.workspace = true
 aibus-provider.workspace = true
 async-trait = "0.1"
 bytes = { version = "1", features = ["serde"] }
+globset = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -24,6 +28,7 @@ yaml-rust2 = "0.10"
 
 [dev-dependencies]
 aibus-testkit.workspace = true
+tempfile = "3"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros", "test-util"] }
 
 [[bench]]

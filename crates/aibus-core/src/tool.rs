@@ -59,6 +59,8 @@ pub enum ToolError {
     Denied { reason: String },
     #[error("timeout")]
     Timeout,
+    #[error("cancelled")]
+    Cancelled,
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("invalid input: {0}")]

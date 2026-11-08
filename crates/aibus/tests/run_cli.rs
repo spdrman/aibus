@@ -93,7 +93,7 @@ fn bad_usage_exits_2() {
     let home = TempDir::new().unwrap();
     let h = home.path();
     assert_eq!(aibus(h, &["run"]).status.code(), Some(2));
-    assert_eq!(aibus(h, &["run", "--json", "--agent", "nope", "hi"]).status.code(), Some(2));
+    assert_eq!(aibus(h, &["run", "--json", "--agent", "nope", "hi"]).status.code(), Some(3), "an unknown agent is a config error");
     // A model no account serves is exit 4 (04 section 4.1, step 7), not a usage error.
     let nobody = aibus(h, &["run", "--json", "--model", "gpt-9", "hi"]);
     assert_eq!(nobody.status.code(), Some(4));

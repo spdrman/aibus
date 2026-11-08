@@ -18,7 +18,18 @@ fn limit(t: &mut Tracker, name: &str, default: i64) -> i64 {
         .unwrap_or(default)
 }
 
-/// Queued runs whose parent is alive, within the depth, concurrency and account limits.
+/// The slots one account has: its own entry under `per_account`, else `max_per_account`.
+fn account_limit(t: &mut Tracker, account: &str, default: i64) -> i64 {
+    t.get_key(LIMITS)
+        .and_then(|l| get(l, "per_account"))
+        .and_then(|m| get(m, account))
+        .and_then(as_i64)
+        .unwrap_or(default)
+}
+
+/// Queued runs that may start now (01 section 4.4): the parent is alive, the depth is within
+/// `max_spawn_depth`, fewer than `max_concurrent_runs` are active, the account has a free slot
+/// and the session has not used up `max_runs_per_session`.
 fn runnable(t: &mut Tracker) -> Value {
     let order: Vec<Value> = t
         .get_key(RUNS_ORDER)
@@ -27,6 +38,7 @@ fn runnable(t: &mut Tracker) -> Value {
     let max_depth = limit(t, "max_spawn_depth", 3);
     let max_conc = limit(t, "max_concurrent_runs", 8);
     let max_acct = limit(t, "max_per_account", 4);
+    let max_total = limit(t, "max_runs_per_session", 500);
 
     let mut statuses = Vec::with_capacity(order.len());
     let mut active = 0i64;
@@ -45,14 +57,20 @@ fn runnable(t: &mut Tracker) -> Value {
         statuses.push((id, st));
     }
 
+    // Runs that left the queue (started, or ended without starting) count against the total.
+    let mut used = statuses
+        .iter()
+        .filter(|(_, st)| *st != Some(RunStatus::Queued))
+        .count() as i64;
     let mut out = Vec::new();
     for (id, st) in &statuses {
-        if *st != Some(RunStatus::Queued) || active >= max_conc {
+        if *st != Some(RunStatus::Queued) || active >= max_conc || used >= max_total {
             continue;
         }
-        let Some(meta) = t.get_key(&run_key(id, "meta")) else {
+        let Some(meta) = t.get_key(&run_key(id, "meta")).cloned() else {
             continue;
         };
+        let meta = &meta;
         let depth = get(meta, "depth").and_then(as_i64).unwrap_or(0);
         if depth > max_depth {
             continue;
@@ -67,7 +85,9 @@ fn runnable(t: &mut Tracker) -> Value {
             }
         }
         let account = get(meta, "account").and_then(as_str).unwrap_or("");
-        if !account.is_empty() && per_account.get(account).copied().unwrap_or(0) >= max_acct {
+        if !account.is_empty()
+            && per_account.get(account).copied().unwrap_or(0) >= account_limit(t, account, max_acct)
+        {
             continue;
         }
         let field = |k: &str| get(meta, k).cloned().unwrap_or(Value::Null);
@@ -79,8 +99,11 @@ fn runnable(t: &mut Tracker) -> Value {
             ("background", field("background")),
             ("isolation", field("isolation")),
             ("prompt", field("prompt")),
+            ("model", field("model")),
+            ("account", field("account")),
         ]));
         active += 1;
+        used += 1;
         if !account.is_empty() {
             *per_account.entry(account.to_owned()).or_default() += 1;
         }

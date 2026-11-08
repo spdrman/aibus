@@ -17,6 +17,7 @@ use crate::agent::{AgentDef, Isolation, Role};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{PermissionId, RunId};
 use crate::msg::{AccountView, Command, Decision, Msg, Pane, Selection};
+use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
 
 /// What `reduce` may not read from the world itself.
@@ -30,6 +31,42 @@ pub type Writes = Vec<(NodeKey, Value)>;
 
 static NULL: Value = Value::Null;
 const ADVICE_KEEP: usize = 8;
+
+/// A run to put in the queue. Four callers fill different subsets (the lead's first prompt,
+/// `Delegate`, `Fork` and an `@agent-` mention), so the fields travel together.
+struct Queue<'a> {
+    agent: &'a str,
+    role: Option<Role>,
+    prompt: &'a str,
+    background: bool,
+    isolation: Isolation,
+    parent: Option<RunId>,
+    run: Option<RunId>,
+    model: Option<&'a str>,
+    account: Option<&'a str>,
+}
+
+impl<'a> Queue<'a> {
+    fn new(
+        agent: &'a str,
+        prompt: &'a str,
+        background: bool,
+        isolation: Isolation,
+        parent: Option<RunId>,
+    ) -> Self {
+        Self {
+            agent,
+            role: None,
+            prompt,
+            background,
+            isolation,
+            parent,
+            run: None,
+            model: None,
+            account: None,
+        }
+    }
+}
 
 struct R<'a> {
     g: &'a dyn Graph,
@@ -122,15 +159,7 @@ impl R<'_> {
         })
     }
 
-    fn queue_run(
-        &mut self,
-        agent: &str,
-        role: Option<Role>,
-        prompt: &str,
-        background: bool,
-        isolation: Isolation,
-        parent: Option<RunId>,
-    ) {
+    fn queue_run(&mut self, q: Queue) {
         let max = get(self.cur(LIMITS), "max_runs_per_session")
             .and_then(as_i64)
             .unwrap_or(500);
@@ -138,9 +167,14 @@ impl R<'_> {
             self.log("warn", "run limit reached, nothing queued");
             return;
         }
-        let id = self.next_run_id();
-        let def = self.def(agent);
-        let role = role
+        // A command that arrives twice queues one run.
+        if q.run.is_some_and(|id| self.run_exists(&id.to_string())) {
+            return;
+        }
+        let id = q.run.unwrap_or_else(|| self.next_run_id());
+        let def = self.def(q.agent);
+        let role = q
+            .role
             .or_else(|| {
                 def.as_ref()
                     .and_then(|d| get(d, "role"))
@@ -148,13 +182,23 @@ impl R<'_> {
                     .and_then(Role::parse)
             })
             .unwrap_or(Role::Worker);
-        let account = def
-            .as_ref()
-            .and_then(|d| get(d, "account"))
-            .and_then(as_str)
+        // A definition with `background: true` forces background (01 section 4.3).
+        let background = q.background
+            || def
+                .as_ref()
+                .and_then(|d| get(d, "background"))
+                .is_some_and(|b| *b == Value::Bool(true));
+        let account = q
+            .account
+            .or_else(|| {
+                def.as_ref()
+                    .and_then(|d| get(d, "account"))
+                    .and_then(as_str)
+            })
             .unwrap_or("")
             .to_owned();
-        let label: String = prompt
+        let label: String = q
+            .prompt
             .lines()
             .next()
             .unwrap_or("")
@@ -162,20 +206,51 @@ impl R<'_> {
             .take(48)
             .collect();
         let meta = map([
-            ("agent", s(agent)),
+            ("agent", s(q.agent)),
             ("role", s(role.as_str())),
-            ("parent", parent.map_or(Value::Null, |p| s(&p.to_string()))),
-            ("depth", n(self.depth_of(parent))),
-            ("model", s("")),
+            (
+                "parent",
+                q.parent.map_or(Value::Null, |p| s(&p.to_string())),
+            ),
+            ("depth", n(self.depth_of(q.parent))),
+            // What the caller asked for; `RunStarted` replaces it with what the run got.
+            ("model", s(q.model.unwrap_or(""))),
             ("account", s(&account)),
             ("label", s(&label)),
             ("started_at", Value::Null),
             ("background", Value::Bool(background)),
-            ("isolation", s(isolation.as_str())),
-            ("prompt", self.store.inline_or_handle(prompt)),
+            ("isolation", s(q.isolation.as_str())),
+            ("prompt", self.store.inline_or_handle(q.prompt)),
         ]);
-        self.new_run(&id.to_string(), meta, RunStatus::Queued);
-        self.log("info", &format!("queued {agent}"));
+        // A parent that already ended can no longer take the result: the run is never started.
+        let orphan = q.parent.is_some_and(|p| {
+            self.status(&p.to_string())
+                .is_some_and(RunStatus::is_terminal)
+        });
+        let status = if orphan {
+            RunStatus::Cancelled
+        } else {
+            RunStatus::Queued
+        };
+        self.new_run(&id.to_string(), meta, status);
+        self.log("info", &format!("queued {}", q.agent));
+    }
+
+    /// Queued runs below `parent` can no longer start (their parent ended): cancels them, and
+    /// the queued runs below those.
+    fn cancel_queued_below(&mut self, parent: &str) {
+        let order = as_list(self.cur(RUNS_ORDER)).to_vec();
+        let mut dead = vec![parent.to_owned()];
+        // Children come after their parents in the order, so one pass reaches them all.
+        for id in order.iter().filter_map(as_str) {
+            let of_dead = get(self.cur(&run_key(id, "meta")), "parent")
+                .and_then(as_str)
+                .is_some_and(|p| dead.iter().any(|d| d == p));
+            if of_dead && self.status(id) == Some(RunStatus::Queued) {
+                self.set_status(id, RunStatus::Cancelled);
+                dead.push(id.to_owned());
+            }
+        }
     }
 
     fn transcript_id(&self, run: &str) -> Option<u64> {
@@ -244,21 +319,31 @@ impl R<'_> {
                 background,
                 isolation,
                 parent,
-            } => self.queue_run(
-                agent.as_str(),
-                None,
-                prompt,
-                *background,
-                *isolation,
-                *parent,
-            ),
+                run,
+                model,
+                account,
+            } => self.queue_run(Queue {
+                run: *run,
+                model: model.as_deref(),
+                account: account.as_ref().map(|a| a.0.as_str()),
+                ..Queue::new(agent.as_str(), prompt, *background, *isolation, *parent)
+            }),
+            Command::Background { run } => {
+                let key = run_key(run, "meta");
+                if self.run_exists(&run.to_string()) {
+                    let meta = with(self.cur(&key), "background", Value::Bool(true));
+                    self.put(key, meta);
+                    self.log("info", "moved to the background");
+                }
+            }
             Command::Fork { prompt, parent } => {
-                self.queue_run("fork", None, prompt, false, Isolation::None, *parent)
+                self.queue_run(Queue::new("fork", prompt, false, Isolation::None, *parent))
             }
             Command::Cancel { run } => {
                 self.put(run_key(run, "cancel_requested"), Value::Bool(true));
                 if self.status(&run.to_string()) == Some(RunStatus::Queued) {
                     self.set_status(run, RunStatus::Cancelled);
+                    self.cancel_queued_below(&run.to_string());
                 }
             }
             Command::Resume { run, .. } => self.set_status(run, RunStatus::Queued),
@@ -420,7 +505,17 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
         }
         Msg::SubmitPrompt { text } => {
             if as_list(r.cur(RUNS_ORDER)).is_empty() {
-                r.queue_run("lead", Some(Role::Lead), text, false, Isolation::None, None);
+                r.queue_run(Queue {
+                    role: Some(Role::Lead),
+                    ..Queue::new("lead", text, false, Isolation::None, None)
+                });
+            } else if let Some((agent, rest)) = parse_mention(text) {
+                // `@agent-<name> <rest>` is a forced delegate; the lead still gets the result.
+                let lead = as_list(r.cur(RUNS_ORDER))
+                    .first()
+                    .and_then(as_str)
+                    .and_then(|id| id.parse().ok());
+                r.queue_run(Queue::new(agent.as_str(), rest, true, Isolation::None, lead));
             } else {
                 r.log("info", "prompt for the running lead");
             }
@@ -614,6 +709,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.put(run_key(&id, "tail"), Value::Handle(tail));
             }
             r.log("info", &format!("finished {}", result.status.as_value()));
+            r.cancel_queued_below(&id);
         }
         Msg::RunFailed { run, error } => {
             let id = run.to_string();
@@ -627,6 +723,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 ]),
             );
             r.log("error", &format!("failed: {}", error.kind.as_str()));
+            r.cancel_queued_below(&id);
         }
         Msg::UsageUpdate { run, usage } => r.put(run_key(run, "usage"), usage_abs(usage)),
         Msg::HookFired {

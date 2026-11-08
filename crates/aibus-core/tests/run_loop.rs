@@ -110,6 +110,9 @@ fn plan(script: Script, def: AgentDef) -> (Plan, mpsc::Receiver<Msg>) {
             date: "2026-11-08".into(),
             data_home: None,
             context: Vec::new(),
+            background: false,
+            max_spawn_depth: 3,
+            forced: None,
         },
         deps: RunDeps {
             provider: fake.clone(),
@@ -742,6 +745,9 @@ impl Tool for Relay {
                 date: "2026-11-08".into(),
                 data_home: None,
                 context: Vec::new(),
+                background: false,
+                max_spawn_depth: 3,
+                forced: None,
             },
             RunDeps {
                 provider: self.fake.clone(),

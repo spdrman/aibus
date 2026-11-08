@@ -80,6 +80,9 @@ async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
             data_home: None,
             budgets: Budgets::default(),
             context: Vec::new(),
+            background: false,
+            max_spawn_depth: 3,
+            forced: None,
         },
         RunDeps {
             provider,

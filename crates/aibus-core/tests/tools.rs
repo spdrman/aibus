@@ -164,6 +164,7 @@ fn deny_beats_allow_and_roles_shape_the_list() {
         Role::Worker,
         0,
         false,
+        3,
     );
     assert_eq!(names(&e), ["read", "ls"], "a bare deny removes the allow");
 
@@ -172,28 +173,31 @@ fn deny_beats_allow_and_roles_shape_the_list() {
         Role::Worker,
         0,
         false,
+        3,
     );
     assert_eq!(e.allow, vec![pat("bash(git *)")]);
     assert_eq!(e.deny, vec![pat("bash(git push *)")], "kept for the runtime check");
 
-    let lead = effective_tools(&def(None, &[]), Role::Lead, 0, false);
-    let worker = effective_tools(&def(None, &[]), Role::Worker, 0, false);
+    let lead = effective_tools(&def(None, &[]), Role::Lead, 0, false, 3);
+    let worker = effective_tools(&def(None, &[]), Role::Worker, 0, false, 3);
     assert!(names(&lead).contains(&"fork".into()));
     assert!(!names(&worker).contains(&"fork".into()));
     assert!(names(&worker).contains(&"delegate".into()));
 
-    let deep = effective_tools(&def(None, &[]), Role::Worker, 3, false);
+    let deep = effective_tools(&def(None, &[]), Role::Worker, 3, false, 3);
     assert!(!names(&deep).contains(&"delegate".into()), "no delegate at the depth limit");
+    let shallow = effective_tools(&def(None, &[]), Role::Worker, 1, false, 1);
+    assert!(!names(&shallow).contains(&"delegate".into()), "the limit is a setting");
 
     // An allow-list cannot grant what the role lacks.
-    let w = effective_tools(&def(Some(&["fork", "read"]), &[]), Role::Worker, 0, false);
+    let w = effective_tools(&def(Some(&["fork", "read"]), &[]), Role::Worker, 0, false, 3);
     assert_eq!(names(&w), ["read"]);
 }
 
 #[test]
 fn background_runs_lose_the_interactive_tools() {
-    let fg = effective_tools(&def(None, &[]), Role::Lead, 0, false);
-    let bg = effective_tools(&def(None, &[]), Role::Lead, 0, true);
+    let fg = effective_tools(&def(None, &[]), Role::Lead, 0, false, 3);
+    let bg = effective_tools(&def(None, &[]), Role::Lead, 0, true, 3);
     for t in ["ask_user", "enter_plan_mode", "exit_plan_mode"] {
         assert!(names(&fg).contains(&t.into()), "{t} in foreground");
         assert!(!names(&bg).contains(&t.into()), "{t} stripped in background");

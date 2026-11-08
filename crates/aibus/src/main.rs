@@ -13,6 +13,7 @@ mod env;
 mod events;
 mod headless;
 mod keychain;
+mod launch;
 mod logfile;
 mod logging;
 mod plain;

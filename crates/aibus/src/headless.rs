@@ -2,15 +2,15 @@
 //! lead run sends goes through the Elm loop and out as one NDJSON line with `--json` (06 section
 //! 2), the last being `SessionEnd` with the exit code, or as plain text without it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
 use std::time::{Duration, SystemTime};
 
 use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::replay::{msg_to_json, replay_hash};
 use aibus_core::{
-    AibusError, CredentialError, Decision, Msg, PermissionId, Redactor, RunError, RunErrorKind,
-    RunMail, RunResult, RunStatus,
+    AibusError, CredentialError, Decision, Msg, PermissionId, Redactor, Roster, RunError,
+    RunErrorKind, RunId, RunMail, RunResult, RunStatus,
 };
 use aibus_graph::Graph;
 use aibus_provider::{ProviderError, ProviderErrorKind};
@@ -119,8 +119,10 @@ struct Pump<'a> {
     out_color: bool,
     recorded: String,
     finished: Option<RunResult>,
-    /// Asked for and not yet answered.
-    pending: HashSet<PermissionId>,
+    /// The lead: only its end ends the session, its children report through it.
+    lead: RunId,
+    /// Asked for and not yet answered, with the run that asked.
+    pending: HashMap<PermissionId, RunId>,
     /// Denied by us because nobody is left to answer (stdin closed).
     auto_denied: HashSet<PermissionId>,
 }
@@ -134,7 +136,7 @@ impl Pump<'_> {
     ) -> Result<(), AibusError> {
         match &mut msg {
             Msg::PermissionNeeded { request } => {
-                self.pending.insert(request.id);
+                self.pending.insert(request.id, request.run);
             }
             Msg::PermissionDecided { id, reason, .. } => {
                 self.pending.remove(id);
@@ -158,8 +160,10 @@ impl Pump<'_> {
             self.recorded.push_str(&line.to_string());
             self.recorded.push('\n');
         }
-        if let Msg::RunFinished { result, .. } = &msg {
-            self.finished = Some(result.clone());
+        if let Msg::RunFinished { run, result } = &msg {
+            if *run == self.lead {
+                self.finished = Some(result.clone());
+            }
         }
         app.step(msg)
     }
@@ -181,6 +185,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         return Err(not_ready("run"));
     };
     let redactor = &ctx.redactor;
+    let (orch, launcher) = (ctx.orch.as_ref(), ctx.launcher.as_ref());
     // A second signal this soon after the first is a forced quit (06 section 5); a graceful
     // stop may take this long before we give up on the run.
     const FORCE_WITHIN: Duration = Duration::from_secs(2);
@@ -196,7 +201,8 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         out_color: color(std::io::stdout().is_terminal()),
         recorded: String::new(),
         finished: None,
-        pending: HashSet::new(),
+        lead: handle.id,
+        pending: HashMap::new(),
         auto_denied: HashSet::new(),
     };
     let mut control = ctx.control.take();
@@ -205,8 +211,15 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     let has_control = control.is_some();
     let mut control_open = has_control;
     let mailbox = handle.mailbox.clone();
-    let deny = |id: PermissionId| {
-        mailbox.try_send(RunMail::Permission {
+    // A prompt goes back to the run that asked, which may be one of the lead's children.
+    let mailbox_of = |run: RunId| {
+        if run == handle.id {
+            return mailbox.clone();
+        }
+        orch.and_then(|o| o.mailbox(run)).unwrap_or_else(|| mailbox.clone())
+    };
+    let deny = |id: PermissionId, run: RunId| {
+        mailbox_of(run).try_send(RunMail::Permission {
             id,
             decision: Decision::Deny,
         })
@@ -232,15 +245,22 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             tokio::select! {
                 msg = rx.recv() => {
                     let Some(msg) = msg else { break };
+                    if let Msg::AgentsReloaded { defs, .. } = &msg {
+                        // The next `delegate` offers the new roster and starts from it.
+                        if let (Some(o), Some(l)) = (orch, launcher) {
+                            o.set_roster(Roster::of(defs.iter()));
+                            l.reload(defs);
+                        }
+                    }
                     let asked = match &msg {
                         Msg::PermissionNeeded { request } if has_control && !control_open => {
-                            Some(request.id)
+                            Some((request.id, request.run))
                         }
                         _ => None,
                     };
                     pump.handle(msg, redactor, app)?;
-                    if let Some(id) = asked {
-                        if deny(id).is_ok() {
+                    if let Some((id, run)) = asked {
+                        if deny(id, run).is_ok() {
                             pump.auto_denied.insert(id);
                         }
                     }
@@ -266,23 +286,25 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                 },
                 line = next_control, if control_open => match line {
                     Some(Line::Ok(Control::Permission { id, decision })) => {
-                        let sent = mailbox.try_send(RunMail::Permission { id, decision });
+                        let run = pump.pending.get(&id).copied().unwrap_or(handle.id);
+                        let sent = mailbox_of(run).try_send(RunMail::Permission { id, decision });
                         if sent.is_err() {
                             eprintln!("aibus: control: the run is not taking messages");
                         }
                     }
                     Some(Line::Ok(Control::SendMessage { run, text })) => {
-                        if run != handle.id {
+                        let known = run == handle.id || orch.is_some_and(|o| o.mailbox(run).is_some());
+                        if !known {
                             eprintln!("aibus: control: no run {run} (the lead is {})", handle.id);
-                        } else if mailbox.try_send(RunMail::UserMessage(text)).is_err() {
+                        } else if mailbox_of(run).try_send(RunMail::UserMessage(text)).is_err() {
                             eprintln!("aibus: control: the run is not taking messages");
                         }
                     }
                     Some(Line::Bad(why)) => eprintln!("aibus: control: {why}"),
                     Some(Line::Eof) | None => {
                         control_open = false;
-                        for id in pump.pending.iter().copied().collect::<Vec<_>>() {
-                            if deny(id).is_ok() {
+                        for (id, run) in pump.pending.iter().map(|(i, r)| (*i, *r)).collect::<Vec<_>>() {
+                            if deny(id, run).is_ok() {
                                 pump.auto_denied.insert(id);
                             }
                         }

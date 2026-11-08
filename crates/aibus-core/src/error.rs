@@ -47,6 +47,9 @@ pub enum AibusError {
     /// The config or settings file is invalid; the message carries `path:line`.
     #[error("config: {0}")]
     ConfigFile(#[from] crate::config::ConfigFileError),
+    /// `--agent <name>` or `@agent-<name>` names no definition.
+    #[error("no agent named {0}; see: aibus agent list")]
+    UnknownAgent(String),
     #[error("auth: {0}")]
     Auth(#[from] CredentialError),
     #[error("provider: {0}")]
@@ -70,7 +73,7 @@ impl AibusError {
         match self {
             AibusError::Io(_) => 1,
             AibusError::Usage(_) => 2,
-            AibusError::Config(_) | AibusError::ConfigFile(_) => 3,
+            AibusError::Config(_) | AibusError::ConfigFile(_) | AibusError::UnknownAgent(_) => 3,
             AibusError::Auth(_) => 4,
             AibusError::Provider(_) => 5,
             AibusError::Denied(_) => 6,

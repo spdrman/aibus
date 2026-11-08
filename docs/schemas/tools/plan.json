@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "plan",
+  "type": "object",
+  "required": [
+    "plan"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "plan": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

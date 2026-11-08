@@ -16,10 +16,11 @@ use aibus_core::agent::discover::{discover, Discovered};
 use aibus_core::config::{self, Loaded};
 use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::persist::paths::{project_dir, Paths};
+use aibus_core::permission::bypass_allowed;
 use aibus_core::{
-    resolve_model, AccountName, AccountView, AgentName, AibusError, App, CredentialError, Msg,
-    ModelDefaults, ModelId, Redactor, RunConfig, RunDeps, RunHandle, RunResult, SessionId,
-    ToolExecutor, ToolLimits, ToolRegistry, MSG_CAPACITY,
+    resolve_model, AccountName, AccountView, AgentName, AibusError, App, Bash, CredentialError,
+    Gate, Msg, ModelDefaults, ModelId, PermissionMode, Redactor, RunConfig, RunDeps, RunHandle,
+    RunResult, SessionId, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, MSG_CAPACITY,
 };
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script, FAKE_KEY};
@@ -192,9 +193,6 @@ impl Step for ParseCli {
         let g = &ctx.global;
         if g.trace.is_some() {
             eprintln!("aibus: warning: --trace: not yet, ignored");
-        }
-        if !g.allow.is_empty() || !g.deny.is_empty() || g.permission_mode.is_some() {
-            eprintln!("aibus: warning: --allow, --deny and --permission-mode are parsed but not applied yet");
         }
         ctx.cwd = g.project_dir()?;
         ctx.prompt = match ctx.run.prompt.as_deref() {
@@ -530,11 +528,32 @@ impl Step for EnterLoop {
             .unwrap_or("lead")
             .parse()
             .map_err(|e: aibus_core::InvalidAgentName| AibusError::Usage(e.to_string()))?;
-        let def = agents
+        let mut def = agents
             .agents
             .get(&name)
             .ok_or_else(|| AibusError::Usage(format!("no agent named {name}")))?
             .clone();
+
+        // `--permission-mode` overrides the definition; `bypass` from either needs the variable.
+        if let Some(mode) = ctx.global.permission_mode.as_deref() {
+            def.permission_mode = parse_mode(mode)?;
+        }
+        let i_know = std::env::var("AIBUS_I_KNOW").ok();
+        let bypass = bypass_allowed(def.permission_mode, i_know.as_deref())?;
+        let pattern = |flag: &str, text: &str| {
+            text.parse::<ToolPattern>()
+                .map_err(|()| AibusError::Usage(format!("{flag} {text}: want tool or tool(specifier)")))
+        };
+        for text in &ctx.global.deny {
+            def.tools.deny.push(pattern("--deny", text)?);
+        }
+        let mut pre_approved = Vec::new();
+        for text in &cfg.tools.allow {
+            pre_approved.push(pattern("tools.allow", text)?);
+        }
+        for text in &ctx.global.allow {
+            pre_approved.push(pattern("--allow", text)?);
+        }
 
         let aliases = cfg.models.clone();
         let to_ref = |s: &str| {
@@ -593,14 +612,38 @@ impl Step for EnterLoop {
             date: events::date(SystemTime::now()),
             data_home: Some(paths.data.clone()),
         };
+        // Nobody can answer a prompt in `aibus run` (the `--json` control channel is not wired
+        // yet), so `default` mode refuses what would ask, with `PermissionNeeded` then
+        // `PermissionDecided { denied, "no tty" }`.
+        let bash = Arc::new(Bash::new(
+            cfg.tools.bash_timeout_secs,
+            Vec::new(),
+            std::env::vars().collect(),
+            ctx.cwd.clone(),
+            session.id.to_string(),
+        ));
+        let gate = Gate {
+            allow: pre_approved,
+            deny_patterns: cfg.tools.deny_patterns.clone(),
+            tty: false,
+            redactor: Some(ctx.redactor.clone()),
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        };
+        let tools = ToolExecutor::with_gate(ToolRegistry::standard(bash), gate)
+            .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
         let deps = RunDeps {
             provider: lead.provider.clone(),
             creds: lead.creds.clone(),
-            tools: Arc::new(ToolExecutor::new(ToolRegistry::read_only())),
+            tools: Arc::new(tools),
             tx,
         };
         ctx.plan = Some((run_cfg, deps));
         ctx.rx = Some(rx);
+        if bypass {
+            if let Some(app) = ctx.app.as_mut() {
+                app.enable_bypass()?;
+            }
+        }
         Ok(())
     }
 }
@@ -658,6 +701,23 @@ impl Step for SubmitPrompt {
         }
         Ok(())
     }
+}
+
+/// The `--permission-mode` values, in the kebab case the flag documents or the snake case the
+/// definitions use.
+fn parse_mode(s: &str) -> Result<PermissionMode, AibusError> {
+    Ok(match s.replace('-', "_").as_str() {
+        "default" => PermissionMode::Default,
+        "accept_edits" => PermissionMode::AcceptEdits,
+        "dont_ask" => PermissionMode::DontAsk,
+        "bypass" => PermissionMode::Bypass,
+        "plan" => PermissionMode::Plan,
+        _ => {
+            return Err(AibusError::Usage(format!(
+                "--permission-mode {s}: want default, accept-edits, dont-ask, bypass or plan"
+            )))
+        }
+    })
 }
 
 #[cfg(test)]

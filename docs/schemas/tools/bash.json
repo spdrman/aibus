@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "bash",
+  "type": "object",
+  "required": [
+    "command"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timeout": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "background": {
+      "type": "boolean"
+    }
+  }
+}

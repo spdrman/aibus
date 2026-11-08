@@ -22,12 +22,12 @@ use crate::tool::{Need, Tool, ToolCx, ToolError, ToolOutput};
 const READ_DEFAULT_LINES: usize = 2000;
 const MAX_HITS: usize = 1000;
 
-fn input<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, ToolError> {
+pub(super) fn input<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, ToolError> {
     serde_json::from_value(v).map_err(|e| ToolError::Invalid(e.to_string()))
 }
 
 /// Runs `f` on the blocking pool.
-async fn blocking<F>(f: F) -> Result<ToolOutput, ToolError>
+pub(super) async fn blocking<F>(f: F) -> Result<ToolOutput, ToolError>
 where
     F: FnOnce() -> Result<ToolOutput, ToolError> + Send + 'static,
 {

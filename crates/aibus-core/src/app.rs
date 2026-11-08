@@ -13,7 +13,7 @@ use crate::error::AibusError;
 use crate::msg::Msg;
 use crate::state::reduce::{reduce, Env};
 use crate::state::store::Store;
-use crate::state::{self, register_run, router_last, ANIMATING, SHUTDOWN};
+use crate::state::{self, register_run, router_last, ANIMATING, PERMISSIONS_BYPASS, SHUTDOWN};
 
 /// Capacity of the `Msg` channel (08 section 3).
 pub const MSG_CAPACITY: usize = 4096;
@@ -118,6 +118,20 @@ impl<G: Graph> App<G> {
 
     pub fn sender(&self) -> mpsc::Sender<Msg> {
         self.tx.clone()
+    }
+
+    /// Turns on `model:permissions:bypass`. This is startup configuration, not a message, so it
+    /// is one commit of its own before the first `step`. Callers go through
+    /// `permission::bypass_allowed` first.
+    pub fn enable_bypass(&mut self) -> Result<(), AibusError> {
+        let node = self
+            .graph
+            .node(PERMISSIONS_BYPASS)
+            .ok_or_else(|| std::io::Error::other("bypass key is not registered"))?;
+        self.graph
+            .commit("BypassEnabled", &[(node, Value::Bool(true))])
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(())
     }
 
     /// Starts the 30 Hz timer. Inside a tokio runtime only.

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "report_artifact",
+  "type": "object",
+  "required": [
+    "path",
+    "kind"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "progress": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

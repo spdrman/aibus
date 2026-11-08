@@ -217,6 +217,10 @@ pub struct Tools {
     pub bash_timeout_secs: u32,
     pub bash_max_output_bytes: usize,
     pub read_max_lines: u32,
+    /// Patterns (`bash(cargo *)`) that skip the permission prompt, like `--allow`.
+    pub allow: Vec<String>,
+    /// Globs added to `tools/shell_deny.txt`; a match is refused before any prompt.
+    pub deny_patterns: Vec<String>,
 }
 
 impl Default for Tools {
@@ -226,6 +230,8 @@ impl Default for Tools {
             bash_timeout_secs: 120,
             bash_max_output_bytes: 262_144,
             read_max_lines: 2000,
+            allow: Vec::new(),
+            deny_patterns: Vec::new(),
         }
     }
 }

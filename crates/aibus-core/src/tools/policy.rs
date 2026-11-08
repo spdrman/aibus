@@ -67,6 +67,34 @@ pub(crate) fn resolve(cwd: &Path, p: &str) -> io::Result<(PathBuf, bool)> {
     Ok((canon, inside))
 }
 
+/// Like `resolve`, for a path that may not exist yet (`write` creates files and directories).
+/// The deepest ancestor that exists is canonicalised, so symlinks in it are followed, and the
+/// rest is appended; a `..` in that rest is refused because it cannot be resolved yet.
+pub(crate) fn resolve_for_write(cwd: &Path, p: &str) -> io::Result<(PathBuf, bool)> {
+    let root = cwd.canonicalize()?;
+    let joined = root.join(p);
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut probe = joined.as_path();
+    let base = loop {
+        match probe.canonicalize() {
+            Ok(c) => break c,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let name = probe.file_name().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "path has a `..` past what exists")
+                })?;
+                tail.push(name.to_owned());
+                probe = probe.parent().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "path has no existing ancestor")
+                })?;
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    let canon = tail.iter().rev().fold(base, |acc, c| acc.join(c));
+    let inside = canon.starts_with(&root);
+    Ok((canon, inside))
+}
+
 /// The path a tool may touch: canonical and inside `cwd`, or `Denied`.
 pub(crate) fn confine(cwd: &Path, p: &str) -> Result<PathBuf, ToolError> {
     let (canon, inside) = resolve(cwd, p)?;

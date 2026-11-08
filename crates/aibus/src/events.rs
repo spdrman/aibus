@@ -82,17 +82,23 @@ pub fn event(msg: &Msg, at: SystemTime, redactor: &Redactor) -> Value {
         }),
         Msg::PermissionNeeded { request } => json!({
             "id": request.id.to_string(),
+            "agent": request.agent.as_str(),
             "run": request.run.to_string(),
             "tool": request.tool.as_str(),
             "summary": request.summary,
         }),
-        Msg::PermissionDecided { id, decision } => json!({
+        Msg::PermissionDecided {
+            id,
+            decision,
+            reason,
+        } => json!({
             "id": id.to_string(),
             "decision": match decision {
                 Decision::Allow => "allowed",
                 Decision::AllowSession => "allowed_session",
                 Decision::Deny => "denied",
             },
+            "reason": reason,
         }),
         Msg::RunFinished { run, result } => json!({
             "run": run.to_string(),

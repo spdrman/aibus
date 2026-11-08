@@ -495,12 +495,15 @@ pub fn cases() -> Vec<Case> {
                 fork: ForkId(7),
                 question: RouterQuestion {
                     kind: "which_file".into(),
-                    prompt: t.clone(),
+                    context: t.clone(),
+                    choices: vec![t.clone()],
                 },
                 answer: RouterAnswer {
                     choice: t.clone(),
                     p: 0.9,
                     verdict: Verdict::Sharp,
+                    latency: std::time::Duration::ZERO,
+                    source: PSource::Logprob,
                 },
             },
             expect: vec![

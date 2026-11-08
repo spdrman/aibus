@@ -145,7 +145,7 @@ impl<'a> Events<'a> {
                 "fork": fork.0,
                 "kind": question.kind.as_str(),
                 "choice": answer.choice,
-                "p": answer.p,
+                "p": (f64::from(answer.p) * 1e4).round() / 1e4,
                 "verdict": answer.verdict.as_str(),
             }),
             Msg::AdvisorSpoke {

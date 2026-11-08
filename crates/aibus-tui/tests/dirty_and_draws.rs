@@ -46,8 +46,18 @@ fn dirty_names_the_widgets_a_commit_changed() {
 
     app.step(Msg::RouterAnswered {
         fork: ForkId(1400),
-        question: RouterQuestion { kind: "which_tool".into(), prompt: String::new() },
-        answer: RouterAnswer { choice: String::new(), p: 0.5, verdict: Verdict::Split },
+        question: RouterQuestion {
+            kind: "which_tool".into(),
+            context: String::new(),
+            choices: Vec::new(),
+        },
+        answer: RouterAnswer {
+            choice: String::new(),
+            p: 0.5,
+            verdict: Verdict::Split,
+            latency: std::time::Duration::ZERO,
+            source: PSource::Logprob,
+        },
     })
     .unwrap();
     let d = dirty(&app);

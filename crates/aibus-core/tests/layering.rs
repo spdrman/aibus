@@ -29,12 +29,15 @@ fn every_registered_key_is_in_a_known_namespace_and_layers_hold() {
         fork: ForkId(1),
         question: RouterQuestion {
             kind: "which_file".into(),
-            prompt: String::new(),
+            context: String::new(),
+            choices: Vec::new(),
         },
         answer: RouterAnswer {
             choice: String::new(),
             p: 1.0,
             verdict: Verdict::Sharp,
+            latency: std::time::Duration::ZERO,
+            source: PSource::Logprob,
         },
     })
     .unwrap();

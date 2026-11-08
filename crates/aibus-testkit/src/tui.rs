@@ -152,8 +152,14 @@ fn start<G: Graph>(app: &mut App<G>, seq: u128, agent: &str, role: Role, model: 
 fn answer<G: Graph>(app: &mut App<G>, fork: u64, kind: &str, p: f64, verdict: Verdict) {
     app.step(Msg::RouterAnswered {
         fork: ForkId(fork),
-        question: RouterQuestion { kind: kind.into(), prompt: String::new() },
-        answer: RouterAnswer { choice: String::new(), p, verdict },
+        question: RouterQuestion { kind: kind.into(), context: String::new(), choices: Vec::new() },
+        answer: RouterAnswer {
+            choice: String::new(),
+            p: p as f32,
+            verdict,
+            latency: std::time::Duration::ZERO,
+            source: PSource::Logprob,
+        },
     })
     .unwrap();
 }

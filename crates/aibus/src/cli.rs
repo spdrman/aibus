@@ -189,6 +189,10 @@ pub struct RunArgs {
     /// Use this directory for the session instead of one under the state dir
     #[arg(long, value_name = "DIR")]
     pub session_dir: Option<PathBuf>,
+    /// Continue this run of the session in `session_dir` instead of starting one (set by
+    /// `session resume --run`)
+    #[arg(skip)]
+    pub resume: Option<aibus_core::RunId>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -258,6 +262,9 @@ pub enum SessionCmd {
         #[arg(long, value_name = "RUN")]
         run: Option<String>,
         message: Option<String>,
+        /// Play this RON script on the fake provider (for tests)
+        #[arg(long, value_name = "FILE", hide = true)]
+        script: Option<PathBuf>,
     },
     Export {
         id: String,

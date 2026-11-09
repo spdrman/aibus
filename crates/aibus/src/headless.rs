@@ -371,6 +371,7 @@ mod tests {
             summary_file: None,
             duration: Duration::ZERO,
             error,
+            worktree: None,
         }
     }
 

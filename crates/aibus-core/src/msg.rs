@@ -387,16 +387,22 @@ pub enum Command {
     Background {
         run: RunId,
     },
+    /// A run that starts from `parent`'s conversation (the lead's when `None`), plus `prompt`.
+    /// `run` is the id the caller already handed out.
     Fork {
         prompt: String,
         parent: Option<RunId>,
+        run: Option<RunId>,
     },
     Cancel {
         run: RunId,
     },
+    /// Continues a finished run with `message`; `parent` is the run that asked, who gets the
+    /// result (None when a surface did).
     Resume {
         run: RunId,
         message: String,
+        parent: Option<RunId>,
     },
     SendMessage {
         run: RunId,

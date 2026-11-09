@@ -16,12 +16,43 @@ use aibus_core::persist::session::{load, read_snapshot, SessionMeta, MSGS};
 use aibus_core::replay::replay_hash;
 use aibus_core::state::value::{get, value_to_json};
 use aibus_core::state::{HANDOFF_LATEST, LEDGER};
-use aibus_core::{AibusError, App, Redactor, SessionId};
+use aibus_core::{AibusError, App, Redactor, RunId, SessionId};
 use aibus_graph::mini::MiniGraph;
 use serde_json::{json, Value as Json};
 
-use crate::cli::{Global, SessionCmd};
+use crate::cli::{Global, RunArgs, SessionCmd};
 use crate::startup::now_ms;
+
+/// `session resume <id> --run <run> "<message>"` as the arguments of a headless run that
+/// continues that run in that session (01 section 5.4).
+pub fn resume_args(
+    g: &Global,
+    id: &str,
+    run: &str,
+    message: Option<String>,
+) -> Result<RunArgs, AibusError> {
+    id.parse::<SessionId>()
+        .map_err(|_| AibusError::Usage(format!("session {id}: not a session id")))?;
+    let dir = g.paths()?.state.join("sessions").join(id);
+    if !dir.join("session.json").is_file() {
+        return Err(AibusError::Usage(format!("no session {id}")));
+    }
+    let run_id: RunId = run
+        .parse()
+        .map_err(|_| AibusError::Usage(format!("run {run}: not a run id")))?;
+    if !dir.join("runs").join(run).join("conversation.jsonl").is_file() {
+        return Err(AibusError::Usage(format!("session {id} has no saved conversation for run {run}")));
+    }
+    let message = message
+        .filter(|m| !m.trim().is_empty())
+        .ok_or_else(|| AibusError::Usage("session resume --run <run> needs a message".into()))?;
+    Ok(RunArgs {
+        prompt: Some(message),
+        session_dir: Some(dir),
+        resume: Some(run_id),
+        ..RunArgs::default()
+    })
+}
 
 pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
     let paths = g.paths()?;
@@ -150,7 +181,7 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                 writeln!(out, "{} sessions removed", removed.len())?;
             }
         }
-        SessionCmd::Resume { id, run, message } => {
+        SessionCmd::Resume { id, run, message, .. } => {
             let dir = dir_of(id)?;
             let (snap, tail) = load(&dir)?;
             let mut app = App::new(MiniGraph::new(), now_ms);

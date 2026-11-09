@@ -256,6 +256,26 @@ fn setup_compacting(a: &mut A) {
     a.step(Msg::Command(Command::Compact { run: R() })).unwrap();
 }
 
+fn setup_finished(a: &mut A) {
+    running(a);
+    a.step(Msg::RunFinished {
+        run: R(),
+        result: RunResult {
+            run_id: R(),
+            agent: "worker".parse().unwrap(),
+            status: RunStatus::Completed,
+            turns: 1,
+            usage: Usage::default(),
+            summary: "done".into(),
+            summary_file: None,
+            duration: Duration::from_secs(1),
+            error: None,
+            worktree: None,
+        },
+    })
+    .unwrap();
+}
+
 fn setup_queued(a: &mut A) {
     a.step(delegate()).unwrap();
 }
@@ -444,6 +464,7 @@ pub fn cases() -> Vec<Case> {
                     summary_file: None,
                     duration: Duration::from_secs(1),
                     error: None,
+                    worktree: None,
                 },
             },
             expect: vec![
@@ -623,10 +644,12 @@ pub fn cases() -> Vec<Case> {
                 k
             },
         ),
-        cmd(
+        cmd_on(
+            running,
             Command::Fork {
                 prompt: SENTINEL.into(),
                 parent: None,
+                run: None,
             },
             {
                 let mut k = new_run_keys();
@@ -647,12 +670,18 @@ pub fn cases() -> Vec<Case> {
             vec!["model:run:<id>:cancel_requested", "model:run:<id>:status"],
         ),
         cmd_on(
-            running,
+            setup_finished,
             Command::Resume {
                 run: R(),
                 message: SENTINEL.into(),
+                parent: None,
             },
-            vec!["model:run:<id>:status"],
+            vec![
+                "model:run:<id>:cancel_requested",
+                "model:run:<id>:error",
+                "model:run:<id>:meta",
+                "model:run:<id>:status",
+            ],
         ),
         cmd_on(
             running,

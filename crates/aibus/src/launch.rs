@@ -10,8 +10,8 @@ use aibus_core::config::Config;
 use aibus_core::{
     expand, AccountCredential, AccountName, AccountRegistry, AdvisorSeat, AgentDef, AgentName,
     AibusError, Assist, Budgets, CredentialSource, CredentialStore, HookRunner, Isolation,
-    Launcher, ModelDefaults, ModelId, Redactor, RouterSeat, RunConfig, RunDeps, RunId, Seat,
-    SelectHints, SpawnSpec, ToolExecutor, ToolLimits, ToolPattern,
+    Launcher, ModelCompactor, ModelDefaults, ModelId, Redactor, RouterSeat, RunConfig, RunDeps,
+    RunId, Seat, SelectHints, SpawnSpec, Start, ToolExecutor, ToolLimits, ToolPattern,
 };
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::{AuthMethodKind, Credential, ModelRef, Provider, Secret};
@@ -51,9 +51,19 @@ pub struct ChildLauncher {
     pub max_spawn_depth: u8,
     /// Each started run's account and model, so a child can inherit its parent's.
     pub chosen: Mutex<HashMap<RunId, (AccountName, ModelId)>>,
+    /// The definition each started run got (with `--deny` applied), so a fork runs its parent's
+    /// and a resume its own, even when the files were edited since.
+    pub defs: Mutex<HashMap<RunId, AgentDef>>,
+    /// `<cache>/worktrees/<session>`: where an isolated run's checkout goes (09 section 7).
+    pub worktrees: PathBuf,
     /// The advisor, the router and the ledger every run of the session shares; set once at
     /// startup by `set_assist`.
     pub assist: OnceLock<Arc<Assist>>,
+}
+
+/// What was remembered for `run`.
+fn recall<T: Clone>(m: &Mutex<HashMap<RunId, T>>, run: RunId) -> Option<T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner).get(&run).cloned()
 }
 
 impl ChildLauncher {
@@ -202,12 +212,16 @@ impl ChildLauncher {
             defs.iter().map(|d| (d.name.clone(), d.clone())).collect();
     }
 
-    /// Records what `run` runs on, for the children it will have.
-    pub fn remember(&self, run: RunId, account: &AccountName, model: &ModelId) {
+    /// Records what `run` runs on, for the children it will have, and what it is defined as.
+    pub fn remember(&self, run: RunId, account: &AccountName, model: &ModelId, def: &AgentDef) {
         self.chosen
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(run, (account.clone(), model.clone()));
+        self.defs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run, def.clone());
     }
 }
 
@@ -218,40 +232,75 @@ impl Launcher for ChildLauncher {
         prompt: String,
         tx: mpsc::Sender<aibus_core::Msg>,
     ) -> Result<(RunConfig, RunDeps), String> {
-        if spec.isolation == Isolation::Worktree {
-            return Err("isolation: worktree is not available yet".into());
-        }
-        let mut def = self
-            .agents
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&spec.agent)
-            .cloned()
-            .ok_or_else(|| format!("no agent named {}", spec.agent))?;
-        def.tools.deny.extend(self.deny.iter().cloned());
-
-        let parent = spec.parent.and_then(|p| {
-            self.chosen
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get(&p)
-                .cloned()
-        });
-        // The caller's model, else the definition's. `inherit` takes the parent's, or the
-        // session's when the parent is unknown.
-        let target = match (&spec.model, expand(&def.model, &self.defaults), &parent) {
-            (Some(m), _, _) => self.registry.model_ref(m),
-            (None, ModelRef::Inherit, None) => self.session_default.clone(),
-            (None, other, _) => other,
+        // A fork is its parent over again, a resume is the run again; anything else starts from
+        // the definition by name.
+        let again = if spec.fork { spec.parent } else { spec.resume.then_some(spec.run) };
+        let mut def: AgentDef = match again.and_then(|r| recall(&self.defs, r)) {
+            Some(def) => def,
+            None => {
+                let mut def = self
+                    .agents
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&spec.agent)
+                    .cloned()
+                    .ok_or_else(|| format!("no agent named {}", spec.agent))?;
+                def.tools.deny.extend(self.deny.iter().cloned());
+                def
+            }
         };
-        let hints = SelectHints {
-            explicit: spec.account.clone(),
-            agent: def.account.clone(),
-            inherit: parent,
-            ..SelectHints::default()
+        if spec.fork {
+            // The same agent as the parent, so it is not offered what only a definition's own
+            // name could reach.
+            def.name = spec.agent.clone();
+        }
+
+        let parent = spec.parent.and_then(|p| recall(&self.chosen, p));
+        let same = again.and_then(|r| recall(&self.chosen, r));
+        // The caller's model, else the definition's. `inherit` takes the parent's, or the
+        // session's when the parent is unknown. A fork and a resume keep the model and the
+        // account of the run they continue.
+        let (target, hints) = match same {
+            Some((account, model)) => (
+                ModelRef::Full(model),
+                SelectHints {
+                    explicit: Some(account),
+                    ..SelectHints::default()
+                },
+            ),
+            None => (
+                match (&spec.model, expand(&def.model, &self.defaults), &parent) {
+                    (Some(m), _, _) => self.registry.model_ref(m),
+                    (None, ModelRef::Inherit, None) => self.session_default.clone(),
+                    (None, other, _) => other,
+                },
+                SelectHints {
+                    explicit: spec.account.clone(),
+                    agent: def.account.clone(),
+                    inherit: parent,
+                    ..SelectHints::default()
+                },
+            ),
         };
         let picked = self.pick(&target, &hints).map_err(|e| e.to_string())?;
-        self.remember(spec.run, &picked.account, &picked.model);
+        self.remember(spec.run, &picked.account, &picked.model, &def);
+
+        // `isolation: worktree` from the call or the definition (09 section 7). A resumed run
+        // finds its kept checkout where it left it.
+        let (cwd, worktree) = if spec.isolation == Isolation::Worktree
+            || def.isolation == Isolation::Worktree
+        {
+            let at = self.worktrees.join(spec.run.to_string());
+            let info = aibus_core::worktree::create(&self.cwd, &at)?;
+            (info.cwd.clone(), Some(info))
+        } else {
+            (self.cwd.clone(), None)
+        };
+        let compactor: Arc<dyn aibus_core::Compactor> = Arc::new(ModelCompactor {
+            provider: picked.provider.clone(),
+            creds: picked.creds.clone(),
+            model: picked.model.clone(),
+        });
 
         Ok((
             RunConfig {
@@ -262,7 +311,7 @@ impl Launcher for ChildLauncher {
                 depth: spec.depth,
                 model: picked.model,
                 account: picked.account,
-                cwd: self.cwd.clone(),
+                cwd,
                 runs_dir: self.runs_dir.clone(),
                 limits: self.limits,
                 budgets: self.budgets,
@@ -272,6 +321,8 @@ impl Launcher for ChildLauncher {
                 background: spec.background,
                 max_spawn_depth: self.max_spawn_depth,
                 forced: None,
+                start: Start::New,
+                worktree,
             },
             RunDeps {
                 provider: picked.provider,
@@ -279,7 +330,7 @@ impl Launcher for ChildLauncher {
                 tools: self.tools.clone(),
                 tx,
                 hooks: self.hooks.clone(),
-                compactor: None,
+                compactor: Some(compactor),
                 assist: self.assist.get().cloned(),
             },
         ))

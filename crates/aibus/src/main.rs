@@ -71,6 +71,16 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Config(c)) => commands::config(&c, &cli.global),
         Some(Command::Agent(c)) => agent_cmd::agent(&c, &cli.global),
         Some(Command::Account(c)) => commands::account(&c, &cli.global, redactor),
+        Some(Command::Session(cli::SessionCmd::Resume {
+            id,
+            run: Some(run),
+            message,
+            script,
+        })) => {
+            let mut args = session_cmd::resume_args(&cli.global, &id, &run, message)?;
+            args.script = script;
+            headless::run(cli.global, args, redactor.clone())
+        }
         Some(Command::Session(c)) => session_cmd::session(&c, &cli.global, redactor),
         Some(Command::Workflow(WorkflowCmd::List { names })) => {
             commands::workflow_list(&cli.global, names)

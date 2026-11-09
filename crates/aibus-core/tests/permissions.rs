@@ -508,6 +508,8 @@ async fn drive(
             background: false,
             max_spawn_depth: 3,
             forced: None,
+            start: Start::New,
+            worktree: None,
         },
         RunDeps {
             provider: fake,

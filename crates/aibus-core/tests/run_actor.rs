@@ -180,6 +180,8 @@ fn start(script: Script, def: AgentDef, cwd: &Path, runs_dir: &Path) -> Rig {
             background: false,
             max_spawn_depth: 3,
             forced: None,
+            start: Start::New,
+            worktree: None,
         },
         RunDeps {
             provider: fake.clone(),
@@ -512,6 +514,7 @@ fn result_with(summary: &str) -> RunResult {
         summary_file: None,
         duration: Duration::ZERO,
         error: None,
+        worktree: None,
     }
 }
 

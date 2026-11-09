@@ -13,9 +13,10 @@ use serde_json::{json, Value};
 
 use super::readonly::input;
 use crate::agent::{Isolation, PermissionMode};
-use crate::ids::{AccountName, AgentName};
+use crate::ids::{AccountName, AgentName, RunId};
 use crate::msg::{Command, Msg};
 use crate::orchestrator::{Orchestrator, Waited};
+use tokio::sync::oneshot;
 use crate::run::result;
 use crate::tool::{Need, Tool, ToolCx, ToolError, ToolOutput};
 
@@ -69,8 +70,19 @@ impl Tool for Delegate {
         }
     }
 
-    fn needs_permission(&self, _: &Value, _: PermissionMode) -> Need {
-        Need::Never
+    /// A worktree is a checkout the model can run commands in, so it asks like `bash` does
+    /// (09 section 3): when the call asks for one, or the agent's definition does.
+    fn needs_permission(&self, input: &Value, _: PermissionMode) -> Need {
+        let asked = input.get("isolation").and_then(Value::as_str) == Some("worktree");
+        let by_definition = input
+            .get("agent")
+            .and_then(Value::as_str)
+            .is_some_and(|a| self.orch.roster().isolated.iter().any(|i| i.as_str() == a));
+        if asked || by_definition {
+            Need::Ask
+        } else {
+            Need::Never
+        }
     }
 
     async fn call(&self, cx: &ToolCx, v: Value) -> Result<ToolOutput, ToolError> {
@@ -103,27 +115,43 @@ impl Tool for Delegate {
             model: i.model,
             account: i.account.map(|a| AccountName(a.into())),
         });
-        if cx.tx.send(queued).await.is_err() {
+        queue_and_answer(&self.orch, cx, queued, run, wait).await
+    }
+}
+
+/// What `delegate`, `fork` and `resume_run` do once they hold a run id: queue the command, then
+/// answer at once with the id (background) or when the run's result arrives (foreground).
+pub(super) async fn queue_and_answer(
+    orch: &Orchestrator,
+    cx: &ToolCx,
+    queued: Msg,
+    run: RunId,
+    wait: Option<oneshot::Receiver<Waited>>,
+) -> Result<ToolOutput, ToolError> {
+    let json_out = |v: Value| ToolOutput {
+        content: v.to_string(),
+        ..Default::default()
+    };
+    if cx.tx.send(queued).await.is_err() {
+        return Err(ToolError::Cancelled);
+    }
+    let Some(wait) = wait else {
+        return Ok(json_out(json!({ "run_id": run.to_string() })));
+    };
+    let waited = tokio::select! {
+        biased;
+        () = cx.cancel.cancelled() => {
+            orch.cancel(run);
             return Err(ToolError::Cancelled);
         }
-        let Some(wait) = wait else {
-            return Ok(json_out(json!({ "run_id": run.to_string() })));
-        };
-        let waited = tokio::select! {
-            biased;
-            () = cx.cancel.cancelled() => {
-                self.orch.cancel(run);
-                return Err(ToolError::Cancelled);
-            }
-            w = wait => w,
-        };
-        Ok(match waited {
-            Ok(Waited::Done(r)) => ToolOutput {
-                content: result::wrap(&r),
-                ..Default::default()
-            },
-            Ok(Waited::Detached) => json_out(json!({ "run_id": run.to_string(), "background": true })),
-            Err(_) => json_out(json!({ "error": "the orchestrator went away" })),
-        })
-    }
+        w = wait => w,
+    };
+    Ok(match waited {
+        Ok(Waited::Done(r)) => ToolOutput {
+            content: result::wrap(&r),
+            ..Default::default()
+        },
+        Ok(Waited::Detached) => json_out(json!({ "run_id": run.to_string(), "background": true })),
+        Err(_) => json_out(json!({ "error": "the orchestrator went away" })),
+    })
 }

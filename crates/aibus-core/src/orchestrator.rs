@@ -12,13 +12,16 @@ use aibus_graph::{Graph, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{roster, AgentDef, Role, Scope};
+use crate::agent::{roster, AgentDef, Isolation, Role, Scope};
 use crate::config;
 use crate::effects::SpawnSpec;
 use crate::error::AibusError;
 use crate::ids::{AgentName, RunId};
 use crate::msg::{Command, Msg};
-use crate::run::{result, RunConfig, RunDeps, RunError, RunErrorKind, RunMail, RunResult, RunStatus};
+use crate::run::{
+    result, RunConfig, RunDeps, RunError, RunErrorKind, RunMail, RunResult,
+    RunStatus, Start,
+};
 use crate::state::store::Store;
 use crate::state::value::{as_i64, get, map, n};
 use crate::state::{ORCH_COUNTS, RUNS_ORDER};
@@ -116,6 +119,8 @@ pub struct Roster {
     /// One `- name: description` line per non-built-in definition (01 section 1.5).
     pub text: String,
     pub builtins: Vec<AgentName>,
+    /// Agents whose definition says `isolation: worktree`.
+    pub isolated: Vec<AgentName>,
 }
 
 impl Roster {
@@ -126,6 +131,10 @@ impl Roster {
             text: roster::text(defs.clone()),
             builtins: workers()
                 .filter(|d| d.source.scope == Scope::Builtin)
+                .map(|d| d.name.clone())
+                .collect(),
+            isolated: workers()
+                .filter(|d| d.isolation == Isolation::Worktree)
                 .map(|d| d.name.clone())
                 .collect(),
         }
@@ -178,6 +187,9 @@ struct Inner {
     live: HashMap<RunId, Live>,
     waiting: HashMap<RunId, oneshot::Sender<Waited>>,
     parent_of: HashMap<RunId, RunId>,
+    /// Every run the graph has shown, oldest first, with its agent: what `resume_run` and
+    /// `send_message` look names and ids up in.
+    known: Vec<(RunId, AgentName)>,
 }
 
 pub struct Orchestrator {
@@ -223,6 +235,42 @@ impl Orchestrator {
         lock(&self.inner).live.get(&run).map(|l| l.mailbox.clone())
     }
 
+    /// The run a tool names: an id, or an agent name (the latest run of that agent). `Err` is
+    /// what the tool says back.
+    pub fn resolve(&self, key: &str) -> Result<RunId, String> {
+        let g = lock(&self.inner);
+        if let Ok(id) = key.parse::<RunId>() {
+            return match g.known.iter().any(|(r, _)| *r == id) || g.live.contains_key(&id) {
+                true => Ok(id),
+                false => Err(format!("no run {key} in this session")),
+            };
+        }
+        g.known
+            .iter()
+            .rev()
+            .find(|(_, a)| a.as_str() == key)
+            .map(|(r, _)| *r)
+            .ok_or_else(|| format!("no run of an agent named {key} in this session"))
+    }
+
+    /// Whether `run` is going (it holds a mailbox).
+    pub fn is_live(&self, run: RunId) -> bool {
+        lock(&self.inner).live.contains_key(&run)
+    }
+
+    /// `send_message` (01 section 5.4): queues `text` for a run that is still going, which reads
+    /// it at its next turn. `Err` is what the tool says back.
+    pub fn message(&self, run: RunId, text: String) -> Result<(), String> {
+        match self.mailbox(run) {
+            None => Err(format!(
+                "run {run} has finished; use resume_run to continue it"
+            )),
+            Some(m) => m
+                .try_send(RunMail::UserMessage(text))
+                .map_err(|_| format!("run {run} cannot take another message right now")),
+        }
+    }
+
     /// Refreshes the counts the limit check reads from the graph, and forgets the requests the
     /// graph now shows.
     pub fn observe(&self, graph: &dyn Graph) {
@@ -245,6 +293,22 @@ impl Orchestrator {
             queued,
             total: running + queued + done + failed,
         };
+        if let Some(Value::List(order)) = graph.read_key(RUNS_ORDER) {
+            // Runs are only ever added to the end, and an agent never changes.
+            for id in order.iter().skip(g.known.len()) {
+                let run = crate::state::value::as_str(id).and_then(|i| i.parse::<RunId>().ok());
+                let agent = run
+                    .and_then(|r| graph.read_key(&crate::state::run_key(r, "meta")))
+                    .and_then(|m| get(m, "agent"))
+                    .and_then(crate::state::value::as_str)
+                    .and_then(|a| a.parse::<AgentName>().ok());
+                if let (Some(run), Some(agent)) = (run, agent) {
+                    g.known.push((run, agent));
+                } else {
+                    break;
+                }
+            }
+        }
         if !g.pending.is_empty() {
             if let Some(Value::List(order)) = graph.read_key(RUNS_ORDER) {
                 for id in order.iter() {
@@ -265,6 +329,17 @@ impl Orchestrator {
         parent: RunId,
         background: bool,
     ) -> Result<(RunId, Option<oneshot::Receiver<Waited>>), String> {
+        self.reserve_as(parent, background, None)
+    }
+
+    /// `reserve`, for a run that exists already when `again` names it (`resume_run`): it is not
+    /// a new run for the session's count, and the graph already shows it.
+    pub fn reserve_as(
+        &self,
+        parent: RunId,
+        background: bool,
+        again: Option<RunId>,
+    ) -> Result<(RunId, Option<oneshot::Receiver<Waited>>), String> {
         let l = &self.limits;
         let mut g = lock(&self.inner);
         let pending = g.pending.len() as u32;
@@ -274,11 +349,13 @@ impl Orchestrator {
                 l.max_concurrent_runs
             ));
         }
-        if g.tally.total + pending >= l.max_runs_per_session {
+        if again.is_none() && g.tally.total + pending >= l.max_runs_per_session {
             return Err(format!("session run limit reached ({})", l.max_runs_per_session));
         }
-        let id = RunId::new();
-        g.pending.insert(id);
+        let id = again.unwrap_or_default();
+        if again.is_none() {
+            g.pending.insert(id);
+        }
         g.parent_of.insert(id, parent);
         let rx = (!background).then(|| {
             let (tx, rx) = oneshot::channel();
@@ -293,6 +370,13 @@ impl Orchestrator {
     pub fn detach(&self, run: RunId) {
         if let Some(w) = lock(&self.inner).waiting.remove(&run) {
             let _ = w.send(Waited::Detached);
+        }
+    }
+
+    /// `/compact`: the run compacts at its next turn boundary.
+    pub fn compact(&self, run: RunId) {
+        if let Some(m) = self.mailbox(run) {
+            let _ = m.try_send(RunMail::Compact);
         }
     }
 
@@ -327,14 +411,24 @@ impl Orchestrator {
     }
 
     /// Starts a queued run. Idempotent by id: a run that is live is left alone. A run whose parent
-    /// is not live is cancelled instead of started.
-    pub fn start(self: &Arc<Self>, launcher: &dyn Launcher, store: &Store, spec: SpawnSpec) {
-        let parent_gone = {
+    /// is not live is cancelled instead of started. A fork first asks its parent for the
+    /// conversation it starts from, so it is on its way once the parent reaches a turn boundary.
+    pub fn start(
+        self: &Arc<Self>,
+        launcher: &Arc<dyn Launcher>,
+        store: &Store,
+        spec: SpawnSpec,
+    ) {
+        let (parent_gone, parent_mail) = {
             let g = lock(&self.inner);
             if g.live.contains_key(&spec.run) {
                 return;
             }
-            spec.parent.is_some_and(|p| !g.live.contains_key(&p))
+            let parent = spec.parent.and_then(|p| g.live.get(&p));
+            (
+                spec.parent.is_some() && parent.is_none(),
+                parent.map(|l| l.mailbox.clone()),
+            )
         };
         if parent_gone {
             self.send_later(Msg::Command(Command::Cancel { run: spec.run }));
@@ -345,11 +439,40 @@ impl Orchestrator {
             Value::Handle(h) => store.text(h).map(|t| t.to_string()).unwrap_or_default(),
             _ => String::new(),
         };
+        let start = if spec.resume { Start::Resume } else { Start::New };
+        if !spec.fork {
+            return self.launch(launcher, &spec, prompt, start);
+        }
+        let (reply, seed) = oneshot::channel();
+        let asked = parent_mail.is_some_and(|m| m.try_send(RunMail::Fork { reply }).is_ok());
+        if !asked {
+            return self.refuse(&spec, "the run to fork from cannot be reached".into());
+        }
+        let (me, launcher) = (self.clone(), launcher.clone());
+        tokio::spawn(async move {
+            match seed.await {
+                Ok(mut conv) => {
+                    conv.push_user_text(prompt.clone());
+                    me.launch(&launcher, &spec, prompt, Start::Fork(Box::new(conv)));
+                }
+                Err(_) => me.refuse(&spec, "the run to fork from ended first".into()),
+            }
+        });
+    }
+
+    fn launch(
+        self: &Arc<Self>,
+        launcher: &Arc<dyn Launcher>,
+        spec: &SpawnSpec,
+        prompt: String,
+        start: Start,
+    ) {
         let (tap, mut seen) = mpsc::channel(crate::app::MSG_CAPACITY);
-        let (cfg, deps) = match launcher.launch(&spec, prompt, tap) {
+        let (mut cfg, deps): (RunConfig, RunDeps) = match launcher.launch(spec, prompt, tap) {
             Ok(built) => built,
-            Err(why) => return self.refuse(&spec, why),
+            Err(why) => return self.refuse(spec, why),
         };
+        cfg.start = start;
         let handle = crate::run::spawn(cfg, deps);
         {
             let mut g = lock(&self.inner);
@@ -404,6 +527,7 @@ impl Orchestrator {
             summary_file: None,
             duration: Default::default(),
             error: Some(error),
+            worktree: None,
         });
     }
 

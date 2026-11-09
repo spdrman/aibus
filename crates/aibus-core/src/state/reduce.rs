@@ -44,6 +44,8 @@ struct Queue<'a> {
     run: Option<RunId>,
     model: Option<&'a str>,
     account: Option<&'a str>,
+    /// Starts from the conversation of `parent`, whose agent it runs.
+    fork: bool,
 }
 
 impl<'a> Queue<'a> {
@@ -64,6 +66,7 @@ impl<'a> Queue<'a> {
             run: None,
             model: None,
             account: None,
+            fork: false,
         }
     }
 }
@@ -222,6 +225,11 @@ impl R<'_> {
             ("isolation", s(q.isolation.as_str())),
             ("prompt", self.store.inline_or_handle(q.prompt)),
         ]);
+        let meta = if q.fork {
+            with(&meta, "fork", Value::Bool(true))
+        } else {
+            meta
+        };
         // A parent that already ended can no longer take the result: the run is never started.
         let orphan = q.parent.is_some_and(|p| {
             self.status(&p.to_string())
@@ -428,8 +436,31 @@ impl R<'_> {
                     self.log("info", "moved to the background");
                 }
             }
-            Command::Fork { prompt, parent } => {
-                self.queue_run(Queue::new("fork", prompt, false, Isolation::None, *parent))
+            Command::Fork { prompt, parent, run } => {
+                // The user's `/fork` has no parent of its own: it forks the lead.
+                let parent = parent.or_else(|| {
+                    as_list(self.cur(RUNS_ORDER))
+                        .first()
+                        .and_then(as_str)
+                        .and_then(|id| id.parse().ok())
+                });
+                let meta = parent.map(|p| self.cur(&run_key(p, "meta")).clone());
+                let agent = meta.as_ref().and_then(|m| get(m, "agent")).and_then(as_str);
+                match (parent, agent) {
+                    (Some(parent), Some(agent)) => {
+                        let role = get(meta.as_ref().unwrap_or(&NULL), "role")
+                            .and_then(as_str)
+                            .and_then(Role::parse);
+                        let agent = agent.to_owned();
+                        self.queue_run(Queue {
+                            role,
+                            run: *run,
+                            fork: true,
+                            ..Queue::new(&agent, prompt, true, Isolation::None, Some(parent))
+                        })
+                    }
+                    _ => self.log("warn", "nothing to fork"),
+                }
             }
             Command::Cancel { run } => {
                 self.put(run_key(run, "cancel_requested"), Value::Bool(true));
@@ -438,7 +469,28 @@ impl R<'_> {
                     self.cancel_queued_below(&run.to_string());
                 }
             }
-            Command::Resume { run, .. } => self.set_status(run, RunStatus::Queued),
+            Command::Resume {
+                run,
+                message,
+                parent,
+            } => {
+                let id = run.to_string();
+                if !self.status(&id).is_some_and(RunStatus::is_terminal) {
+                    self.log("warn", "only a finished run can be resumed");
+                    return;
+                }
+                let key = run_key(run, "meta");
+                let meta = with(
+                    self.cur(&key),
+                    "parent",
+                    parent.map_or(Value::Null, |p| s(&p.to_string())),
+                );
+                let meta = with(&meta, "prompt", self.store.inline_or_handle(message));
+                self.put(key, with(&meta, "resume", Value::Bool(true)));
+                self.set_status(run, RunStatus::Queued);
+                self.put(run_key(run, "error"), Value::Null);
+                self.put(run_key(run, "cancel_requested"), Value::Bool(false));
+            }
             Command::Retry { run } => {
                 self.set_status(run, RunStatus::Queued);
                 self.put(run_key(run, "error"), Value::Null);
@@ -478,6 +530,21 @@ impl R<'_> {
                 self.log("info", "queued request");
             }
         }
+    }
+}
+
+/// `/compact` and `/fork <task>` typed while a lead runs: the command, aimed at the lead.
+fn slash(text: &str, lead: Option<&str>) -> Option<Command> {
+    let lead: RunId = lead?.parse().ok()?;
+    let (word, rest) = text.trim().split_once(char::is_whitespace).unwrap_or((text.trim(), ""));
+    match word {
+        "/compact" => Some(Command::Compact { run: lead }),
+        "/fork" if !rest.trim().is_empty() => Some(Command::Fork {
+            prompt: rest.trim().to_owned(),
+            parent: Some(lead),
+            run: None,
+        }),
+        _ => None,
     }
 }
 
@@ -584,6 +651,8 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     role: Some(Role::Lead),
                     ..Queue::new("lead", text, false, Isolation::None, None)
                 });
+            } else if let Some(c) = slash(text, as_list(r.cur(RUNS_ORDER)).first().and_then(as_str)) {
+                r.command(&c);
             } else if let Some((agent, rest)) = parse_mention(text) {
                 // `@agent-<name> <rest>` is a forced delegate; the lead still gets the result.
                 let lead = as_list(r.cur(RUNS_ORDER))
@@ -628,6 +697,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 ("isolation", base("isolation", s("none"))),
                 ("prompt", base("prompt", s(""))),
             ]);
+            // Only a fork carries the mark, and a resume's is spent once the run starts.
+            let meta = match get(&old, "fork") {
+                Some(f) => with(&meta, "fork", f.clone()),
+                None => meta,
+            };
             if had {
                 r.put(run_key(&id, "meta"), meta);
                 r.set_status(&id, RunStatus::Starting);
@@ -924,7 +998,15 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.put(ACCOUNTS, list(items));
             r.log("info", &format!("{} accounts loaded", accounts.len()));
         }
-        Msg::IoError { context, .. } => r.log("error", &format!("io error in {context}")),
+        Msg::IoError { context, .. } => {
+            // A compaction that failed leaves the run running again (`Compact` set `compacting`).
+            if let Some(run) = context.strip_prefix("compacting ") {
+                if r.status(run) == Some(RunStatus::Compacting) {
+                    r.set_status(run, RunStatus::Running);
+                }
+            }
+            r.log("error", &format!("io error in {context}"))
+        }
         Msg::Shutdown { reason } => r.put(SHUTDOWN, s(reason.as_str())),
     }
     Ok(())

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git")

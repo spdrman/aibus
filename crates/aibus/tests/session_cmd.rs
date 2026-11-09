@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use common::{aibus, ndjson, stderr};
 use serde_json::Value;
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 

@@ -1,8 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-# Own lockfile and the private causl source: see crates/aibus-graph-causl/Cargo.toml.
-exclude = ["crates/aibus-graph-causl"]
+# Own lockfile and the private causl source: see crates/aibus-graph-causl/Cargo.toml. `fuzz` is
+# cargo-fuzz (nightly) with its own lockfile.
+exclude = ["crates/aibus-graph-causl", "fuzz"]
 
 [workspace.package]
 version = "0.0.0"

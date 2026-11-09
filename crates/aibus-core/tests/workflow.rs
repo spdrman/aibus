@@ -19,7 +19,7 @@ use aibus_provider::{ContentBlock, MessageRole, StopReason};
 use aibus_testkit::fake_credential;
 use common::{app, A};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {

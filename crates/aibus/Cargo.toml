@@ -36,6 +36,7 @@ signal-hook = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+aibus-testkit.workspace = true
 zstd = "0.13"
 regex = "1"
 ulid = "1"

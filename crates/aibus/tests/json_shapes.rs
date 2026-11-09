@@ -9,7 +9,7 @@ use std::fs;
 use common::schema::{assert_valid, check};
 use common::{aibus, command, ndjson, stderr};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 fn out_json(out: &std::process::Output) -> Value {
     serde_json::from_slice(&out.stdout)

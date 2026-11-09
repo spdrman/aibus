@@ -63,7 +63,7 @@ fn drive(w: &mut SessionWriter, app: &mut App<MiniGraph>, msgs: impl IntoIterato
 
 #[test]
 fn the_last_snapshot_plus_the_logged_commits_rebuild_the_session() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     let resizes = (0..70).map(|i| Msg::Resize { cols: 80 + i, rows: 24 });
@@ -83,7 +83,7 @@ fn the_last_snapshot_plus_the_logged_commits_rebuild_the_session() {
 
 #[test]
 fn the_shutdown_snapshot_alone_is_the_whole_session() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     drive(&mut w, &mut a, recorded());
@@ -100,7 +100,7 @@ fn the_shutdown_snapshot_alone_is_the_whole_session() {
 
 #[test]
 fn every_recorded_msg_replays_from_msgs_jsonl_zst_to_the_recorded_hash() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     drive(&mut w, &mut a, recorded());
@@ -115,7 +115,7 @@ fn every_recorded_msg_replays_from_msgs_jsonl_zst_to_the_recorded_hash() {
 
 #[test]
 fn a_transcript_has_the_07_line_types_and_meta_json() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     let msgs = recorded();
@@ -167,7 +167,7 @@ fn a_transcript_has_the_07_line_types_and_meta_json() {
 
 #[test]
 fn a_registered_secret_never_reaches_the_transcript_or_msgs() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let redactor = Redactor::new();
     redactor.register(&AccountName("work".into()), "sk-test-SECRET-0123456789");
     let mut a = app();
@@ -214,7 +214,7 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn a_result_over_the_cap_is_cut_and_the_whole_text_goes_to_a_side_file() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     let msgs = recorded();
@@ -247,7 +247,7 @@ fn a_result_over_the_cap_is_cut_and_the_whole_text_goes_to_a_side_file() {
 #[test]
 fn thinking_is_stored_only_when_store_thinking_is_on() {
     let thinking_in = |on: bool| {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = aibus_testkit::TempDir::new().unwrap();
         let mut a = app();
         let persist = Persist { store_thinking: on, ..Persist::default() };
         let mut w = writer(dir.path(), Redactor::new(), &persist);
@@ -275,7 +275,7 @@ fn thinking_is_stored_only_when_store_thinking_is_on() {
 
 #[test]
 fn a_snapshot_survives_a_write_and_a_read() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = aibus_testkit::TempDir::new().unwrap();
     let mut a = app();
     a.step(Msg::Resize { cols: 100, rows: 30 }).unwrap();
     let snap = a.graph.snapshot();

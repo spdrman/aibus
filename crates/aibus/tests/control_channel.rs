@@ -10,7 +10,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 
 use common::{command, schema};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 /// A tool call that needs permission under `default` mode, then an answer that depends on what
 /// the conversation holds.

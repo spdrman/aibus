@@ -12,7 +12,7 @@ use aibus_provider::fake::{FakeProvider, Script, Step};
 use aibus_provider::{MessageRole, StopReason, ToolChoice};
 use aibus_testkit::fake_credential;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {

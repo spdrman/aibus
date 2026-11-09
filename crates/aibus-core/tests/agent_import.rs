@@ -7,7 +7,7 @@ use std::path::Path;
 use aibus_core::agent::discover::discover;
 use aibus_core::agent::import::{import, Outcome};
 use aibus_core::{AgentName, HookKind};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 const REVIEWER: &str = "---
 name: reviewer

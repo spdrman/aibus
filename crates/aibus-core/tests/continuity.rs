@@ -9,7 +9,7 @@ use aibus_core::continuity::handoff::Handoff;
 use aibus_core::continuity::{ledger, Layout};
 use aibus_core::*;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 

@@ -53,6 +53,12 @@ The MSRV pins `wiremock` (a dev-dependency of the provider crates and `aibus-tes
 
 `notify` watches the agent directories for `agents.reload_on_change`. The only new crate with a `build.rs` on Linux is `inotify-sys`, whose script only decides whether to link `libinotify` on NetBSD and OpenBSD. I unpacked `fsevent-sys` (macOS) and `filetime` and neither has one; `kqueue` and `kqueue-sys` only build on the BSDs and I did not unpack them. The MSRV pins `notify` at 8.0.0 and `notify-types` at 2.0.0 in `Cargo.lock` (8.2 needs rustc 1.88); like the other pins, use `cargo update -p <crate> --precise` rather than a bare `cargo update` until the MSRV moves.
 
+## Fuzzing (C2.1)
+
+`fuzz/` is a workspace of its own (it is in the root manifest's `exclude`), with its own `Cargo.lock` started from the root one so the pins above hold. It needs a nightly toolchain and `cargo-fuzz`, and its one extra dependency is `libfuzzer-sys`, whose `build.rs` compiles libFuzzer's C++ sources with the `cc` crate (so a C++ compiler is needed, in the fuzz container only). Nothing in `cargo build --workspace`, `cargo deny` or the MSRV build sees it. `sh tools/fuzz.sh` runs the targets; see `docs/SECURITY.md`.
+
+`aibus-testkit` now has `tempfile`, `zstd` and `base64` as normal dependencies (the `TempDir` that greps its tree for the fake key when a test ends); all three were already in the lock file through other crates, so no new build script comes with them.
+
 ## CI
 
-`.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.
+`.github/workflows/fuzz.yml` runs the fuzz targets nightly. `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.

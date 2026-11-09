@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use aibus_core::replay::replay_hash;
 use common::{aibus, command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 

@@ -10,7 +10,7 @@ use aibus_provider::fake::{FakeProvider, Script, Step};
 use aibus_provider::{ContentBlock, StopReason};
 use aibus_testkit::fake_credential;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 

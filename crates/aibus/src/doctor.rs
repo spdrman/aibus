@@ -44,6 +44,23 @@ fn config_check(g: &Global, paths: &Paths) -> (Check, Option<Config>) {
     }
 }
 
+/// `none` (the default), or the sandbox `[tools] sandbox` names. A kind whose program is not
+/// on `PATH` fails the check, since `bash` would refuse every call.
+fn sandbox_check(cfg: Option<&Config>) -> Check {
+    let tools = cfg.map(|c| &c.tools);
+    let Some(tools) = tools.filter(|t| t.sandbox != config::SandboxKind::None) else {
+        return check("shell sandbox", true, "none");
+    };
+    let sandbox = Sandbox { kind: tools.sandbox, network: tools.sandbox_network };
+    let name = tools.sandbox.as_str();
+    let path = std::env::var("PATH").unwrap_or_default();
+    if !sandbox.available(&path) {
+        return check("shell sandbox", false, format!("{name} is configured but not on PATH"));
+    }
+    let net = if tools.sandbox_network { "" } else { ", network off" };
+    check("shell sandbox", true, format!("{name}{net}"))
+}
+
 /// `keyring (<backend>)` or `unavailable, env/file only`. It only fails when an account is
 /// configured to use a keychain that is not there.
 fn store_check(keychain: &dyn Keychain, cfg: Option<&Config>) -> Check {

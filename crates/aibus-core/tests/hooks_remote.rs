@@ -10,7 +10,7 @@ use aibus_core::config::{Hook, Hooks};
 use aibus_core::*;
 use aibus_testkit::FakeClock;
 use serde_json::{json, Map, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio_util::sync::CancellationToken;
 
 /// Answers from a queue and remembers what it was asked.

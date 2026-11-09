@@ -8,7 +8,7 @@ use std::fs;
 
 use common::schema::assert_valid;
 use common::{command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 const SCRIPT: &str = r##"[
     // the lead: a plan that ends on an intention

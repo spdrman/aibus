@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 use common::{aibus, command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 fn user_config(home: &Path, text: &str) {
     let dir = home.join(".config/aibus");

@@ -14,7 +14,7 @@ use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::*;
 use aibus_graph::Graph;
 use common::*;
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 fn wired() -> (A, Rc<RefCell<Vec<Effect>>>) {
     let mut a = app();

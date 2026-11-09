@@ -5,11 +5,13 @@ pub mod tui;
 
 use std::cell::RefCell;
 use std::io;
+use std::path::Path;
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::{AccountName, AuthMethodKind, Credential, Secret};
+use base64::Engine as _;
 
 /// Virtual time over `tokio::time::pause()`. Sleeps, timeouts and backoffs in the code under
 /// test finish as soon as every task is idle, and the clock jumps forward by exactly what
@@ -84,8 +86,11 @@ impl io::Write for Writer {
 
 struct Active {
     buf: Buffer,
-    forbidden: Vec<String>,
+    forbidden: Forbidden,
 }
+
+/// The secrets a capture checks for; shared between the capture and the thread's active slot.
+type Forbidden = Arc<Mutex<Vec<String>>>;
 
 thread_local! {
     static ACTIVE: RefCell<Option<Active>> = const { RefCell::new(None) };
@@ -97,6 +102,7 @@ thread_local! {
 /// runtime (all of them, since `FakeClock` needs one) log on the thread that holds it.
 pub struct LogCapture {
     buf: Buffer,
+    forbidden: Forbidden,
 }
 
 /// The subscriber is global and installed once. A scoped one is only seen by callsites
@@ -113,13 +119,14 @@ pub fn capture_logs() -> LogCapture {
         tracing::subscriber::set_global_default(subscriber).unwrap();
     });
     let buf: Buffer = Arc::default();
+    let forbidden: Forbidden = Arc::new(Mutex::new(vec![FAKE_KEY.to_owned()]));
     ACTIVE.with(|a| {
         *a.borrow_mut() = Some(Active {
             buf: buf.clone(),
-            forbidden: vec![FAKE_KEY.to_owned()],
+            forbidden: forbidden.clone(),
         });
     });
-    LogCapture { buf }
+    LogCapture { buf, forbidden }
 }
 
 impl LogCapture {
@@ -130,23 +137,33 @@ impl LogCapture {
 
     /// Adds another key (an account's own) to the ones that must never appear.
     pub fn forbid(&self, secret: &str) {
-        ACTIVE.with(|a| {
-            a.borrow_mut()
-                .as_mut()
-                .expect("capture is active")
-                .forbidden
-                .push(secret.to_owned())
-        });
+        self.forbidden.lock().unwrap().push(secret.to_owned());
+    }
+
+    fn check(&self) {
+        let text = self.text();
+        for secret in self.forbidden.lock().unwrap().iter() {
+            assert!(
+                !text.contains(secret.as_str()),
+                "a secret was logged:\n{text}"
+            );
+        }
     }
 }
 
 impl Drop for LogCapture {
     fn drop(&mut self) {
-        let check = !std::thread::panicking();
-        if check {
-            assert_no_secret_logged();
+        if !std::thread::panicking() {
+            self.check();
         }
-        ACTIVE.with(|a| *a.borrow_mut() = None);
+        // Only clear the slot if it is still ours: a test that makes its own capture after a
+        // `TempDir` did replaces the slot, and the older one must not clear the newer.
+        ACTIVE.with(|a| {
+            let mut slot = a.borrow_mut();
+            if slot.as_ref().is_some_and(|s| Arc::ptr_eq(&s.buf, &self.buf)) {
+                *slot = None;
+            }
+        });
     }
 }
 
@@ -159,11 +176,106 @@ pub fn assert_no_secret_logged() {
             .as_ref()
             .expect("assert_no_secret_logged needs a live capture_logs()");
         let text = String::from_utf8_lossy(&active.buf.lock().unwrap()).into_owned();
-        for secret in &active.forbidden {
+        for secret in active.forbidden.lock().unwrap().iter() {
             assert!(
                 !text.contains(secret.as_str()),
                 "a secret was logged:\n{text}"
             );
         }
     });
+}
+
+/// Panics if a file under `root` holds the fake key, or a key added with `LogCapture::forbid`,
+/// as it is or in base64. Files that end in `.zst` are decompressed first, since that is how
+/// the session logs and message recordings are written. Symlinks are not followed.
+pub fn assert_no_secret_on_disk(root: &Path) {
+    let mut keys = vec![FAKE_KEY.to_owned()];
+    ACTIVE.with(|a| {
+        if let Some(active) = a.borrow().as_ref() {
+            keys.extend(active.forbidden.lock().unwrap().iter().cloned());
+        }
+    });
+    let needles: Vec<(String, Vec<u8>)> = keys
+        .iter()
+        .flat_map(|k| {
+            [
+                ("as it is", k.clone().into_bytes()),
+                ("in base64", base64::engine::general_purpose::STANDARD.encode(k).into_bytes()),
+            ]
+        })
+        .map(|(how, n)| (how.to_owned(), n))
+        .collect();
+    let mut todo = vec![root.to_path_buf()];
+    while let Some(dir) = todo.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            let path = entry.path();
+            if kind.is_dir() {
+                todo.push(path);
+                continue;
+            }
+            if !kind.is_file() || entry.metadata().is_ok_and(|m| m.len() > MAX_SCANNED) {
+                continue;
+            }
+            let Ok(raw) = std::fs::read(&path) else { continue };
+            let unpacked = path
+                .extension()
+                .is_some_and(|e| e == "zst")
+                .then(|| zstd::stream::decode_all(raw.as_slice()).unwrap_or_default());
+            for bytes in std::iter::once(&raw).chain(unpacked.as_ref()) {
+                for (how, needle) in &needles {
+                    assert!(
+                        !bytes.windows(needle.len()).any(|w| w == needle.as_slice()),
+                        "{} holds a secret {how}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Files bigger than this are not read by `assert_no_secret_on_disk`.
+const MAX_SCANNED: u64 = 32 * 1024 * 1024;
+
+/// A drop-in for `tempfile::TempDir` that the integration tests use for their temp project,
+/// home and XDG trees. When it is dropped (and the test has not already failed) it greps the
+/// whole tree for the fake key (`assert_no_secret_on_disk`), and it holds a `capture_logs()` for
+/// the test unless one is already running, so every test that makes a directory also checks
+/// that nothing it logged held the key (10 section 4).
+pub struct TempDir {
+    inner: tempfile::TempDir,
+    _logs: Option<LogCapture>,
+}
+
+impl TempDir {
+    pub fn new() -> io::Result<Self> {
+        let live = ACTIVE.with(|a| a.borrow().is_some());
+        Ok(Self {
+            inner: tempfile::TempDir::new()?,
+            _logs: (!live).then(capture_logs),
+        })
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = tempfile::TempDir;
+    fn deref(&self) -> &tempfile::TempDir {
+        &self.inner
+    }
+}
+
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        self.inner.path()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            assert_no_secret_on_disk(self.inner.path());
+        }
+    }
 }

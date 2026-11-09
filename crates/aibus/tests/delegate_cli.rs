@@ -5,7 +5,7 @@ mod common;
 use std::fs;
 
 use common::{aibus, command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 #[test]
 fn an_unknown_agent_exits_3() {

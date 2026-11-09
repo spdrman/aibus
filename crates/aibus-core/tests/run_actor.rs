@@ -15,7 +15,7 @@ use aibus_provider::{
 };
 use aibus_testkit::{fake_credential, FakeClock};
 use serde_json::json;
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 
 fn builtin(name: &str) -> AgentDef {

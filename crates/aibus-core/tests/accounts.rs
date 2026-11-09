@@ -12,7 +12,7 @@ use aibus_provider::{
     AuthMethodKind, ConfigError, ModelRef, Provider, ProviderConfig, ProviderFactory, ProviderId,
     ProviderRegistry, Secret,
 };
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 
 const WORK_KEY: &str = "sk-work-aaaaaaaaaaaa";

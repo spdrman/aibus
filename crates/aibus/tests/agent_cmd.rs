@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use common::{aibus, command, stderr};
 use serde_json::Value;
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()

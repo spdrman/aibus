@@ -10,7 +10,7 @@ use aibus_core::tools::Bash;
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
 use serde_json::json;
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio_util::sync::CancellationToken;
 

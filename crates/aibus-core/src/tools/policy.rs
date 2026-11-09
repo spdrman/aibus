@@ -9,7 +9,7 @@ use crate::tool::ToolError;
 
 /// Shell-word normalisation for `bash(...)` specifiers: leading `NAME=value` assignments are
 /// dropped (quotes and backslashes respected) and runs of whitespace collapse to one space.
-pub(crate) fn normalise_command(cmd: &str) -> String {
+pub fn normalise_command(cmd: &str) -> String {
     let mut rest = cmd.trim_start();
     while let Some(after) = strip_assignment(rest) {
         rest = after.trim_start();
@@ -51,7 +51,7 @@ fn strip_assignment(s: &str) -> Option<&str> {
 
 /// Glob match for a specifier. `*` crosses `/`, so `read(/abs/**)` and `bash(git *)` behave
 /// the way the examples in 09 read. A spec that is not a valid glob matches nothing.
-pub(crate) fn spec_matches(spec: &str, subject: &str) -> bool {
+pub fn spec_matches(spec: &str, subject: &str) -> bool {
     GlobBuilder::new(spec)
         .literal_separator(false)
         .build()

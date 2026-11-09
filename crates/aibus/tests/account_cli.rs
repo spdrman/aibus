@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use common::{aibus, command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 const KEY: &str = "sk-cli-0123456789abcdef";
 

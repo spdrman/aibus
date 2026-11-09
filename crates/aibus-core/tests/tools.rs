@@ -6,7 +6,7 @@ use std::time::Duration;
 use aibus_core::*;
 use aibus_provider::ToolSpec;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 

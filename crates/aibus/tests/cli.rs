@@ -5,7 +5,7 @@ mod common;
 use std::fs;
 
 use common::{aibus, command, stderr};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 const KEY_MSG: &str = "credentials do not go in config; run: aibus account add <name> --key-stdin";
 

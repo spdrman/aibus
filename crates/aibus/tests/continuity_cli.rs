@@ -10,7 +10,7 @@ use std::process::Output;
 use common::schema::assert_valid;
 use common::{aibus, command, ndjson, stderr};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::TempDir;
 
 fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()

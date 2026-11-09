@@ -17,7 +17,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::lock;
+use super::sandbox::Sandbox;
 use crate::agent::PermissionMode;
+use crate::config::SandboxKind;
 use crate::tool::{Need, Tool, ToolCx, ToolError, ToolOutput};
 
 /// How often a running command is checked for exit, timeout and cancel.
@@ -116,9 +118,10 @@ enum End {
     Stopped,
 }
 
-struct Exec<'a> {
-    command: &'a str,
-    cwd: &'a Path,
+struct Exec {
+    /// The shell (or the sandbox wrapped around it), with its arguments and working directory
+    /// set. The environment and the pipes are added when it starts.
+    cmd: Command,
     env: Vec<(String, String)>,
     timeout: Option<Duration>,
     /// Kill what the shell left behind once it exits (a foreground call), instead of leaving
@@ -129,17 +132,12 @@ struct Exec<'a> {
 /// Runs `x` to the end, writing output into `out`. `stop` is polled while it runs; when it
 /// turns true the whole process group is killed.
 fn exec(
-    x: &Exec<'_>,
+    mut x: Exec,
     out: &Arc<Mutex<Tail>>,
     stop: &impl Fn() -> bool,
 ) -> std::io::Result<End> {
-    let mut cmd = Command::new("sh");
-    // stderr is folded into stdout inside the shell, so the two come out in the order the
-    // command wrote them instead of whichever reader thread got scheduled first.
-    cmd.arg("-c")
-        .arg(format!("exec 2>&1\n{}", x.command))
-        .current_dir(x.cwd)
-        .env_clear()
+    let cmd = &mut x.cmd;
+    cmd.env_clear()
         .envs(x.env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -260,6 +258,7 @@ pub struct Bash {
     env: Vec<(String, String)>,
     project_dir: PathBuf,
     session: String,
+    sandbox: Option<Sandbox>,
     jobs: Mutex<(u32, HashMap<String, Job>)>,
 }
 
@@ -280,8 +279,46 @@ impl Bash {
             env,
             project_dir,
             session,
+            sandbox: None,
             jobs: Mutex::new((0, HashMap::new())),
         }
+    }
+
+    /// Runs every command inside `sandbox` (`[tools] sandbox`). A kind that is configured but
+    /// whose program is missing refuses the call; it never falls back to running outside.
+    pub fn with_sandbox(mut self, sandbox: Sandbox) -> Self {
+        self.sandbox = (sandbox.kind != SandboxKind::None).then_some(sandbox);
+        self
+    }
+
+    /// `sh -c script` in `cwd`, wrapped in the sandbox when there is one. stderr is folded into
+    /// stdout inside the shell, so the two come out in the order the command wrote them instead
+    /// of whichever reader thread got scheduled first.
+    fn command(&self, script: &str, cwd: &Path) -> Result<Command, ToolError> {
+        let script = format!("exec 2>&1\n{script}");
+        let var = |name: &str| self.env.iter().find(|(k, _)| k == name).map(|(_, v)| PathBuf::from(v));
+        let mut cmd = match &self.sandbox {
+            None => {
+                let mut c = Command::new("sh");
+                c.arg("-c").arg(script);
+                c
+            }
+            Some(s) => {
+                let path = var("PATH").unwrap_or_default();
+                if !s.available(&path.to_string_lossy()) {
+                    return Err(ToolError::Denied {
+                        reason: format!(
+                            "[tools] sandbox is {} but it is not on PATH; refusing to run outside it",
+                            s.kind.as_str()
+                        ),
+                    });
+                }
+                let tmp = var("TMPDIR").unwrap_or_else(|| PathBuf::from("/tmp"));
+                s.command(&script, &self.project_dir, cwd, &tmp, var("HOME").as_deref())
+            }
+        };
+        cmd.current_dir(cwd);
+        Ok(cmd)
     }
 
     /// State of a background job started by this tool.
@@ -359,6 +396,7 @@ impl Tool for Bash {
             &self.session,
             &cx.run.to_string(),
         );
+        let cmd = self.command(&i.command, &cx.cwd)?;
         let cap = cx.limits.bash_max_output_bytes;
         let out = Arc::new(Mutex::new(Tail::new(cap)));
         let stop = Arc::new(AtomicBool::new(false));
@@ -379,17 +417,15 @@ impl Tool for Bash {
                 );
                 handle
             };
-            let (command, cwd) = (i.command, cx.cwd.clone());
             let timeout = i.timeout.map(|s| Duration::from_secs(u64::from(s)));
             tokio::task::spawn_blocking(move || {
                 let x = Exec {
-                    command: &command,
-                    cwd: &cwd,
+                    cmd,
                     env,
                     timeout,
                     reap: false,
                 };
-                let code = match exec(&x, &out, &|| stop.load(Ordering::SeqCst)) {
+                let code = match exec(x, &out, &|| stop.load(Ordering::SeqCst)) {
                     Ok(End::Exited(code)) => code.unwrap_or(-1),
                     _ => -1,
                 };
@@ -404,16 +440,15 @@ impl Tool for Bash {
         let timeout = Duration::from_secs(u64::from(i.timeout.unwrap_or(self.timeout_secs)));
         let guard = StopOnDrop(Arc::clone(&stop));
         let cancel = cx.cancel.clone();
-        let (command, cwd, tail) = (i.command, cx.cwd.clone(), Arc::clone(&out));
+        let tail = Arc::clone(&out);
         let end = tokio::task::spawn_blocking(move || {
             let x = Exec {
-                command: &command,
-                cwd: &cwd,
+                cmd,
                 env,
                 timeout: Some(timeout),
                 reap: true,
             };
-            exec(&x, &tail, &|| cancel.is_cancelled() || stop.load(Ordering::SeqCst))
+            exec(x, &tail, &|| cancel.is_cancelled() || stop.load(Ordering::SeqCst))
         })
         .await
         .map_err(|e| ToolError::Io(std::io::Error::other(e)))??;

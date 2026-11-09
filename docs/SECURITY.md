@@ -35,7 +35,7 @@ A crash from a fuzz run goes into `fixtures/fuzz/<target>/` with a descriptive n
 Run it in a container, never on a host. The script installs nightly and `cargo-fuzz` itself:
 
 ```
-docker run --rm -v "$PWD":/work -w /work rust:1.85 sh tools/fuzz.sh 60
+docker run --rm -v "$PWD":/work -w /work rust:1.89 sh tools/fuzz.sh 60
 ```
 
 The local run on MARS is the real gate. `.github/workflows/fuzz.yml` is the same thing, manual only (120 seconds per target, crash artifacts uploaded).

@@ -20,7 +20,7 @@ grep-searcher = "0.1"
 ignore = "0.4"
 indexmap = { version = "2", features = ["serde"] }
 regex = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_ignored = "0.1"
 serde_json = "1"

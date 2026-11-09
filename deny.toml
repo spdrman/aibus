@@ -9,7 +9,7 @@ version = 2
 unmaintained = "all"
 yanked = "deny"
 # ratatui 0.29 needs `paste`, a compile-time proc macro with no runtime code. ratatui 0.30 drops it
-# but needs rustc 1.88, and the MSRV is pinned at 1.85. Revisit when the MSRV moves.
+# but is still waiting on the ratatui 0.30 move (the MSRV is 1.89 now, so it can happen).
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but only expands macros at build time; ratatui 0.29 requires it" },
 ]

@@ -6,7 +6,7 @@
 name = "aibus-graph-causl"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/spdrman/aibus"
 publish = false

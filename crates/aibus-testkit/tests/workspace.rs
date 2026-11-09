@@ -138,9 +138,9 @@ fn every_crate_forbids_unsafe_code() {
 }
 
 #[test]
-fn msrv_is_pinned_to_1_85() {
+fn msrv_is_pinned_to_1_89() {
     let toolchain = std::fs::read_to_string(root().join("rust-toolchain.toml")).unwrap();
-    assert!(toolchain.contains("channel = \"1.85\""));
+    assert!(toolchain.contains("channel = \"1.89\""));
     let manifest = std::fs::read_to_string(root().join("Cargo.toml")).unwrap();
-    assert!(manifest.contains("rust-version = \"1.85\""));
+    assert!(manifest.contains("rust-version = \"1.89\""));
 }

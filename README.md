@@ -86,7 +86,7 @@ tar -xzf aibus-<target>.tar.gz && ./aibus-<target>/aibus version
 
 ### Build from source
 
-You need the Rust version in [rust-toolchain.toml](rust-toolchain.toml) (1.85, the MSRV), which `rustup` picks up by itself.
+You need the Rust version in [rust-toolchain.toml](rust-toolchain.toml) (1.89, the MSRV), which `rustup` picks up by itself.
 
 ```sh
 git clone https://github.com/spdrman/aibus && cd aibus

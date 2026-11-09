@@ -109,7 +109,7 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
         }
 
         // Something worth a log row every 20 simulated seconds, so the ring fills and wraps.
-        if (t / SAMPLE_EVERY_MS) % 2 == 0 {
+        if (t / SAMPLE_EVERY_MS).is_multiple_of(2) {
             app.step(Msg::IoError { context: format!("step {t}"), error: "e".into() }).unwrap();
         }
 

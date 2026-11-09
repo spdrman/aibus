@@ -33,4 +33,4 @@ the manual checks.
 
 ### Build
 
-* MSRV is Rust 1.85 (`rust-toolchain.toml`).
+* MSRV is Rust 1.89 (`rust-toolchain.toml`), up from 1.85, because `rusqlite` 0.41 needs it. I moved to 0.41 for the bundled SQLite 3.54 (RUSTSEC-2026-0459).

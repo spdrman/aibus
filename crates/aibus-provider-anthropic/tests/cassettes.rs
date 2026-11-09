@@ -86,6 +86,16 @@ async fn bearer_auth_uses_authorization_and_none_sends_no_key() {
 }
 
 #[tokio::test]
+async fn an_oauth_token_goes_in_authorization_never_in_x_api_key_or_the_body() {
+    let server = server_with("POST", "/v1/messages", "stream_text").await;
+    let _ = collect(&*provider(&server), &cred(AuthMethodKind::OAuth), request("a")).await;
+    let r = sent(&server).await;
+    assert_eq!(r.headers.get("authorization").unwrap().to_str().unwrap(), format!("Bearer {KEY}"));
+    assert!(r.headers.get("x-api-key").is_none());
+    assert!(!String::from_utf8_lossy(&r.body).contains(KEY));
+}
+
+#[tokio::test]
 async fn a_tool_call_streams_start_input_fragments_and_end_and_costs_the_cache() {
     let server = server_with("POST", "/v1/messages", "tool_call").await;
     let mut req = request("read main");

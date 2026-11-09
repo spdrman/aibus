@@ -31,6 +31,9 @@ pub enum CredentialError {
     /// No keychain on this machine. `account add` offers `--env` and `--file` instead.
     #[error("no keychain available: {0}; use --env <VAR> or --file <PATH> instead, a key is never stored in plaintext")]
     NoKeychain(String),
+    /// A refresh or login failed, or the stored tokens cannot be used. Surfaces as an auth error.
+    #[error("oauth: {0}")]
+    OAuth(String),
     #[error("keychain: {0}")]
     Keychain(String),
     /// A run's provider refused the credential; the text is the run's banner.

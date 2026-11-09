@@ -86,7 +86,7 @@ impl Anthropic {
         h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
         match creds.kind {
             AuthMethodKind::None => {}
-            AuthMethodKind::Bearer => {
+            AuthMethodKind::Bearer | AuthMethodKind::OAuth => {
                 let value = Zeroizing::new(format!("Bearer {}", creds.secret.expose()));
                 h.insert(AUTHORIZATION, sensitive(&value)?);
             }

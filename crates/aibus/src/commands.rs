@@ -25,6 +25,8 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
         factories: builtin_factories(),
         env: Arc::new(|v| std::env::var(v).ok()),
         redactor: redactor.clone(),
+        // No provider ships an OAuth flow yet: `--oauth` says so (C2.5a).
+        oauth: None,
         stdin: &mut input,
         prompt: std::io::stdin().is_terminal().then_some(&ask),
         out: &mut stdout,

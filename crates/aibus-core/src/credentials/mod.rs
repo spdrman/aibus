@@ -4,8 +4,10 @@
 
 mod file;
 mod memory;
+mod oauth;
 
 pub use memory::MemoryKeychain;
+pub use oauth::{FakeOAuth, OAuthFlow, OAuthTokens};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -91,6 +93,9 @@ pub struct CredentialStore {
     #[allow(clippy::type_complexity)]
     env: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
     now: Box<dyn Fn() -> Instant + Send + Sync>,
+    /// Seconds since the epoch, for token expiry.
+    wall: Box<dyn Fn() -> u64 + Send + Sync>,
+    oauth: Option<Arc<dyn OAuthFlow>>,
     cache: Mutex<HashMap<AccountName, Cached>>,
 }
 
@@ -105,6 +110,8 @@ impl CredentialStore {
             redactor,
             env: Box::new(|var| std::env::var(var).ok()),
             now: Box::new(Instant::now),
+            wall: Box::new(oauth::unix_now),
+            oauth: None,
             cache: Mutex::new(HashMap::new()),
         }
     }
@@ -124,6 +131,18 @@ impl CredentialStore {
         self
     }
 
+    /// The flow that refreshes OAuth tokens. Without one an expired token is an auth error.
+    pub fn with_oauth(mut self, flow: Arc<dyn OAuthFlow>) -> Self {
+        self.oauth = Some(flow);
+        self
+    }
+
+    /// Takes the wall clock (seconds since the epoch) from `wall`, for token expiry in tests.
+    pub fn with_wall_clock(mut self, wall: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
+        self.wall = Box::new(wall);
+        self
+    }
+
     fn cache(&self) -> std::sync::MutexGuard<'_, HashMap<AccountName, Cached>> {
         self.cache.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -134,6 +153,10 @@ impl CredentialStore {
         // A rotated key takes effect within a minute.
         const TTL: Duration = Duration::from_secs(60);
         let name = account.account_name();
+        if account.auth.oauth {
+            // Never cached: the token has its own expiry.
+            return self.resolve_oauth(&name);
+        }
         let now = (self.now)();
         if let Some(c) = self
             .cache()
@@ -180,6 +203,67 @@ impl CredentialStore {
         })
     }
 
+    /// The stored tokens, refreshed first when they expire within a minute. A refresh that
+    /// fails is an auth error and the old tokens stay where they were.
+    fn resolve_oauth(&self, name: &AccountName) -> Result<Credential, CredentialError> {
+        const SKEW: u64 = 60;
+        let raw = self
+            .keychain
+            .get(KEYCHAIN_SERVICE, &user(name))?
+            .ok_or_else(|| CredentialError::Missing(name.clone()))?;
+        let mut tokens = OAuthTokens::decode(raw.expose())
+            .ok_or_else(|| CredentialError::OAuth("the stored tokens are unreadable".into()))?;
+        if tokens.expires_at.is_some_and(|e| e <= (self.wall)() + SKEW) {
+            let fail = |m: &str| {
+                CredentialError::OAuth(format!("{m}; run: aibus account add {name} --oauth"))
+            };
+            let refresh = tokens
+                .refresh
+                .as_ref()
+                .ok_or_else(|| fail("the token expired and there is no refresh token"))?;
+            let flow = self
+                .oauth
+                .as_ref()
+                .ok_or_else(|| fail("the token expired and no OAuth flow is available"))?;
+            let mut fresh = flow
+                .refresh(refresh.expose())
+                .map_err(|e| CredentialError::OAuth(format!("refresh failed: {e}")))?;
+            // A refresh may leave the refresh token out: the old one still stands.
+            if fresh.refresh.is_none() {
+                fresh.refresh = tokens.refresh.take();
+            }
+            self.store_oauth(name, &fresh)?;
+            tokens = fresh;
+        }
+        self.register_oauth(name, &tokens);
+        Ok(Credential {
+            account: name.clone(),
+            secret: Secret::new(tokens.access.expose().clone()),
+            kind: AuthMethodKind::OAuth,
+            resolved_at: (self.now)(),
+        })
+    }
+
+    fn register_oauth(&self, name: &AccountName, tokens: &OAuthTokens) {
+        self.redactor.register(name, tokens.access.expose());
+        if let Some(r) = &tokens.refresh {
+            self.redactor
+                .register(&AccountName(format!("{name}:refresh").into()), r.expose());
+        }
+    }
+
+    /// Puts OAuth tokens in the keychain, where a key would go.
+    pub fn store_oauth(
+        &self,
+        account: &AccountName,
+        tokens: &OAuthTokens,
+    ) -> Result<(), CredentialError> {
+        self.keychain.set(KEYCHAIN_SERVICE, &user(account), &tokens.encode())?;
+        self.cache().remove(account);
+        self.register_oauth(account, tokens);
+        Ok(())
+    }
+
     /// Puts a key in the keychain. Never anywhere else: there is no plaintext fallback.
     pub fn store(
         &self,
@@ -197,6 +281,7 @@ impl CredentialStore {
         self.keychain.delete(KEYCHAIN_SERVICE, &user(account))?;
         self.cache().remove(account);
         self.redactor.unregister(account);
+        self.redactor.unregister(&AccountName(format!("{account}:refresh").into()));
         Ok(())
     }
 

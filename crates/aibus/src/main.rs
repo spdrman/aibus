@@ -18,6 +18,7 @@ mod keychain;
 mod launch;
 mod logfile;
 mod logging;
+mod net;
 mod plain;
 mod providers;
 mod session_cmd;
@@ -51,12 +52,7 @@ fn main() -> std::process::ExitCode {
 fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
     // clap prints its own help and usage errors and exits 0 or 2.
     let matches = Cli::command().get_matches();
-    let path = cli::subcommand_path(&matches).join(" ");
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    let not_yet = |what: &str| -> Result<u8, AibusError> {
-        eprintln!("aibus: {what}: not yet");
-        Ok(2)
-    };
     match cli.command {
         None => bare(cli.global, cli.prompt, redactor),
         Some(Command::Run(args)) => headless::run(cli.global, args, redactor.clone()),
@@ -89,6 +85,17 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Workflow(WorkflowCmd::List { names })) => {
             commands::workflow_list(&cli.global, names)
         }
+        Some(Command::Workflow(WorkflowCmd::Run { name, input, script })) => {
+            // The same session as `aibus run --workflow <name> <input>`.
+            let args = RunArgs {
+                prompt: Some(input),
+                workflow: Some(name),
+                script,
+                ..RunArgs::default()
+            };
+            headless::run(cli.global, args, redactor.clone())
+        }
+        Some(Command::Init) => commands::init(&cli.global),
         Some(Command::Doctor { session }) => {
             doctor::doctor(&cli.global, session.as_deref(), redactor, &keychain::OsKeychain)
         }
@@ -96,7 +103,6 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             print!("{}", completions::script(shell));
             Ok(0)
         }
-        Some(_) => not_yet(&path),
     }
 }
 

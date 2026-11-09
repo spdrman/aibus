@@ -11,6 +11,8 @@ mod policy;
 mod readonly;
 mod shell;
 mod user;
+mod web;
+mod workflow;
 mod write;
 
 use std::collections::BTreeMap;
@@ -36,6 +38,8 @@ pub use memory::{MemoryAppend, MemoryRead, MemoryWrite};
 pub use readonly::{Glob, Grep, Ls, Read};
 pub use shell::ShellDeny;
 pub use user::{AskUser, EnterPlanMode, ExitPlanMode, Plan, ReportArtifact};
+pub use web::{Fetched, WebFetch, WebFetcher};
+pub use workflow::RunWorkflow;
 pub use write::{Edit, Write};
 
 /// The tools a run may call: allow patterns with the denies that still need a runtime check.
@@ -56,7 +60,7 @@ pub fn effective_tools(
     background: bool,
     max_spawn_depth: u8,
 ) -> EffectiveTools {
-    const COMMON: [&str; 8] = [
+    const COMMON: [&str; 9] = [
         "read",
         "write",
         "edit",
@@ -65,9 +69,11 @@ pub fn effective_tools(
         "ls",
         "bash",
         "report_artifact",
+        "web_fetch",
     ];
-    const LEAD_ONLY: [&str; 10] = [
+    const LEAD_ONLY: [&str; 11] = [
         "fork",
+        "workflow",
         "resume_run",
         "send_message",
         "ledger_update",
@@ -80,6 +86,7 @@ pub fn effective_tools(
     ];
     const INTERACTIVE: [&str; 3] = ["ask_user", "enter_plan_mode", "exit_plan_mode"];
 
+    let mcp = matches!(role, Role::Lead | Role::Worker);
     let mut names: Vec<&str> = match role {
         Role::Lead | Role::Worker => COMMON.to_vec(),
         Role::Advisor => vec!["read", "glob", "grep", "ls"],
@@ -110,24 +117,42 @@ pub fn effective_tools(
             .collect(),
         Some(list) => list
             .iter()
-            .filter(|p| names.contains(&p.tool.as_str()))
+            .filter(|p| names.contains(&p.tool.as_str()) || (mcp && p.tool.starts_with("mcp:")))
             .cloned()
             .collect(),
     };
+    // MCP tools are the server's, not part of any role's set: an agent that lists no tools
+    // gets whatever servers are configured, and a list reaches them with `mcp:*` or a name.
+    if mcp && def.tools.allow.is_none() {
+        allow.push(ToolPattern {
+            tool: "mcp:*".into(),
+            spec: None,
+        });
+    }
     allow.retain(|p| !def.tools.deny.iter().any(|d| d.spec.is_none() && d.tool == p.tool));
+    // A bare deny of an MCP tool stays, since `mcp:*` in the allow-list still covers the name.
     let deny = def
         .tools
         .deny
         .iter()
-        .filter(|d| d.spec.is_some())
+        .filter(|d| d.spec.is_some() || d.tool.starts_with("mcp:"))
         .cloned()
         .collect();
     EffectiveTools { allow, deny }
 }
 
+/// Whether an allow-list entry names the tool `name`. MCP entries are globs over
+/// `mcp:server:tool` (`mcp:*`); every other entry is the tool's own name.
+fn names_tool(entry: &str, name: &str) -> bool {
+    entry == name
+        || (entry.starts_with("mcp:")
+            && globset::Glob::new(entry)
+                .is_ok_and(|g| g.compile_matcher().is_match(&*crate::mcp::allow_name(name))))
+}
+
 #[derive(Default)]
 pub struct ToolRegistry {
-    tools: BTreeMap<&'static str, Arc<dyn Tool>>,
+    tools: BTreeMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -158,14 +183,14 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
-        self.tools.insert(tool.name(), tool);
+        self.tools.insert(tool.name().to_owned(), tool);
     }
 
     /// Schemas for the tools the run may call. Names outside `eff` are never shown.
     pub fn specs(&self, eff: &EffectiveTools) -> Vec<ToolSpec> {
         self.tools
             .iter()
-            .filter(|(name, _)| eff.allow.iter().any(|p| p.tool == **name))
+            .filter(|(name, _)| eff.allow.iter().any(|p| names_tool(&p.tool, name)))
             .map(|(_, t)| t.spec())
             .collect()
     }
@@ -214,7 +239,7 @@ struct Admitted {
 /// covers what it matches. Every part of a `bash` command has to be covered by some pattern,
 /// for the others one subject is enough.
 fn covers(pats: &[&ToolPattern], name: &str, subjects: &[String], outside: bool) -> bool {
-    let of_tool = || pats.iter().filter(|p| p.tool == name);
+    let of_tool = || pats.iter().filter(|p| names_tool(&p.tool, name));
     let matches = |p: &ToolPattern, s: &str| {
         p.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s))
     };
@@ -373,7 +398,8 @@ impl ToolExecutor {
         name: &str,
         mut input: Value,
     ) -> Result<Admitted, ToolError> {
-        let allows: Vec<&ToolPattern> = eff.allow.iter().filter(|p| p.tool == name).collect();
+        let allows: Vec<&ToolPattern> =
+            eff.allow.iter().filter(|p| names_tool(&p.tool, name)).collect();
         if allows.is_empty() {
             return Err(denied("not in allow-list"));
         }
@@ -395,6 +421,10 @@ impl ToolExecutor {
                     self.refuse_destructive(part)?;
                 }
                 parts
+            }
+            "web_fetch" => {
+                let url = input.get("url").and_then(Value::as_str);
+                vec![url.ok_or_else(|| ToolError::Invalid("missing url".into()))?.to_string()]
             }
             "glob" => {
                 let pat = input.get("pattern").and_then(Value::as_str);
@@ -490,10 +520,11 @@ impl ToolExecutor {
         };
 
         if eff.deny.iter().any(|d| {
-            d.tool == name
-                && subjects
-                    .iter()
-                    .any(|s| d.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s)))
+            names_tool(&d.tool, name)
+                && (subjects.is_empty() && d.spec.is_none()
+                    || subjects
+                        .iter()
+                        .any(|s| d.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s))))
         }) {
             return Err(denied("denied by tool policy"));
         }

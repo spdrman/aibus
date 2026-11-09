@@ -4,6 +4,7 @@
 pub mod builtin;
 pub mod def;
 pub mod discover;
+pub mod import;
 pub mod roster;
 pub mod validate;
 
@@ -170,11 +171,35 @@ pub struct ToolPolicy {
     pub deny: Vec<ToolPattern>,
 }
 
+/// How a hook decides (01 section 6): a shell command, a model call, or a POST.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookKind {
+    #[default]
+    Command,
+    Prompt,
+    Http,
+}
+
+impl HookKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "command" => HookKind::Command,
+            "prompt" => HookKind::Prompt,
+            "http" => HookKind::Http,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct HookSpec {
     pub matcher: Option<String>,
+    /// The command line, the prompt or the URL, by `kind`.
     pub command: String,
     pub timeout_secs: Option<u32>,
+    #[serde(default)]
+    pub kind: HookKind,
 }
 
 /// Lifecycle hooks scoped to one agent, keyed by event name (01 section 6).

@@ -59,6 +59,8 @@ pub struct ChildLauncher {
     /// The advisor, the router and the ledger every run of the session shares; set once at
     /// startup by `set_assist`.
     pub assist: OnceLock<Arc<Assist>>,
+    /// Where workflow files are looked for (`.aibus/workflows`, then the user's).
+    pub workflow_dirs: Vec<PathBuf>,
 }
 
 /// What was remembered for `run`.
@@ -206,6 +208,15 @@ impl ChildLauncher {
         })
     }
 
+    /// `/workflow <name> <input>` or `/<name> <input>` for a workflow that exists: the `workflow`
+    /// call a lead opens with in place of its first request (01 section 8.4).
+    pub fn slash_workflow(&self, prompt: &str) -> Option<(String, serde_json::Value)> {
+        let known: Vec<String> =
+            aibus_core::workflow::list(&self.workflow_dirs).into_iter().map(|(name, _, _)| name).collect();
+        let (name, input) = aibus_core::workflow::parse_slash(prompt, &known)?;
+        Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": input})))
+    }
+
     /// Swaps in reloaded definitions.
     pub fn reload(&self, defs: &[AgentDef]) {
         *self.agents.write().unwrap_or_else(PoisonError::into_inner) =
@@ -296,6 +307,10 @@ impl Launcher for ChildLauncher {
         } else {
             (self.cwd.clone(), None)
         };
+        // The TUI starts its lead here, with whatever the first prompt was.
+        let forced = (def.role == aibus_core::Role::Lead && spec.parent.is_none() && !spec.fork && !spec.resume)
+            .then(|| self.slash_workflow(&prompt))
+            .flatten();
         let compactor: Arc<dyn aibus_core::Compactor> = Arc::new(ModelCompactor {
             provider: picked.provider.clone(),
             creds: picked.creds.clone(),
@@ -321,7 +336,7 @@ impl Launcher for ChildLauncher {
                 context: Vec::new(),
                 background: spec.background,
                 max_spawn_depth: self.max_spawn_depth,
-                forced: None,
+                forced: forced.map(|(tool, input)| (tool.into(), input)),
                 start: Start::New,
                 worktree,
             },

@@ -64,6 +64,12 @@ pub enum RunMail {
     /// A background child ended: its wrapped result (01 section 5.3) goes to the model as a
     /// message before the next request.
     ChildFinished(String),
+    /// A tool call the run makes at its next turn boundary in place of a request, with the
+    /// result in hand afterwards: `/fix <text>` typed while the lead runs is a `workflow` call.
+    Call {
+        tool: smol_str::SmolStr,
+        input: serde_json::Value,
+    },
     /// A fork is starting from this run (01 section 5.2): at the next turn boundary the run
     /// answers with a copy of its conversation.
     Fork { reply: oneshot::Sender<Conversation> },
@@ -113,9 +119,10 @@ pub struct RunConfig {
     pub background: bool,
     /// `limits.max_spawn_depth`: at `depth` this far down the run is not offered `delegate`.
     pub max_spawn_depth: u8,
-    /// `@agent-<name> <rest>` as the first prompt (01 section 4.2): the run opens with a
-    /// foreground `delegate` to this agent with this prompt, and then goes on with the result.
-    pub forced: Option<(AgentName, String)>,
+    /// A tool call the run opens with in place of its first request, and then goes on with the
+    /// result in hand: `@agent-<name> <rest>` is a foreground `delegate` (01 section 4.2), `/fix
+    /// <text>` and `--workflow` are a `workflow` call (01 section 8.4).
+    pub forced: Option<(smol_str::SmolStr, serde_json::Value)>,
     pub start: Start,
     /// The worktree `cwd` points into, removed when the run ends if nothing in it changed.
     pub worktree: Option<WorktreeInfo>,
@@ -483,11 +490,12 @@ impl Task<'_> {
         conv: &mut Conversation,
         mode: PermissionMode,
         pre_tokens: u64,
-    ) {
+    ) -> Option<(smol_str::SmolStr, serde_json::Value)> {
         while let Ok(m) = mail.try_recv() {
             queued.push(m);
         }
         let mut compact = false;
+        let mut call = None;
         for m in queued.drain(..) {
             match m {
                 RunMail::UserMessage(text) => {
@@ -512,6 +520,7 @@ impl Task<'_> {
                     });
                 }
                 RunMail::Compact => compact = true,
+                RunMail::Call { tool, input } => call = Some((tool, input)),
                 RunMail::ChildFinished(report) => {
                     conv.messages.push(Message::text(MessageRole::User, &report));
                 }
@@ -532,6 +541,7 @@ impl Task<'_> {
                 .await;
             }
         }
+        call
     }
 
     /// The order of 01 section 5.5: `pre_compact` hooks, the lead's auto-handoff, the summary,
@@ -760,7 +770,7 @@ impl Task<'_> {
                         self.send(decided(decision, None)).await;
                         return decision;
                     }
-                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
+                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::Call { .. } | RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
                     Some(RunMail::Permission { .. }) => {}
                     None => return Decision::Deny,
                 },
@@ -843,15 +853,15 @@ impl Task<'_> {
     }
 }
 
-/// The assistant turn a forced `@agent-<name>` stands for: one foreground `delegate` call.
-fn opening_delegate(agent: &AgentName, prompt: &str) -> ChatResponse {
+/// The assistant turn a forced call stands for: one tool call, made before the first request.
+fn opening_call(name: &str, input: serde_json::Value) -> ChatResponse {
     ChatResponse {
         message: Message {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::ToolUse {
                 id: aibus_provider::ToolCallId(ulid::Ulid::new()),
-                name: "delegate".into(),
-                input: json!({"agent": agent, "prompt": prompt, "background": false}),
+                name: name.into(),
+                input,
             }],
             at: SystemTime::UNIX_EPOCH,
         },
@@ -933,7 +943,9 @@ async fn drive(
         if cancel.is_cancelled() {
             return End::of(RunStatus::Cancelled);
         }
-        t.boundary(mail, &mut queued, conv, mode, pre_tokens).await;
+        if let Some(call) = t.boundary(mail, &mut queued, conv, mode, pre_tokens).await {
+            forced = Some(call);
+        }
         // `auto_compact_at`, else 80 % of the window (01 section 5.5). The count is what the
         // last response said the request was; before there is one, the heuristic's estimate
         // (which already carries a 10 % margin).
@@ -965,7 +977,7 @@ async fn drive(
 
         // A forced delegate opens the run in place of the first request.
         let (resp, seeded) = match forced.take() {
-            Some((agent, prompt)) => (opening_delegate(&agent, &prompt), true),
+            Some((name, input)) => (opening_call(&name, input), true),
             None => match t.request(conv, &specs, max_output, mode, pre_tokens).await {
                 Ok(resp) => (resp, false),
                 Err(end) => return end,
@@ -1058,7 +1070,7 @@ async fn drive(
                             let _ = reply.send(conv.clone());
                         }
                         m => {
-                            again |= matches!(m, RunMail::UserMessage(_) | RunMail::ChildFinished(_));
+                            again |= matches!(m, RunMail::UserMessage(_) | RunMail::Call { .. } | RunMail::ChildFinished(_));
                             queued.push(m);
                         }
                     }
@@ -1215,7 +1227,7 @@ async fn drive(
                                     () = cancel.cancelled() => break None,
                                     m = mail.recv() => match m {
                                         Some(RunMail::UserMessage(text)) => break Some(text),
-                                        Some(m @ (RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
+                                        Some(m @ (RunMail::ChildFinished(_) | RunMail::Call { .. } | RunMail::Fork { .. })) => queued.push(m),
                                         Some(_) => {}
                                         None => break None,
                                     },

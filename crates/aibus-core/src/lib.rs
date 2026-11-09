@@ -14,6 +14,7 @@ pub mod effects;
 pub mod error;
 pub mod hooks;
 pub mod ids;
+pub mod mcp;
 pub mod msg;
 pub mod orchestrator;
 pub mod permission;
@@ -25,6 +26,8 @@ pub mod run;
 pub mod state;
 pub mod tool;
 pub mod tools;
+pub mod triggers;
+pub mod workflow;
 pub mod worktree;
 
 pub use accounts::{AccountRegistry, SelectError, SelectHints};
@@ -38,7 +41,7 @@ pub use credentials::{
 pub use redact::Redactor;
 pub use effects::{Effect, Effects, PendingTool, SpawnSpec};
 pub use error::{AibusError, CredentialError};
-pub use hooks::{Blocked, Fired, HookInput, HookRunner, Ran};
+pub use hooks::{Blocked, Fired, HookInput, HookRunner, HookTransport, Ran};
 pub use ids::*;
 pub use msg::*;
 pub use orchestrator::{parse_mention, Launcher, Limits, Orchestrator, Roster, Waited};
@@ -47,6 +50,7 @@ pub use tool::*;
 pub use worktree::WorktreeInfo;
 pub use tools::{
     effective_tools, Bash, CreateHandoff, Delegate, EffectiveTools, Fork, Gate, JobView,
-    LedgerUpdate, MemoryAppend, MemoryRead, MemoryWrite, Recall, ResumeRun, SendMessage,
-    ShellDeny, ToolExecutor, ToolRegistry,
+    LedgerUpdate, MemoryAppend, MemoryRead, MemoryWrite, Recall, ResumeRun, RunWorkflow,
+    SendMessage, ShellDeny, ToolExecutor, ToolRegistry, WebFetch, WebFetcher,
 };
+pub use triggers::Triggers;

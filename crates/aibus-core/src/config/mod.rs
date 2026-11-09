@@ -30,6 +30,8 @@ pub struct Config {
     pub memory: Memory,
     pub tools: Tools,
     pub hooks: Hooks,
+    /// `[mcp.<server>]`: MCP servers started over stdio (01 section 9).
+    pub mcp: BTreeMap<String, McpServer>,
     pub persist: Persist,
     pub ui: Ui,
     /// Action name to key, overriding the defaults (05 section 4).
@@ -257,6 +259,22 @@ impl Default for Tools {
     }
 }
 
+/// `[mcp.<server>]`: a program that speaks MCP on its stdin and stdout. Its tools show up as
+/// `mcp:<server>:<tool>`.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpServer {
+    pub command: String,
+    pub args: Vec<String>,
+    /// Added to the scrubbed environment the server starts with. The config holds no secrets, so
+    /// a key goes in through `pass_env` instead.
+    pub env: BTreeMap<String, String>,
+    /// Variables of aibus's own environment the server may see although they look secret.
+    pub pass_env: Vec<String>,
+    /// How long a call may take; 60 s when unset.
+    pub timeout_secs: Option<u32>,
+}
+
 /// `[hooks]`: the one `pass_env` list, and every other key is an event name (01 section 6.1).
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -273,8 +291,42 @@ pub struct Hooks {
 #[serde(default)]
 pub struct Hook {
     pub matcher: Option<String>,
+    /// The command line of a `command` hook.
     pub command: String,
     pub timeout: Option<u32>,
+    /// `type = "command"` (the default), `"prompt"` or `"http"`.
+    #[serde(rename = "type")]
+    pub kind: crate::agent::HookKind,
+    /// What a `prompt` hook asks the model.
+    pub prompt: Option<String>,
+    /// Where an `http` hook POSTs.
+    pub url: Option<String>,
+}
+
+impl Hook {
+    /// The runnable form: the text that matters for the hook's kind. `Err` says what is missing.
+    pub fn spec(&self) -> Result<crate::agent::HookSpec, &'static str> {
+        use crate::agent::HookKind;
+        let text = match self.kind {
+            HookKind::Command => Some(&self.command),
+            HookKind::Prompt => self.prompt.as_ref(),
+            HookKind::Http => self.url.as_ref(),
+        };
+        match (text.filter(|t| !t.trim().is_empty()), self.kind) {
+            (Some(t), HookKind::Http) if !(t.starts_with("http://") || t.starts_with("https://")) => {
+                Err("an http hook needs an http:// or https:// url")
+            }
+            (Some(t), _) => Ok(crate::agent::HookSpec {
+                matcher: self.matcher.clone(),
+                command: t.clone(),
+                timeout_secs: self.timeout,
+                kind: self.kind,
+            }),
+            (None, HookKind::Command) => Err("a command hook needs a command"),
+            (None, HookKind::Prompt) => Err("a prompt hook needs a prompt"),
+            (None, HookKind::Http) => Err("an http hook needs a url"),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -407,6 +459,21 @@ impl Config {
         for event in self.hooks.events.keys() {
             if crate::msg::HookEvent::parse(event).is_none() {
                 bad(&format!("hooks.{event}"), "not a hook event".into());
+            }
+        }
+        for (event, list) in &self.hooks.events {
+            for (i, h) in list.iter().enumerate() {
+                if let Err(why) = h.spec() {
+                    bad(&format!("hooks.{event}[{}]", i + 1), why.into());
+                }
+            }
+        }
+        for (name, server) in &self.mcp {
+            let ok = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            if !ok {
+                bad(&format!("mcp.{name}"), "a server name is letters, digits, `_` and `-`".into());
+            } else if server.command.trim().is_empty() {
+                bad(&format!("mcp.{name}.command"), "a server needs a command".into());
             }
         }
         if !["newest", "branch"].contains(&self.continuity.topic.as_str()) {

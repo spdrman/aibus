@@ -1,0 +1,14 @@
+name = "explore"
+description = "Map the code, find the call sites, summarise"
+
+[[step]]
+agent = "search"
+prompt = "Map the parts of the repository that matter for: {{input}}"
+
+[[step]]
+agent = "grep"
+prompt = "Find the call sites and tests that touch what was found: {{prev.summary}}"
+
+[[step]]
+agent = "plan"
+prompt = "Summarise how this works and where to start. Map: {{steps.search.summary}} Call sites: {{steps.grep.summary}}"

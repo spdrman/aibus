@@ -49,7 +49,7 @@ impl Report {
 }
 
 /// The tools a definition may name (01 section 9), besides `mcp:*` patterns.
-const KNOWN_TOOLS: [&str; 22] = [
+const KNOWN_TOOLS: [&str; 24] = [
     "read",
     "write",
     "edit",
@@ -72,6 +72,8 @@ const KNOWN_TOOLS: [&str; 22] = [
     "memory_read",
     "memory_write",
     "memory_append",
+    "web_fetch",
+    "workflow",
 ];
 
 /// 01 section 6.1.

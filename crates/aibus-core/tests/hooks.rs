@@ -21,6 +21,7 @@ fn hook(matcher: Option<&str>, command: &str, timeout: Option<u32>) -> Hook {
         matcher: matcher.map(Into::into),
         command: command.into(),
         timeout,
+        ..Hook::default()
     }
 }
 
@@ -85,6 +86,7 @@ fn spec(matcher: Option<&str>, command: &str) -> HookSpec {
         matcher: matcher.map(Into::into),
         command: command.into(),
         timeout_secs: None,
+        kind: HookKind::Command,
     }
 }
 

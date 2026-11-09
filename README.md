@@ -99,6 +99,7 @@ target/release/aibus version
 * No real provider has been exercised end to end: the tests and the demo run on the fake provider, and the live provider run is a separate nightly job.
 * Windows is unverified. The binary is built, but nobody has run it on a Windows machine yet (see [docs/RELEASE.md](docs/RELEASE.md)), and the `PATH` change in `install.ps1` is the part the container tests could not exercise.
 * The release pipeline and the installers have only run against fake releases in containers until the first real release is cut.
+* OAuth sign-in and the Bedrock and Vertex transports are in the code, but not usable yet: no provider offers an OAuth login, and `auth = "sigv4"` or `"gcloud"` cannot be selected from the config.
 * Only the Linux and macOS terminals I own have been tried by eye; the rest of the checklist in [docs/RELEASE.md](docs/RELEASE.md) is open.
 
 ## Layout

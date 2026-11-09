@@ -17,14 +17,16 @@ use aibus_core::state::run_key;
 use aibus_graph::{Graph, Value};
 
 use crate::fixture::{self, line, stream};
-use crate::gate::Gate;
+use crate::gate::{Gate, Stats};
 
 const OPEN_BUDGET_US: f64 = 2000.0;
 const ANY_BUDGET_US: f64 = 4000.0;
 const SAMPLES: usize = 5000;
 const ROUNDS: usize = 3;
 
-pub fn run<G: Graph>(label: &str, mk: fn() -> G) {
+/// Returns the open-transcript and the any-run statistics, so an includer can set two backends
+/// side by side.
+pub fn run<G: Graph>(label: &str, mk: fn() -> G) -> (Stats, Stats) {
     println!("backend: {label}");
     let mut gate = Gate::new();
     let (mut app, runs) = fixture::big_session(mk);
@@ -109,4 +111,5 @@ pub fn run<G: Graph>(label: &str, mk: fn() -> G) {
         any.max
     );
     gate.finish();
+    (open_only, any)
 }

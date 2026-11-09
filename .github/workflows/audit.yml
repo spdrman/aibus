@@ -1,0 +1,50 @@
+name: audit
+
+# `cargo audit` on the lockfile; opens an issue for a new advisory, or comments on the one already
+# open. Started by hand only (the local run on MARS is the real gate, no schedule); docs/RELEASE.md
+# says when I run it.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-audit
+      - name: Audit
+        id: audit
+        run: |
+          set +e
+          cargo audit --deny warnings > audit.txt 2>&1
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+          cat audit.txt
+      - name: Open or update the issue
+        if: steps.audit.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          title="cargo-audit: new advisory on Cargo.lock"
+          body="$(printf 'cargo audit failed on %s.\n\n```\n%s\n```\n' "$GITHUB_SHA" "$(head -c 20000 audit.txt)")"
+          n="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+      - name: Fail when there was an advisory
+        if: steps.audit.outputs.status != '0'
+        run: exit 1

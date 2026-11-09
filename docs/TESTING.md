@@ -24,9 +24,11 @@ the same command, started by hand.
 | Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
 | Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
 
-The conformance row says "both backends when available": `ci.yml` has a `causl` job that runs the
-`aibus-graph-causl` tests with `--features causl-rs`. The crate is private, so the job's fetch step
-needs the repository secret `CAUSL_CI_BUILD_1` and is the only step that sees it.
+The conformance row says "both backends when available": the `causl-differential` job in
+`.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and
+differential tests with `--features causl-rs`, plus the side-by-side `commit_stream` bench. The
+crate is private, so the job's fetch step needs the repository secret `CAUSL_CI_BUILD_1` and is the
+only step that sees it. See `docs/BUILD.md`.
 
 ## The test kit
 

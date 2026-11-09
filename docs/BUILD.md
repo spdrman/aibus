@@ -59,6 +59,28 @@ The MSRV pins `wiremock` (a dev-dependency of the provider crates and `aibus-tes
 
 `aibus-testkit` now has `tempfile`, `zstd` and `base64` as normal dependencies (the `TempDir` that greps its tree for the fake key when a test ends); all three were already in the lock file through other crates, so no new build script comes with them.
 
+## The causl-rs backend (C2.4)
+
+`crates/aibus-graph-causl` is outside the workspace (see `exclude` in the root manifest) and has its own `Cargo.lock`, so `cargo build --workspace --locked`, `cargo deny check` and the root lock never see the private source. The default feature set does not compile the host layer; `--features causl-rs` does.
+
+**Pin or vendor.** I pin: `causl-engine-core = { git = "https://git.opsite.ca/causl/causl-core-rs.git", rev = "a6247b36b38dda4d97017d0577210aa8c724e4f2" }` in that crate's `Cargo.toml`, with the same commit in its lock file. That is the commit the conformance suite, the differential and the numbers in `docs/spikes/A1.5-causl.md` ran against. Vendoring (a `vendor/` copy plus a `[patch]` entry) would take the token out of CI, but it needs the owner to confirm the crate's licence allows redistribution inside this repo, so I have not done it. Until one of the two happens, the crate can only be built with a token.
+
+**Who fetches it.** Only the `causl-differential` job in `.github/workflows/causl-spike.yml` (manual dispatch, `contents: read`, SHA-pinned actions, `persist-credentials: false`). The secret `CAUSL_CI_BUILD_1` is on the single fetch step and every later step builds offline from the cargo cache. If the secret is empty or the remote refuses it, the job ends with the warning and summary line `skipped: causl-engine-core unavailable`, which is not a pass. No workflow runs on push or pull request.
+
+**Supply chain.** `crates/aibus-graph-causl/deny.toml` sets `unknown-registry = "deny"` and `unknown-git = "deny"`, allows crates.io plus exactly `https://git.opsite.ca/causl/causl-core-rs.git`, and uses the same licence allow-list and bans as the root file. The root `deny.toml` keeps `allow-git = []`. Run it with `cargo deny --config crates/aibus-graph-causl/deny.toml --manifest-path crates/aibus-graph-causl/Cargo.toml check`; the job does that on every run, and `causl-engine-core` passes the licence allow-list there. I have not looked for a LICENSE file in the upstream repo, which matters for the vendoring question. `cargo audit` does not run on this crate.
+
+**Running the differential locally.** You need the token, and it all happens in a container, never on a host. Give git the token as an extra header for the fetch only, then build offline:
+
+```
+cargo fetch --locked --manifest-path crates/aibus-graph-causl/Cargo.toml
+cargo test --locked --offline --manifest-path crates/aibus-graph-causl/Cargo.toml --features causl-rs --test causl --test differential
+cargo bench --locked --offline --manifest-path crates/aibus-graph-causl/Cargo.toml --features causl-rs --bench commit_stream
+```
+
+The differential replays every fixture in `aibus-testkit` through `MiniGraph` and `CauslGraph` and asserts equal snapshot bytes and equal commit intents. The bench prints both backends and a `side_by_side` line.
+
+**If upstream lands `Persister`, `Reader` and `Observable`.** They are `unimplemented!()` in the pinned commit. `Reader` and `Observable` would change nothing for me (the public `State` getters do the job and I need no engine telemetry). `Persister` would let `snapshot` and `hydrate` use the engine's own state dump, but I would keep the typed-input snapshot unless the differential stayed green, since that is what keeps snapshots byte-identical with `mini`. The three engine gaps from the spike (derived retention seed and default, dynamic dependency ordering) are the ones that would let me delete host workarounds.
+
 ## CI
 
 `.github/workflows/fuzz.yml` runs the fuzz targets nightly. `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.

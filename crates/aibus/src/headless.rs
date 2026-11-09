@@ -233,6 +233,8 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         let mut deadline: Option<Instant> = None;
         // Buffered log lines go out within 2 s even when nothing is happening.
         let mut idle = tokio::time::interval(Duration::from_secs(1));
+        // The live numbers for `doctor --session`, every 10 s like `eng:mem`.
+        let mut mem = tokio::time::interval(Duration::from_secs(aibus_core::mem::SAMPLE_SECS));
         loop {
             let timeout = async {
                 match deadline {
@@ -325,6 +327,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                     }
                 },
                 _ = idle.tick() => writer.after_step(app)?,
+                _ = mem.tick() => writer.memory(app)?,
                 () = timeout => break,
             }
         }

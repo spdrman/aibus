@@ -1,0 +1,40 @@
+name: bench
+
+# 10 section 9: the p99 gates. Nightly, and on pull requests that touch the graph state or the
+# TUI. A p99 over its budget, or more than 20 % over the committed baseline for this runner
+# class (benches/baselines/<class>/, scaled by a calibration loop, see benches/gate.rs), fails.
+# A class with no baseline yet only enforces the budgets; `AIBUS_BENCH_SAVE=1` writes one.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/aibus-core/src/state/**"
+      - "crates/aibus-core/benches/**"
+      - "crates/aibus-graph/**"
+      - "crates/aibus-tui/**"
+      - "benches/**"
+
+env:
+  CARGO_TERM_COLOR: never
+  AIBUS_BENCH_GATE: "1"
+  AIBUS_RUNNER_CLASS: github-ubuntu-latest
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - name: commit_stream on mini
+        run: cargo bench --locked -p aibus-core --bench commit_stream
+      - name: hydrate_snapshot
+        run: cargo bench --locked -p aibus-core --bench hydrate_snapshot
+      - name: render_dashboard
+        run: cargo bench --locked -p aibus-tui --bench render_dashboard
+      - name: soft gates, logged
+        run: cargo test --locked --release -p aibus-testkit --test startup_time --test streaming_cpu -- --nocapture

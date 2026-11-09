@@ -196,6 +196,7 @@ dependencies = [
  "aibus-tui",
  "ratatui",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",

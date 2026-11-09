@@ -1,0 +1,7 @@
+[
+    ToolCall(name: "read", input: {"path": "missing.txt"}), Stop(ToolUse),
+    ToolCall(name: "read", input: {"path": "missing.txt"}), Stop(ToolUse),
+    Text("try ls before reading"), Stop(EndTurn),
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    Text("found the file list"),
+]

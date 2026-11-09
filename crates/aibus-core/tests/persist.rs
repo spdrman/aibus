@@ -218,7 +218,11 @@ fn a_result_over_the_cap_is_cut_and_the_whole_text_goes_to_a_side_file() {
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     let msgs = recorded();
-    let Msg::ToolCallFinished { run, call_id, duration, .. } = msgs[5].clone() else { panic!() };
+    let Some(Msg::ToolCallFinished { run, call_id, duration, .. }) =
+        msgs.iter().find(|m| matches!(m, Msg::ToolCallFinished { .. })).cloned()
+    else {
+        panic!("the fixture has a tool call")
+    };
     let big = "x".repeat(70 * 1024);
     drive(&mut w, &mut a, msgs[..1].to_vec());
     drive(

@@ -1,7 +1,11 @@
 //! Fixtures, fake clock, TestBackend helpers and snapshot macros.
 #![forbid(unsafe_code)]
 
+pub mod replay;
+mod session;
 pub mod tui;
+
+pub use session::{big_session, xdg_temp, Xdg};
 
 use std::cell::RefCell;
 use std::io;

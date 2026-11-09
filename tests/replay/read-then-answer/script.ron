@@ -1,0 +1,8 @@
+[
+    Text("Looking at the readme."),
+    ToolCall(name: "read", input: {"path": "README.md"}),
+    Usage(input: 120, output: 18),
+    Stop(ToolUse),
+    Text("It is a one-line readme for a demo project."),
+    Usage(input: 210, output: 12),
+]

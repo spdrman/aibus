@@ -1,0 +1,479 @@
+{
+  "view:accounts": "Null",
+  "view:advisor_rail": {
+    "Map": {
+      "advice": {
+        "List": []
+      },
+      "calls": {
+        "I64": 0
+      },
+      "checkpoints": {
+        "List": [
+          {
+            "Map": {
+              "active": {
+                "Bool": false
+              },
+              "name": {
+                "Str": "before a plan"
+              }
+            }
+          },
+          {
+            "Map": {
+              "active": {
+                "Bool": false
+              },
+              "name": {
+                "Str": "same error x2"
+              }
+            }
+          },
+          {
+            "Map": {
+              "active": {
+                "Bool": false
+              },
+              "name": {
+                "Str": "before done"
+              }
+            }
+          }
+        ]
+      },
+      "status": {
+        "Str": "on_call"
+      },
+      "subtitle": {
+        "Str": "advisor · on call"
+      },
+      "title": {
+        "Str": "ADVISOR"
+      },
+      "tokens_read": {
+        "I64": 0
+      },
+      "typing_cursor": {
+        "I64": 0
+      }
+    }
+  },
+  "view:agents": "Null",
+  "view:animating": {
+    "Bool": false
+  },
+  "view:cards": {
+    "List": [
+      {
+        "Map": {
+          "border": {
+            "Str": "swarm"
+          },
+          "label": {
+            "Str": "explore"
+          },
+          "model_label": {
+            "Str": "fake-small"
+          },
+          "name": {
+            "Str": "explore"
+          },
+          "progress": {
+            "Map": {
+              "kind": {
+                "Str": "done"
+              },
+              "value": {
+                "F64": 1.0
+              }
+            }
+          },
+          "run_id": {
+            "Str": "01M6Z6N6Q659F6DYJ9VK09C9ZN"
+          },
+          "selected": {
+            "Bool": true
+          },
+          "spinner_phase": {
+            "I64": 0
+          },
+          "status": {
+            "Str": "done"
+          }
+        }
+      }
+    ]
+  },
+  "view:delegate_row": {
+    "Map": {
+      "connectors": {
+        "List": [
+          {
+            "I64": -1
+          }
+        ]
+      },
+      "swarm_model_label": {
+        "Str": "fake-small"
+      }
+    }
+  },
+  "view:dirty": {
+    "List": [
+      {
+        "Str": "return_box"
+      },
+      {
+        "Str": "log"
+      }
+    ]
+  },
+  "view:fork_layer": {
+    "Map": {
+      "any_split": {
+        "Bool": false
+      },
+      "enabled": {
+        "Bool": true
+      },
+      "forks": {
+        "I64": 0
+      },
+      "rows": {
+        "List": [
+          {
+            "Map": {
+              "label": {
+                "Str": "which file"
+              },
+              "p": "Null",
+              "verdict": {
+                "Str": ""
+              }
+            }
+          },
+          {
+            "Map": {
+              "label": {
+                "Str": "which tool"
+              },
+              "p": "Null",
+              "verdict": {
+                "Str": ""
+              }
+            }
+          },
+          {
+            "Map": {
+              "label": {
+                "Str": "retry or stop"
+              },
+              "p": "Null",
+              "verdict": {
+                "Str": ""
+              }
+            }
+          }
+        ]
+      },
+      "title": {
+        "Str": "ROUTER · fork layer"
+      }
+    }
+  },
+  "view:header": {
+    "Map": {
+      "lead_label": {
+        "Str": "fake-small"
+      },
+      "legend": {
+        "List": [
+          {
+            "Map": {
+              "role": {
+                "Str": "lead"
+              },
+              "text": {
+                "Str": "fake-small · lead"
+              }
+            }
+          },
+          {
+            "Map": {
+              "role": {
+                "Str": "swarm"
+              },
+              "text": {
+                "Str": "fake-small · swarm"
+              }
+            }
+          }
+        ]
+      },
+      "swarm_label": {
+        "Str": "fake-small"
+      }
+    }
+  },
+  "view:lead_box": {
+    "Map": {
+      "effort": {
+        "Str": "high"
+      },
+      "highlight": {
+        "Bool": false
+      },
+      "label": {
+        "Str": "lead"
+      },
+      "model_flag": "Null",
+      "model_label": {
+        "Str": "fake-small"
+      }
+    }
+  },
+  "view:menu": "Null",
+  "view:palette": "Null",
+  "view:permission": "Null",
+  "view:return_box": {
+    "Map": {
+      "highlight": {
+        "Bool": false
+      },
+      "lead_model_label": {
+        "Str": "fake-small"
+      },
+      "pulse": {
+        "Bool": false
+      }
+    }
+  },
+  "view:run_tips": {
+    "List": [
+      {
+        "Map": {
+          "account": {
+            "Str": "fake"
+          },
+          "cost": {
+            "Str": "$0.0000"
+          },
+          "description": {
+            "Str": ""
+          },
+          "model": {
+            "Str": "fake-small"
+          },
+          "name": {
+            "Str": "lead"
+          },
+          "run_id": {
+            "Str": "01M6Z6N6PX6A2XJS6HDBJ13TM3"
+          }
+        }
+      },
+      {
+        "Map": {
+          "account": {
+            "Str": "fake"
+          },
+          "cost": {
+            "Str": "$0.0000"
+          },
+          "description": {
+            "Str": ""
+          },
+          "model": {
+            "Str": "fake-small"
+          },
+          "name": {
+            "Str": "explore"
+          },
+          "run_id": {
+            "Str": "01M6Z6N6Q659F6DYJ9VK09C9ZN"
+          }
+        }
+      }
+    ]
+  },
+  "view:session_log:lines": {
+    "List": [
+      {
+        "Map": {
+          "actor": {
+            "Str": "lead"
+          },
+          "actor_colour": {
+            "Str": "lead"
+          },
+          "p": "Null",
+          "run": {
+            "Str": "01M6Z6N6PX6A2XJS6HDBJ13TM3"
+          },
+          "text": {
+            "Str": "started"
+          },
+          "time": {
+            "Str": "00:00:00"
+          },
+          "verdict": "Null"
+        }
+      },
+      {
+        "Map": {
+          "actor": {
+            "Str": "aibus"
+          },
+          "actor_colour": {
+            "Str": "dim"
+          },
+          "p": "Null",
+          "run": "Null",
+          "text": {
+            "Str": "tool delegate requested"
+          },
+          "time": {
+            "Str": "00:00:00"
+          },
+          "verdict": "Null"
+        }
+      },
+      {
+        "Map": {
+          "actor": {
+            "Str": "explore"
+          },
+          "actor_colour": {
+            "Str": "swarm"
+          },
+          "p": "Null",
+          "run": {
+            "Str": "01M6Z6N6Q659F6DYJ9VK09C9ZN"
+          },
+          "text": {
+            "Str": "started"
+          },
+          "time": {
+            "Str": "00:00:00"
+          },
+          "verdict": "Null"
+        }
+      },
+      {
+        "Map": {
+          "actor": {
+            "Str": "explore"
+          },
+          "actor_colour": {
+            "Str": "swarm"
+          },
+          "p": "Null",
+          "run": {
+            "Str": "01M6Z6N6Q659F6DYJ9VK09C9ZN"
+          },
+          "text": {
+            "Str": "finished completed"
+          },
+          "time": {
+            "Str": "00:00:00"
+          },
+          "verdict": "Null"
+        }
+      },
+      {
+        "Map": {
+          "actor": {
+            "Str": "aibus"
+          },
+          "actor_colour": {
+            "Str": "dim"
+          },
+          "p": "Null",
+          "run": "Null",
+          "text": {
+            "Str": "delegate ok 3 ms"
+          },
+          "time": {
+            "Str": "00:00:00"
+          },
+          "verdict": "Null"
+        }
+      },
+      {
+        "Map": {
+          "actor": {
+            "Str": "lead"
+          },
+          "actor_colour": {
+            "Str": "lead"
+          },
+          "p": "Null",
+          "run": {
+            "Str": "01M6Z6N6PX6A2XJS6HDBJ13TM3"
+          },
+          "text": {
+            "Str": "finished completed"
+          },
+          "time": {
+            "Str": "00:00:00"
+          },
+          "verdict": "Null"
+        }
+      }
+    ]
+  },
+  "view:status_bar": {
+    "Map": {
+      "advisor": {
+        "Map": {
+          "label": {
+            "Str": "advisor"
+          },
+          "state": {
+            "Str": "on call"
+          }
+        }
+      },
+      "alerts": {
+        "List": []
+      },
+      "ledger": "Null",
+      "mem": "Null",
+      "router": {
+        "Map": {
+          "enabled": {
+            "Bool": true
+          },
+          "forks": {
+            "I64": 0
+          },
+          "label": {
+            "Str": "router"
+          }
+        }
+      },
+      "subagents": {
+        "Map": {
+          "running": {
+            "I64": 0
+          },
+          "total": {
+            "I64": 1
+          }
+        }
+      },
+      "swarm": {
+        "Map": {
+          "label": {
+            "Str": "fake-small"
+          },
+          "state": {
+            "Str": "idle"
+          }
+        }
+      }
+    }
+  },
+  "view:transcript": "Null"
+}

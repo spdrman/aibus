@@ -1,0 +1,6 @@
+[
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    ToolCall(name: "ls", input: {"path": "src"}), Stop(ToolUse),
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    Text("never reached"),
+]

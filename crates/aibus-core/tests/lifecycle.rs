@@ -134,6 +134,7 @@ impl Launcher for TestLauncher {
                     provider: fake.clone(),
                     creds: Arc::new(fake_credential()),
                     model: ModelId("fake-small".into()),
+                    handoff: None,
                 })),
                 assist: None,
             },
@@ -171,6 +172,8 @@ struct Rig {
     lead: RunId,
     lead_fake: Arc<FakeProvider>,
     auto_compact_at: Option<u32>,
+    /// Where the lead's compactor writes its auto-handoffs, when a test wants them.
+    layout: Option<aibus_core::continuity::Layout>,
 }
 
 struct Out {
@@ -241,6 +244,7 @@ impl Rig {
             lead: RunId::new(),
             lead_fake: Arc::new(FakeProvider::new(lead)),
             auto_compact_at: None,
+            layout: None,
         }
     }
 
@@ -296,6 +300,10 @@ impl Rig {
                     provider: self.lead_fake.clone(),
                     creds: Arc::new(fake_credential()),
                     model: ModelId("fake-small".into()),
+                    handoff: self.layout.clone().map(|layout| AutoHandoff {
+                        layout,
+                        redactor: Redactor::new(),
+                    }),
                 })),
                 assist: None,
             },
@@ -560,6 +568,88 @@ async fn compaction_at_the_threshold_summarises_cuts_the_context_and_keeps_the_h
     assert_eq!(saved.matches("compact_boundary").count(), 1);
     let loaded = aibus_core::run::transcript::load(&rig.dir.path().join(format!("runs/{}/conversation.jsonl", rig.lead))).unwrap();
     assert_eq!(loaded.conv.messages.len(), 2, "summary and the last answer");
+}
+
+/// A lead that compacts once, as in the test above.
+fn compacting_lead() -> Script {
+    script(
+        [Step::Usage { input: 500, output: 5 }]
+            .into_iter()
+            .chain(call("ls", json!({"path": "."})))
+            .chain([Step::MatchPrompt {
+                contains: "Summarise the conversation below".into(),
+                then: vec![text("SUMMARY: listed the directory"), end()],
+            }])
+            .chain([text("done after compacting")]),
+    )
+}
+
+fn handoff_path(out: &Out) -> (usize, PathBuf) {
+    out.msgs
+        .iter()
+        .enumerate()
+        .find_map(|(i, m)| match m {
+            Msg::HandoffWritten { path } => Some((i, path.clone())),
+            _ => None,
+        })
+        .expect("a HandoffWritten")
+}
+
+#[tokio::test]
+async fn compaction_writes_an_auto_handoff_from_the_ledger_before_it_summarises() {
+    use aibus_core::continuity::handoff::Handoff;
+    use aibus_core::continuity::{ledger, Layout};
+    let _clock = FakeClock::new();
+    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| script([text("unused")]));
+    rig.auto_compact_at = Some(100);
+    let layout = Layout::new(rig.dir.path(), &config::Config::default(), rig.dir.path(), Some("auth")).unwrap();
+    ledger::update(&layout, "goal", "Move auth to middleware", false, "2026-11-08").unwrap();
+    ledger::update(&layout, "in progress", "run the migration\nadd a test", false, "2026-11-08").unwrap();
+    rig.layout = Some(layout.clone());
+    let out = rig.run("a long task").await;
+    assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
+
+    let (written, path) = handoff_path(&out);
+    let compacted = out.msgs.iter().position(|m| matches!(m, Msg::Compacted { .. })).unwrap();
+    assert!(written < compacted, "the handoff comes first");
+    assert_eq!(path.parent().unwrap(), layout.handoff_dir());
+    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(name.starts_with("auto-handoff-") && name.ends_with(".yaml"), "{name}");
+    let h = Handoff::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(h.goal(), "Move auth to middleware");
+    assert_eq!(h.now(), "run the migration");
+    assert_eq!(h.text("status").as_deref(), Some("partial"));
+    assert_eq!(h.text("session").as_deref(), Some("auth"));
+    assert_eq!(h.to_json()["next"], json!(["add a test"]));
+    // The graph knows: `model:handoff:latest` names it.
+    let latest = rig.app.graph.read_key("model:handoff:latest").expect("model:handoff:latest");
+    assert!(format!("{latest:?}").contains(&name), "{latest:?}");
+}
+
+#[tokio::test]
+async fn without_a_ledger_the_auto_handoff_quotes_the_conversation() {
+    use aibus_core::continuity::handoff::Handoff;
+    use aibus_core::continuity::Layout;
+    let _clock = FakeClock::new();
+    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| script([text("unused")]));
+    rig.auto_compact_at = Some(100);
+    rig.layout = Some(Layout::new(rig.dir.path(), &config::Config::default(), rig.dir.path(), None).unwrap());
+    let out = rig.run("fix the login bug").await;
+    let (_, path) = handoff_path(&out);
+    let h = Handoff::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(h.goal(), "fix the login bug");
+    assert_eq!(h.text("session").as_deref(), Some("general"));
+    assert!(!h.now().is_empty());
+}
+
+#[tokio::test]
+async fn a_compactor_without_a_handoff_sink_writes_nothing() {
+    let _clock = FakeClock::new();
+    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| script([text("unused")]));
+    rig.auto_compact_at = Some(100);
+    let out = rig.run("a long task").await;
+    assert!(!out.msgs.iter().any(|m| matches!(m, Msg::HandoffWritten { .. })));
+    assert!(!rig.dir.path().join("thoughts").exists());
 }
 
 #[tokio::test]

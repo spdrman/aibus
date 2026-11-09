@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS memory_files (path TEXT PRIMARY KEY, scope TEXT, kind
     hash TEXT);
 ";
 
-fn io_err(e: rusqlite::Error) -> io::Error {
+pub(crate) fn io_err(e: rusqlite::Error) -> io::Error {
     io::Error::other(format!("index.sqlite: {e}"))
 }
 
@@ -40,6 +40,16 @@ pub struct Index {
 }
 
 impl Index {
+    /// The connection, for `continuity::recall`, which keeps the memory queries next to the
+    /// trait they implement.
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     pub fn open(path: &Path) -> io::Result<Self> {
         if let Some(dir) = path.parent() {
             create_private_dir(dir)?;

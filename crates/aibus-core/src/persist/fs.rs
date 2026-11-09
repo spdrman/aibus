@@ -82,6 +82,65 @@ pub fn write_locked(path: &Path, data: impl AsRef<[u8]>) -> io::Result<()> {
     done
 }
 
+/// Reads `path` while holding a shared lock, so a writer in another process is never seen
+/// half way through its write. `None` for a file that does not exist.
+pub fn read_locked(path: &Path) -> io::Result<Option<String>> {
+    use fs4::fs_std::FileExt;
+    use std::io::Read;
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    FileExt::lock_shared(&file)?;
+    let mut text = String::new();
+    let done = file.read_to_string(&mut text);
+    FileExt::unlock(&file)?;
+    done.map(|_| Some(text))
+}
+
+/// Read, change and write back under one exclusive lock, for the files two processes may
+/// change at once (a ledger section, `LEARNINGS.md`). `change` gets the current text (empty for
+/// a file that did not exist) and returns the new one; its error leaves the file alone.
+pub fn update_locked(
+    path: &Path,
+    change: impl FnOnce(&str) -> io::Result<String>,
+) -> io::Result<()> {
+    use fs4::fs_std::FileExt;
+    use std::io::{Read, Seek, SeekFrom};
+    let mut opts = fs::OpenOptions::new();
+    opts.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(path)?;
+    FileExt::lock_exclusive(&file)?;
+    let done = (|| {
+        let mut old = String::new();
+        file.read_to_string(&mut old)?;
+        let new = change(&old)?;
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(new.as_bytes())?;
+        file.sync_all()
+    })();
+    FileExt::unlock(&file)?;
+    done
+}
+
+/// FNV-1a over `bytes` as 16 hex digits. Stable across Rust versions and platforms, which
+/// `DefaultHasher` is not, so a hash stored in `index.sqlite` still means something next year.
+pub fn content_hash(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
 fn open_private(path: &Path, truncate: bool) -> io::Result<fs::File> {
     let mut opts = fs::OpenOptions::new();
     opts.write(true).create(true).truncate(truncate);

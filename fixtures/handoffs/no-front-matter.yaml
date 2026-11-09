@@ -1,0 +1,7 @@
+goal: Fix the flaky login test
+now: Re-run it with --nocapture and read the first failure
+test: npm test -- login
+done_this_session:
+  - task: Reproduced the flake on CI only
+next:
+  - Check the clock mock

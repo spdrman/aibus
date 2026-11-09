@@ -14,9 +14,16 @@ use aibus_provider::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use std::path::PathBuf;
+use std::time::SystemTime;
+
 use super::loop_::{Compactor, STREAM_CAPACITY};
-use super::{ContentBlock, Conversation, Message, MessageRole, ModelId};
+use super::{ContentBlock, Conversation, Message, MessageRole, ModelId, Usage};
+use crate::continuity::handoff::{self, Front, Handoff};
+use crate::continuity::{ledger, Layout};
 use crate::credentials::CredentialSource;
+use crate::persist::time::date;
+use crate::redact::Redactor;
 
 /// Characters of a tool call's input or a tool's result that go into the text to summarise.
 const TOOL_CHARS: usize = 1_000;
@@ -32,6 +39,16 @@ pub struct ModelCompactor {
     pub provider: Arc<dyn Provider>,
     pub creds: Arc<dyn CredentialSource>,
     pub model: ModelId,
+    /// The lead's compactor writes an auto-handoff before it summarises (01 section 5.5); a
+    /// worker's has none.
+    pub handoff: Option<AutoHandoff>,
+}
+
+/// Where an auto-handoff goes, and the redactor its text passes through, since it quotes the
+/// conversation.
+pub struct AutoHandoff {
+    pub layout: Layout,
+    pub redactor: Redactor,
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -68,7 +85,7 @@ fn render(m: &Message) -> String {
 
 /// The conversation as text, newest messages first until `budget` characters are used, then in
 /// order again. Whatever was left out from the front is said so.
-fn flatten(conv: &Conversation, budget: usize) -> String {
+pub(crate) fn flatten(conv: &Conversation, budget: usize) -> String {
     let mut kept = Vec::new();
     let mut used = 0;
     for m in conv.messages.iter().rev() {
@@ -89,13 +106,16 @@ fn flatten(conv: &Conversation, budget: usize) -> String {
     out
 }
 
-#[async_trait::async_trait]
-impl Compactor for ModelCompactor {
-    async fn compact(
+impl ModelCompactor {
+    /// One request in a fresh context: `instruction` and then `conv` as text, with no tools.
+    /// The model's text and what the call used and cost.
+    pub(crate) async fn ask(
         &self,
-        conv: &mut Conversation,
+        system: &str,
+        instruction: &str,
+        conv: &Conversation,
         cancel: &CancellationToken,
-    ) -> Result<(), String> {
+    ) -> Result<(String, Usage), String> {
         let info = self.provider.models().into_iter().find(|m| m.id == self.model);
         let window = info.as_ref().map_or(100_000, |m| m.context_window as usize);
         let max_output = info.as_ref().map_or(4_096, |m| m.max_output.min(4_096));
@@ -103,10 +123,10 @@ impl Compactor for ModelCompactor {
         let body = flatten(conv, budget);
         let req = ChatRequest {
             model: self.model.clone(),
-            system: "You summarise conversations for an engineering assistant.".into(),
+            system: system.into(),
             messages: vec![Message::text(
                 MessageRole::User,
-                &format!("{INSTRUCTION}\n\n<conversation>\n{body}\n</conversation>"),
+                &format!("{instruction}\n\n<conversation>\n{body}\n</conversation>"),
             )],
             tools: Vec::new(),
             tool_choice: ToolChoice::Auto,
@@ -129,7 +149,7 @@ impl Compactor for ModelCompactor {
                 _ = chunks.recv() => {}
             }
         };
-        let summary: String = resp
+        let text: String = resp
             .message
             .blocks
             .iter()
@@ -138,28 +158,64 @@ impl Compactor for ModelCompactor {
                 _ => None,
             })
             .collect();
-        if summary.trim().is_empty() {
-            return Err("the model returned an empty summary".into());
+        if text.trim().is_empty() {
+            return Err("the model returned an empty answer".into());
         }
-        let u = resp.usage;
+        let mut usage = resp.usage;
+        if usage.cost_usd <= 0.0 {
+            usage.cost_usd = self
+                .provider
+                .price(&self.model)
+                .and_then(|p| p.cost_usd(&usage))
+                .unwrap_or(0.0);
+        }
+        Ok((text, usage))
+    }
+}
+
+#[async_trait::async_trait]
+impl Compactor for ModelCompactor {
+    async fn compact(
+        &self,
+        conv: &mut Conversation,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
+        let system = "You summarise conversations for an engineering assistant.";
+        let (summary, u) = self.ask(system, INSTRUCTION, conv, cancel).await?;
         conv.usage.input_tokens += u.input_tokens;
         conv.usage.output_tokens += u.output_tokens;
         conv.usage.cache_read += u.cache_read;
         conv.usage.cache_write += u.cache_write;
-        conv.usage.cost_usd += if u.cost_usd > 0.0 {
-            u.cost_usd
-        } else {
-            self.provider
-                .price(&self.model)
-                .and_then(|p| p.cost_usd(&u))
-                .unwrap_or(0.0)
-        };
+        conv.usage.cost_usd += u.cost_usd;
         conv.messages = vec![Message::text(
             MessageRole::User,
             &format!("Summary of the conversation so far, written when the context was compacted:\n\n{}", summary.trim()),
         )];
         conv.compact_boundary = Some(0);
         Ok(())
+    }
+
+    /// The ledger's goal and first open item, or the conversation's first and last words when
+    /// there is no ledger, as `auto-handoff-<ts>.yaml` (01 section 8.2). Nothing is asked of the
+    /// model: this runs right before a compaction, when the context is already full.
+    async fn handoff(&self, conv: &Conversation) -> Result<Option<PathBuf>, String> {
+        let Some(auto) = &self.handoff else {
+            return Ok(None);
+        };
+        let ledger = ledger::read(&auto.layout).map_err(|e| e.to_string())?;
+        let mut body = serde_json::Value::Object(handoff::summarise(ledger.as_ref(), Some(conv)));
+        auto.redactor.redact_json(&mut body);
+        let now = SystemTime::now();
+        let front = Front {
+            session: &auto.layout.topic,
+            date: &date(now),
+            status: "partial",
+            outcome: None,
+        };
+        let h = Handoff::build(&front, body.as_object().ok_or("no handoff body")?)?;
+        handoff::write(&auto.layout, &h, true, now)
+            .map(Some)
+            .map_err(|e| e.to_string())
     }
 }
 

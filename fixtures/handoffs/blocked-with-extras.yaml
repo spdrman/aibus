@@ -1,0 +1,28 @@
+---
+session: billing-export
+date: 2026-11-05
+status: blocked
+---
+goal: Export invoices as CSV
+now: Waiting for the finance team to confirm the column order
+blockers:
+  - Column order is not decided
+  - "The staging database is read-only until Monday: ask ops"
+questions:
+  - Should refunds be negative rows?
+  - Is the export per customer or per month?
+decisions:
+  - use_streaming: the largest customer has 2M rows
+  - quote_all_fields: "finance opens these in a spreadsheet that mangles dates"
+findings:
+  - encoding: the legacy table is latin-1, not utf-8
+worked:
+  - writing the exporter against a 100-row sample first
+failed:
+  - "loading the whole result set: out of memory at 400k rows"
+files:
+  created: [src/export/csv.rs]
+  modified: [src/export/mod.rs]
+reviewer: dana
+estimate_hours: 6
+tags: [export, finance]

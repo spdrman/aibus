@@ -72,6 +72,25 @@ pub enum MemoryScope {
     Local,
 }
 
+impl MemoryScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MemoryScope::User => "user",
+            MemoryScope::Project => "project",
+            MemoryScope::Local => "local",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "user" => MemoryScope::User,
+            "project" => MemoryScope::Project,
+            "local" => MemoryScope::Local,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionMode {

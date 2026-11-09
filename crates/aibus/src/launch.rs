@@ -300,6 +300,7 @@ impl Launcher for ChildLauncher {
             provider: picked.provider.clone(),
             creds: picked.creds.clone(),
             model: picked.model.clone(),
+            handoff: None,
         });
 
         Ok((

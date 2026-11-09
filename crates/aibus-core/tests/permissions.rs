@@ -34,6 +34,7 @@ fn cx(cwd: &Path) -> ToolCx {
         cancel: CancellationToken::new(),
         limits: ToolLimits::default(),
         tx: mpsc::channel(1).0,
+        memory: None,
     }
 }
 

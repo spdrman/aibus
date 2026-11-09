@@ -173,6 +173,13 @@ pub enum Command {
     Completions { shell: Shell },
     /// Print the version
     Version,
+    /// Play the scripted README session on a virtual clock (no config, keychain or network)
+    #[command(hide = true)]
+    Demo {
+        /// Print each frame as plain text instead of drawing it
+        #[arg(long)]
+        text: bool,
+    },
 }
 
 #[derive(Args, Debug, Default)]
@@ -456,7 +463,7 @@ mod tests {
     ];
 
     fn leaves(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
-        let subs: Vec<_> = cmd.get_subcommands().filter(|s| s.get_name() != "help").collect();
+        let subs: Vec<_> = cmd.get_subcommands().filter(|s| s.get_name() != "help" && !s.is_hide_set()).collect();
         if subs.is_empty() {
             out.push(prefix.trim().to_owned());
         }

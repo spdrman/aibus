@@ -235,6 +235,32 @@ pub fn nearest_256(r: u8, g: u8, b: u8) -> u8 {
     }
 }
 
+/// The SGR parameters that set `c` as foreground or background (the demo's ANSI writer).
+pub fn sgr(c: Color, fg: bool) -> String {
+    let (base, bright) = if fg { (30, 90) } else { (40, 100) };
+    match c {
+        Color::Reset => (if fg { 39 } else { 49 }).to_string(),
+        Color::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", if fg { 38 } else { 48 }),
+        Color::Indexed(n) => format!("{};5;{n}", if fg { 38 } else { 48 }),
+        Color::Black => base.to_string(),
+        Color::Red => (base + 1).to_string(),
+        Color::Green => (base + 2).to_string(),
+        Color::Yellow => (base + 3).to_string(),
+        Color::Blue => (base + 4).to_string(),
+        Color::Magenta => (base + 5).to_string(),
+        Color::Cyan => (base + 6).to_string(),
+        Color::Gray => (base + 7).to_string(),
+        Color::DarkGray => bright.to_string(),
+        Color::LightRed => (bright + 1).to_string(),
+        Color::LightGreen => (bright + 2).to_string(),
+        Color::LightYellow => (bright + 3).to_string(),
+        Color::LightBlue => (bright + 4).to_string(),
+        Color::LightMagenta => (bright + 5).to_string(),
+        Color::LightCyan => (bright + 6).to_string(),
+        Color::White => (bright + 7).to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -105,6 +105,9 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Doctor { session }) => {
             doctor::doctor(&cli.global, session.as_deref(), redactor, &keychain::OsKeychain)
         }
+        Some(Command::Demo { text }) => aibus_tui::demo::print(text, std::io::stdout().lock())
+            .map(|()| 0)
+            .map_err(|e| AibusError::Io(std::io::Error::other(e))),
         Some(Command::Completions { shell }) => {
             print!("{}", completions::script(shell));
             Ok(0)

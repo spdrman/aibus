@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod demo;
 pub mod glyphs;
 pub mod hit;
 pub mod input;

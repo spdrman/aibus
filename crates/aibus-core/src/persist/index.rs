@@ -200,6 +200,15 @@ mod tests {
     use super::*;
     use crate::ids::SessionId;
 
+    /// RUSTSEC-2026-0459 is fixed in the SQLite 3.54.0 that `libsqlite3-sys` 0.39 bundles.
+    #[test]
+    fn bundled_sqlite_is_at_least_3_54() {
+        let conn = Connection::open_in_memory().unwrap();
+        let version: String = conn.query_row("SELECT sqlite_version()", [], |r| r.get(0)).unwrap();
+        let parts: Vec<u32> = version.split('.').map(|p| p.parse().unwrap()).collect();
+        assert!(parts[..2] >= [3, 54][..], "bundled SQLite {version} is older than 3.54.0");
+    }
+
     fn session(id: &str, started: &str) -> SessionMeta {
         let mut m = SessionMeta::new(SessionId::new(), started.into(), Some("t".into()), "/p".into(), "lead");
         m.id = id.into();

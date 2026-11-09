@@ -32,7 +32,7 @@ aibus ──► aibus-tui ──► aibus-core ──► aibus-graph
 
 `aibus-core` depends on `aibus-provider` (the trait), never on a concrete provider. `aibus-tui` never depends on a provider crate. `aibus-graph` depends on nothing in the workspace.
 
-Edition 2021, MSRV pinned in `rust-toolchain.toml` (1.85 at the time of writing; raised only with a changelog note). `#![forbid(unsafe_code)]` on every crate except where a keychain FFI crate needs it, and there it is `deny` with an allow on the one function.
+Edition 2021, MSRV pinned in `rust-toolchain.toml` (1.89 at the time of writing; raised only with a changelog note). `#![forbid(unsafe_code)]` on every crate except where a keychain FFI crate needs it, and there it is `deny` with an allow on the one function.
 
 ## 2. Runtime
 

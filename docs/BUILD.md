@@ -4,7 +4,7 @@ I started this file with the two things the spec says have to live here from day
 
 ## Toolchain
 
-`rust-toolchain.toml` pins 1.85, which is also the MSRV (`rust-version = "1.85"` in the workspace manifest). I only raise it with a changelog note. Everything builds with `--locked`, and `Cargo.lock` is committed.
+`rust-toolchain.toml` pins 1.89, which is also the MSRV (`rust-version = "1.89"` in the workspace manifest). I only raise it with a changelog note. Everything builds with `--locked`, and `Cargo.lock` is committed.
 
 ## Dependencies that run code at build time
 

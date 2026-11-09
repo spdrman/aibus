@@ -113,3 +113,16 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Embed the same stack (rejected: the brief is a single Rust binary). Skip continuity until later (rejected: it is one of the three pillars).
 
 **Why.** The ideas port cleanly; the infrastructure does not need to.
+
+## D-02 gate at C2.4 (2026-11-08): `mini` stays the default
+
+**Context.** D-02 flips the default to `causl-rs` only if the crate is obtainable under the supply-chain rules and the differential test has been green for a release. C2.4 built what is needed to check both.
+
+**Decision.** The default stays `mini`. I checked the two conditions:
+
+1. Obtainable under the supply-chain rules: not met. `causl-engine-core` is version 0.0.0, `publish = false`, on a private Gitea, pinned at `a6247b36b38dda4d97017d0577210aa8c724e4f2`. Building it needs a token, which only the manual `causl-differential` workflow has. `cargo deny` restricts sources to crates.io plus that one remote, but there is no token-free source: no public mirror and no vendored copy with a confirmed licence.
+2. Differential green for a release: not met. The first green run is 2026-11-08 (conformance 13 of 13, differential 2 of 2, side-by-side bench, clippy 1.99.1, `cargo deny`). The same differential was also shown to fail with one side's commit intents deliberately reversed, then the change was reverted. One green run is not a release.
+
+**Alternatives.** Flip now because the numbers are fine (rejected: causl is 1.4x to 2.4x mini at p50 on `commit_stream` and far under the 4 ms p99 budget, so speed is not the blocker, the supply chain is). Drop the second backend (rejected: it is cheap to keep and the differential keeps `mini` honest).
+
+**Why.** Flipping would make the default build depend on a source nobody but the owner can fetch. The gate is re-evaluated at each release (Q12): flip once the crate is public or vendored under a confirmed licence and the differential has been green across a release.

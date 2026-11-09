@@ -89,7 +89,7 @@ pub fn assert_same_on_both<A: Graph, B: Graph>(fx: &Fixture, a: fn() -> A, b: fn
     };
     assert_eq!(
         intents(left.graph.commit_log()),
-        intents(right.graph.commit_log()).into_iter().rev().collect::<Vec<_>>(),
+        intents(right.graph.commit_log()),
         "{}: the commit logs differ",
         fx.name
     );

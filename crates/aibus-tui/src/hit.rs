@@ -45,6 +45,22 @@ pub enum HitId {
     Backdrop,
     /// The modal's own box.
     Modal,
+    /// A real button of a modal or a screen: `allow`, `always`, `deny`, `edit`, `cancel`, ...
+    Button(&'static str),
+    /// The nth row of the list in the palette, the agents screen or the accounts screen.
+    ListRow(usize),
+    /// The nth row of the open transcript (index among the rows drawn).
+    TrRow(usize),
+    TrTrack,
+    TrThumb,
+    /// The `jump to latest` button of a transcript scrolled away from the bottom.
+    JumpLatest,
+    /// The `copy` hint beside a text selection.
+    CopyHint,
+    /// The nth row of the prompt.
+    PromptRow(usize),
+    /// The nth candidate of the completion popup.
+    PopupItem(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +77,10 @@ pub enum HitKind {
     Thumb,
     /// Swallows the click.
     Modal,
+    /// Clicked to act; lights up under the pointer.
+    Button,
+    /// Text that a drag selects.
+    Text,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,8 +143,10 @@ impl HitMap {
     pub fn hoverable(&self) -> bool {
         // A context menu has a backdrop but its items still react to the pointer.
         let menu = self.regions.iter().any(|r| matches!(r.id, HitId::MenuItem(_)));
-        self.regions.iter().any(|r| !matches!(r.kind, HitKind::Modal))
-            && (menu || !self.regions.iter().any(|r| r.id == HitId::Backdrop))
+        let buttons = self.regions.iter().any(|r| matches!(r.kind, HitKind::Button | HitKind::Text));
+        buttons
+            || (self.regions.iter().any(|r| !matches!(r.kind, HitKind::Modal))
+                && (menu || !self.regions.iter().any(|r| r.id == HitId::Backdrop)))
     }
 }
 

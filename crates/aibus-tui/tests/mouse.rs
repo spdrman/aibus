@@ -319,6 +319,7 @@ fn with_the_mouse_off_pointer_events_do_nothing() {
             &mut CtrlC::default(),
             mouse,
             Instant::now(),
+            &mut |app, m| app.step(m),
         )
         .unwrap();
         assert_eq!(r.int("eng:msg_seq") != seq, changed, "mouse = {mouse}");

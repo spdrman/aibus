@@ -55,6 +55,14 @@ actions! {
     Quit "quit" "quit";
     CloseModal "close_modal" "close";
     ClearPrompt "clear_prompt" "clear the prompt";
+    NextTool "next_tool" "next tool call";
+    PrevTool "prev_tool" "previous tool call";
+    ToggleTool "toggle_tool" "expand or collapse the call";
+    PageUp "page_up" "page up";
+    PageDown "page_down" "page down";
+    CompactRun "compact_run" "compact the run";
+    ScrollTop "scroll_top" "first row";
+    ScrollBottom "scroll_bottom" "latest row";
 }
 
 impl Action {
@@ -85,6 +93,12 @@ pub enum Ctx {
     Modal,
     /// The context menu of a run.
     Menu,
+    /// The screens with their own keys (letters named on their buttons).
+    Palette,
+    Agents,
+    Accounts,
+    Outcome,
+    Confirm,
 }
 
 /// Where a binding applies (the "Context" column of the table).
@@ -170,10 +184,10 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (FocusPrev, "shift+tab", &[Global]),
     (Submit, "enter", &[Prompt]),
     (OpenTranscript, "enter", &[Cards, Log]),
-    (MoveUp, "up", &[Cards, Log, Rail, Menu]),
-    (MoveUp, "k", &[Cards, Log, Rail, Menu]),
-    (MoveDown, "down", &[Cards, Log, Rail, Menu]),
-    (MoveDown, "j", &[Cards, Log, Rail, Menu]),
+    (MoveUp, "up", &[Cards, Log, Rail, Menu, Transcript]),
+    (MoveUp, "k", &[Cards, Log, Rail, Menu, Transcript]),
+    (MoveDown, "down", &[Cards, Log, Rail, Menu, Transcript]),
+    (MoveDown, "j", &[Cards, Log, Rail, Menu, Transcript]),
     (CardPrev, "left", &[Cards]),
     (CardPrev, "h", &[Cards]),
     (CardNext, "right", &[Cards]),
@@ -182,13 +196,14 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (RetryRun, "r", &[Cards, Transcript]),
     // `m` is the context menu (05 section 6.1), so the message key moved to `M`.
     (MessageRun, "M", &[Cards, Transcript]),
+    (MessageRun, "m", &[Transcript]),
     (OpenMenu, "m", &[Cards, Log]),
     (ShowTooltip, "space", &[Dashboard]),
     (PickMenuItem, "enter", &[Menu]),
-    (ResumeRun, "R", &[Cards]),
+    (ResumeRun, "R", &[Cards, Transcript]),
     (ToggleBackground, "b", &[Cards]),
     (BackgroundWait, "ctrl+b", &[Global]),
-    (OpenLeadTranscript, "t", &[Global]),
+    (OpenLeadTranscript, "t", &[Global, Transcript]),
     (FocusRail, "a", &[Global]),
     (ShowAdvice, "enter", &[Rail]),
     (JumpPermission, "p", &[Global]),
@@ -209,6 +224,14 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (CloseModal, "esc", &[Modal, Permission, Transcript, Menu]),
     (CloseModal, "q", &[Transcript]),
     (ClearPrompt, "esc", &[Prompt]),
+    (NextTool, "tab", &[Transcript]),
+    (PrevTool, "shift+tab", &[Transcript]),
+    (ToggleTool, "enter", &[Transcript]),
+    (PageUp, "pageup", &[Transcript, Log]),
+    (PageDown, "pagedown", &[Transcript, Log]),
+    (CompactRun, "c", &[Transcript]),
+    (ScrollTop, "g", &[Transcript]),
+    (ScrollBottom, "G", &[Transcript]),
 ];
 
 /// `ctrl+b`, `shift+tab`, `esc`, `R`, `f5`: modifiers joined by `+`, then a key name or one
@@ -499,6 +522,11 @@ fn ctx_name(c: Ctx) -> &'static str {
         Ctx::Permission => "permission",
         Ctx::Modal => "modal",
         Ctx::Menu => "menu",
+        Ctx::Palette => "palette",
+        Ctx::Agents => "agents",
+        Ctx::Accounts => "accounts",
+        Ctx::Outcome => "outcome",
+        Ctx::Confirm => "confirm",
     }
 }
 
@@ -520,7 +548,7 @@ mod tests {
             );
         }
         assert_eq!(map.conflicts(), Vec::<String>::new());
-        assert_eq!(ACTIONS.len(), 37);
+        assert_eq!(ACTIONS.len(), 45);
     }
 
     #[test]

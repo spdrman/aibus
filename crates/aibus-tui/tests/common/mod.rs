@@ -32,6 +32,8 @@ pub struct Rig {
     pub layout_done: bool,
     /// What menu picks asked to be copied.
     pub copied: Vec<Clip>,
+    /// What keys and clicks asked the loop to do outside the graph.
+    pub jobs: Vec<aibus_tui::input::Job>,
 }
 
 impl Rig {
@@ -45,6 +47,7 @@ impl Rig {
             now: Instant::now(),
             layout_done: false,
             copied: Vec::new(),
+            jobs: Vec::new(),
         };
         rig.settle();
         rig
@@ -59,8 +62,7 @@ impl Rig {
     /// What the loop does after every step: tell the UI about pointer state and the commit, draw.
     pub fn settle(&mut self) {
         self.input.settle(self.now);
-        self.ui.pointer = self.input.pointer;
-        self.ui.filter_edit = self.input.filter_edit;
+        aibus_tui::app::sync(&mut self.ui, &self.input);
         self.ui.note_commit(&self.app.graph);
         self.ui.draw(&mut self.term, &self.app.graph).unwrap();
     }
@@ -71,6 +73,7 @@ impl Rig {
         }
         self.layout_done |= out.layout_done;
         self.copied.extend(out.copy);
+        self.jobs.extend(out.jobs);
         self.settle();
         out.msgs
     }
@@ -88,7 +91,7 @@ impl Rig {
     pub fn mouse_with(&mut self, kind: MouseEventKind, col: u16, row: u16, mods: KeyModifiers) -> Vec<Msg> {
         let cx = Context::read(&self.app.graph);
         let ev = MouseEvent { kind, column: col, row, modifiers: mods };
-        let out = self.input.mouse(ev, self.now, &self.ui.drawn, &cx);
+        let out = self.input.mouse(ev, self.now, &self.ui.drawn, &cx, &mut self.ui.prompt);
         self.apply(out)
     }
 
@@ -115,7 +118,7 @@ impl Rig {
     pub fn key_with(&mut self, code: KeyCode, mods: KeyModifiers) -> Vec<Msg> {
         let ev = key_from_crossterm(KeyEvent::new(code, mods)).unwrap();
         let cx = Context::read(&self.app.graph);
-        let out = self.input.key(ev, &cx, &self.ui.keys, &self.ui.drawn, &mut self.ui.prompt.text);
+        let out = self.input.key(ev, &cx, &self.ui.keys, &self.ui.drawn, &mut self.ui.prompt);
         self.apply(out)
     }
 

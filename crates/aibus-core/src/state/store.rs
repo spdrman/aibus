@@ -23,6 +23,8 @@ pub const LOG_RING: usize = 2_000;
 pub const SUMMARY_HEAD: usize = 2 * 1024;
 /// Tool inputs and prompts over this go behind a handle (Q13).
 pub const INLINE_MAX: usize = 4 * 1024;
+/// How much of a result the expanded view keeps in memory; the rest is on disk.
+pub const OUTPUT_KEEP: usize = 4 * 1024;
 
 pub const TRANSCRIPT: &str = "transcript";
 pub const TAIL: &str = "tail";
@@ -36,13 +38,86 @@ pub struct Block {
     pub text: Arc<str>,
 }
 
+/// What a run did besides talk: the transcript view draws these between the text (05 section 3).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Ev {
+    /// A message from the user: the prompt that started the run, or one sent to it.
+    User(String),
+    Tool(Tool),
+    /// The conversation was compacted away at this many tokens.
+    Compact { pre_tokens: u64 },
+    Note { error: bool, text: String },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tool {
+    pub call: String,
+    pub name: String,
+    /// The one line a collapsed call shows: the command, the path.
+    pub summary: String,
+    pub input: String,
+    pub done: Option<Done>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Done {
+    pub ok: bool,
+    pub ms: u64,
+    pub bytes: usize,
+    /// The start of the result, for the expanded view.
+    pub output: String,
+}
+
+enum Chunk {
+    /// A sealed run of text; `start` is the number of text bytes before it.
+    Text { block: Arc<Block>, start: usize },
+    Ev { ev: Ev, ver: u32 },
+}
+
+/// One row of the transcript view.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Row {
+    Text(String),
+    User(String),
+    /// A tool call; `ordinal` counts the calls of the run from 0.
+    Tool { ordinal: usize, tool: Tool, expanded: bool },
+    Detail(String),
+    Compact(u64),
+    Note { error: bool, text: String },
+}
+
+/// A window of the rows of a transcript at one width.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Rows {
+    pub total: usize,
+    /// Index of `rows[0]` among all rows.
+    pub first: usize,
+    pub rows: Vec<Row>,
+    /// How many calls the transcript holds.
+    pub tools: usize,
+}
+
 #[derive(Default)]
 struct Transcript {
-    blocks: Vec<Arc<Block>>,
+    chunks: Vec<Chunk>,
     blocks_version: u32,
+    /// Text bytes in `chunks`; the tail starts here.
+    sealed_bytes: usize,
     tail: String,
     tail_version: u32,
     head: String,
+    /// `(tail_version, text bytes so far)` after each change, so a past version can be cut out.
+    marks: Vec<(u32, usize)>,
+    /// The content was dropped when the run finished.
+    evicted: bool,
+}
+
+impl Transcript {
+    fn seal(&mut self, block: Arc<Block>) {
+        let start = self.sealed_bytes;
+        self.sealed_bytes += block.text.len();
+        self.chunks.push(Chunk::Text { block, start });
+    }
 }
 
 #[derive(Default)]
@@ -55,6 +130,8 @@ struct Inner {
     /// Wrapped lines per sealed block at one width; a width change drops everything.
     wrap: HashMap<u64, Arc<[String]>>,
     wrap_width: usize,
+    /// How many times text was wrapped (a cache miss, the tail, a cut): the tail-only test reads it.
+    wrap_calls: u64,
 }
 
 #[derive(Clone, Default)]
@@ -91,6 +168,41 @@ fn count_rows(text: &str, width: usize) -> usize {
     text.split('\n')
         .map(|l| l.chars().count().div_ceil(width).max(1))
         .sum()
+}
+
+/// The rows below a call that is expanded: its input, then its result, each wrapped.
+fn detail(tool: &Tool, width: usize) -> Vec<String> {
+    let w = width.saturating_sub(4).max(1);
+    let mut out: Vec<String> = wrap_text(&tool.input, w).into_iter().map(|l| format!("  {l}")).collect();
+    if let Some(d) = &tool.done {
+        out.extend(wrap_text(&d.output, w).into_iter().map(|l| format!("  {l}")));
+    }
+    out
+}
+
+fn event_rows(ev: &Ev, expanded: &[String], width: usize) -> usize {
+    match ev {
+        Ev::User(t) => count_rows(t, width.saturating_sub(2).max(1)),
+        Ev::Tool(t) if expanded.contains(&t.call) => 1 + detail(t, width).len(),
+        _ => 1,
+    }
+}
+
+fn event_window(ev: &Ev, ordinal: usize, expanded: &[String], width: usize, range: std::ops::Range<usize>) -> Vec<Row> {
+    let all: Vec<Row> = match ev {
+        Ev::User(t) => wrap_text(t, width.saturating_sub(2).max(1)).into_iter().map(Row::User).collect(),
+        Ev::Tool(t) => {
+            let open = expanded.contains(&t.call);
+            let mut rows = vec![Row::Tool { ordinal, tool: t.clone(), expanded: open }];
+            if open {
+                rows.extend(detail(t, width).into_iter().map(Row::Detail));
+            }
+            rows
+        }
+        Ev::Compact { pre_tokens } => vec![Row::Compact(*pre_tokens)],
+        Ev::Note { error, text } => vec![Row::Note { error: *error, text: text.clone() }],
+    };
+    all.into_iter().skip(range.start).take(range.len()).collect()
 }
 
 impl Store {
@@ -158,23 +270,82 @@ impl Store {
             let rest = t.tail.split_off(cut);
             let head = std::mem::replace(&mut t.tail, rest);
             *next_id += 1;
-            t.blocks.push(Arc::new(Block {
+            t.seal(Arc::new(Block {
                 id: *next_id,
                 text: head.into(),
             }));
             sealed = true;
         }
+        let total = t.sealed_bytes + t.tail.len();
+        t.marks.push((t.tail_version, total));
         if sealed {
             t.blocks_version = t.blocks_version.wrapping_add(1);
         }
         sealed
     }
 
+    /// Puts an event after the text so far. Both handles move.
+    pub fn push_event(&self, id: u64, ev: Ev) {
+        let mut guard = self.lock();
+        let Inner {
+            transcripts,
+            next_id,
+            ..
+        } = &mut *guard;
+        let Some(t) = transcripts.get_mut(&id) else {
+            return;
+        };
+        if !t.tail.is_empty() {
+            *next_id += 1;
+            let text = std::mem::take(&mut t.tail);
+            t.seal(Arc::new(Block { id: *next_id, text: text.into() }));
+        }
+        t.tail_version = t.tail_version.wrapping_add(1);
+        t.blocks_version = t.blocks_version.wrapping_add(1);
+        t.marks.push((t.tail_version, t.sealed_bytes));
+        t.chunks.push(Chunk::Ev { ev, ver: t.tail_version });
+    }
+
+    /// Fills in the result of the call `call`. Both handles move.
+    pub fn finish_tool(&self, id: u64, call: &str, done: Done) {
+        let mut g = self.lock();
+        let Some(t) = g.transcripts.get_mut(&id) else { return };
+        let found = t.chunks.iter_mut().rev().find_map(|c| match c {
+            Chunk::Ev { ev: Ev::Tool(tool), .. } if tool.call == call => Some(tool),
+            _ => None,
+        });
+        if let Some(tool) = found {
+            tool.done = Some(done);
+            t.tail_version = t.tail_version.wrapping_add(1);
+            t.blocks_version = t.blocks_version.wrapping_add(1);
+        }
+    }
+
+    /// The id of the `ordinal`th call of the transcript.
+    pub fn tool_call(&self, id: u64, ordinal: usize) -> Option<String> {
+        let g = self.lock();
+        g.transcripts
+            .get(&id)?
+            .chunks
+            .iter()
+            .filter_map(|c| match c {
+                Chunk::Ev { ev: Ev::Tool(t), .. } => Some(t.call.clone()),
+                _ => None,
+            })
+            .nth(ordinal)
+    }
+
+    /// The sealed text blocks, oldest first.
     pub fn blocks(&self, id: u64) -> Vec<Arc<Block>> {
-        self.lock()
-            .transcripts
-            .get(&id)
-            .map_or_else(Vec::new, |t| t.blocks.clone())
+        self.lock().transcripts.get(&id).map_or_else(Vec::new, |t| {
+            t.chunks
+                .iter()
+                .filter_map(|c| match c {
+                    Chunk::Text { block, .. } => Some(block.clone()),
+                    Chunk::Ev { .. } => None,
+                })
+                .collect()
+        })
     }
 
     pub fn tail(&self, id: u64) -> String {
@@ -197,12 +368,40 @@ impl Store {
         let Some(t) = g.transcripts.get_mut(&id) else {
             return;
         };
-        let gone: Vec<u64> = t.blocks.drain(..).map(|b| b.id).collect();
+        let gone: Vec<u64> = t
+            .chunks
+            .drain(..)
+            .filter_map(|c| match c {
+                Chunk::Text { block, .. } => Some(block.id),
+                Chunk::Ev { .. } => None,
+            })
+            .collect();
         t.tail = String::new();
+        t.sealed_bytes = 0;
+        t.marks.clear();
+        t.evicted = true;
         t.blocks_version = t.blocks_version.wrapping_add(1);
         t.tail_version = t.tail_version.wrapping_add(1);
         for b in gone {
             g.wrap.remove(&b);
+        }
+    }
+
+    /// Whether the content was dropped when the run finished and has not been brought back.
+    pub fn is_evicted(&self, id: u64) -> bool {
+        self.lock().transcripts.get(&id).is_some_and(|t| t.evicted)
+    }
+
+    /// Starts bringing an evicted transcript back from disk: true once, for whoever reads the
+    /// file. Text goes in with `append` and events with `push_event`, as they came the first time.
+    pub fn begin_restore(&self, id: u64) -> bool {
+        let mut g = self.lock();
+        match g.transcripts.get_mut(&id) {
+            Some(t) if t.evicted => {
+                t.evicted = false;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -298,18 +497,33 @@ impl Store {
             g.wrap.clear();
             g.wrap_width = width;
         }
-        g.wrap
-            .entry(block.id)
-            .or_insert_with(|| wrap_text(&block.text, width).into())
-            .clone()
+        if let Some(hit) = g.wrap.get(&block.id) {
+            return hit.clone();
+        }
+        g.wrap_calls += 1;
+        let lines: Arc<[String]> = wrap_text(&block.text, width).into();
+        g.wrap.insert(block.id, lines.clone());
+        lines
     }
 
-    /// `(sealed_rows, tail_rows)` of a transcript at `width`. Sealed blocks come from the cache;
-    /// only the tail is walked.
+    /// How many times text was wrapped, for the test that a stream commit wraps only the tail.
+    pub fn wrap_calls(&self) -> u64 {
+        self.lock().wrap_calls
+    }
+
+    /// `(sealed_rows, tail_rows)` of a transcript's text at `width`. Sealed blocks come from the
+    /// cache; only the tail is walked.
     pub fn rows(&self, id: u64, width: usize) -> (usize, usize) {
         let mut g = self.lock();
-        let blocks = match g.transcripts.get(&id) {
-            Some(t) => t.blocks.clone(),
+        let blocks: Vec<Arc<Block>> = match g.transcripts.get(&id) {
+            Some(t) => t
+                .chunks
+                .iter()
+                .filter_map(|c| match c {
+                    Chunk::Text { block, .. } => Some(block.clone()),
+                    Chunk::Ev { .. } => None,
+                })
+                .collect(),
             None => return (0, 0),
         };
         let sealed = blocks
@@ -323,15 +537,113 @@ impl Store {
         (sealed, tail)
     }
 
+    /// The rows of a transcript at `width`: text wrapped, events one row each (a call in
+    /// `expanded` adds its input and result). `upto` cuts the transcript back to what it held at
+    /// that tail version (time travel). `window` is `(first row, count)`; a `None` first row
+    /// takes the last `count` rows. Wrapping a sealed block is cached; the tail is wrapped each time.
+    pub fn transcript_rows(
+        &self,
+        id: u64,
+        width: usize,
+        expanded: &[String],
+        upto: Option<u32>,
+        window: (Option<usize>, usize),
+    ) -> Rows {
+        let mut g = self.lock();
+        let Some(t) = g.transcripts.get(&id) else { return Rows::default() };
+        let limit = upto.map(|v| {
+            t.marks
+                .iter()
+                .rev()
+                .find(|(ver, _)| *ver <= v)
+                .map_or(0, |(_, bytes)| *bytes)
+        });
+        // The pieces in order: text (a sealed block, or a cut of it or of the tail) and events.
+        enum Piece {
+            Block(Arc<Block>),
+            Cut(String),
+            Ev(Ev),
+        }
+        let mut pieces = Vec::new();
+        for c in &t.chunks {
+            match c {
+                Chunk::Text { block, start } => match limit {
+                    Some(l) if l <= *start => {}
+                    Some(l) if l < start + block.text.len() => {
+                        pieces.push(Piece::Cut(block.text[..boundary(&block.text, l - start)].to_owned()));
+                    }
+                    _ => pieces.push(Piece::Block(block.clone())),
+                },
+                Chunk::Ev { ev, ver } => {
+                    if upto.is_none_or(|v| *ver <= v) {
+                        pieces.push(Piece::Ev(ev.clone()));
+                    }
+                }
+            }
+        }
+        let tail = match limit {
+            Some(l) if l <= t.sealed_bytes => String::new(),
+            Some(l) => t.tail[..boundary(&t.tail, (l - t.sealed_bytes).min(t.tail.len()))].to_owned(),
+            None => t.tail.clone(),
+        };
+        if !tail.is_empty() {
+            pieces.push(Piece::Cut(tail));
+        }
+        // Row counts first, so the window can be placed; then only the rows in it are built.
+        let mut counts = Vec::with_capacity(pieces.len());
+        let mut text_rows: Vec<Option<Arc<[String]>>> = Vec::with_capacity(pieces.len());
+        let mut tools = 0;
+        for p in &pieces {
+            let (n, lines) = match p {
+                Piece::Block(b) => {
+                    let lines = Self::wrapped_locked(&mut g, b, width);
+                    (lines.len(), Some(lines))
+                }
+                Piece::Cut(text) => {
+                    g.wrap_calls += 1;
+                    let lines: Arc<[String]> = wrap_text(text, width).into();
+                    (lines.len(), Some(lines))
+                }
+                Piece::Ev(ev) => {
+                    tools += usize::from(matches!(ev, Ev::Tool(_)));
+                    (event_rows(ev, expanded, width), None)
+                }
+            };
+            counts.push(n);
+            text_rows.push(lines);
+        }
+        let total: usize = counts.iter().sum();
+        let (first, count) = match window {
+            (Some(f), c) => (f.min(total), c),
+            (None, c) => (total.saturating_sub(c), c),
+        };
+        let end = (first + count).min(total);
+        let mut rows = Vec::with_capacity(end - first);
+        let (mut at, mut ord) = (0usize, 0usize);
+        for (i, p) in pieces.iter().enumerate() {
+            let n = counts[i];
+            let this = ord;
+            ord += usize::from(matches!(p, Piece::Ev(Ev::Tool(_))));
+            let (lo, hi) = (first.max(at), end.min(at + n));
+            if lo < hi {
+                match (p, &text_rows[i]) {
+                    (_, Some(lines)) => rows.extend(lines[lo - at..hi - at].iter().cloned().map(Row::Text)),
+                    (Piece::Ev(ev), None) => rows.extend(event_window(ev, this, expanded, width, lo - at..hi - at)),
+                    _ => {}
+                }
+            }
+            at += n;
+        }
+        Rows { total, first, rows, tools }
+    }
+
     /// Bytes of content held (blocks, tails, heads, texts, log rows excluded).
     pub fn content_bytes(&self) -> usize {
         let g = self.lock();
         let t: usize = g
             .transcripts
             .values()
-            .map(|t| {
-                t.blocks.iter().map(|b| b.text.len()).sum::<usize>() + t.tail.len() + t.head.len()
-            })
+            .map(|t| t.sealed_bytes + t.tail.len() + t.head.len())
             .sum();
         t + g.texts.values().map(|x| x.len()).sum::<usize>()
     }

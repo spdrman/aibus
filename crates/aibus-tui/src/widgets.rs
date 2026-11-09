@@ -14,15 +14,15 @@ use crate::theme::{Interact, Theme};
 const SPINNER: [&str; 4] = ["◐", "◓", "◑", "◒"];
 const PARTIAL: [&str; 8] = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
-fn text<'a>(v: &'a Value, key: &str) -> &'a str {
+pub(crate) fn text<'a>(v: &'a Value, key: &str) -> &'a str {
     get(v, key).and_then(as_str).unwrap_or("")
 }
 
-fn flag(v: &Value, key: &str) -> bool {
+pub(crate) fn flag(v: &Value, key: &str) -> bool {
     matches!(get(v, key), Some(Value::Bool(true)))
 }
 
-fn real(v: &Value, key: &str) -> Option<f64> {
+pub(crate) fn real(v: &Value, key: &str) -> Option<f64> {
     match get(v, key)? {
         Value::F64(x) => Some(*x),
         Value::I64(x) => Some(*x as f64),
@@ -30,7 +30,7 @@ fn real(v: &Value, key: &str) -> Option<f64> {
     }
 }
 
-fn int(v: &Value, key: &str) -> i64 {
+pub(crate) fn int(v: &Value, key: &str) -> i64 {
     get(v, key).and_then(as_i64).unwrap_or(0)
 }
 
@@ -75,13 +75,13 @@ pub(crate) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, s: &str, style: 
 }
 
 /// `s` against the right edge of `area`.
-fn put_right(buf: &mut Buffer, area: Rect, y: u16, s: &str, style: Style) {
+pub(crate) fn put_right(buf: &mut Buffer, area: Rect, y: u16, s: &str, style: Style) {
     let w = u16::try_from(s.chars().count()).unwrap_or(u16::MAX);
     put(buf, area, area.width.saturating_sub(w), y, s, style);
 }
 
 /// `s` cut to `max` cells, with `…` where it was cut.
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
     }
@@ -535,38 +535,101 @@ pub fn session_log(
     LogGeom { inner, first, shown: end - first, total: lines.len() }
 }
 
-/// The prompt line: `<cwd> $ ` and what the user has typed, or the dim placeholder while empty.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Prompt {
-    pub cwd: String,
-    pub text: String,
-    pub placeholder: String,
-}
+pub use crate::prompt::Prompt;
 
-impl Default for Prompt {
-    fn default() -> Self {
-        Self {
-            cwd: "~/app".into(),
-            text: String::new(),
-            placeholder: "aibus --model sonnet --advisor opus".into(),
-        }
-    }
-}
-
-pub fn prompt(buf: &mut Buffer, area: Rect, th: &Theme, p: &Prompt, focused: bool) {
+/// The prompt: `<cwd> $ ` then the lines of the text, or the dim placeholder until the first
+/// submit. The block cursor blinks on the tick counter (30 ticks on, 30 off). Returns the rect
+/// of each row drawn and the char index each starts at, for the hit map.
+pub fn prompt(buf: &mut Buffer, area: Rect, th: &Theme, p: &Prompt, focused: bool, tick: i64) -> Vec<(Rect, usize)> {
     fill(buf, area, th.bg);
     let lead = if focused { th.focused() } else { Style::new().fg(th.fg) };
-    let x = put(buf, area, 1, 0, &format!("{} $ ", p.cwd), lead);
-    let x = if p.text.is_empty() {
-        put(buf, area, x, 0, &format!("{} ", p.placeholder), Style::new().fg(th.dim_text))
-    } else {
-        // The tail, so the cursor stays on screen.
-        let room = usize::from(area.width.saturating_sub(x + 2));
-        let skip = p.text.chars().count().saturating_sub(room);
-        let shown: String = p.text.chars().skip(skip).collect();
-        put(buf, area, x, 0, &shown, Style::new().fg(th.fg))
+    let prefix = format!("{} $ ", p.cwd);
+    let indent = prefix.chars().count() as u16 + 1;
+    let lines = p.lines();
+    let rows = usize::from(area.height).max(1);
+    let (cursor_line, cursor_col) = p.pos(p.at());
+    let first = (cursor_line + 1).saturating_sub(rows).min(lines.len().saturating_sub(rows));
+    let on = focused && Prompt::blink_on(tick);
+    let sel = p.selection();
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, line) in lines.iter().enumerate() {
+        let len = line.chars().count();
+        if i >= first && i < first + rows {
+            let y = (i - first) as u16;
+            let row = Rect { y: area.y + y, height: 1, ..area };
+            out.push((row, start));
+            if i == 0 {
+                put(buf, area, 1, y, &prefix, lead);
+            }
+            let room = usize::from(area.width.saturating_sub(indent + 2));
+            // A long line shows its tail around the cursor.
+            let skip = if i == cursor_line { (cursor_col + 1).saturating_sub(room) } else { 0 };
+            if p.shows_placeholder() {
+                put(buf, area, indent, y, &format!("{} ", p.placeholder), Style::new().fg(th.dim_text));
+            } else {
+                let shown: String = line.chars().skip(skip).take(room).collect();
+                put(buf, area, indent, y, &shown, Style::new().fg(th.fg));
+                if let Some((a, b)) = sel {
+                    for k in 0..shown.chars().count() {
+                        let at = start + skip + k;
+                        if at >= a && at < b {
+                            buf.set_style(Rect { x: area.x + indent + k as u16, y: area.y + y, width: 1, height: 1 }, th.interact(Interact::Selected));
+                        }
+                    }
+                }
+            }
+            if i == cursor_line && on {
+                let col = if p.shows_placeholder() { 0 } else { cursor_col - skip };
+                let x = indent + col as u16;
+                let past_end = cursor_col >= len || p.shows_placeholder();
+                if past_end {
+                    let at = if p.shows_placeholder() { indent + p.placeholder.chars().count() as u16 + 1 } else { x };
+                    put(buf, area, at, y, th.g("▌"), Style::new().fg(th.router));
+                } else {
+                    buf.set_style(Rect { x: area.x + x, y: area.y + y, width: 1, height: 1 }, Style::new().add_modifier(Modifier::REVERSED));
+                }
+            }
+        }
+        start += len + 1;
+    }
+    out
+}
+
+/// The one-line hint under the prompt for the first sessions.
+pub fn hint_row(buf: &mut Buffer, area: Rect, th: &Theme, notice: Option<&str>) {
+    fill(buf, area, th.bg);
+    let hint = "Enter send  ·  Alt+Enter new line  ·  Tab complete  ·  / commands  ·  : palette  ·  ? help";
+    let (text, colour) = match notice {
+        Some(n) => (n, th.warn),
+        None => (hint, th.dim_text),
     };
-    put(buf, area, x, 0, th.g("▌"), Style::new().fg(th.router));
+    put(buf, area, 1, 0, &clip(text, usize::from(area.width).saturating_sub(2)), Style::new().fg(colour));
+}
+
+/// The completion popup above the prompt: one row per candidate. Returns each row.
+pub fn popup(buf: &mut Buffer, full: Rect, above: Rect, items: &[String], sel: usize, th: &Theme) -> (Rect, Vec<(usize, Rect)>) {
+    let shown = items.len().min(8);
+    let widest = items.iter().map(|i| i.chars().count()).max().unwrap_or(0);
+    let w = (widest + 4).clamp(8, usize::from(full.width)) as u16;
+    let h = shown as u16 + 2;
+    let rect = Rect { x: above.x + 1, y: above.y.saturating_sub(h).max(full.y), width: w, height: h.min(above.y.saturating_sub(full.y)).max(1) };
+    Clear.render(rect, buf);
+    let inner = panel(buf, rect, "", th.dim_text, th);
+    let first = sel.saturating_sub(shown.saturating_sub(1));
+    let mut rows = Vec::new();
+    for (k, item) in items.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + k as u16, height: 1, ..inner };
+        if r.bottom() > inner.bottom() {
+            break;
+        }
+        if first + k == sel {
+            buf.set_style(r, th.interact(Interact::Selected));
+        }
+        put(buf, r, 0, 0, &format!(" {item}"), Style::new().fg(th.fg));
+        rows.push((first + k, r));
+    }
+    (rect, rows)
 }
 
 /// The status bar. Returns where each clickable segment went.

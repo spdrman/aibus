@@ -27,7 +27,7 @@ pub const MENU_VIEW: &str = "view:menu";
 pub const DIRTY: &str = "view:dirty";
 
 /// Widget name and the one `view:` node it draws. `view:dirty` lists the names.
-pub const WIDGETS: [(&str, &str); 11] = [
+pub const WIDGETS: [(&str, &str); 16] = [
     ("header", HEADER),
     ("rail", RAIL),
     ("lead_box", LEAD_BOX),
@@ -39,6 +39,11 @@ pub const WIDGETS: [(&str, &str); 11] = [
     ("status_bar", STATUS_BAR),
     ("tips", RUN_TIPS),
     ("menu", MENU_VIEW),
+    ("permission", crate::views::PERMISSION),
+    ("palette", crate::views::PALETTE),
+    ("agents", crate::views::AGENTS),
+    ("accounts", crate::views::ACCOUNTS_VIEW),
+    ("transcript", crate::views::TRANSCRIPT),
 ];
 
 /// The router questions the fork layer shows, as `(kind, row label)`.
@@ -596,6 +601,11 @@ pub fn register<G: Graph>(g: &mut G, store: Store) -> Vec<NodeKey> {
             "log" => Box::new(move |t| session_log(&st, t)),
             "tips" => Box::new(run_tips),
             "menu" => Box::new(menu),
+            "permission" => Box::new(move |t| crate::views::permission(&st, t)),
+            "palette" => Box::new(crate::views::palette),
+            "agents" => Box::new(move |t| crate::views::agents(&st, t)),
+            "accounts" => Box::new(crate::views::accounts),
+            "transcript" => Box::new(move |t| crate::views::transcript(&st, t)),
             _ => Box::new(move |t| status_bar(&st, t)),
         };
         let key = NodeKey::from(key);

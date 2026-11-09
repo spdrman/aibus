@@ -23,11 +23,14 @@ use crate::hit::{z, HitId, HitKind, HitMap, Segment};
 pub use crate::layout::{areas, Areas, Layout};
 use crate::layout::{too_small, MIN_COLS, MIN_ROWS};
 use crate::keys::Keymap;
+use crate::screens::{self, Entry, Placed};
 use crate::theme::{Interact, Theme};
+use crate::transcript::{self, Cells, Geom};
 use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
+use crate::views::{ACCOUNTS_VIEW, AGENTS, PALETTE, PERMISSION, TRANSCRIPT};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -46,6 +49,11 @@ pub struct Views<'a> {
     status: &'a Value,
     tips: &'a Value,
     menu: &'a Value,
+    permission: &'a Value,
+    palette: &'a Value,
+    agents: &'a Value,
+    accounts: &'a Value,
+    transcript: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -63,6 +71,11 @@ impl<'a> Views<'a> {
             status: at(STATUS_BAR),
             tips: at(RUN_TIPS),
             menu: at(MENU_VIEW),
+            permission: at(PERMISSION),
+            palette: at(PALETTE),
+            agents: at(AGENTS),
+            accounts: at(ACCOUNTS_VIEW),
+            transcript: at(TRANSCRIPT),
         }
     }
 }
@@ -149,6 +162,12 @@ pub struct Drawn {
     pub areas: Areas,
     pub log: Extent,
     pub cards: usize,
+    /// The open transcript's geometry and the plain text of its rows.
+    pub transcript: Option<Geom>,
+    /// Each row of the prompt and the char index it starts at, and the rect of its popup rows.
+    pub prompt_rows: Vec<(Rect, usize)>,
+    /// The column the prompt's text starts at.
+    pub prompt_indent: u16,
 }
 
 /// One frame's inputs.
@@ -161,6 +180,13 @@ pub struct Scene<'a> {
     pub prompt: &'a Prompt,
     /// The log's filter is being typed.
     pub filter_edit: bool,
+    /// A text field open over the modal, if any.
+    pub entry: Option<&'a Entry>,
+    /// The cells selected in the transcript, and whether they were just copied.
+    pub selection: Option<Cells>,
+    pub copied: bool,
+    /// What the last action on the agents or accounts screen said.
+    pub note: &'a str,
 }
 
 /// Dotted cells in `dim`, with a brighter `●` at step `at` of the path when there is one. Only
@@ -470,7 +496,16 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         }
         return Drawn::default();
     }
-    let a = areas(full, &c.layout, c.rail_open);
+    // A prompt of several rows and the hint under it take rows from the dashboard, as long as
+    // what is left is still a dashboard.
+    let want_hint = sc.prompt.hints || sc.prompt.notice.is_some();
+    let wanted = u16::try_from(sc.prompt.rows().saturating_sub(1)).unwrap_or(0) + u16::from(want_hint);
+    let extra = if full.height.saturating_sub(wanted) >= MIN_ROWS { wanted } else { 0 };
+    let mut a = areas(Rect { height: full.height - extra, ..full }, &c.layout, c.rail_open);
+    let hint = extra > 0 && want_hint;
+    a.prompt.height = if extra == 0 { 1 } else { sc.prompt.rows() };
+    let hint_area = Rect { y: a.prompt.bottom(), height: u16::from(hint), ..a.prompt };
+    a.status.y += extra;
     widgets::header(buf, a.header, v.header, th);
     widgets::legend(buf, a.legend, v.header, th);
     let marks = widgets::rail(buf, a.rail, v.rail, th);
@@ -479,7 +514,10 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("");
     let filter = (c.filter.as_str(), sc.filter_edit, c.follow);
     let log = widgets::session_log(buf, a.log, v.log, th, c.scroll_log, filter, lead_label);
-    widgets::prompt(buf, a.prompt, th, sc.prompt, c.focus == Pane::Input);
+    let prompt_rows = widgets::prompt(buf, a.prompt, th, sc.prompt, c.focus == Pane::Input, c.tick);
+    if hint {
+        widgets::hint_row(buf, hint_area, th, sc.prompt.notice.as_deref());
+    }
     let segments = widgets::status_bar(buf, a.status, v.status, th);
     // Drawn over the centre column, so what is under it goes first.
     let open_marks = a.rail_open.map(|r| {
@@ -490,7 +528,10 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     // The hit map, bottom layer first.
     let mut hits = HitMap::default();
     let strip = a.rail.width < crate::layout::RAIL_FULL;
-    hits.add(a.prompt, HitId::Pane(Pane::Input), HitKind::Pane, z::PANE);
+    hits.add(Rect { height: a.prompt.height + u16::from(hint), ..a.prompt }, HitId::Pane(Pane::Input), HitKind::Pane, z::PANE);
+    for (i, (r, _)) in prompt_rows.iter().enumerate() {
+        hits.add(*r, HitId::PromptRow(i), HitKind::Pane, z::ITEM);
+    }
     hits.add(a.centre, HitId::Pane(Pane::Cards), HitKind::Pane, z::PANE);
     hits.add(a.log, HitId::Pane(Pane::Log), HitKind::Pane, z::PANE);
     hits.add(a.rail, HitId::Pane(Pane::Advisor), HitKind::Pane, z::PANE);
@@ -587,6 +628,17 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         }
     }
 
+    // The completion popup floats above the prompt.
+    if modal.is_none() {
+        if let Some(p) = sc.prompt.popup.as_ref().filter(|p| !p.items.is_empty()) {
+            let (rect, rows) = widgets::popup(buf, full, a.prompt, &p.items, p.sel, th);
+            hits.add(rect, HitId::Modal, HitKind::Modal, z::OVERLAY + 2);
+            for (i, r) in rows {
+                hits.add(r, HitId::PopupItem(i), HitKind::Button, z::OVERLAY + 3);
+            }
+        }
+    }
+
     // The context menu, or else the tooltip: layers over the frame that move nothing.
     if modal.is_none() && !matches!(v.menu, Value::Null) {
         hits.add(full, HitId::Backdrop, HitKind::Modal, z::BACKDROP);
@@ -614,14 +666,38 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         }
     }
 
+    let mut transcript_geom = None;
     if let Some(name) = modal {
         hits.add(full, HitId::Backdrop, HitKind::Modal, z::BACKDROP);
-        let area = match name {
-            "help" => help(buf, full, sc),
-            "advice" => advice(buf, full, sc),
-            other => placeholder(buf, full, th, other),
+        let cwd = sc.prompt.cwd.as_str();
+        let placed: Placed = match name {
+            "help" => Placed { area: help(buf, full, sc), hits: Vec::new() },
+            "advice" => Placed { area: advice(buf, full, sc), hits: Vec::new() },
+            "permission" if !matches!(v.permission, Value::Null) => {
+                screens::permission(buf, full, v.permission, th, &sc.pointer, sc.entry, cwd)
+            }
+            "palette" => screens::palette(buf, full, v.palette, th, &sc.pointer),
+            "agents" => screens::agents(buf, full, v.agents, th, &sc.pointer, sc.entry, sc.note),
+            "accounts" => screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note),
+            "outcome" => screens::outcome(buf, full, th, &sc.pointer),
+            "confirm:clear" => screens::confirm_clear(buf, full, th, &sc.pointer),
+            t if t.starts_with("transcript:") => {
+                let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
+                for (id, r, kind) in &g.hits {
+                    let layer = if matches!(id, HitId::TrRow(_)) { z::MODAL + 1 } else { z::MODAL + 2 };
+                    hits.add(*r, *id, *kind, layer);
+                }
+                let area = g.area;
+                transcript_geom = Some(g);
+                Placed { area, hits: Vec::new() }
+            }
+            other => Placed { area: placeholder(buf, full, th, other), hits: Vec::new() },
         };
-        hits.add(area, HitId::Modal, HitKind::Modal, z::MODAL);
+        hits.add(placed.area, HitId::Modal, HitKind::Modal, z::MODAL);
+        for (id, r) in placed.hits {
+            let kind = if matches!(id, HitId::ListRow(_)) { HitKind::Item } else { HitKind::Button };
+            hits.add(r, id, kind, z::MODAL + 1);
+        }
     }
     if th.ascii {
         glyphs::sweep(buf);
@@ -631,6 +707,9 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         areas: a,
         log: Extent { total: log.total, visible },
         cards: as_list(v.cards).len(),
+        transcript: transcript_geom,
+        prompt_rows,
+        prompt_indent: u16::try_from(sc.prompt.cwd.chars().count() + 5).unwrap_or(0),
     }
 }
 
@@ -650,12 +729,35 @@ pub struct Ui {
     pub filter_edit: bool,
     /// The last frame's geometry: what pointer events resolve against.
     pub drawn: Drawn,
+    /// A text field open over the modal.
+    pub entry: Option<Entry>,
+    /// The transcript cells selected with the mouse, and whether they were just copied.
+    pub selection: Option<Cells>,
+    pub copied: bool,
+    pub note: String,
+    /// Ticks reach the screen (a run is running, advice is typing). Off, the tick counter only
+    /// matters through the prompt's cursor, so a frame is drawn when that blinks and no oftener.
+    pub animating: bool,
     seen: GraphTime,
     pending: bool,
     size: Option<(u16, u16)>,
-    last: Option<(Chrome, Pointer, Prompt, Theme, bool)>,
+    last: Option<State>,
     /// Frames drawn so far.
     pub draws: u64,
+}
+
+/// What a frame was drawn from, to tell whether the next one would differ.
+#[derive(PartialEq)]
+struct State {
+    chrome: Chrome,
+    pointer: Pointer,
+    prompt: Prompt,
+    theme: Theme,
+    filter_edit: bool,
+    entry: Option<Entry>,
+    selection: Option<Cells>,
+    copied: bool,
+    note: String,
 }
 
 impl Ui {
@@ -667,6 +769,11 @@ impl Ui {
             pointer: Pointer::default(),
             filter_edit: false,
             drawn: Drawn::default(),
+            entry: None,
+            selection: None,
+            copied: false,
+            note: String::new(),
+            animating: true,
             seen: 0,
             pending: false,
             size: None,
@@ -691,19 +798,36 @@ impl Ui {
         let size = term.size()?;
         let now = (size.width, size.height);
         let chrome = Chrome::read(g);
-        let state = (chrome, self.pointer, self.prompt.clone(), self.theme, self.filter_edit);
+        let mut state = State {
+            chrome: chrome.clone(),
+            pointer: self.pointer,
+            prompt: self.prompt.clone(),
+            theme: self.theme,
+            filter_edit: self.filter_edit,
+            entry: self.entry.clone(),
+            selection: self.selection,
+            copied: self.copied,
+            note: self.note.clone(),
+        };
+        if !self.animating {
+            state.chrome.tick = chrome.tick / crate::prompt::BLINK_TICKS;
+        }
         if !self.pending && self.size == Some(now) && self.last.as_ref() == Some(&state) {
             return Ok(false);
         }
         let views = Views::read(g);
         let scene = Scene {
             views: &views,
-            chrome: &state.0,
+            chrome: &chrome,
             pointer: self.pointer,
             theme: &self.theme,
             keys: &self.keys,
             prompt: &self.prompt,
             filter_edit: self.filter_edit,
+            entry: self.entry.as_ref(),
+            selection: self.selection,
+            copied: self.copied,
+            note: &self.note,
         };
         let mut drawn = None;
         term.draw(|f| drawn = Some(render(f.buffer_mut(), &scene)))?;

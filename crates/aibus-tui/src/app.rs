@@ -1,16 +1,19 @@
 //! Terminal setup, the panic hook and the event loop (the only file that touches a real tty).
 
 use std::io::{self, Stdout, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use aibus_core::state::{run_key, ANIMATING};
+use aibus_core::persist::session::SessionWriter;
+use aibus_core::state::store::Store;
+use aibus_core::state::value::{as_str, get};
+use aibus_core::state::{run_key, ANIMATING, MODAL};
 use aibus_core::{
-    AibusError, App, Command, KeyCode, KeyEvent, Msg, Ticker, UiIntent, MSG_CAPACITY,
+    AibusError, App, Command, KeyCode, KeyEvent, Msg, RunId, Ticker, UiIntent, MSG_CAPACITY,
 };
 use aibus_graph::{Graph, Value};
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -19,7 +22,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
-use crate::input::{self, Clip, Context, Input, MouseMode};
+use crate::input::{self, AccountOp, Clip, Context, Input, Job, MouseMode};
 use crate::keys::Keymap;
 use crate::layout::Layout;
 use crate::theme::Theme;
@@ -54,6 +57,22 @@ pub struct Options {
     pub watch: Option<Box<dyn FnMut(&Msg)>>,
     /// Samples resident memory in MiB for the status bar's `mem` segment (`-v`).
     pub mem: Option<fn() -> Option<u32>>,
+    /// Sees every message a key or a click produced, before the loop steps it: how a permission
+    /// answer or a message reaches the run's mailbox, which the graph does not hold.
+    #[allow(clippy::type_complexity)]
+    pub user: Option<Box<dyn FnMut(&Msg)>>,
+    /// Writes `msgs.jsonl`, the commit log and each run's `transcript.jsonl` as the session goes.
+    pub writer: Option<SessionWriter>,
+    /// `<session>/runs`, where a finished run's transcript is read back from.
+    pub runs_dir: Option<PathBuf>,
+    /// Where a new agent definition is written (`n` on the agents screen).
+    pub agents_dir: Option<PathBuf>,
+    /// The agents screen's `v`: validates the definition and says what it found.
+    #[allow(clippy::type_complexity)]
+    pub validate: Option<Box<dyn FnMut(&str, Option<&Path>) -> String>>,
+    /// The accounts screen's `t`, `a` and `d`: what was done, in a line.
+    #[allow(clippy::type_complexity)]
+    pub account: Option<Box<dyn FnMut(AccountOp) -> String>>,
 }
 
 /// What a batch of terminal events asks of the loop besides the messages it stepped.
@@ -61,8 +80,10 @@ pub struct Options {
 pub struct Handled {
     /// A border drag ended: the sizes are final and worth saving.
     pub layout_done: bool,
-    /// Text a menu pick wants on the clipboard.
+    /// Text a menu pick or a selection wants on the clipboard.
     pub copies: Vec<Clip>,
+    /// What keys and clicks asked the loop to do outside the graph.
+    pub jobs: Vec<Job>,
 }
 
 /// `text` for the terminal to put on the clipboard: an OSC 52 sequence, base64 inside.
@@ -89,7 +110,7 @@ pub fn restore() {
     RESTORES.fetch_add(1, Ordering::SeqCst);
     let mut out = io::stdout();
     let _ = out.write_all(input::mouse_switch(MouseMode::Hover, MouseMode::Off).as_bytes());
-    let _ = execute!(out, LeaveAlternateScreen, cursor::Show);
+    let _ = execute!(out, DisableBracketedPaste, LeaveAlternateScreen, cursor::Show);
     let _ = disable_raw_mode();
     let _ = out.flush();
 }
@@ -112,7 +133,7 @@ impl Session {
     pub fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut out = io::stdout();
-        if let Err(e) = execute!(out, EnterAlternateScreen, cursor::Hide) {
+        if let Err(e) = execute!(out, EnterAlternateScreen, EnableBracketedPaste, cursor::Hide) {
             restore();
             return Err(e);
         }
@@ -189,6 +210,7 @@ pub fn terminal_events<G: Graph>(
     ctrl_c: &mut CtrlC,
     mouse: bool,
     now: Instant,
+    step: &mut dyn FnMut(&mut App<G>, Msg) -> Result<(), AibusError>,
 ) -> Result<Handled, AibusError> {
     let mut done = Handled::default();
     for ev in input::coalesce(events) {
@@ -196,28 +218,138 @@ pub fn terminal_events<G: Graph>(
         let out = match ev {
             Event::Key(k) => {
                 let Some(key) = key_from_crossterm(k) else { continue };
-                if key.ctrl && key.code == KeyCode::Char('c') && ctrl_c.press(now) {
-                    app.step(Msg::Command(Command::Quit { force: false }))?;
+                // The second Ctrl+C quits, unless the first was a copy.
+                if key.ctrl
+                    && key.code == KeyCode::Char('c')
+                    && !input.has_selection(&ui.prompt)
+                    && ctrl_c.press(now)
+                {
+                    step(app, Msg::Command(Command::Quit { force: true }))?;
                     continue;
                 }
-                input.key(key, &cx, &ui.keys, &ui.drawn, &mut ui.prompt.text)
+                input.key(key, &cx, &ui.keys, &ui.drawn, &mut ui.prompt)
             }
-            Event::Mouse(m) if mouse => input.mouse(m, now, &ui.drawn, &cx),
+            Event::Mouse(m) if mouse => input.mouse(m, now, &ui.drawn, &cx, &mut ui.prompt),
+            Event::Paste(text) => input.paste(&text, &cx, &mut ui.prompt),
             Event::Resize(cols, rows) => {
-                app.step(Msg::Resize { cols, rows })?;
+                step(app, Msg::Resize { cols, rows })?;
                 continue;
             }
             _ => continue,
         };
         for msg in out.msgs {
-            app.step(msg)?;
+            step(app, msg)?;
         }
         done.layout_done |= out.layout_done;
         done.copies.extend(out.copy);
+        done.jobs.extend(out.jobs);
     }
+    sync(ui, input);
+    Ok(done)
+}
+
+/// What the event layer holds that the frame draws.
+pub fn sync(ui: &mut Ui, input: &Input) {
     ui.pointer = input.pointer;
     ui.filter_edit = input.filter_edit;
-    Ok(done)
+    ui.entry = input.entry.clone();
+    ui.selection = input.selection();
+    ui.copied = input.copied;
+    ui.note.clone_from(&input.note);
+}
+
+/// The agent file a new definition starts from.
+pub fn agent_template(name: &str) -> String {
+    format!(
+        "---\nname: {name}\ndescription: What {name} is for, in one line.\nrole: worker\nmodel: inherit\ntools: [read, grep, glob]\n---\n\nYou are {name}. Say what you do and how you report back.\n"
+    )
+}
+
+/// The editor to open: `$VISUAL`, then `$EDITOR`, then `vi`.
+pub fn editor(visual: Option<&str>, editor: Option<&str>) -> String {
+    [visual, editor]
+        .into_iter()
+        .flatten()
+        .find(|e| !e.trim().is_empty())
+        .unwrap_or("vi")
+        .to_owned()
+}
+
+/// What a job asked for, done. Returns the file to open in the editor when the job needs the
+/// terminal for it (the loop does that, since it has to leave the alternate screen).
+pub fn run_job(
+    job: Job,
+    agents_dir: Option<&Path>,
+    validate: &mut Option<Box<dyn FnMut(&str, Option<&Path>) -> String>>,
+    account: &mut Option<Box<dyn FnMut(AccountOp) -> String>>,
+    note: &mut String,
+) -> Option<PathBuf> {
+    match job {
+        Job::EditFile(path) => Some(path),
+        Job::NewAgent(name) => {
+            let Some(dir) = agents_dir else {
+                *note = "no agents directory is set up".into();
+                return None;
+            };
+            let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if !valid {
+                *note = format!("`{name}` is not a name: letters, digits, - and _");
+                return None;
+            }
+            let path = dir.join(format!("{name}.md"));
+            if path.exists() {
+                *note = format!("{} already exists", path.display());
+                return Some(path);
+            }
+            match std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, agent_template(&name))) {
+                Ok(()) => Some(path),
+                Err(e) => {
+                    *note = format!("could not write {}: {e}", path.display());
+                    None
+                }
+            }
+        }
+        Job::Validate { name, path } => {
+            *note = match validate {
+                Some(f) => f(&name, path.as_deref()),
+                None => "validation is not available here".into(),
+            };
+            None
+        }
+        Job::Account(op) => {
+            *note = match account {
+                Some(f) => f(op),
+                None => "accounts cannot be changed from here".into(),
+            };
+            None
+        }
+    }
+}
+
+/// The finished run whose transcript is open but not in memory: its run and store entry.
+pub fn evicted_open<G: Graph>(g: &G, store: &Store) -> Option<(RunId, u64)> {
+    let run = g.read_key(MODAL).and_then(as_str)?.strip_prefix("transcript:")?.parse::<RunId>().ok()?;
+    let Some(Value::Handle(h)) = g.read_key(&run_key(run, "blocks")) else { return None };
+    store.is_evicted(h.id).then_some((run, h.id))
+}
+
+/// Reads the open run's transcript back from `<runs_dir>/<run>/transcript.jsonl`, all of it, and
+/// tells the graph. The loop does the same on a blocking thread, a chunk at a time.
+pub fn reload_open<G: Graph>(app: &mut App<G>, runs_dir: &Path) -> Result<usize, AibusError> {
+    let Some((run, entry)) = evicted_open(&app.graph, &app.store) else { return Ok(0) };
+    if !app.store.begin_restore(entry) {
+        return Ok(0);
+    }
+    let path = runs_dir.join(run.to_string()).join("transcript.jsonl");
+    let lines = aibus_core::persist::transcript::reload(&app.store, entry, &path, usize::MAX, || {}).unwrap_or(0);
+    app.step(Msg::Ui(UiIntent::Loaded(run)))?;
+    Ok(lines)
+}
+
+/// `text` for the system clipboard, where the terminal ignored OSC 52. Whether it worked is not
+/// something the caller can do anything about.
+pub fn system_clipboard(text: &str) -> bool {
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_owned())).is_ok()
 }
 
 /// What a menu pick wants copied, as text. A run's result is the last block of its transcript
@@ -260,6 +392,9 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut ui = Ui::new(opts.theme);
     ui.keys = opts.keys;
     ui.prompt = opts.prompt;
+    let mut user = opts.user.take().unwrap_or_else(|| Box::new(|_| {}));
+    let mut writer = opts.writer.take();
+    let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
     let mut input = Input::default();
     let mut ctrl_c = CtrlC::default();
     let supported = input::mouse_supported(opts.term.as_deref());
@@ -306,12 +441,12 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             }
         };
         tokio::select! {
-            Some(m) = rx.recv() => app.step(m)?,
+            Some(m) = rx.recv() => step_written(&mut app, &mut writer, m)?,
             Some(m) = next_run => {
                 if let Some(f) = watch.as_mut() {
                     f(&m);
                 }
-                app.step(m)?;
+                step_written(&mut app, &mut writer, m)?;
             }
             Some(first) = ev_rx.recv() => {
                 // Everything that piled up while the last frame drew is one batch.
@@ -320,8 +455,12 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                     let Ok(e) = ev_rx.try_recv() else { break };
                     batch.push(e);
                 }
+                let mut step = |app: &mut App<G>, m: Msg| {
+                    user(&m);
+                    step_written(app, &mut writer, m)
+                };
                 done = terminal_events(
-                    batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(),
+                    batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(), &mut step,
                 )?;
             }
             () = tip_timer => {}
@@ -334,19 +473,44 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
         }
         // A tooltip comes up once the pointer has rested long enough.
         input.settle(Instant::now());
-        ui.pointer = input.pointer;
-        ui.filter_edit = input.filter_edit;
         for clip in &done.copies {
             if let Some(text) = clip_text(&app, clip) {
                 let mut out = io::stdout();
                 out.write_all(osc52(&text).as_bytes())?;
                 out.flush()?;
+                // Terminals that ignore OSC 52 get the system clipboard as well.
+                system_clipboard(&text);
             }
         }
+        for job in done.jobs.drain(..) {
+            let file = run_job(job, opts.agents_dir.as_deref(), &mut validate, &mut account, &mut input.note);
+            if let Some(path) = file {
+                if let Err(e) = edit_file(&mut session, &path) {
+                    input.note = format!("could not run the editor: {e}");
+                }
+                mode = MouseMode::Off;
+            }
+        }
+        // A finished run's transcript that is open streams back from disk, a chunk at a time.
+        if let (Some(dir), Some((run, entry))) = (opts.runs_dir.as_ref(), evicted_open(&app.graph, &app.store)) {
+            if app.store.begin_restore(entry) {
+                let (store, tx, path) = (app.store.clone(), tx.clone(), dir.join(run.to_string()).join("transcript.jsonl"));
+                tokio::task::spawn_blocking(move || {
+                    let _ = aibus_core::persist::transcript::reload(&store, entry, &path, 400, || {
+                        let _ = tx.blocking_send(Msg::Ui(UiIntent::Loaded(run)));
+                    });
+                });
+            }
+        }
+        sync(&mut ui, &input);
         ui.note_commit(&app.graph);
         let typing = app.graph.read_key(view::RAIL).is_some_and(view::rail_typing);
         let animating = typing || matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));
-        ticker.set_animating(animating);
+        // The prompt's cursor blinks on the tick counter, so ticks also run while it has focus;
+        // the frame is only drawn again when the blink changes, unless something animates.
+        ui.animating = animating;
+        let blinking = app.graph.read_key(aibus_core::state::FOCUS).and_then(as_str) == Some("input");
+        ticker.set_animating(animating || blinking);
         ui.draw(&mut session.term, &app.graph)?;
         // Move events are only asked for while something on this frame reacts to hover.
         let want = input::mouse_mode(opts.mouse, supported, ui.drawn.hits.hoverable());
@@ -366,7 +530,48 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             break;
         }
     }
+    if let Some(w) = writer.as_mut() {
+        w.finish(&mut app)?;
+    }
     Ok(())
+}
+
+/// Steps one message from outside the loop, and has the writer record it and what it did.
+fn step_written<G: Graph>(app: &mut App<G>, writer: &mut Option<SessionWriter>, m: Msg) -> Result<(), AibusError> {
+    let Some(w) = writer.as_mut() else { return app.step(m) };
+    let at = std::time::SystemTime::now();
+    w.msg(&m, at)?;
+    // The first message of a run is its task.
+    if let Msg::RunStarted { run, .. } = &m {
+        app.step(m.clone())?;
+        let prompt = app.graph.read_key(&run_key(run, "meta")).and_then(|meta| get(meta, "prompt")).cloned();
+        let text = match prompt {
+            Some(Value::Handle(h)) => app.store.text(&h).map(|t| t.to_string()),
+            Some(v) => as_str(&v).map(str::to_owned),
+            None => None,
+        };
+        if let Some(t) = text.filter(|t| !t.is_empty()) {
+            w.prompt(*run, at, &t)?;
+        }
+    } else {
+        app.step(m)?;
+    }
+    w.after_step(app)
+}
+
+/// Runs `$VISUAL` or `$EDITOR` on `path` with the terminal handed over, then takes it back.
+fn edit_file(session: &mut Session, path: &Path) -> io::Result<()> {
+    let mut out = io::stdout();
+    execute!(out, DisableBracketedPaste, LeaveAlternateScreen, cursor::Show)?;
+    out.write_all(input::mouse_switch(MouseMode::Hover, MouseMode::Off).as_bytes())?;
+    disable_raw_mode()?;
+    let cmd = editor(std::env::var("VISUAL").ok().as_deref(), std::env::var("EDITOR").ok().as_deref());
+    let mut parts = cmd.split_whitespace();
+    let ran = parts.next().map(|prog| std::process::Command::new(prog).args(parts).arg(path).status());
+    enable_raw_mode()?;
+    execute!(out, EnterAlternateScreen, EnableBracketedPaste, cursor::Hide)?;
+    session.term.clear()?;
+    ran.transpose().map(|_| ())
 }
 
 #[cfg(test)]

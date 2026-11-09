@@ -83,6 +83,8 @@ async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
             background: false,
             max_spawn_depth: 3,
             forced: None,
+            start: Start::New,
+            worktree: None,
         },
         RunDeps {
             provider,

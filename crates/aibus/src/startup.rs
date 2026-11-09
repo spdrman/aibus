@@ -22,10 +22,11 @@ use aibus_core::persist::session::{read_runs, SessionMeta, SessionWriter};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
     expand, parse_mention, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
-    Bash, Budgets, CredentialStore, Delegate, Effects, Gate, HookEvent, HookInput, HookRunner,
-    Limits, Msg, ModelDefaults, ModelId, Orchestrator, PermissionMode, Redactor, Roster,
-    RunConfig, RunDeps, RunHandle, RunResult, SelectHints, SessionId, ToolExecutor, ToolLimits,
-    ToolPattern, ToolRegistry, MSG_CAPACITY,
+    Bash, Budgets, Compactor, CredentialStore, Delegate, Effects, Fork, Gate, HookEvent, HookInput,
+    HookRunner, Limits, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode,
+    Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, SelectHints,
+    SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry,
+    MSG_CAPACITY,
 };
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script};
@@ -336,13 +337,23 @@ impl Step for OpenSession {
             .clone()
             .unwrap_or_else(|| paths.state.join("sessions").join(id.to_string()));
         create_private_dir(&dir.join("runs"))?;
-        let meta = SessionMeta::new(
-            id,
-            events::rfc3339(SystemTime::now()),
-            ctx.global.topic.clone(),
-            ctx.cwd.clone(),
-            ctx.global.agent.as_deref().unwrap_or("lead"),
-        );
+        // Resuming a run goes on in its own session: same id and start, the same meta file.
+        let old = ctx
+            .run
+            .resume
+            .and(ctx.run.session_dir.as_ref())
+            .and_then(|d| SessionMeta::read(d).ok());
+        let meta = match old {
+            Some(old) => old,
+            None => SessionMeta::new(
+                id,
+                events::rfc3339(SystemTime::now()),
+                ctx.global.topic.clone(),
+                ctx.cwd.clone(),
+                ctx.global.agent.as_deref().unwrap_or("lead"),
+            ),
+        };
+        let id = meta.id.parse().unwrap_or(id);
         meta.write(&dir)?;
         ctx.session = Some(Session { id, dir, meta });
         Ok(())
@@ -576,13 +587,25 @@ impl Step for EnterLoop {
         let session = ctx.session.as_ref().ok_or_else(|| not_ready("session"))?;
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
 
-        let name: AgentName = ctx
-            .global
-            .agent
-            .as_deref()
-            .unwrap_or("lead")
-            .parse()
-            .map_err(|e: aibus_core::InvalidAgentName| AibusError::Usage(e.to_string()))?;
+        // `session resume --run`: the run's own definition, model and account, from its transcript.
+        let resume = match ctx.run.resume {
+            Some(run) => {
+                let file = session.dir.join("runs").join(run.to_string()).join("conversation.jsonl");
+                let loaded = aibus_core::run::transcript::load(&file).map_err(AibusError::Usage)?;
+                Some((run, loaded.meta))
+            }
+            None => None,
+        };
+        let name: AgentName = match &resume {
+            Some((_, meta)) => meta.agent.clone(),
+            None => ctx
+                .global
+                .agent
+                .as_deref()
+                .unwrap_or("lead")
+                .parse()
+                .map_err(|e: aibus_core::InvalidAgentName| AibusError::Usage(e.to_string()))?,
+        };
         let mut def = agents
             .agents
             .get(&name)
@@ -593,7 +616,9 @@ impl Step for EnterLoop {
         // on the command line follows it.
         // The TUI starts no lead here: its prompt waits in the input line.
         let mut prompt = if ctx.interactive { String::new() } else { ctx.prompt.clone() };
-        if let (false, Some(_), Some(initial)) = (ctx.interactive, &ctx.global.agent, &def.initial_prompt) {
+        if let (false, Some(_), Some(initial), None) =
+            (ctx.interactive, &ctx.global.agent, &def.initial_prompt, &resume)
+        {
             prompt = if prompt.trim().is_empty() {
                 initial.clone()
             } else {
@@ -606,7 +631,7 @@ impl Step for EnterLoop {
             ));
         }
         // `@agent-<name> <rest>` opens the lead with a delegate to that agent (01 section 4.2).
-        let forced = match parse_mention(&prompt) {
+        let forced = match parse_mention(&prompt).filter(|_| resume.is_none()) {
             Some((agent, rest)) => {
                 if !agents.agents.contains_key(&agent) {
                     return Err(AibusError::UnknownAgent(agent.to_string()));
@@ -689,6 +714,9 @@ impl Step for EnterLoop {
         };
         let mut registry = ToolRegistry::standard(bash);
         registry.register(Arc::new(Delegate::new(orch.clone())));
+        registry.register(Arc::new(Fork::new(orch.clone())));
+        registry.register(Arc::new(ResumeRun::new(orch.clone())));
+        registry.register(Arc::new(SendMessage::new(orch.clone())));
         let tools = ToolExecutor::with_gate(registry, gate)
             .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
         // `--no-hooks` leaves the runner's default in place, which runs nothing.
@@ -729,6 +757,8 @@ impl Step for EnterLoop {
             data_home: Some(paths.data.clone()),
             max_spawn_depth: limits.max_spawn_depth,
             chosen: Default::default(),
+            defs: Default::default(),
+            worktrees: paths.cache.join("worktrees").join(session.id.to_string()),
             assist: Default::default(),
         });
         // The advisor and the router get their own models and accounts, or a note on stderr
@@ -752,28 +782,48 @@ impl Step for EnterLoop {
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
         // `inherit` has no parent here, so it means the session's model. The TUI has none yet.
         let plan = if ctx.interactive { None } else {
-        let target = match expand(&def.model, &defaults) {
-            ModelRef::Inherit => session_default.clone(),
-            r => r,
-        };
-        let hints = SelectHints {
-            explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
-            agent: def.account.clone(),
-            ..SelectHints::default()
+        let (target, hints) = match &resume {
+            Some((_, meta)) => (
+                ModelRef::Full(meta.model.clone()),
+                SelectHints {
+                    explicit: Some(meta.account.clone()),
+                    ..SelectHints::default()
+                },
+            ),
+            None => (
+                match expand(&def.model, &defaults) {
+                    ModelRef::Inherit => session_default.clone(),
+                    r => r,
+                },
+                SelectHints {
+                    explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
+                    agent: def.account.clone(),
+                    ..SelectHints::default()
+                },
+            ),
         };
         // A missing key fails here, with exit 4, rather than on the first request.
         let picked = launcher.pick(&target, &hints)?;
-        let run = aibus_core::RunId::new();
-        launcher.remember(run, &picked.account, &picked.model);
+        let run = resume.as_ref().map_or_else(aibus_core::RunId::new, |(run, _)| *run);
+        launcher.remember(run, &picked.account, &picked.model, &def);
+        // A resumed run that worked in a worktree goes back to the one it kept (09 section 7).
+        let (cwd, worktree) = match (&resume, def.isolation) {
+            (Some(_), aibus_core::Isolation::Worktree) => {
+                let info = aibus_core::worktree::create(&ctx.cwd, &launcher.worktrees.join(run.to_string()))
+                    .map_err(AibusError::Usage)?;
+                (info.cwd.clone(), Some(info))
+            }
+            _ => (ctx.cwd.clone(), None),
+        };
         let run_cfg = RunConfig {
             run,
             def,
             prompt,
             parent: None,
-            depth: 0,
+            depth: resume.as_ref().map_or(0, |(_, meta)| meta.depth),
             model: picked.model,
             account: picked.account,
-            cwd: ctx.cwd.clone(),
+            cwd,
             runs_dir: session.dir.join("runs"),
             limits: tool_limits,
             date: events::date(SystemTime::now()),
@@ -783,14 +833,21 @@ impl Step for EnterLoop {
             background: false,
             max_spawn_depth: limits.max_spawn_depth,
             forced,
+            start: if resume.is_some() { Start::Resume } else { Start::New },
+            worktree,
         };
+        let compactor: Arc<dyn Compactor> = Arc::new(ModelCompactor {
+            provider: picked.provider.clone(),
+            creds: picked.creds.clone(),
+            model: run_cfg.model.clone(),
+        });
         let deps = RunDeps {
             provider: picked.provider,
             creds: picked.creds,
             tools,
             tx: tx.clone(),
             hooks: hooks.clone(),
-            compactor: None,
+            compactor: Some(compactor),
             assist,
         };
         Some((run_cfg, deps))
@@ -857,6 +914,13 @@ impl Step for EnterLoop {
 
     fn stop(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         ctx.agent_watch = None;
+        // Session end: a clean worktree a killed run left behind goes, a dirty one stays and
+        // `aibus doctor` lists it (09 section 7).
+        if let Some(l) = &ctx.launcher {
+            for kept in aibus_core::worktree::sweep(&l.worktrees) {
+                eprintln!("aibus: kept worktree with changes: {}", kept.path.display());
+            }
+        }
         ctx.handoff_watch = None;
         Ok(())
     }
@@ -1021,6 +1085,7 @@ mod tests {
                 script: None,
                 record: None,
                 session_dir: None,
+                resume: None,
             },
             Redactor::new(),
         )

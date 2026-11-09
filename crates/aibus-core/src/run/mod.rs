@@ -5,10 +5,15 @@ mod coalesce;
 mod loop_;
 mod model;
 pub mod result;
+pub mod transcript;
+
+mod compact;
 
 pub use budget::Budgets;
+pub use compact::ModelCompactor;
 pub use loop_::{
-    spawn, Compactor, RunConfig, RunDeps, RunHandle, RunMail, MAILBOX_CAPACITY, STREAM_CAPACITY,
+    spawn, Compactor, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
+    STREAM_CAPACITY,
 };
 pub use model::{expand, resolve_model, ModelDefaults};
 
@@ -22,6 +27,7 @@ use smol_str::SmolStr;
 pub use aibus_provider::{ContentBlock, Message, MessageRole, Usage};
 
 use crate::agent::{Isolation, Role};
+use crate::worktree::WorktreeInfo;
 use crate::ids::{AccountName, AgentName, ModelId, PermissionId, RunId, SessionId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -154,6 +160,10 @@ pub struct RunResult {
     pub summary_file: Option<PathBuf>,
     pub duration: Duration,
     pub error: Option<RunError>,
+    /// The run's worktree when it was dirty and so was kept (09 section 7); a clean one is
+    /// removed at the end of the run and not reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<WorktreeInfo>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -197,4 +207,41 @@ pub struct Conversation {
     /// Index of the summary message.
     pub compact_boundary: Option<usize>,
     pub usage: Usage,
+}
+
+impl Conversation {
+    /// Adds a user turn: every `tool_use` still waiting for its result gets an error one, and
+    /// when the last message is already a user turn the text joins it as a block (two user
+    /// turns in a row are not valid for every provider). A fork's task and a resumed run's
+    /// message both go in this way.
+    pub fn push_user_text(&mut self, text: String) {
+        let waiting: Vec<_> = match self.messages.last() {
+            Some(m) if m.role == MessageRole::Assistant => m
+                .blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::ToolUse { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut blocks: Vec<ContentBlock> = waiting
+            .into_iter()
+            .map(|id| ContentBlock::ToolResult {
+                id,
+                content: "not run: the run stopped before this call".into(),
+                is_error: true,
+            })
+            .collect();
+        blocks.push(ContentBlock::Text(text));
+        match self.messages.last_mut() {
+            Some(m) if m.role == MessageRole::User => m.blocks.extend(blocks),
+            _ => self.messages.push(Message {
+                role: MessageRole::User,
+                blocks,
+                at: SystemTime::UNIX_EPOCH,
+            }),
+        }
+    }
 }

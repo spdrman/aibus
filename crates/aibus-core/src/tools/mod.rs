@@ -4,6 +4,7 @@
 
 mod bash;
 mod delegate;
+mod lifecycle;
 mod policy;
 mod readonly;
 mod shell;
@@ -27,6 +28,7 @@ use crate::tool::{Tool, ToolCx, ToolError, ToolOutput};
 pub(crate) use bash::{kill_group, scrubbed_env, Tail};
 pub use bash::{Bash, JobView};
 pub use delegate::Delegate;
+pub use lifecycle::{Fork, ResumeRun, SendMessage};
 pub use readonly::{Glob, Grep, Ls, Read};
 pub use shell::ShellDeny;
 pub use user::{AskUser, EnterPlanMode, ExitPlanMode, Plan, ReportArtifact};

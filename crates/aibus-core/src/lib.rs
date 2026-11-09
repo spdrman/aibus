@@ -24,6 +24,7 @@ pub mod run;
 pub mod state;
 pub mod tool;
 pub mod tools;
+pub mod worktree;
 
 pub use accounts::{AccountRegistry, SelectError, SelectHints};
 pub use agent::*;
@@ -42,6 +43,8 @@ pub use msg::*;
 pub use orchestrator::{parse_mention, Launcher, Limits, Orchestrator, Roster, Waited};
 pub use run::*;
 pub use tool::*;
+pub use worktree::WorktreeInfo;
 pub use tools::{
-    effective_tools, Bash, Delegate, EffectiveTools, Gate, JobView, ShellDeny, ToolExecutor, ToolRegistry,
+    effective_tools, Bash, Delegate, EffectiveTools, Fork, Gate, JobView, ResumeRun, SendMessage,
+    ShellDeny, ToolExecutor, ToolRegistry,
 };

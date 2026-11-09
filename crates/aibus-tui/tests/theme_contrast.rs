@@ -79,6 +79,14 @@ fn recording_bars_and_borders_meet_3() {
     check("recording", &Theme::recording(), &RECORDING_BARS, 3.0);
 }
 
+/// The orange of a split row is text too (the verdict word, the log's `split → <lead>`, the
+/// footer on `highlight`), so it is measured as text on every background it sits on.
+#[test]
+fn split_text_meets_4_5_on_every_background() {
+    check("recording", &Theme::recording(), &RECORDING_SPLIT_TEXT, 4.5);
+    check("light", &Theme::light(), &LIGHT_SPLIT_TEXT, 4.5);
+}
+
 #[test]
 fn light_text_pairs_meet_4_5() {
     check("light", &Theme::light(), &LIGHT_TEXT, 4.5);
@@ -270,3 +278,19 @@ const LIGHT_BARS: [(&str, &str, f64); 12] = [
     ("focus", "panel", 6.70),
 ];
 // worst text 4.84; dim/bg 3.55; split_rest/panel 1.69
+const RECORDING_SPLIT_TEXT: [(&str, &str, f64); 6] = [
+    ("split", "bg", 8.11),
+    ("split", "panel", 7.69),
+    ("split", "highlight", 6.59),
+    ("split", "hover", 7.03),
+    ("split", "pressed", 8.63),
+    ("split", "selected", 6.59),
+];
+const LIGHT_SPLIT_TEXT: [(&str, &str, f64); 6] = [
+    ("split", "bg", 6.06),
+    ("split", "panel", 6.65),
+    ("split", "highlight", 5.30),
+    ("split", "hover", 5.75),
+    ("split", "pressed", 4.89),
+    ("split", "selected", 5.10),
+];

@@ -154,6 +154,43 @@ impl<G: Graph> App<G> {
         Ok(())
     }
 
+    /// What the panels call things (startup configuration, one commit): the flag or config key
+    /// that picked the lead's model (null on the default), and per side seat its label and
+    /// whether it is on. A seat that is off shows `advisor · off` / `router · off`.
+    pub fn set_session_view(
+        &mut self,
+        model_flag: Option<&str>,
+        advisor: (Option<&str>, bool),
+        router: (Option<&str>, bool),
+    ) -> Result<(), AibusError> {
+        use state::value::{map, s};
+        let seat = |(label, on): (Option<&str>, bool)| {
+            map([
+                ("label", label.map_or(Value::Null, s)),
+                ("enabled", Value::Bool(on)),
+            ])
+        };
+        let writes = [
+            (state::SESSION_MODEL_FLAG, model_flag.map_or(Value::Null, s)),
+            (
+                state::SESSION_ASSIST,
+                map([("advisor", seat(advisor)), ("router", seat(router))]),
+            ),
+        ];
+        let mut batch = Vec::new();
+        for (key, v) in writes {
+            let node = self
+                .graph
+                .node(key)
+                .ok_or_else(|| std::io::Error::other(format!("{key} is not registered")))?;
+            batch.push((node, v));
+        }
+        self.graph
+            .commit("SessionViewSet", &batch)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(())
+    }
+
     /// Starts the 30 Hz timer. Inside a tokio runtime only.
     pub fn start_ticker(&mut self, hz: u32) {
         self.ticker = Some(Ticker::spawn(self.tx.clone(), hz));

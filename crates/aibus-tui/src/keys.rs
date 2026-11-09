@@ -29,6 +29,9 @@ actions! {
     StopRun "stop_run" "stop or dismiss run";
     RetryRun "retry_run" "retry failed run";
     MessageRun "message_run" "message the run";
+    OpenMenu "open_menu" "context menu";
+    ShowTooltip "show_tooltip" "show tooltip";
+    PickMenuItem "pick_menu_item" "pick menu item";
     ResumeRun "resume_run" "resume partial run";
     ToggleBackground "toggle_background" "background / foreground";
     BackgroundWait "background_wait" "wait in background";
@@ -80,6 +83,8 @@ pub enum Ctx {
     Permission,
     /// Any other modal (palette, advice, a screen).
     Modal,
+    /// The context menu of a run.
+    Menu,
 }
 
 /// Where a binding applies (the "Context" column of the table).
@@ -96,6 +101,7 @@ pub enum Scope {
     Transcript,
     Permission,
     Modal,
+    Menu,
 }
 
 impl Scope {
@@ -111,6 +117,7 @@ impl Scope {
             Scope::Transcript => ctx == Transcript,
             Scope::Permission => ctx == Permission,
             Scope::Modal => ctx == Modal,
+            Scope::Menu => ctx == Menu,
         }
     }
 
@@ -125,11 +132,12 @@ impl Scope {
             Scope::Transcript => "transcript",
             Scope::Permission => "permission",
             Scope::Modal => "modal",
+            Scope::Menu => "menu",
         }
     }
 }
 
-const ALL_CTX: [Ctx; 7] = [
+const ALL_CTX: [Ctx; 8] = [
     Ctx::Prompt,
     Ctx::Cards,
     Ctx::Log,
@@ -137,6 +145,7 @@ const ALL_CTX: [Ctx; 7] = [
     Ctx::Transcript,
     Ctx::Permission,
     Ctx::Modal,
+    Ctx::Menu,
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,17 +170,21 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (FocusPrev, "shift+tab", &[Global]),
     (Submit, "enter", &[Prompt]),
     (OpenTranscript, "enter", &[Cards, Log]),
-    (MoveUp, "up", &[Cards, Log, Rail]),
-    (MoveUp, "k", &[Cards, Log, Rail]),
-    (MoveDown, "down", &[Cards, Log, Rail]),
-    (MoveDown, "j", &[Cards, Log, Rail]),
+    (MoveUp, "up", &[Cards, Log, Rail, Menu]),
+    (MoveUp, "k", &[Cards, Log, Rail, Menu]),
+    (MoveDown, "down", &[Cards, Log, Rail, Menu]),
+    (MoveDown, "j", &[Cards, Log, Rail, Menu]),
     (CardPrev, "left", &[Cards]),
     (CardPrev, "h", &[Cards]),
     (CardNext, "right", &[Cards]),
     (CardNext, "l", &[Cards]),
     (StopRun, "x", &[Cards, Transcript]),
     (RetryRun, "r", &[Cards, Transcript]),
-    (MessageRun, "m", &[Cards, Transcript]),
+    // `m` is the context menu (05 section 6.1), so the message key moved to `M`.
+    (MessageRun, "M", &[Cards, Transcript]),
+    (OpenMenu, "m", &[Cards, Log]),
+    (ShowTooltip, "space", &[Dashboard]),
+    (PickMenuItem, "enter", &[Menu]),
     (ResumeRun, "R", &[Cards]),
     (ToggleBackground, "b", &[Cards]),
     (BackgroundWait, "ctrl+b", &[Global]),
@@ -193,7 +206,7 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (OpenHelp, "?", &[Global]),
     (CancelRun, "ctrl+c", &[Global]),
     (Quit, "q", &[Dashboard]),
-    (CloseModal, "esc", &[Modal, Permission, Transcript]),
+    (CloseModal, "esc", &[Modal, Permission, Transcript, Menu]),
     (CloseModal, "q", &[Transcript]),
     (ClearPrompt, "esc", &[Prompt]),
 ];
@@ -485,6 +498,7 @@ fn ctx_name(c: Ctx) -> &'static str {
         Ctx::Transcript => "transcript",
         Ctx::Permission => "permission",
         Ctx::Modal => "modal",
+        Ctx::Menu => "menu",
     }
 }
 
@@ -506,7 +520,7 @@ mod tests {
             );
         }
         assert_eq!(map.conflicts(), Vec::<String>::new());
-        assert_eq!(ACTIONS.len(), 34);
+        assert_eq!(ACTIONS.len(), 37);
     }
 
     #[test]
@@ -534,8 +548,21 @@ mod tests {
         for c in [Ctx::Cards, Ctx::Transcript] {
             assert_eq!(at("x", c), Some(StopRun));
             assert_eq!(at("r", c), Some(RetryRun));
-            assert_eq!(at("m", c), Some(MessageRun));
+            assert_eq!(at("M", c), Some(MessageRun));
         }
+        // The context menu and the tooltip (05 section 6.1) work from the keyboard.
+        for c in [Ctx::Cards, Ctx::Log] {
+            assert_eq!(at("m", c), Some(OpenMenu));
+        }
+        for c in [Ctx::Cards, Ctx::Log, Ctx::Rail] {
+            assert_eq!(at("space", c), Some(ShowTooltip));
+        }
+        assert_eq!(at("space", Ctx::Prompt), None, "a space in the prompt is a space");
+        assert_eq!(at("m", Ctx::Prompt), None);
+        assert_eq!(at("enter", Ctx::Menu), Some(PickMenuItem));
+        assert_eq!(at("esc", Ctx::Menu), Some(CloseModal));
+        assert_eq!((at("j", Ctx::Menu), at("up", Ctx::Menu)), (Some(MoveDown), Some(MoveUp)));
+        assert_eq!(at("m", Ctx::Menu), None, "the menu key does nothing inside the menu");
         assert_eq!(at("R", Ctx::Cards), Some(ResumeRun));
         assert_eq!(at("b", Ctx::Cards), Some(ToggleBackground));
         assert_eq!(at("ctrl+b", Ctx::Log), Some(BackgroundWait));

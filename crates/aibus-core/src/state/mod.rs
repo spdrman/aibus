@@ -21,6 +21,11 @@ pub const NAMESPACES: [&str; 4] = ["model", "ctrl", "view", "eng"];
 // model: inputs
 pub const SESSION_ID: &str = "model:session:id";
 pub const SESSION_TOPIC: &str = "model:session:topic";
+/// What picked the lead's model, as the lead box shows it (`--model sonnet`); null on the default.
+pub const SESSION_MODEL_FLAG: &str = "model:session:model_flag";
+/// The side seats as the panels name them: `{ advisor: {label, enabled}, router: {label, enabled} }`.
+/// The labels are null until startup says otherwise.
+pub const SESSION_ASSIST: &str = "model:session:assist";
 pub const AGENTS_DEFS: &str = "model:agents:defs";
 pub const AGENTS_WARNINGS: &str = "model:agents:warnings";
 /// `{name, provider, label, default_model, key_ref}`, no secrets.
@@ -52,6 +57,12 @@ pub const SELECTED_LOG: &str = "ctrl:selected:log";
 pub const MODAL: &str = "ctrl:modal";
 pub const PALETTE_TEXT: &str = "ctrl:palette:text";
 pub const LOG_FILTER: &str = "ctrl:log:filter";
+/// Whether the log follows its newest row (`f`); scrolling away turns it off.
+pub const LOG_FOLLOW: &str = "ctrl:log:follow";
+/// The open context menu: `{ run, col, row, selected }`, null when closed.
+pub const MENU: &str = "ctrl:menu";
+/// Resident memory in MiB for the status bar's `mem` segment; null unless `-v` asked for it.
+pub const MEM: &str = "ctrl:mem";
 pub const SIZE: &str = "ctrl:size";
 /// Whether the 3-column rail strip is opened to the full rail (`a`, a click on the strip).
 pub const RAIL_EXPANDED: &str = "ctrl:rail:expanded";
@@ -155,6 +166,14 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
     let inputs: Vec<(&str, Value)> = vec![
         (SESSION_ID, s("")),
         (SESSION_TOPIC, s("")),
+        (SESSION_MODEL_FLAG, Value::Null),
+        (
+            SESSION_ASSIST,
+            map([
+                ("advisor", map([("label", Value::Null), ("enabled", Value::Bool(true))])),
+                ("router", map([("label", Value::Null), ("enabled", Value::Bool(true))])),
+            ]),
+        ),
         (AGENTS_DEFS, list(vec![])),
         (AGENTS_WARNINGS, list(vec![])),
         (ACCOUNTS, list(vec![])),
@@ -172,6 +191,8 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
                 ("calls", n(0)),
                 ("tokens_read", n(0)),
                 ("active_checkpoint", Value::Null),
+                // The tick the newest advice arrived on; the rail types it out from there.
+                ("advice_tick", n(0)),
             ]),
         ),
         (ADVISOR_ADVICE, list(vec![])),
@@ -197,6 +218,9 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         (MODAL, Value::Null),
         (PALETTE_TEXT, s("")),
         (LOG_FILTER, s("")),
+        (LOG_FOLLOW, Value::Bool(true)),
+        (MENU, Value::Null),
+        (MEM, Value::Null),
         (SIZE, map([("cols", n(80)), ("rows", n(24))])),
         (RAIL_EXPANDED, Value::Bool(false)),
         (LAYOUT, map([("rail", Value::Null), ("log", Value::Null)])),

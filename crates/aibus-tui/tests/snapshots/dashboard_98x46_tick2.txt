@@ -1,46 +1,46 @@
                        AIBUS   ·   SONNET 5.5 LEADS   ·   HAIKU 5.5 SWARMS
 ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ advisor
+  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ opus 5.5 · advisor
 
- ┌ ADVISOR ───────────┐                  ┌ Sonnet 5.5 · main session ───────────┐
- │ advisor · reading  │                  │edits + runs tests                    │
- │                    │                  │effort ▮▮▮▮ high                      │
- │ ◆ before a plan    │                  └──────────────────────────────────────┘
- │  reads the whole   │                                      ·
- │  session, every    │                  ┌ ROUTER · fork layer ─────forks 1,314─┐
- │  tool call, result │                  │which file     █████████▍ 0.94 sharp  │
- │ last advice:       │                  │which tool     █████████▍ 0.94 sharp  │
- │ » plan skips auth  │                  │retry or stop  █████▊████ 0.58 split  │
- │ calls            1 │                  │sharp → runs in code   split → lead   │
- │ tokens read   122k │                  └──────────────────────────────────────┘
- │   silent on every  │                     delegate to subagents · Haiku 5.5
- │   routine turn     │                                      ┼
- │                    │                                      ┼
- │ ◇ same error x2    │        ┌ ▸ search ───────┐ ┌ grep ───────────┐ ┌ audit ──────────┐
- │ ◇ before done      │        │Haiku 5.5        │ │Haiku 5.5        │ │Haiku 5.5        │
- │                    │        │█████▋   71%     │ │██▊      35%     │ │████████ 100%    │
- │                    │        │◐ running        │ │◓ running        │ │✓ done           │
- │                    │        │maps the repo    │ │finds call sites │ │runs in a        │
- │                    │        │                 │ │                 │ │worktree         │
+ ┌ OPUS 5.5 ──────────┐                  ┌ Sonnet 5.5 · main session ───────────┐
+ │ advisor · reading  │                  │ edits + runs tests                   │
+ │                    │···●··············│ effort ▮▮▮▮ high      --model sonnet │
+ │ ◆ before a plan    │·                 └──────────────────────────────────────┘
+ │ │ reads the whole  │                                      ●
+ │ │ session, every   │                                      ·
+ │ │ tool call and    │                  ┌ ROUTER · fork layer ─────forks 1,314─┐
+ │ │ every result     │                  │ which file     █████████▌ 0.94 sharp │
+ │ │ last advice:     │                  │ which tool     █████████▌ 0.94 sharp │
+ │ │ » plan skips auth│                  │ retry or stop  ██████████ 0.58 split │
+ │ │ calls           1│                  │ sharp → runs in code  split → Sonnet │
+ │ │ tokens read  122k│                  └──────────────────────────────────────┘
+ │ │ silent on every  │                     delegate to subagents · Haiku 5.5
+ │ │ routine turn     │                                      ●
+ │ ◇ same error x2    │                 ···················●·····················
+ │ │ never writes     │        ┌ ▸ search ───────┐ ┌ grep ───────────┐ ┌ audit ──────────┐
+ │ │ code itself.     │        │ Haiku 5.5       │ │ Haiku 5.5       │ │ Haiku 5.5       │
+ │ │ Sonnet applies   │        │ ███████▏   71%  │ │ ███▌       35%  │ │ ██████████ 100% │
+ │ │ the advice.      │        │ maps the repo   │ │ finds call      │ │ runs in a       │
+ │ ◇ before done      │        │                 │ │ sites           │ │ worktree        │
+ │                    │        │ ◐ running       │ │ ◓ running       │ │ ✓ done          │
  │                    │        └─────────────────┘ └─────────────────┘ └─────────────────┘
- │                    │                                      │
- │                    │                                      │
+ │                    │
+ │                    │                 ·········································
+ │                    │                                      ▾
  │                    │                  ┌ back to Sonnet 5.5 · lead ───────────┐
- │                    │                  │review + verify                       │
+ │                    │                  │ review + verify                      │
  │                    │                  └──────────────────────────────────────┘
- │                    │
- │                    │
  │                    │
  └────────────────────┘
 
 ┌ session log ───────────────────────────────────────────────────────────────────────────────────┐
-│22:13:20  info     router which_tool answered                                                   │
-│22:13:20  info     router retry_or_stop answered                                                │
-│22:13:20  info     advisor spoke at before_plan                                                 │
-│22:13:20  info     checkpoint before_plan                                                       █
+│ 22:13:20  router     which tool →                                        p=0.94  sharp → code  │
+│ 22:13:20  router     retry or stop →                               p=0.58  split → sonnet 5.5  │
+│ 22:13:20  opus 5.5   before plan · advice sent                                                 │
+│ 22:13:20  opus 5.5   before plan · reading full session                                        █
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 
  ~/app $ aibus --model sonnet --advisor opus ▌
 
-  haiku 5.5 [swarming]      subagents [2/3]      advisor [reading]      router [ 1,314 forks]
+  haiku [swarming]      subagents [2/3]      opus [reading]      router [ 1,314 forks]

@@ -55,7 +55,8 @@ pub struct Options {
     /// the like outside the graph.
     #[allow(clippy::type_complexity)]
     pub watch: Option<Box<dyn FnMut(&Msg)>>,
-    /// Samples resident memory in MiB for the status bar's `mem` segment (`-v`).
+    /// Samples resident memory in MiB for the status bar's `mem` segment (`-v`), every 10 s
+    /// (`eng:mem`, 08 section 5).
     pub mem: Option<fn() -> Option<u32>>,
     /// Sees every message a key or a click produced, before the loop steps it: how a permission
     /// answer or a message reaches the run's mailbox, which the graph does not hold.
@@ -407,7 +408,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut mode = MouseMode::Off;
     let mut runs = opts.msgs.take();
     let mut watch = opts.watch.take();
-    let mut mem = tokio::time::interval(Duration::from_secs(2));
+    let mut mem = tokio::time::interval(Duration::from_secs(aibus_core::mem::SAMPLE_SECS));
 
     let size = session.term.size()?;
     app.step(Msg::Resize { cols: size.width, rows: size.height })?;

@@ -25,10 +25,11 @@ use aibus_core::{
     AutoHandoff, Bash, Budgets, Compactor, CreateHandoff, CredentialStore, Delegate, Effects, Fork,
     Gate, HookEvent, HookInput, HookRunner, LedgerUpdate, Limits, MemoryAppend, MemoryRead,
     MemoryWrite, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode, Recall,
-    Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, SelectHints,
-    SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry,
-    MSG_CAPACITY,
+    Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, RunWorkflow, SelectHints,
+    SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, Triggers,
+    WebFetch, MSG_CAPACITY,
 };
+use aibus_core::assist::Seat;
 use aibus_core::continuity::{handoff, Layout};
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script};
@@ -47,6 +48,7 @@ use crate::continuity::{self, Continuity};
 use crate::events;
 use crate::keychain::OsKeychain;
 use crate::launch::ChildLauncher;
+use crate::net::Net;
 use crate::providers::{builtin_factories, provider_configs, refresh_stale_models};
 use crate::signals::Signals;
 use crate::trace::TraceGuard;
@@ -243,9 +245,6 @@ impl Step for ParseCli {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let usage = |m: &str| AibusError::Usage(m.to_owned());
-        if ctx.run.workflow.is_some() {
-            return Err(usage("--workflow: not yet"));
-        }
         if ctx.global.permission_mode.as_deref() == Some("bypass")
             && std::env::var("AIBUS_I_KNOW").as_deref() != Ok("1")
         {
@@ -636,7 +635,7 @@ impl Step for EnterLoop {
             ));
         }
         // `@agent-<name> <rest>` opens the lead with a delegate to that agent (01 section 4.2).
-        let forced = match parse_mention(&prompt).filter(|_| resume.is_none()) {
+        let mut forced = match parse_mention(&prompt).filter(|_| resume.is_none()) {
             Some((agent, rest)) => {
                 if !agents.agents.contains_key(&agent) {
                     return Err(AibusError::UnknownAgent(agent.to_string()));
@@ -646,10 +645,21 @@ impl Step for EnterLoop {
                         "@agent-{agent}: say what it should do"
                     )));
                 }
-                Some((agent, rest.to_owned()))
+                Some((
+                    "delegate".to_owned(),
+                    serde_json::json!({"agent": agent, "prompt": rest, "background": false}),
+                ))
             }
             None => None,
         };
+        // `--workflow <name>` takes the prompt as the workflow's input (01 section 8.4); the lead
+        // opens with a `workflow` call and then goes on with the report in hand.
+        let workflow_dirs = aibus_core::workflow::dirs(&ctx.cwd, Some(&paths.config));
+        if let (Some(name), None) = (ctx.run.workflow.clone(), &resume) {
+            aibus_core::workflow::load(&workflow_dirs, &name).map_err(AibusError::Usage)?;
+            forced = Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": prompt})));
+            prompt = format!("/workflow {name} {prompt}");
+        }
         let limits = Limits::resolve(cfg, |k| std::env::var(k).ok())?;
 
         // `--permission-mode` overrides the definition; `bypass` from either needs the variable.
@@ -718,7 +728,52 @@ impl Step for EnterLoop {
             redactor: Some(ctx.redactor.clone()),
             home: std::env::var_os("HOME").map(PathBuf::from),
         };
+        // `--no-hooks` leaves the runner's default in place, which runs nothing; the trigger
+        // hints run nothing either, so they stay.
+        let (triggers, trigger_warnings) =
+            Triggers::load(&Triggers::files(&ctx.cwd, Some(&paths.config)));
+        for w in trigger_warnings {
+            eprintln!("aibus: warning: {w}");
+        }
+        let hooks = Arc::new(
+            if ctx.global.no_hooks {
+                HookRunner::default()
+            } else {
+                HookRunner::new(
+                    &cfg.hooks,
+                    std::env::vars().collect(),
+                    ctx.cwd.clone(),
+                    session.id.to_string(),
+                    Some(paths.state.join("logs/hooks").join(session.id.to_string())),
+                    Some(ctx.redactor.clone()),
+                )
+            }
+            .with_triggers(triggers),
+        );
+        // `web_fetch` pages and `http` hooks are the sockets core does not own (09 section 8).
+        let net = Net::new();
+        hooks.set_transport(net.clone());
         let mut registry = ToolRegistry::standard(bash);
+        if cfg.tools.web {
+            registry.register(Arc::new(WebFetch::new(net.clone())));
+        }
+        if !cfg.mcp.is_empty() {
+            let rt = ctx.rt.as_ref().ok_or_else(|| not_ready("runtime"))?;
+            let env: Vec<(String, String)> = std::env::vars().collect();
+            let (found, warnings) = rt.block_on(aibus_core::mcp::connect_all(
+                &cfg.mcp,
+                &env,
+                &ctx.cwd,
+                &session.id.to_string(),
+            ));
+            for w in warnings {
+                eprintln!("aibus: warning: {w}");
+            }
+            for tool in found {
+                registry.register(tool);
+            }
+        }
+        registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone())));
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
         registry.register(Arc::new(ResumeRun::new(orch.clone())));
@@ -739,19 +794,6 @@ impl Step for EnterLoop {
         registry.register(Arc::new(MemoryAppend::new(ctx.redactor.clone())));
         let tools = ToolExecutor::with_gate(registry, gate)
             .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
-        // `--no-hooks` leaves the runner's default in place, which runs nothing.
-        let hooks = Arc::new(if ctx.global.no_hooks {
-            HookRunner::default()
-        } else {
-            HookRunner::new(
-                &cfg.hooks,
-                std::env::vars().collect(),
-                ctx.cwd.clone(),
-                session.id.to_string(),
-                Some(paths.state.join("logs/hooks").join(session.id.to_string())),
-                Some(ctx.redactor.clone()),
-            )
-        });
         let tools = Arc::new(tools);
         let launcher = Arc::new(ChildLauncher {
             agents: std::sync::RwLock::new(
@@ -780,7 +822,28 @@ impl Step for EnterLoop {
             defs: Default::default(),
             worktrees: paths.cache.join("worktrees").join(session.id.to_string()),
             assist: Default::default(),
+            workflow_dirs: workflow_dirs.clone(),
         });
+        // A `prompt` hook asks the session's own model; the account is only touched when some hook
+        // wants it, so a session with none never reads a key for this.
+        let prompt_hooks = cfg.hooks.events.values().flatten().any(|h| h.kind == aibus_core::HookKind::Prompt)
+            || agents
+                .agents
+                .values()
+                .any(|d| d.hooks.values().flatten().any(|h| h.kind == aibus_core::HookKind::Prompt));
+        if prompt_hooks {
+            match launcher.pick(&session_default, &SelectHints::default()) {
+                Ok(p) => {
+                    let _ = net.seat.set(Seat {
+                        provider: p.provider,
+                        creds: p.creds,
+                        model: p.model,
+                        account: p.account,
+                    });
+                }
+                Err(e) => eprintln!("aibus: warning: prompt hooks have no model to ask: {e}"),
+            }
+        }
         // The advisor and the router get their own models and accounts, or a note on stderr
         // saying why they are off.
         let assist = launcher.set_assist(
@@ -835,6 +898,8 @@ impl Step for EnterLoop {
             }
             _ => (ctx.cwd.clone(), None),
         };
+        // `/fix <text>` or `/workflow <name> <text>` as the prompt is the same as `--workflow`.
+        let forced = forced.or_else(|| launcher.slash_workflow(&prompt).filter(|_| resume.is_none()));
         let run_cfg = RunConfig {
             run,
             def,
@@ -852,7 +917,7 @@ impl Step for EnterLoop {
             context: Vec::new(),
             background: false,
             max_spawn_depth: limits.max_spawn_depth,
-            forced,
+            forced: forced.map(|(tool, input)| (tool.into(), input)),
             start: if resume.is_some() { Start::Resume } else { Start::New },
             worktree,
         };

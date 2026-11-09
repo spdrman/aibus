@@ -275,7 +275,9 @@ impl Rig {
                 context: Vec::new(),
                 background: false,
                 max_spawn_depth: 3,
-                forced: forced.map(|(a, r)| (a.parse().unwrap(), r.into())),
+                forced: forced.map(|(a, r)| {
+                    ("delegate".into(), json!({"agent": a, "prompt": r, "background": false}))
+                }),
                 start: Start::New,
                 worktree: None,
             },

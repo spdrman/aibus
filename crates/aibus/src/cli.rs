@@ -1,5 +1,4 @@
-//! The command line (06 section 1). Every subcommand and global flag parses; `main` runs the
-//! few that exist and answers "not yet" (exit 2) for the rest.
+//! The command line (06 section 1) and `init`. Every subcommand and global flag parses.
 
 use std::path::PathBuf;
 
@@ -158,6 +157,8 @@ pub enum Command {
     /// The config file
     #[command(subcommand)]
     Config(ConfigCmd),
+    /// Put the example workflows in .aibus/workflows
+    Init,
     /// Check the install and the config
     Doctor {
         /// Also print the live memory numbers of this session
@@ -345,7 +346,13 @@ pub enum WorkflowCmd {
         #[arg(long, hide = true)]
         names: bool,
     },
-    Run { name: String, input: String },
+    Run {
+        name: String,
+        input: String,
+        /// Play this RON script on the fake provider (for tests)
+        #[arg(long, value_name = "FILE", hide = true)]
+        script: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -368,17 +375,6 @@ pub enum Shell {
     Zsh,
     Fish,
     Powershell,
-}
-
-/// The words of the subcommand that was given, for the "not yet" message: `["agent", "list"]`.
-pub fn subcommand_path(m: &clap::ArgMatches) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = m;
-    while let Some((name, sub)) = cur.subcommand() {
-        out.push(name.to_owned());
-        cur = sub;
-    }
-    out
 }
 
 #[cfg(test)]
@@ -420,6 +416,7 @@ mod tests {
         "memory index",
         "workflow list",
         "workflow run",
+        "init",
         "config path",
         "config show",
         "config init",

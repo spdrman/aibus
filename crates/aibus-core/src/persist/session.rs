@@ -28,6 +28,7 @@ use aibus_graph::Value;
 
 pub const SNAPSHOT: &str = "graph.snapshot.json.zst";
 pub const MSGS: &str = "msgs.jsonl.zst";
+pub const MEMORY: &str = "memory.json";
 
 /// `session.json`.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -230,9 +231,15 @@ impl SessionWriter {
         self.msgs.flush(now)
     }
 
-    /// Shutdown: a last snapshot, every buffer flushed.
+    /// Writes `memory.json`, the live numbers `aibus doctor --session` prints (08 section 5).
+    pub fn memory<G: Graph>(&self, app: &App<G>) -> io::Result<()> {
+        write_atomic(&self.dir.join(MEMORY), crate::mem::numbers(app).to_string())
+    }
+
+    /// Shutdown: a last snapshot, every buffer flushed, the last memory numbers.
     pub fn finish<G: Graph>(&mut self, app: &mut App<G>) -> Result<(), AibusError> {
         self.snapshot(app)?;
+        self.memory(app)?;
         Ok(self.flush()?)
     }
 }

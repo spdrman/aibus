@@ -95,7 +95,7 @@ pub enum ToolError {
 
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
     /// Name, description and JSON schema, as the model sees it.
     fn spec(&self) -> ToolSpec;
     fn needs_permission(&self, input: &serde_json::Value, mode: PermissionMode) -> Need;

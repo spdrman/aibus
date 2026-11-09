@@ -1,0 +1,25 @@
+name = "fix"
+description = "Diagnose, assess risk, fix, verify"
+
+[[step]]
+agent = "explore"
+prompt = "Diagnose this problem and say where the cause is (file paths and line numbers): {{input}}"
+
+[[step]]
+agent = "plan"
+prompt = """
+Risks of fixing it this way: {{prev.summary}}
+
+End your answer with one line, `RISK: LOW`, `RISK: MEDIUM` or `RISK: HIGH`.
+"""
+# Reads the step's JSON on stdin; exit 2 blocks the chain and stderr says why.
+gate = '''grep -q 'RISK: HIGH' && { echo "the risk assessment ended on RISK: HIGH" >&2; exit 2; }; exit 0'''
+
+[[step]]
+agent = "general"
+prompt = "Make the fix. Diagnosis: {{steps.explore.summary}} Risks to keep in mind: {{steps.plan.summary}}"
+
+[[step]]
+agent = "general"
+prompt = "Verify the fix: run the project's tests and report what passed and what failed. Problem: {{input}}"
+on_fail = "retry:2"

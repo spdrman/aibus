@@ -12,8 +12,10 @@ aibus-core.workspace = true
 aibus-graph.workspace = true
 aibus-provider.workspace = true
 aibus-provider-anthropic.workspace = true
+aibus-provider-http.workspace = true
 aibus-provider-openai.workspace = true
 aibus-tui.workspace = true
+async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }

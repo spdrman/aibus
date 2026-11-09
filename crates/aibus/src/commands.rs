@@ -32,28 +32,67 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
     account::run(cmd, g.json, &mut io)
 }
 
-/// `workflow list`: the names of `workflows/*.toml` in the project and the user config (01
-/// section 8), sorted and without repeats. `--names` is the helper the completion scripts call.
+/// `workflow list`: the workflows of `.aibus/workflows` and the user config (01 section 8.4), by
+/// name, the project's winning a name both have. `--names` is the helper the completion scripts
+/// call: names only.
 pub fn workflow_list(g: &Global, names: bool) -> Result<u8, AibusError> {
-    let dirs = [
-        project_dir(&g.project_dir()?).join("workflows"),
-        g.paths()?.config.join("workflows"),
-    ];
-    let mut found: Vec<String> = dirs
-        .iter()
-        .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
-        .filter_map(|e| {
-            let p = e.path();
-            (p.extension()? == "toml").then(|| p.file_stem()?.to_str().map(str::to_owned))?
-        })
-        .collect();
-    found.sort();
-    found.dedup();
-    if g.json && !names {
-        println!("{}", json!(found));
+    let dirs = aibus_core::workflow::dirs(&g.project_dir()?, Some(&g.paths()?.config));
+    let found = aibus_core::workflow::list(&dirs);
+    if names {
+        for (name, _, _) in &found {
+            println!("{name}");
+        }
+        return Ok(0);
+    }
+    if g.json {
+        let rows: Vec<_> = found
+            .iter()
+            .map(|(name, path, parsed)| match parsed {
+                Ok(w) => json!({
+                    "name": name,
+                    "path": path,
+                    "description": w.description,
+                    "steps": w.steps.iter().map(|s| s.agent.as_str()).collect::<Vec<_>>(),
+                }),
+                Err(e) => json!({"name": name, "path": path, "error": e.to_string()}),
+            })
+            .collect();
+        println!("{}", json!(rows));
+        return Ok(0);
+    }
+    for (name, path, parsed) in &found {
+        match parsed {
+            Ok(w) => {
+                let agents: Vec<&str> = w.steps.iter().map(|s| s.agent.as_str()).collect();
+                println!("{name}\t{}\t{}", w.description, agents.join(" > "));
+            }
+            Err(e) => println!("{name}\t(invalid: {e})\t{}", path.display()),
+        }
+    }
+    Ok(0)
+}
+
+/// `aibus init`: puts the four shipped workflows in `.aibus/workflows/`, leaving any file that is
+/// already there alone.
+pub fn init(g: &Global) -> Result<u8, AibusError> {
+    let dir = aibus_core::workflow::dirs(&g.project_dir()?, None).remove(0);
+    std::fs::create_dir_all(&dir)?;
+    let mut wrote = Vec::new();
+    for (name, text) in aibus_core::workflow::EXAMPLES {
+        let path = dir.join(format!("{name}.toml"));
+        if path.exists() {
+            continue;
+        }
+        std::fs::write(&path, text)?;
+        wrote.push(path);
+    }
+    if g.json {
+        println!("{}", json!({ "workflows": wrote }));
+    } else if wrote.is_empty() {
+        println!("{} already has the example workflows", dir.display());
     } else {
-        for n in &found {
-            println!("{n}");
+        for p in &wrote {
+            println!("wrote {}", p.display());
         }
     }
     Ok(0)

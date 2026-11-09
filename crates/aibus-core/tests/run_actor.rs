@@ -9,8 +9,9 @@ use aibus_core::context::{build, ContextInput, Git};
 use aibus_core::*;
 use aibus_provider::fake::{FakeProvider, Script, Step};
 use aibus_provider::{
-    ContentBlock, MessageRole, ModelRef, ProviderError, ProviderErrorKind, StopReason,
-    StreamChunk,
+    AccountInfo, AliasTable, Capabilities, ChatRequest, ChatResponse, ContentBlock, Credential,
+    MessageRole, ModelInfo, ModelRef, Price, Provider, ProviderError, ProviderErrorKind,
+    ProviderId, StopReason, StreamChunk,
 };
 use aibus_testkit::{fake_credential, FakeClock};
 use serde_json::json;
@@ -160,6 +161,17 @@ struct Rig {
 
 fn start(script: Script, def: AgentDef, cwd: &Path, runs_dir: &Path) -> Rig {
     let fake = Arc::new(FakeProvider::new(script));
+    start_on(fake.clone(), fake, def, cwd, runs_dir)
+}
+
+/// `start` with something between the run and the fake; `fake` is what the `Rig` reports on.
+fn start_on(
+    provider: Arc<dyn Provider>,
+    fake: Arc<FakeProvider>,
+    def: AgentDef,
+    cwd: &Path,
+    runs_dir: &Path,
+) -> Rig {
     let (tx, rx) = mpsc::channel(MSG_CAPACITY);
     let handle = spawn(
         RunConfig {
@@ -184,7 +196,7 @@ fn start(script: Script, def: AgentDef, cwd: &Path, runs_dir: &Path) -> Rig {
             worktree: None,
         },
         RunDeps {
-            provider: fake.clone(),
+            provider,
             creds: Arc::new(fake_credential()),
             tools: Arc::new(ToolExecutor::new(ToolRegistry::read_only())),
             tx,
@@ -227,10 +239,97 @@ fn repo() -> TempDir {
     d
 }
 
+/// The fake, except that `stream` first fills the channel it was given (nothing drains it yet,
+/// since the run's own task is the one calling) and reports how many chunks fitted.
+struct Filling {
+    inner: Arc<FakeProvider>,
+    fitted: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Provider for Filling {
+    fn id(&self) -> ProviderId {
+        self.inner.id()
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        self.inner.capabilities()
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        self.inner.models()
+    }
+
+    async fn refresh_models(&self, creds: &Credential) -> Result<Vec<ModelInfo>, ProviderError> {
+        self.inner.refresh_models(creds).await
+    }
+
+    fn resolve_model(&self, r: &ModelRef, aliases: &AliasTable) -> Option<ModelId> {
+        self.inner.resolve_model(r, aliases)
+    }
+
+    async fn stream(
+        &self,
+        creds: &Credential,
+        req: ChatRequest,
+        out: mpsc::Sender<StreamChunk>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<ChatResponse, ProviderError> {
+        let mut fitted = 0;
+        while out.try_send(StreamChunk::TextDelta(String::new())).is_ok() {
+            fitted += 1;
+        }
+        self.fitted.store(fitted, std::sync::atomic::Ordering::SeqCst);
+        self.inner.stream(creds, req, out, cancel).await
+    }
+
+    async fn count_tokens(
+        &self,
+        creds: &Credential,
+        req: &ChatRequest,
+    ) -> Option<Result<u64, ProviderError>> {
+        self.inner.count_tokens(creds, req).await
+    }
+
+    async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
+        self.inner.verify(creds).await
+    }
+
+    fn price(&self, model: &ModelId) -> Option<Price> {
+        self.inner.price(model)
+    }
+}
+
 #[test]
 fn handle_sizes_follow_the_spec() {
     assert_eq!(MAILBOX_CAPACITY, 64);
     assert_eq!(STREAM_CAPACITY, 1024);
+}
+
+/// 08 section 3, filled rather than read off the constant: the provider's channel takes exactly
+/// 1024 chunks before it is full (and then the provider awaits), and the run's mailbox takes 64.
+#[tokio::test]
+async fn the_stream_and_mailbox_channels_fill_at_the_spec_sizes() {
+    let _clock = FakeClock::new();
+    let dir = repo();
+    let runs = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new(Script::new().then(Step::Text("ok".into()))));
+    let fitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let filling = Arc::new(Filling { inner: fake.clone(), fitted: fitted.clone() });
+    let rig = start_on(filling, fake, builtin("explore"), dir.path(), runs.path());
+
+    // The run's task has not been polled yet on this runtime, so nothing has drained the mailbox.
+    for n in 0..64 {
+        rig.handle
+            .mailbox
+            .try_send(RunMail::UserMessage(format!("m{n}")))
+            .unwrap_or_else(|e| panic!("message {n} should fit: {e}"));
+    }
+    assert!(rig.handle.mailbox.try_send(RunMail::UserMessage("one too many".into())).is_err());
+
+    let done = rig.finish().await;
+    assert_eq!(fitted.load(std::sync::atomic::Ordering::SeqCst), 1024);
+    assert_eq!(done.finished().status, RunStatus::Completed);
 }
 
 #[tokio::test]

@@ -3,22 +3,28 @@
 //! hooks come in with each call, so they only ever run for that agent's runs.
 
 mod exec;
+mod remote;
+
+pub use remote::HookTransport;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{HookSet, HookSpec, PermissionMode, Role};
+use crate::agent::{HookKind, HookSet, HookSpec, PermissionMode, Role};
 use crate::config;
 use crate::ids::RunId;
 use crate::msg::{HookEvent, HookOutcome};
 use crate::persist::fs::{create_private_dir, write_private};
 use crate::redact::Redactor;
+use crate::triggers::Triggers;
+use crate::workflow::GateVerdict;
 use crate::tools::scrubbed_env;
 
 /// What a hook is told. The fields every event carries (01 section 6.2) are named; the
@@ -85,6 +91,11 @@ pub struct HookRunner {
     log_dir: Option<PathBuf>,
     redactor: Option<Redactor>,
     seq: AtomicU64,
+    /// Where `prompt` and `http` hooks go; set once by the binary, which owns the providers and
+    /// the sockets. Without it those hooks are errors.
+    transport: OnceLock<Arc<dyn HookTransport>>,
+    /// `.aibus/triggers.toml`: added to the lead's prompt as `[hint]` lines (01 section 4.1).
+    triggers: Triggers,
 }
 
 impl HookRunner {
@@ -96,20 +107,11 @@ impl HookRunner {
         log_dir: Option<PathBuf>,
         redactor: Option<Redactor>,
     ) -> Self {
+        // A hook that is missing its command, prompt or URL was reported by `Config::problems`.
         let global = hooks
             .events
             .iter()
-            .map(|(event, list)| {
-                let specs = list
-                    .iter()
-                    .map(|h| HookSpec {
-                        matcher: h.matcher.clone(),
-                        command: h.command.clone(),
-                        timeout_secs: h.timeout,
-                    })
-                    .collect();
-                (event.clone(), specs)
-            })
+            .map(|(event, list)| (event.clone(), list.iter().filter_map(|h| h.spec().ok()).collect()))
             .collect();
         Self {
             enabled: true,
@@ -121,6 +123,88 @@ impl HookRunner {
             log_dir,
             redactor,
             seq: AtomicU64::new(0),
+            transport: OnceLock::new(),
+            triggers: Triggers::default(),
+        }
+    }
+
+    /// Adds the trigger hints. They work under `--no-hooks` too, since a hint runs nothing.
+    #[must_use]
+    pub fn with_triggers(mut self, triggers: Triggers) -> Self {
+        self.triggers = triggers;
+        self
+    }
+
+    /// Sets what `prompt` and `http` hooks use. The first call wins.
+    pub fn set_transport(&self, transport: Arc<dyn HookTransport>) {
+        let _ = self.transport.set(transport);
+    }
+
+    /// A workflow gate (01 section 8.4): `command` runs like a hook command with `stdin` on its
+    /// standard input. Exit 2 blocks with stderr as the reason, so does `{"decision":"deny"}` on
+    /// stdout; a gate that cannot start or times out blocks too (fail closed); any other exit is a
+    /// non-blocking error. Under `--no-hooks` nothing runs and the gate passes.
+    pub async fn gate(
+        &self,
+        command: &str,
+        stdin: String,
+        run: Option<RunId>,
+        cancel: &CancellationToken,
+    ) -> Result<GateVerdict, crate::workflow::HostError> {
+        use crate::workflow::HostError;
+        const GATE_TIMEOUT_SECS: u64 = 60;
+        if !self.enabled {
+            return Ok(GateVerdict::Pass);
+        }
+        let job = exec::Job {
+            command: command.to_owned(),
+            cwd: self.project_dir.clone(),
+            env: scrubbed_env(
+                &self.env,
+                &self.pass_env,
+                &self.project_dir,
+                &self.session,
+                &run.map(|r| r.to_string()).unwrap_or_default(),
+            ),
+            stdin: stdin.clone().into_bytes(),
+        };
+        let done = exec::run(job, Duration::from_secs(GATE_TIMEOUT_SECS), cancel).await;
+        self.log("gate", command, &stdin, done.as_ref().ok()).await;
+        let done = match done {
+            Err(e) => return Ok(GateVerdict::Block(format!("the gate could not start: {e}"))),
+            Ok(d) => d,
+        };
+        match done.ended {
+            exec::Ended::Cancelled => Err(HostError::Cancelled),
+            exec::Ended::TimedOut => {
+                Ok(GateVerdict::Block(format!("the gate timed out after {GATE_TIMEOUT_SECS} s")))
+            }
+            exec::Ended::Exited(Some(2)) => Ok(GateVerdict::Block(match done.stderr.trim() {
+                "" => "the gate exited 2".into(),
+                s => self.redact(s).into_owned(),
+            })),
+            exec::Ended::Exited(Some(0)) => {
+                let verdict = serde_json::from_str::<Value>(done.stdout.trim()).ok();
+                let denied = verdict
+                    .as_ref()
+                    .and_then(|v| v.get("decision"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|d| d == "deny" || d == "block");
+                if denied {
+                    let reason = verdict
+                        .as_ref()
+                        .and_then(|v| v.get("reason"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("the gate said deny");
+                    Ok(GateVerdict::Block(self.redact(reason).into_owned()))
+                } else {
+                    Ok(GateVerdict::Pass)
+                }
+            }
+            exec::Ended::Exited(code) => {
+                tracing::warn!("gate error: {command} (exit {code:?})");
+                Ok(GateVerdict::Pass)
+            }
         }
     }
 
@@ -141,10 +225,15 @@ impl HookRunner {
         const TIMED_OUT: i32 = 124;
 
         let mut fired = Fired::default();
+        let event = input.event;
+        // Hints run nothing, so `--no-hooks` keeps them.
+        if event == HookEvent::UserPromptSubmit {
+            let prompt = input.extra.get("prompt").and_then(Value::as_str);
+            fired.context.extend(prompt.and_then(|p| self.triggers.hint(p)));
+        }
         if !self.enabled {
             return fired;
         }
-        let event = input.event;
         // `matcher` against the event's matcher input: no matcher or `*` takes everything,
         // otherwise `a|b` alternatives, each a name or a glob. An event without matcher input
         // runs every hook.
@@ -178,36 +267,53 @@ impl HookRunner {
             if cancel.is_cancelled() {
                 break;
             }
-            // What the log and the notices call a hook: the file name of the command's first word.
-            let name = {
-                let first = spec.command.split_whitespace().next().unwrap_or(&spec.command);
-                Path::new(first)
-                    .file_name()
-                    .map_or(first, |f| f.to_str().unwrap_or(first))
-                    .to_owned()
+            // What the log and the notices call a hook: the file name of the command's first word,
+            // `prompt`, or the host of the URL (never its path or query).
+            let name = match spec.kind {
+                HookKind::Command => {
+                    let first = spec.command.split_whitespace().next().unwrap_or(&spec.command);
+                    Path::new(first)
+                        .file_name()
+                        .map_or(first, |f| f.to_str().unwrap_or(first))
+                        .to_owned()
+                }
+                HookKind::Prompt => "prompt".to_owned(),
+                HookKind::Http => {
+                    let rest = spec.command.split_once("://").map_or(&*spec.command, |(_, r)| r);
+                    let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+                    format!("http {}", host.rsplit('@').next().unwrap_or(host))
+                }
             };
             let mut secs = spec.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).max(1);
             if event == HookEvent::UserPromptSubmit {
                 secs = secs.min(PROMPT_TIMEOUT_CAP_SECS);
             }
             let body = self.stdin(input, &extra);
-            let job = exec::Job {
-                command: spec.command.clone(),
-                cwd: self.project_dir.clone(),
-                env: scrubbed_env(
-                    &self.env,
-                    &self.pass_env,
-                    &self.project_dir,
-                    &self.session,
-                    &input.run.map(|r| r.to_string()).unwrap_or_default(),
-                ),
-                stdin: body.clone().into_bytes(),
-            };
             let _span = tracing::trace_span!(
                 target: "aibus_trace", "hook", event = event.as_str(), hook = name.as_str()
             );
-            let done = exec::run(job, Duration::from_secs(u64::from(secs)), cancel).await;
-            self.log(event, &spec.command, &body, done.as_ref().ok()).await;
+            let limit = Duration::from_secs(u64::from(secs));
+            let done = match spec.kind {
+                HookKind::Command => {
+                    let job = exec::Job {
+                        command: spec.command.clone(),
+                        cwd: self.project_dir.clone(),
+                        env: scrubbed_env(
+                            &self.env,
+                            &self.pass_env,
+                            &self.project_dir,
+                            &self.session,
+                            &input.run.map(|r| r.to_string()).unwrap_or_default(),
+                        ),
+                        stdin: body.clone().into_bytes(),
+                    };
+                    exec::run(job, limit, cancel).await
+                }
+                HookKind::Prompt | HookKind::Http => {
+                    remote::run(self.transport.get(), spec, &body, limit, cancel).await
+                }
+            };
+            self.log(event.as_str(), &spec.command, &body, done.as_ref().ok()).await;
 
             let (code, stdout, stderr) = match done {
                 Err(e) => {
@@ -370,7 +476,7 @@ impl HookRunner {
     }
 
     /// `logs/hooks/<session>/<event>-<ts>.log`: what the hook was given and what it printed.
-    async fn log(&self, event: HookEvent, command: &str, stdin: &str, done: Option<&exec::Done>) {
+    async fn log(&self, event: &str, command: &str, stdin: &str, done: Option<&exec::Done>) {
         let Some(dir) = self.log_dir.clone() else {
             return;
         };
@@ -378,7 +484,7 @@ impl HookRunner {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_millis());
         let seq = self.seq.fetch_add(1, Ordering::Relaxed);
-        let path = dir.join(format!("{}-{at}-{seq}.log", event.as_str()));
+        let path = dir.join(format!("{event}-{at}-{seq}.log"));
         let status = match done.map(|d| d.ended) {
             Some(exec::Ended::Exited(Some(c))) => format!("exit {c}"),
             Some(exec::Ended::Exited(None)) => "killed by a signal".into(),

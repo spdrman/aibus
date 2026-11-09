@@ -46,3 +46,7 @@ tokio = { version = "1", features = ["sync", "time", "rt", "macros", "test-util"
 [[bench]]
 name = "commit_stream"
 harness = false
+
+[[bench]]
+name = "hydrate_snapshot"
+harness = false

@@ -320,7 +320,8 @@ async fn glob_ls_and_grep_stay_in_the_project() {
     ));
 
     let l = run("ls", tmp.path(), json!({"path": "."})).await.unwrap();
-    assert_eq!(l.content, "long.txt\nnotes.txt\nsrc/");
+    // xdg_temp puts its `home/` next to the files.
+    assert_eq!(l.content, "home/\nlong.txt\nnotes.txt\nsrc/");
 
     let r = run("grep", tmp.path(), json!({"pattern": "beta"})).await.unwrap();
     for hit in ["notes.txt:1:beta notes", "src/a.rs:2:fn beta() {}", "src/deep/b.rs:1:// beta lives here"] {

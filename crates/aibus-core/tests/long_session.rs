@@ -19,6 +19,7 @@ use aibus_core::state::store::{LOG_RING, SUMMARY_HEAD, TAIL_MAX};
 use aibus_core::state::run_key;
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
+use aibus_testkit::xdg_temp;
 use aibus_graph::{Graph, Value, COMMIT_HISTORY_CAP};
 use aibus_provider::StreamChunk;
 

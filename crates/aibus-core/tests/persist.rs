@@ -12,6 +12,7 @@ use aibus_core::persist::session::{load, write_snapshot, SessionWriter, MSGS};
 use aibus_core::replay::{msg_from_json, replay_hash};
 use aibus_core::{AccountName, App, Msg, Redactor, RunId};
 use aibus_graph::mini::MiniGraph;
+use aibus_testkit::xdg_temp;
 use aibus_graph::Graph;
 use aibus_provider::StreamChunk;
 

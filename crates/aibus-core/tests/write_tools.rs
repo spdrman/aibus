@@ -126,7 +126,8 @@ async fn a_failed_write_leaves_the_original_and_no_temp_file() {
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(names.iter().all(|n| n == "keep.txt" || n == "d"), "{names:?}");
+    // `home` is the XDG tree xdg_temp makes beside the files.
+    assert!(names.iter().all(|n| matches!(n.as_str(), "keep.txt" | "d" | "home")), "{names:?}");
     assert_eq!(std::fs::read_to_string(dir.path().join("keep.txt")).unwrap(), "original");
 }
 

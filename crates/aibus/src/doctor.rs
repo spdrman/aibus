@@ -5,7 +5,7 @@
 
 use aibus_core::config::{self, Config};
 use aibus_core::persist::paths::{project_dir, Paths};
-use aibus_core::{AibusError, KeyRef, Keychain, Redactor, SessionId, StoreHealth};
+use aibus_core::{AibusError, KeyRef, Keychain, Redactor, Sandbox, SessionId, StoreHealth};
 use serde_json::{json, Value};
 
 use crate::cli::Global;

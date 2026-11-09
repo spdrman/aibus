@@ -1,4 +1,4 @@
-# aibus
+![aibus — AI agent orchestration](assets/aibus-logo.svg)
 
 A terminal app for running AI agents with sub-agents, an advisor and continuity across sessions. Rust, ratatui, crossterm.
 

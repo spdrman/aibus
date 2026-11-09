@@ -491,8 +491,7 @@
 47 00..01 fg=#c0caf5 bg=#1a1b26
 47 01..09 fg=#7dcfff bg=#1a1b26 BOLD
 47 09..45 fg=#8c96c2 bg=#1a1b26
-47 45..46 fg=#9ece6a bg=#1a1b26
-47 46..120 fg=#c0caf5 bg=#1a1b26
+47 45..120 fg=#c0caf5 bg=#1a1b26
 48 00..120 fg=#c0caf5 bg=#1a1b26
 49 00..02 fg=#c0caf5 bg=#1a1b26
 49 02..18 fg=#7aa2f7 bg=#1a1b26

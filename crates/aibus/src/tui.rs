@@ -6,8 +6,12 @@ use std::path::{Path, PathBuf};
 
 use aibus_core::config::Config;
 use aibus_core::persist::paths::Paths;
-use aibus_core::{AibusError, Msg, Redactor, Roster};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use aibus_core::{AibusError, Msg, PermissionId, Redactor, Roster, RunId, RunMail};
 use aibus_tui::app::Options;
+use aibus_tui::input::AccountOp;
 use aibus_tui::keys::Keymap;
 use aibus_tui::{Prompt, Theme};
 
@@ -69,10 +73,12 @@ pub fn options(
         hz: cfg.ui.tick_hz,
         theme,
         keys,
-        prompt: Prompt {
-            cwd: tilde(&env.cwd, env.home.as_deref()),
-            text: prompt.to_owned(),
-            placeholder: std::iter::once("aibus").chain(launch).collect::<Vec<_>>().join(" "),
+        prompt: {
+            let mut p = Prompt::default().with_text(prompt);
+            p.cwd = tilde(&env.cwd, env.home.as_deref());
+            p.placeholder = std::iter::once("aibus").chain(launch).collect::<Vec<_>>().join(" ");
+            p.hints = cfg.ui.hints && sessions_seen(&paths.state) < aibus_tui::prompt::HINT_SESSIONS;
+            p
         },
         mouse: cfg.ui.mouse && !global.no_mouse,
         term: env.term.clone(),
@@ -81,8 +87,66 @@ pub fn options(
         msgs: None,
         watch: None,
         mem: None,
+        user: None,
+        writer: None,
+        runs_dir: None,
+        agents_dir: Some(paths.config.join("agents")),
+        validate: None,
+        account: None,
     };
     (opts, warnings)
+}
+
+/// How many sessions have started before this one: `state/sessions_seen`, one number. The hint
+/// row under the prompt is for the first five (`[ui] hints`).
+fn sessions_seen(state: &Path) -> u32 {
+    std::fs::read_to_string(state.join("sessions_seen")).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0)
+}
+
+fn count_session(state: &Path) {
+    let n = sessions_seen(state).saturating_add(1);
+    // A hint that fails to count is not worth a message.
+    let _ = aibus_core::persist::fs::create_private_dir(state)
+        .and_then(|()| aibus_core::persist::fs::write_private(state.join("sessions_seen"), n.to_string()));
+}
+
+/// One account operation from the accounts screen, run by the same code as `aibus account`.
+/// It runs on its own thread: `account test` starts a runtime of its own.
+fn account_op(op: AccountOp, paths: &Paths, redactor: &Redactor) -> String {
+    use crate::account::{self, Io};
+    use crate::cli::{AccountAdd, AccountCmd};
+    let (cmd, key) = match op {
+        AccountOp::Test(name) => (AccountCmd::Test { name }, String::new()),
+        AccountOp::Disable(name) => (AccountCmd::Disable { name }, String::new()),
+        AccountOp::Add { name, provider, key } => (
+            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, base_url: None, label: None }),
+            key,
+        ),
+    };
+    let (paths, redactor) = (paths.clone(), redactor.clone());
+    let done = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let mut stdin = std::io::Cursor::new(key.into_bytes());
+        let mut io = Io {
+            paths,
+            keychain: Arc::new(crate::keychain::OsKeychain),
+            factories: crate::providers::builtin_factories(),
+            env: Arc::new(|v| std::env::var(v).ok()),
+            redactor,
+            stdin: &mut stdin,
+            prompt: None,
+            out: &mut out,
+        };
+        account::run(&cmd, false, &mut io)?;
+        Ok::<_, AibusError>(String::from_utf8_lossy(&out).trim().replace('\n', "  "))
+    })
+    .join();
+    match done {
+        Ok(Ok(text)) if text.is_empty() => "done".to_owned(),
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => format!("failed: {e}"),
+        Err(_) => "failed".to_owned(),
+    }
 }
 
 /// Returns the process exit code.
@@ -136,6 +200,54 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     if ctx.global.verbose > 0 {
         opts.mem = Some(aibus_core::mem::rss_mib);
     }
+    count_session(&paths.state);
+    // Permission answers and messages reach the run that is waiting through its mailbox. The
+    // map of which run asked is kept from what the runs say.
+    if let Some(orch) = ctx.orch.clone() {
+        let asked: Arc<std::sync::Mutex<HashMap<PermissionId, RunId>>> = Arc::default();
+        let seen = asked.clone();
+        let lead: Arc<std::sync::Mutex<Option<RunId>>> = Arc::default();
+        let lead_seen = lead.clone();
+        let mut inner = opts.watch.take();
+        opts.watch = Some(Box::new(move |m| {
+            if let Some(f) = inner.as_mut() {
+                f(m);
+            }
+            match m {
+                Msg::PermissionNeeded { request } => {
+                    seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(request.id, request.run);
+                }
+                Msg::RunStarted { run, role: aibus_core::Role::Lead, .. } => {
+                    *lead_seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(*run);
+                }
+                _ => {}
+            }
+        }));
+        let o = orch.clone();
+        opts.user = Some(Box::new(move |m| match m {
+            Msg::Command(aibus_core::Command::Permission { id, decision }) => {
+                let run = asked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(id);
+                if let Some(mail) = run.and_then(|r| o.mailbox(r)) {
+                    let _ = mail.try_send(RunMail::Permission { id: *id, decision: *decision });
+                }
+            }
+            Msg::Command(aibus_core::Command::SendMessage { run, text }) => {
+                let _ = o.message(*run, text.clone());
+            }
+            // A prompt typed while the lead runs is a message to it; slash commands are not.
+            Msg::SubmitPrompt { text } if !text.starts_with('/') => {
+                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(run) = run.filter(|r| o.is_live(*r)) {
+                    let _ = o.message(run, text.clone());
+                }
+            }
+            _ => {}
+        }));
+    }
+    opts.writer = ctx.writer.take();
+    opts.runs_dir = ctx.session.as_ref().map(|s| s.dir.join("runs"));
+    let (g, r) = (paths.clone(), ctx.redactor.clone());
+    opts.account = Some(Box::new(move |op| account_op(op, &g, &r)));
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();

@@ -7,9 +7,13 @@ pub mod hit;
 pub mod input;
 pub mod keys;
 pub mod layout;
+pub mod prompt;
+pub mod screens;
 pub mod theme;
+pub mod transcript;
 pub mod ui;
 pub mod view;
+pub mod views;
 pub mod widgets;
 
 pub use layout::{areas, Areas, Layout};

@@ -27,7 +27,7 @@ pub const MENU_VIEW: &str = "view:menu";
 pub const DIRTY: &str = "view:dirty";
 
 /// Widget name and the one `view:` node it draws. `view:dirty` lists the names.
-pub const WIDGETS: [(&str, &str); 11] = [
+pub const WIDGETS: [(&str, &str); 16] = [
     ("header", HEADER),
     ("rail", RAIL),
     ("lead_box", LEAD_BOX),
@@ -39,6 +39,11 @@ pub const WIDGETS: [(&str, &str); 11] = [
     ("status_bar", STATUS_BAR),
     ("tips", RUN_TIPS),
     ("menu", MENU_VIEW),
+    ("permission", crate::views::PERMISSION),
+    ("palette", crate::views::PALETTE),
+    ("agents", crate::views::AGENTS),
+    ("accounts", crate::views::ACCOUNTS_VIEW),
+    ("transcript", crate::views::TRANSCRIPT),
 ];
 
 /// The router questions the fork layer shows, as `(kind, row label)`.
@@ -571,6 +576,19 @@ fn menu(t: &mut Tracker) -> Value {
     ])
 }
 
+/// Registers `view:transcript:<run>:lines` for the transcript that is open, once. The node is a
+/// store handle that moves a version when the text does (03 section 8); the screen draws from
+/// `view:transcript`, which reads the same two run handles.
+pub fn ensure_lines<G: Graph>(g: &mut G) -> Option<NodeKey> {
+    let run = g.read_key(aibus_core::state::MODAL).and_then(as_str)?.strip_prefix("transcript:")?.to_owned();
+    let key = NodeKey::from(crate::views::lines_key(&run));
+    if g.node(&key).is_none() {
+        g.derived(&key, Box::new(move |t| crate::views::lines(t, &run)));
+        return Some(key);
+    }
+    None
+}
+
 /// Registers the `view:` nodes and `view:dirty`, and returns their keys.
 ///
 /// The router rows are inputs the core creates on the first answer; registering them here
@@ -596,6 +614,11 @@ pub fn register<G: Graph>(g: &mut G, store: Store) -> Vec<NodeKey> {
             "log" => Box::new(move |t| session_log(&st, t)),
             "tips" => Box::new(run_tips),
             "menu" => Box::new(menu),
+            "permission" => Box::new(move |t| crate::views::permission(&st, t)),
+            "palette" => Box::new(crate::views::palette),
+            "agents" => Box::new(move |t| crate::views::agents(&st, t)),
+            "accounts" => Box::new(crate::views::accounts),
+            "transcript" => Box::new(move |t| crate::views::transcript(&st, t)),
             _ => Box::new(move |t| status_bar(&st, t)),
         };
         let key = NodeKey::from(key);

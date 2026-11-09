@@ -461,8 +461,7 @@
 43 00..01 fg=#1a1b26 bg=#f4f4f8
 43 01..09 fg=#1d4ed8 bg=#f4f4f8 BOLD
 43 09..45 fg=#4b5273 bg=#f4f4f8
-43 45..46 fg=#2a6410 bg=#f4f4f8
-43 46..98 fg=#1a1b26 bg=#f4f4f8
+43 45..98 fg=#1a1b26 bg=#f4f4f8
 44 00..98 fg=#1a1b26 bg=#f4f4f8
 45 00..02 fg=#1a1b26 bg=#f4f4f8
 45 02..18 fg=#2250c0 bg=#f4f4f8

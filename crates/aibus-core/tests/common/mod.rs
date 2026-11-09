@@ -370,7 +370,7 @@ pub fn cases() -> Vec<Case> {
             name: "RunStarted",
             setup: setup_queued,
             msg: started(first_delegated()),
-            expect: vec!["model:log", "model:run:<id>:meta", "model:run:<id>:status"],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:meta", "model:run:<id>:status", "model:run:<id>:tail"],
         },
         Case {
             name: "Stream",
@@ -406,7 +406,7 @@ pub fn cases() -> Vec<Case> {
                 run: R(),
                 call: tool_call(false),
             },
-            expect: vec!["model:log", "model:tools:pending"],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:tail", "model:tools:pending"],
         },
         Case {
             name: "ToolCallFinished",
@@ -421,7 +421,7 @@ pub fn cases() -> Vec<Case> {
                 },
                 duration: Duration::from_millis(3),
             },
-            expect: vec!["model:log", "model:tools:pending"],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:tail", "model:tools:pending"],
         },
         Case {
             name: "PermissionNeeded",
@@ -430,6 +430,7 @@ pub fn cases() -> Vec<Case> {
                 request: permission_request(),
             },
             expect: vec![
+                "ctrl:modal",
                 "model:permissions:open",
                 "model:run:<id>:status",
                 "model:tools:pending",
@@ -444,6 +445,7 @@ pub fn cases() -> Vec<Case> {
                 reason: None,
             },
             expect: vec![
+                "ctrl:modal",
                 "model:permissions:open",
                 "model:run:<id>:status",
                 "model:tools:pending",
@@ -489,7 +491,7 @@ pub fn cases() -> Vec<Case> {
                     retryable: true,
                 },
             },
-            expect: vec!["model:log", "model:run:<id>:error", "model:run:<id>:status"],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:error", "model:run:<id>:status", "model:run:<id>:tail"],
         },
         Case {
             name: "UsageUpdate",
@@ -567,7 +569,7 @@ pub fn cases() -> Vec<Case> {
                 run: R(),
                 pre_tokens: 90_000,
             },
-            expect: vec!["model:log", "model:run:<id>:status"],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:status", "model:run:<id>:tail"],
         },
         Case {
             name: "HandoffWritten",
@@ -689,7 +691,7 @@ pub fn cases() -> Vec<Case> {
                 run: R(),
                 text: SENTINEL.into(),
             },
-            vec!["model:log"],
+            vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:tail"],
         ),
         cmd_on(
             with_perm,
@@ -698,6 +700,7 @@ pub fn cases() -> Vec<Case> {
                 decision: Decision::Deny,
             },
             vec![
+                "ctrl:modal",
                 "model:permissions:open",
                 "model:run:<id>:status",
                 "model:tools:pending",
@@ -730,9 +733,11 @@ pub fn cases() -> Vec<Case> {
             vec!["ctrl:selected:log"],
         ),
         cmd(Command::Select(Pane::Advisor, Selection::Next), vec![]),
-        cmd(Command::OpenTranscript(R()), vec!["ctrl:modal"]),
+        cmd(Command::OpenTranscript(R()), vec!["ctrl:modal", "ctrl:transcript"]),
+        cmd(Command::PaletteText(SENTINEL.into()), vec!["ctrl:palette:text", "ctrl:screen:sel"]),
+        cmd(Command::OpenScreen(Screen::Agents), vec!["ctrl:modal", "ctrl:palette:text", "ctrl:screen:sel"]),
         cmd(Command::CloseModal, vec!["ctrl:modal"]),
-        cmd(Command::OpenPalette, vec!["ctrl:modal"]),
+        cmd(Command::OpenPalette, vec!["ctrl:modal", "ctrl:palette:text", "ctrl:screen:sel"]),
         cmd(Command::OpenHelp, vec!["ctrl:modal"]),
         cmd(
             Command::Workflow {

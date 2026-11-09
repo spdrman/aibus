@@ -729,7 +729,8 @@ impl Step for EnterLoop {
         let gate = Gate {
             allow: pre_approved,
             deny_patterns: cfg.tools.deny_patterns.clone(),
-            tty: ctx.control.is_some(),
+            // A terminal session answers prompts itself, in the permission modal.
+            tty: ctx.control.is_some() || ctx.interactive,
             redactor: Some(ctx.redactor.clone()),
             home: std::env::var_os("HOME").map(PathBuf::from),
         };

@@ -83,6 +83,25 @@ pub enum Selection {
     Clear,
 }
 
+/// What a key or a click in the transcript asks of its view state (05 section 3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TrOp {
+    /// Positive towards older rows. Scrolling away from the bottom stops following.
+    Scroll(i32),
+    Top,
+    /// Back to the newest row, and follow again (the `jump to latest` button).
+    Bottom,
+    /// Select a call (`Next` and `Prev` walk the calls of the run).
+    Tool(Selection),
+    /// Expand or collapse the selected call.
+    Toggle,
+    /// Step the view one change back in graph time (`[`).
+    Back,
+    Forward,
+    /// Back to now.
+    Live,
+}
+
 /// What a mouse gesture or a bound key asks of the UI state (05 section 6.1). The TUI turns a
 /// hit on its map into one of these, so a click and the key with the same meaning take the same
 /// path through `reduce`, and replay sees both alike.
@@ -116,6 +135,13 @@ pub enum UiIntent {
     MenuSelect(i64),
     /// Resident memory in MiB, sampled by the loop under `-v`.
     Mem(u32),
+    Transcript(TrOp),
+    /// A finished run's transcript came back from disk (a chunk of it, or all).
+    Loaded(RunId),
+    /// The selected row of the open palette, agents screen or accounts screen.
+    Pick(Selection),
+    /// Opens the permission modal on the oldest open prompt (`p`, a click on the alert).
+    ShowPermission,
 }
 
 impl UiIntent {
@@ -135,6 +161,10 @@ impl UiIntent {
             UiIntent::CloseMenu => "close_menu",
             UiIntent::MenuSelect(_) => "menu_select",
             UiIntent::Mem(_) => "mem",
+            UiIntent::Transcript(_) => "transcript",
+            UiIntent::Loaded(_) => "loaded",
+            UiIntent::Pick(_) => "pick",
+            UiIntent::ShowPermission => "show_permission",
         }
     }
 }
@@ -385,6 +415,14 @@ impl ShutdownReason {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Screen {
+    Agents,
+    Accounts,
+    /// `/clear` asks first.
+    ConfirmClear,
+}
+
 /// The user-facing verb set the TUI and CLI both produce.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
@@ -439,7 +477,11 @@ pub enum Command {
     OpenTranscript(RunId),
     CloseModal,
     OpenPalette,
+    /// The text typed into the palette.
+    PaletteText(String),
     OpenHelp,
+    /// The agents screen (`A`) or the accounts screen (`K`).
+    OpenScreen(Screen),
     Workflow {
         name: String,
         input: String,
@@ -756,6 +798,8 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::OpenTranscript(_) => "open_transcript",
         Command::CloseModal => "close_modal",
         Command::OpenPalette => "open_palette",
+        Command::PaletteText(_) => "palette_text",
+        Command::OpenScreen(_) => "open_screen",
         Command::OpenHelp => "open_help",
         Command::Workflow { .. } => "workflow",
         Command::LedgerUpdate { .. } => "ledger_update",

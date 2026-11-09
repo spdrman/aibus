@@ -32,6 +32,8 @@ pub struct Rig {
     pub layout_done: bool,
     /// What menu picks asked to be copied.
     pub copied: Vec<Clip>,
+    /// What keys and clicks asked the loop to do outside the graph.
+    pub jobs: Vec<aibus_tui::input::Job>,
 }
 
 impl Rig {
@@ -45,6 +47,7 @@ impl Rig {
             now: Instant::now(),
             layout_done: false,
             copied: Vec::new(),
+            jobs: Vec::new(),
         };
         rig.settle();
         rig
@@ -59,8 +62,8 @@ impl Rig {
     /// What the loop does after every step: tell the UI about pointer state and the commit, draw.
     pub fn settle(&mut self) {
         self.input.settle(self.now);
-        self.ui.pointer = self.input.pointer;
-        self.ui.filter_edit = self.input.filter_edit;
+        aibus_tui::app::sync(&mut self.ui, &self.input);
+        aibus_tui::view::ensure_lines(&mut self.app.graph);
         self.ui.note_commit(&self.app.graph);
         self.ui.draw(&mut self.term, &self.app.graph).unwrap();
     }
@@ -71,6 +74,7 @@ impl Rig {
         }
         self.layout_done |= out.layout_done;
         self.copied.extend(out.copy);
+        self.jobs.extend(out.jobs);
         self.settle();
         out.msgs
     }
@@ -88,7 +92,7 @@ impl Rig {
     pub fn mouse_with(&mut self, kind: MouseEventKind, col: u16, row: u16, mods: KeyModifiers) -> Vec<Msg> {
         let cx = Context::read(&self.app.graph);
         let ev = MouseEvent { kind, column: col, row, modifiers: mods };
-        let out = self.input.mouse(ev, self.now, &self.ui.drawn, &cx);
+        let out = self.input.mouse(ev, self.now, &self.ui.drawn, &cx, &mut self.ui.prompt);
         self.apply(out)
     }
 
@@ -115,8 +119,21 @@ impl Rig {
     pub fn key_with(&mut self, code: KeyCode, mods: KeyModifiers) -> Vec<Msg> {
         let ev = key_from_crossterm(KeyEvent::new(code, mods)).unwrap();
         let cx = Context::read(&self.app.graph);
-        let out = self.input.key(ev, &cx, &self.ui.keys, &self.ui.drawn, &mut self.ui.prompt.text);
+        let out = self.input.key(ev, &cx, &self.ui.keys, &self.ui.drawn, &mut self.ui.prompt);
         self.apply(out)
+    }
+
+    pub fn paste(&mut self, text: &str) -> Vec<Msg> {
+        let cx = Context::read(&self.app.graph);
+        let out = self.input.paste(text, &cx, &mut self.ui.prompt);
+        self.apply(out)
+    }
+
+    /// Types `text` as key presses.
+    pub fn type_text(&mut self, text: &str) {
+        for c in text.chars() {
+            self.press(c);
+        }
     }
 
     pub fn key(&mut self, code: KeyCode) -> Vec<Msg> {
@@ -284,4 +301,106 @@ pub fn assert_crop(frame: &Frame, area: Rect, name: &str, styles: bool) {
     if styles {
         aibus_testkit::tui::check_snapshot(dir, name, ".styles.txt", &st);
     }
+}
+
+// ---- C1.3 -----------------------------------------------------------------------------------
+
+use aibus_core::{AgentDef, DefSource, PermissionId, PermissionRequest, RunResult, RunStatus, Scope, ToolCall, ToolCallId, ToolResult, Usage};
+
+pub fn call_id(n: u128) -> ToolCallId {
+    ToolCallId(ulid::Ulid::from_parts(NOW, n))
+}
+
+pub fn text_stream(app: &mut App<MiniGraph>, seq: u128, text: &str) {
+    app.step(Msg::Stream { run: run_id(seq), chunks: vec![aibus_provider::StreamChunk::TextDelta(text.into())] }).unwrap();
+}
+
+/// A tool call that ran `ms` and returned `content`.
+pub fn tool_call(app: &mut App<MiniGraph>, seq: u128, n: u128, name: &str, input: serde_json::Value, ms: u64, content: &str) {
+    app.step(Msg::ToolCallRequested {
+        run: run_id(seq),
+        call: ToolCall { id: call_id(n), name: name.into(), input, needs_permission: false },
+    })
+    .unwrap();
+    app.step(Msg::ToolCallFinished {
+        run: run_id(seq),
+        call_id: call_id(n),
+        result: ToolResult { content: content.into(), ..Default::default() },
+        duration: Duration::from_millis(ms),
+    })
+    .unwrap();
+}
+
+/// The lead with some talk, one `bash` call, a compaction and more talk, its transcript open.
+pub fn tool_app() -> App<MiniGraph> {
+    let mut app = session();
+    text_stream(&mut app, 1, "I'll run the tests first.");
+    tool_call(&mut app, 1, 1, "bash", serde_json::json!({"command": "cargo test"}), 1200, &format!("running 4 tests\ntest result: ok\n{}", "x".repeat(4000)));
+    text_stream(&mut app, 1, "All green. Compacting before the next step.");
+    app.step(Msg::Compacted { run: run_id(1), pre_tokens: 167_000 }).unwrap();
+    text_stream(&mut app, 1, "Done.");
+    app.step(Msg::Command(Command::OpenTranscript(run_id(1)))).unwrap();
+    app
+}
+
+pub fn finish(app: &mut App<MiniGraph>, seq: u128, status: RunStatus) {
+    app.step(Msg::RunFinished {
+        run: run_id(seq),
+        result: RunResult {
+            run_id: run_id(seq),
+            agent: "worker".parse().unwrap(),
+            status,
+            turns: 1,
+            usage: Usage::default(),
+            summary: "done".into(),
+            summary_file: None,
+            duration: Duration::from_secs(1),
+            error: None,
+            worktree: None,
+        },
+    })
+    .unwrap();
+}
+
+pub fn fail(app: &mut App<MiniGraph>, seq: u128, retryable: bool) {
+    app.step(Msg::RunFailed {
+        run: run_id(seq),
+        error: aibus_core::RunError { kind: aibus_core::RunErrorKind::Provider, message: "rate limited".into(), retryable },
+    })
+    .unwrap();
+}
+
+pub fn ask(app: &mut App<MiniGraph>, seq: u128, agent: &str, n: u128, summary: &str) -> PermissionId {
+    let id = PermissionId::new();
+    app.step(Msg::PermissionNeeded {
+        request: PermissionRequest {
+            id,
+            agent: agent.parse().unwrap(),
+            run: run_id(seq),
+            call: call_id(n),
+            tool: "bash".into(),
+            summary: summary.into(),
+        },
+    })
+    .unwrap();
+    id
+}
+
+pub fn defs(names: &[&str]) -> Vec<AgentDef> {
+    names
+        .iter()
+        .map(|n| {
+            let src = format!("---\nname: {n}\ndescription: the {n} agent\nrole: worker\nmodel: haiku\ntools: [read, grep]\n---\nYou are {n}. Map the repo and report.\nSecond line.\n");
+            let source = DefSource { path: Some(format!("/p/.aibus/agents/{n}.md").into()), scope: Scope::Project };
+            aibus_core::agent::def::parse(&src, source).unwrap().0
+        })
+        .collect()
+}
+
+pub fn with_agents(app: &mut App<MiniGraph>, names: &[&str]) {
+    app.step(Msg::AgentsReloaded { defs: defs(names), warnings: vec![] }).unwrap();
+}
+
+pub fn modal(r: &Rig) -> Option<String> {
+    r.app.graph.read_key("ctrl:modal").and_then(aibus_core::state::value::as_str).map(str::to_owned)
 }

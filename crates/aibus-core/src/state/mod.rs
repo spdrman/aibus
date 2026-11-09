@@ -56,6 +56,15 @@ pub const SELECTED_CARD: &str = "ctrl:selected:card";
 pub const SELECTED_LOG: &str = "ctrl:selected:log";
 pub const MODAL: &str = "ctrl:modal";
 pub const PALETTE_TEXT: &str = "ctrl:palette:text";
+/// The modal that a permission prompt took the place of, to come back to after the answer.
+pub const MODAL_UNDER: &str = "ctrl:modal:under";
+/// The selected row of the open palette, agents screen or accounts screen.
+pub const SCREEN_SEL: &str = "ctrl:screen:sel";
+/// The open transcript's view state: `{ run, follow, top, sel, expanded, at, ver, evicted }`.
+/// `top` is the first row shown while not following; `at` and `ver` are the graph time and the
+/// tail version the view is stepped back to (null while live); `evicted` is the oldest time still
+/// retained when a step went past it.
+pub const TRANSCRIPT_UI: &str = "ctrl:transcript";
 pub const LOG_FILTER: &str = "ctrl:log:filter";
 /// Whether the log follows its newest row (`f`); scrolling away turns it off.
 pub const LOG_FOLLOW: &str = "ctrl:log:follow";
@@ -80,6 +89,12 @@ pub const SHUTDOWN: &str = "eng:shutdown";
 pub const SCHEMA_VERSION: &str = "eng:schema_version";
 // view: the core only owns the one the tick timer needs; `aibus-tui` registers the rest.
 pub const ANIMATING: &str = "view:animating";
+
+/// Where the transcript screen puts its text for a terminal of this size: `(width, height)` of
+/// the body. The reducer scrolls by it and `aibus-tui` draws into it, so both must agree.
+pub fn transcript_body(cols: u16, rows: u16) -> (usize, usize) {
+    (usize::from(cols).saturating_sub(5).max(1), usize::from(rows).saturating_sub(5).max(1))
+}
 
 /// Current value of `eng:schema_version`.
 pub const SCHEMA: i64 = 1;
@@ -217,6 +232,9 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         (SELECTED_LOG, Value::Null),
         (MODAL, Value::Null),
         (PALETTE_TEXT, s("")),
+        (MODAL_UNDER, Value::Null),
+        (SCREEN_SEL, n(0)),
+        (TRANSCRIPT_UI, Value::Null),
         (LOG_FILTER, s("")),
         (LOG_FOLLOW, Value::Bool(true)),
         (MENU, Value::Null),

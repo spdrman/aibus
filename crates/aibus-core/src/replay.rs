@@ -13,8 +13,11 @@ use aibus_provider::{StopReason, StreamChunk, Usage};
 use serde_json::{json, Value};
 
 use crate::app::App;
-use crate::ids::{RunId, ToolCallId};
-use crate::msg::{Msg, ToolCall, ToolResult};
+use crate::ids::{ForkId, PermissionId, RunId, ToolCallId};
+use crate::msg::{
+    Checkpoint, Decision, HookEvent, HookOutcome, Msg, PermissionRequest, RouterAnswer,
+    RouterQuestion, ToolCall, ToolResult,
+};
 use crate::run::{RunError, RunResult};
 use crate::Role;
 
@@ -80,6 +83,57 @@ pub fn msg_to_json(msg: &Msg) -> Option<Value> {
         }
         Msg::RunFailed { run, error } => {
             json!({"msg": "RunFailed", "run": run.to_string(), "error": error})
+        }
+        Msg::UsageUpdate { run, usage } => {
+            json!({"msg": "UsageUpdate", "run": run.to_string(), "usage": usage})
+        }
+        Msg::PermissionNeeded { request: r } => json!({
+            "msg": "PermissionNeeded", "id": r.id.to_string(), "agent": r.agent.as_str(),
+            "run": r.run.to_string(), "call": r.call.0.to_string(), "tool": r.tool,
+            "summary": r.summary,
+        }),
+        Msg::PermissionDecided {
+            id,
+            decision,
+            reason,
+        } => json!({
+            "msg": "PermissionDecided", "id": id.to_string(), "decision": decision,
+            "reason": reason,
+        }),
+        Msg::HookFired {
+            run,
+            event,
+            outcome,
+        } => json!({
+            "msg": "HookFired", "run": run.map(|r| r.to_string()), "event": event,
+            "exit_code": outcome.exit_code, "message": outcome.message,
+        }),
+        Msg::RouterAnswered {
+            fork,
+            question,
+            answer,
+        } => json!({
+            "msg": "RouterAnswered", "fork": fork.0, "kind": question.kind.as_str(),
+            "context": question.context, "choices": question.choices,
+            "choice": answer.choice, "p": answer.p, "verdict": answer.verdict,
+            "latency_ms": answer.latency.as_millis() as u64, "source": answer.source,
+        }),
+        Msg::AdvisorSpoke {
+            checkpoint,
+            advice,
+            tokens_read,
+        } => json!({
+            "msg": "AdvisorSpoke", "checkpoint": checkpoint.name(), "advice": advice,
+            "tokens_read": tokens_read,
+        }),
+        Msg::CheckpointHit { checkpoint, detail } => json!({
+            "msg": "CheckpointHit", "checkpoint": checkpoint.name(), "detail": detail,
+        }),
+        Msg::Compacted { run, pre_tokens } => {
+            json!({"msg": "Compacted", "run": run.to_string(), "pre_tokens": pre_tokens})
+        }
+        Msg::HandoffWritten { path } => {
+            json!({"msg": "HandoffWritten", "path": path.display().to_string()})
         }
         _ => return None,
     })
@@ -190,22 +244,107 @@ pub fn msg_from_json(v: &Value) -> Result<Msg, String> {
             run: run()?,
             error: from_value::<RunError>(v, "error")?,
         },
+        "UsageUpdate" => Msg::UsageUpdate {
+            run: run()?,
+            usage: from_value(v, "usage")?,
+        },
+        "PermissionNeeded" => Msg::PermissionNeeded {
+            request: PermissionRequest {
+                id: permission_id(v)?,
+                agent: text(v, "agent")?.parse().map_err(|e| format!("agent: {e}"))?,
+                run: run()?,
+                call: call_id(v, "call")?,
+                tool: text(v, "tool")?.into(),
+                summary: text(v, "summary")?.into(),
+            },
+        },
+        "PermissionDecided" => Msg::PermissionDecided {
+            id: permission_id(v)?,
+            decision: from_value::<Decision>(v, "decision")?,
+            reason: from_value(v, "reason")?,
+        },
+        "HookFired" => Msg::HookFired {
+            run: match field(v, "run")? {
+                Value::Null => None,
+                _ => Some(run()?),
+            },
+            event: from_value::<HookEvent>(v, "event")?,
+            outcome: HookOutcome {
+                exit_code: field(v, "exit_code")?.as_i64().ok_or("exit_code")? as i32,
+                message: from_value(v, "message")?,
+            },
+        },
+        "RouterAnswered" => Msg::RouterAnswered {
+            fork: ForkId(field(v, "fork")?.as_u64().ok_or("fork")?),
+            question: RouterQuestion {
+                kind: text(v, "kind")?.into(),
+                context: text(v, "context")?.into(),
+                choices: from_value(v, "choices")?,
+            },
+            answer: RouterAnswer {
+                choice: text(v, "choice")?.into(),
+                p: field(v, "p")?.as_f64().ok_or("p")? as f32,
+                verdict: from_value(v, "verdict")?,
+                latency: Duration::from_millis(field(v, "latency_ms")?.as_u64().ok_or("ms")?),
+                source: from_value(v, "source")?,
+            },
+        },
+        "AdvisorSpoke" => Msg::AdvisorSpoke {
+            checkpoint: checkpoint(v)?,
+            advice: text(v, "advice")?.into(),
+            tokens_read: field(v, "tokens_read")?.as_u64().ok_or("tokens_read")?,
+        },
+        "CheckpointHit" => Msg::CheckpointHit {
+            checkpoint: checkpoint(v)?,
+            detail: text(v, "detail")?.into(),
+        },
+        "Compacted" => Msg::Compacted {
+            run: run()?,
+            pre_tokens: field(v, "pre_tokens")?.as_u64().ok_or("pre_tokens")?,
+        },
+        "HandoffWritten" => Msg::HandoffWritten {
+            path: text(v, "path")?.into(),
+        },
         other => return Err(format!("cannot replay {other}")),
     })
 }
 
-/// Replays `msgs.jsonl` through `reduce` on the mini engine and returns the snapshot hash.
-pub fn replay_hash(jsonl: &str) -> Result<String, String> {
-    let mut app = App::new(MiniGraph::new(), || 0);
+fn permission_id(v: &Value) -> Result<PermissionId, String> {
+    text(v, "id")?.parse().map_err(|e| format!("id: {e}"))
+}
+
+fn checkpoint(v: &Value) -> Result<Checkpoint, String> {
+    Ok(match text(v, "checkpoint")? {
+        "before_plan" => Checkpoint::BeforePlan,
+        "same_error_x2" => Checkpoint::SameErrorX2,
+        "before_done" => Checkpoint::BeforeDone,
+        other => Checkpoint::Custom(other.into()),
+    })
+}
+
+/// Steps every line of `msgs.jsonl` into `app`. The caller builds the app, so it picks the graph
+/// backend and whether the dashboard's `view:` nodes are registered.
+pub fn replay_into<G: Graph>(app: &mut App<G>, jsonl: &str) -> Result<(), String> {
     for (n, line) in jsonl.lines().enumerate().filter(|(_, l)| !l.is_empty()) {
         let v: Value = serde_json::from_str(line).map_err(|e| format!("line {}: {e}", n + 1))?;
         let msg = msg_from_json(&v).map_err(|e| format!("line {}: {e}", n + 1))?;
         app.step(msg).map_err(|e| format!("line {}: {e}", n + 1))?;
     }
-    // FNV-1a over the snapshot's JSON: it only has to be stable, not secret.
-    let json = serde_json::to_vec(&app.graph.snapshot()).expect("a snapshot serialises");
+    Ok(())
+}
+
+/// FNV-1a over the snapshot's JSON: it only has to be stable, not secret.
+pub fn snapshot_hash<G: Graph>(graph: &G) -> String {
+    let json = serde_json::to_vec(&graph.snapshot()).expect("a snapshot serialises");
     let hash = json.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
     });
-    Ok(format!("fnv1a64:{hash:016x}"))
+    format!("fnv1a64:{hash:016x}")
+}
+
+/// Replays `msgs.jsonl` through `reduce` on the mini engine and returns the snapshot hash.
+pub fn replay_hash(jsonl: &str) -> Result<String, String> {
+    let mut app = App::new(MiniGraph::new(), || 0);
+    replay_into(&mut app, jsonl)?;
+    Ok(snapshot_hash(&app.graph))
 }

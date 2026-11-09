@@ -1,0 +1,69 @@
+name: nightly
+
+# The nightly rows of the layer table in 10 section 1: the live provider contract tests (opt-in,
+# they need a real account) and the fuzz targets. The benches are in bench.yml, which has its
+# own nightly trigger. Both can also be started by hand.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 2 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  # `cargo test --features live-tests` against a real account (docs/PROVIDERS.md). Skipped when
+  # no key is configured; AIBUS_RECORD stays off, so nothing is written back.
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AIBUS_LIVE_ACCOUNT: nightly
+      AIBUS_LIVE_KEY_NIGHTLY: ${{ secrets.AIBUS_LIVE_KEY_NIGHTLY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Skip notice
+        if: env.AIBUS_LIVE_KEY_NIGHTLY == ''
+        run: echo "AIBUS_LIVE_KEY_NIGHTLY is not set, so the live provider tests are skipped"
+      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
+        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
+      - name: Anthropic
+        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
+        run: cargo test --locked -p aibus-provider-anthropic --features live-tests --test live
+      - name: OpenAI
+        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
+        run: cargo test --locked -p aibus-provider-openai --features live-tests --test live
+
+  # cargo-fuzz on the targets under fuzz/ (frontmatter, handoff YAML, the redactor, the
+  # tool-pattern matcher). The job does nothing until that directory exists.
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Is there anything to fuzz
+        id: has
+        run: |
+          if [ -f fuzz/Cargo.toml ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "no fuzz/ directory yet"; fi
+      - uses: dtolnay/rust-toolchain@nightly
+        if: steps.has.outputs.yes == 'true'
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        if: steps.has.outputs.yes == 'true'
+        with:
+          tool: cargo-fuzz
+      - name: Each target for five minutes
+        if: steps.has.outputs.yes == 'true'
+        run: |
+          for t in $(cargo fuzz list); do
+            cargo fuzz run "$t" -- -max_total_time=300
+          done

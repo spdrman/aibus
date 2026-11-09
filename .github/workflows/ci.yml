@@ -1,5 +1,9 @@
 name: ci
 
+# The layer table of 10 section 1, one job per row that runs on every push. docs/TESTING.md has
+# the same commands for running a layer by hand. Nightly and bench rows are in nightly.yml and
+# bench.yml.
+
 on:
   push:
   pull_request:
@@ -19,7 +23,114 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # Every crate's `src/**` tests and the doc tests: the Unit row.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked --lib --bins
+      - run: cargo test --workspace --locked --doc
+
+  # Graph conformance on mini (10 section 8). The second backend runs in `causl` below.
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aibus-graph
+
+  # Engine integration (10 section 4): aibus-core/tests/integration/.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aibus-core --test integration
+
+  # TestBackend frame snapshots (10 section 6).
+  tui-snapshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aibus-tui
+
+  # The binary under assert-style tests (10 section 7).
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aibus --tests
+
+  # Recorded Msg streams (10 section 5): hash, view: nodes, under a second each.
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aibus-testkit --test replay --test session
+      - run: cargo test --locked -p aibus-core --test replay
+
+  # Provider cassettes (10 section 3.1). The live half is in nightly.yml.
+  provider-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p aibus-provider -p aibus-provider-http -p aibus-provider-anthropic -p aibus-provider-openai
+
+  # The workspace boundary tests and everything not named above.
+  workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
+
+  # The second backend: conformance and the replay differential. The crate is private, so this
+  # only runs where the secret is exposed (pushes to this repository); it is skipped, not
+  # failed, anywhere else. Only the fetch step sees the secret.
+  causl:
+    runs-on: ubuntu-latest
+    env:
+      CAUSL_CI_BUILD_1: ${{ secrets.CAUSL_CI_BUILD_1 }}
+      CAUSL_MANIFEST: crates/aibus-graph-causl/Cargo.toml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Skip notice
+        if: env.CAUSL_CI_BUILD_1 == ''
+        run: echo "CAUSL_CI_BUILD_1 is not exposed to this run, so the causl backend is not tested"
+      - uses: dtolnay/rust-toolchain@1.85
+        if: env.CAUSL_CI_BUILD_1 != ''
+      - name: Fetch the private source
+        if: env.CAUSL_CI_BUILD_1 != ''
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set +x
+          basic=$(printf 'x-access-token:%s' "$CAUSL_CI_BUILD_1" | base64 | tr -d '\n')
+          echo "::add-mask::$basic"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://git.opsite.ca/.extraheader"
+          export GIT_CONFIG_VALUE_0="Authorization: Basic $basic"
+          cargo fetch --locked --manifest-path "$CAUSL_MANIFEST"
+      - name: Conformance and differential replay on causl
+        if: env.CAUSL_CI_BUILD_1 != ''
+        run: cargo test --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs
 
   supply-chain:
     runs-on: ubuntu-latest

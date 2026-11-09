@@ -1,0 +1,5 @@
+[
+    ToolCall(name: "memory_write", input: {"path": "LEARNINGS.md", "content": "Run the failing test alone first."}), Stop(ToolUse),
+    Text("Saved the note."), Stop(EndTurn),
+    Text("[]"),
+]

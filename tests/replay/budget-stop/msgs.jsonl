@@ -1,0 +1,6 @@
+{"account":"fake","agent":"pricey","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N6FW4ZZKP7DKA8QEAY4T"}
+{"chunks":[{"k":"text","v":"pricey"},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":1000000,"output_tokens":0}},{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N6FW4ZZKP7DKA8QEAY4T"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6FW4ZZKP7DKA8QEAY4T"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6FW4ZZKP7DKA8QEAY4T"}
+{"msg":"UsageUpdate","run":"01M6Z6N6FW4ZZKP7DKA8QEAY4T","usage":{"cache_read":0,"cache_write":0,"cost_usd":1.0,"input_tokens":1000000,"output_tokens":0}}
+{"msg":"RunFinished","result":{"agent":"pricey","duration":{"nanos":1679625,"secs":0},"error":{"kind":"Budget","message":"max_cost_usd reached: $1.0000 of $0.50","retryable":false},"run_id":"01M6Z6N6FW4ZZKP7DKA8QEAY4T","status":"Partial","summary":"","summary_file":null,"summary_len":6,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":1.0,"input_tokens":1000000,"output_tokens":0}},"run":"01M6Z6N6FW4ZZKP7DKA8QEAY4T"}

@@ -1,0 +1,4 @@
+[
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    Text("The listing is off limits, so I read the readme instead."),
+]

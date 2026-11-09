@@ -39,9 +39,11 @@ fn the_recorded_stream_is_the_m1_shape() {
         [
             "RunStarted",
             "Stream",
+            "UsageUpdate",
             "ToolCallRequested",
             "ToolCallFinished",
             "Stream",
+            "UsageUpdate",
             "RunFinished"
         ]
     );

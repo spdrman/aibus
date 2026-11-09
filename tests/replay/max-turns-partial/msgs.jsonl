@@ -1,0 +1,14 @@
+{"account":"fake","agent":"quick","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"msg":"UsageUpdate","run":"01M6Z6N6D1SEZMJBQB5EW9V14G","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"call":"00000000000000000000000001","content_len":22,"is_error":false,"ms":2,"msg":"ToolCallFinished","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\"src\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"msg":"UsageUpdate","run":"01M6Z6N6D1SEZMJBQB5EW9V14G","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"call":"00000000000000000000000001","input":{"path":"src"},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"call":"00000000000000000000000001","content_len":7,"is_error":false,"ms":1,"msg":"ToolCallFinished","run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}
+{"msg":"RunFinished","result":{"agent":"quick","duration":{"nanos":11526227,"secs":0},"error":null,"run_id":"01M6Z6N6D1SEZMJBQB5EW9V14G","status":"Partial","summary":"","summary_file":null,"summary_len":0,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6D1SEZMJBQB5EW9V14G"}

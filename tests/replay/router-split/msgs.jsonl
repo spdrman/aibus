@@ -1,0 +1,13 @@
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"chunks":[{"k":"text","v":"Now I will list the files."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"msg":"UsageUpdate","run":"01M6Z6N71XQE54VG9AYGWZR04Q","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"choice":"ls","choices":["ask_user","bash","create_handoff","delegate","edit","enter_plan_mode","exit_plan_mode","fork","glob","grep","ledger_update","ls","plan","read","recall","report_artifact","resume_run","send_message","workflow","write"],"context":"The lead said, and then called no tool:\nNow I will list the files.","fork":1,"kind":"which_tool","latency_ms":0,"msg":"RouterAnswered","p":0.5199999809265137,"source":"Logprob","verdict":"Split"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"msg":"UsageUpdate","run":"01M6Z6N71XQE54VG9AYGWZR04Q","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"call":"00000000000000000000000001","content_len":14,"is_error":false,"ms":1,"msg":"ToolCallFinished","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"chunks":[{"k":"text","v":"done"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N71XQE54VG9AYGWZR04Q"}
+{"msg":"UsageUpdate","run":"01M6Z6N71XQE54VG9AYGWZR04Q","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":9801593,"secs":0},"error":null,"run_id":"01M6Z6N71XQE54VG9AYGWZR04Q","status":"Completed","summary":"","summary_file":null,"summary_len":4,"turns":3,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N71XQE54VG9AYGWZR04Q"}

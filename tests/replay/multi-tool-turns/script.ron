@@ -1,0 +1,15 @@
+[
+    Text("Three looks, two of them at once."),
+    ToolCall(name: "ls", input: {"path": "."}),
+    ToolCall(name: "glob", input: {"pattern": "**/*.rs"}),
+    Usage(input: 150, output: 30),
+    Stop(ToolUse),
+    ToolCall(name: "grep", input: {"pattern": "fn main"}),
+    Usage(input: 310, output: 14),
+    Stop(ToolUse),
+    ToolCall(name: "read", input: {"path": "src/main.rs"}),
+    Usage(input: 380, output: 12),
+    Stop(ToolUse),
+    Text("main prints a greeting and nothing else."),
+    Usage(input: 460, output: 11),
+]

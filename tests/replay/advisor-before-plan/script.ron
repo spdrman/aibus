@@ -1,0 +1,6 @@
+[
+    Text("# Plan\n1. Now I will list the files."), Stop(EndTurn),
+    Text("plan skips auth"), Stop(EndTurn),
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    Text("done"),
+]

@@ -73,33 +73,89 @@ have a machine for, and the rest go in the release notes as not tried.
 
 ## Release pipeline
 
-`.github/workflows/release.yml` runs on a pushed `v*` tag, and by hand (`workflow_dispatch`) as a
-dry run that builds and checksums but signs and publishes nothing. On a tag it:
+A merge into the `release` branch is the whole release. `.github/workflows/release.yml` runs on a
+push to `release`, and by hand (`workflow_dispatch`) as a dry run. The tag-triggered version is
+gone, so pushing a tag does nothing.
 
-1. builds `cargo build --release --locked -p aibus` for aarch64 and x86_64 macOS, x86_64 and
-   aarch64 Linux (glibc), x86_64 Linux musl and x86_64 Windows, and packs each as `.tar.gz`
-   (`.zip` on Windows). `AIBUS_TAG` and `AIBUS_COMMIT` are set so `aibus version` prints both;
-2. writes a CycloneDX SBOM with `cargo cyclonedx` and `SHA256SUMS` for every file;
-3. signs every file and `SHA256SUMS` with `cosign sign-blob` keyless (a `.sigstore.json` bundle
-   next to each), using the job's OIDC token, so no key or secret is stored;
-4. creates the GitHub release with all of it attached.
+On a push to `release` it runs these jobs, each one only if the ones before it succeeded:
 
-Only the last job has `id-token: write` and `contents: write`. Every action is pinned to a full
-commit SHA. The workflow has never run: the runner labels, the `cargo cyclonedx` flags and the
-cosign bundle step are unverified until the first dry run.
+1. `prepare` reads the version from `[workspace.package]` in `Cargo.toml`, makes the tag
+   `v<version>`, and stops if the tag already exists, if `CHANGELOG.md` has no entry for the
+   version, if the release commit is not a descendant of the tip of `main`, or if `install.sh`,
+   `install.ps1` or `packaging/homebrew/render-formula.sh` is missing.
+2. `build` runs `cargo build --release --locked -p aibus` on six runners (aarch64 and x86_64 macOS,
+   x86_64 and aarch64 Linux glibc, x86_64 Linux musl, x86_64 Windows) with `AIBUS_TAG` and
+   `AIBUS_COMMIT` set, runs the binary once (`aibus version` must show the commit, and the tag on a
+   release), and packs `aibus-<target>.tar.gz` (`.zip` on Windows) holding `aibus-<target>/` with
+   the binary, `LICENSE` and `README.md`.
+3. `package` (read-only) writes the CycloneDX SBOM `aibus.cdx.json`, copies `install.sh` and
+   `install.ps1` from the repo root, and writes `SHA256SUMS` over all of it.
+4. `publish` (with `finalize`, the only job with `contents: write`, and the only one with
+   `id-token: write`) signs every file with `cosign sign-blob` keyless (a `*.sigstore.json` bundle
+   each), then creates the tag at the release commit and the GitHub release with the CHANGELOG
+   section as notes (`gh release create --target`).
+5. `verify` downloads the published release and checks that the tag points at the release commit,
+   that exactly the expected assets are there, that `SHA256SUMS` covers and matches them, that every
+   bundle verifies against this workflow's identity
+   (`https://github.com/spdrman/aibus/.github/workflows/release.yml@refs/heads/release`), and that
+   `install.sh` from the release installs a working `aibus` on a Linux runner whose `aibus version`
+   prints the tag and commit.
+6. `finalize` runs only if all of the above succeeded. It renders `Formula/aibus.rb` from the
+   published `SHA256SUMS` (`packaging/homebrew/render-formula.sh <version> <SHA256SUMS>`), commits it
+   to `release`, and merges `release` into `main` with a merge commit. It refuses if `release` or
+   `main` moved during the run. If anything earlier failed it does not run, `main` is untouched,
+   and the `summary` job writes each job's result to the run summary.
+
+The dry run (`gh workflow run release.yml --ref <branch>`) runs `prepare` (problems become
+warnings), `build` and `package`. `publish`, `verify`, `finalize` and `summary` carry the
+push-to-`release` condition on the job itself, so a dispatch skips them whatever the ref is: it
+never tags, signs, publishes or merges.
+
+Pushes made with `GITHUB_TOKEN` (the formula commit, the merge into main) do not start new runs, so
+there is no loop. If that ever changed, the second run would stop in `prepare` because the tag
+exists. Every action is pinned to a full commit SHA, and `persist-credentials` is on only in
+`finalize`. `main` has no branch protection, which `finalize` relies on for its push; if protection
+is added, `finalize` fails closed at the push and the merge is done by hand.
 
 Check a download with `cosign verify-blob --bundle aibus-<target>.tar.gz.sigstore.json
---certificate-identity-regexp 'https://github.com/spdrman/aibus/' --certificate-oidc-issuer
-https://token.actions.githubusercontent.com aibus-<target>.tar.gz` and `sha256sum -c SHA256SUMS`.
+--certificate-identity https://github.com/spdrman/aibus/.github/workflows/release.yml@refs/heads/release
+--certificate-oidc-issuer https://token.actions.githubusercontent.com aibus-<target>.tar.gz` and
+`sha256sum -c SHA256SUMS`.
 
-### Tag procedure
+Not proven by a dry run: signing, publishing, `verify` and `finalize` only run on the real push, so
+the first release is their first run. The keyless bundle format, the `install.sh` run and the
+formula render are the parts most likely to need a fix on that run.
 
-* [ ] `main` is green locally (the automatic part above) and the dry run of the workflow is green.
-* [ ] `version` in the root `Cargo.toml` is the release version, and `Cargo.lock` is committed.
-* [ ] `git tag -s vX.Y.Z` on that commit and `git push origin vX.Y.Z`. The tag is the only trigger.
-* [ ] When the workflow finishes: verify one archive per OS with the command above, and run
-      `aibus version` (it prints `vX.Y.Z` and the commit).
-* [ ] Fill in the Homebrew formula and publish to crates.io (next section).
+### Release procedure
+
+* [ ] `main` is green locally (the automatic part above) and a dry run of the workflow is green.
+* [ ] `version` in the root `Cargo.toml` is the release version, `Cargo.lock` is committed, and
+      `CHANGELOG.md` has the entry for it.
+* [ ] Open a pull request from `main` (or a branch of it) into `release`, and merge it. The merge
+      is the trigger. If `release` does not exist yet, create it at the tip of `main` once.
+* [ ] Watch the run (`gh run watch`). The run summary says which job stopped it, if any.
+* [ ] When it is green: `main` has the merge commit and `Formula/aibus.rb`, the release has the
+      assets listed above (six archives, SBOM, `SHA256SUMS`, two installers, and a bundle for
+      each), and `brew install spdrman/aibus/aibus` then `aibus version` works on a clean machine.
+* [ ] Verify one archive per OS with the command above, and run `aibus version` (it prints
+      `vX.Y.Z` and the commit).
+
+### If a run dies halfway
+
+`finalize` is last, so a failed run has not touched `main`. What to remove depends on how far it
+got, and it has to be done before the next try, because `prepare` refuses an existing tag:
+
+* Died in `prepare`, `build` or `package`: nothing was created. Fix and push to `release` again.
+* Died in `publish` or `verify`: delete the release and the tag it created with
+  `gh release delete vX.Y.Z --cleanup-tag --yes`, and check `gh release list` and the remote tags.
+  Fix, and push to `release` again.
+* Died in `finalize` after the formula commit but before the merge: the release is good. Merge
+  `release` into `main` by hand (a merge commit), after checking `Formula/aibus.rb` looks right.
+* Died in `finalize` before the formula commit: the release is good. Render the formula by hand
+  with the published `SHA256SUMS`, commit it to `release`, and merge `release` into `main`.
+
+A release that was published and then found broken is not edited: delete it as above and cut the
+next patch version.
 
 ### Changelog note rule for MSRV bumps
 
@@ -109,10 +165,12 @@ message too. A bump never rides in a patch release.
 
 ### Homebrew and crates.io
 
-* Homebrew: `packaging/homebrew/aibus.rb` is the template, with placeholder checksums. The tap
-  repository (`spdrman/homebrew-aibus`) is created by the owner. After the release, copy the file to
-  `Formula/aibus.rb` in the tap, set `version`, and put in the `SHA256SUMS` lines.
-  [ ] On a clean macOS or Linux machine: `brew install spdrman/aibus/aibus`, then `aibus version`.
+* Homebrew: this repository is the tap. The committed `Formula/aibus.rb` has all-zero placeholder
+  checksums (template `packaging/homebrew/aibus.rb.in`); `finalize` overwrites it, rendered from the
+  release's `SHA256SUMS` with `packaging/homebrew/render-formula.sh`, so it carries real checksums
+  after a release. Install with `brew tap spdrman/aibus https://github.com/spdrman/aibus && brew
+  install spdrman/aibus/aibus`.
+  [ ] On a clean macOS or Linux machine: install as above, then `aibus version`.
 * crates.io: the workspace sets `publish = false`, so `cargo install aibus` does not work yet. When
   I decide to publish, `aibus` needs its path dependencies published first (or a single-crate
   package), `publish` turned on, and a crates.io token. None of that is done.

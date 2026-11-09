@@ -1,22 +1,106 @@
 name: release
 
-# Runs on a pushed version tag only (v*), or by hand as a dry run: a dry run builds and checksums
-# everything but signs nothing and publishes nothing. docs/RELEASE.md has the tag procedure and
-# the manual checklist that goes with it. Nothing here has been run yet.
+# A push to the `release` branch is the whole release: prepare checks, build packages six targets,
+# package writes the SBOM and SHA256SUMS, publish signs, tags and creates the GitHub release,
+# verify downloads what was published and checks it, finalize renders the Homebrew formula onto
+# `release` and merges `release` into `main`. docs/RELEASE.md has the procedure, the failure story
+# and the rollback steps.
+#
+# `workflow_dispatch` is a dry run: prepare, build and package run, and nothing else. Every job that
+# tags, signs, publishes or merges has the push-to-release condition on the job itself (and the
+# steps that do the writing repeat it), so a dispatch, from any ref, skips them whatever the inputs.
+#
+# Pushes made with GITHUB_TOKEN (the formula commit and the merge into main) do not start new workflow
+# runs, so finalize cannot retrigger this workflow. If a token that does retrigger ever replaces it,
+# the second run stops in prepare anyway, because the tag it would create already exists.
 
 on:
   push:
-    tags: ['v*']
+    branches: [release]
   workflow_dispatch:
 
 permissions: {}
+
+# One release at a time, and never cancel one halfway through: a cancelled publish leaves a tag
+# behind.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: never
 
 jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checks
+        id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          publish=false
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/release ]; then publish=true; fi
+          version=$(awk '
+            /^\[/ { in_ws = ($0 == "[workspace.package]") }
+            in_ws && /^version[ ]*=/ { gsub(/^[^"]*"|".*$/, ""); print; exit }
+          ' Cargo.toml)
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::workspace version '$version' is not X.Y.Z"
+            exit 1
+          fi
+          tag="v$version"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+          # A real release stops on any problem. A dry run reports the same problems as warnings,
+          # so it still builds from a branch that is behind main or reuses a released version.
+          problems=0
+          problem() {
+            problems=$((problems + 1))
+            if [ "$publish" = true ]; then echo "::error::$1"; else echo "::warning::dry run, a release would stop here: $1"; fi
+          }
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            problem "tag $tag already exists"
+          fi
+          if ! grep -Eq "^## \[?${version//./\\.}\]?([[:space:]]|$)" CHANGELOG.md 2>/dev/null; then
+            problem "CHANGELOG.md has no entry for $version"
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor origin/main "$SHA"; then
+            problem "$SHA is not a descendant of the tip of main ($(git rev-parse --short origin/main))"
+          fi
+          if [ "$publish" = true ]; then
+            for f in install.sh install.ps1 packaging/homebrew/render-formula.sh; do
+              [ -f "$f" ] || problem "$f is missing on the release commit"
+            done
+          fi
+          {
+            echo "### prepare"
+            echo "version \`$version\`, tag \`$tag\`, commit \`$SHA\`, publish \`$publish\`, problems $problems"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$publish" = true ] && [ "$problems" -gt 0 ]; then exit 1; fi
+
   build:
     name: build ${{ matrix.target }}
+    needs: prepare
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -24,7 +108,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: aarch64-apple-darwin, os: macos-14, archive: tar.gz }
+          - { target: aarch64-apple-darwin, os: macos-15, archive: tar.gz }
           - { target: x86_64-apple-darwin, os: macos-15-intel, archive: tar.gz }
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, archive: tar.gz }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, archive: tar.gz }
@@ -34,9 +118,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
-        with:
-          targets: ${{ matrix.target }}
+      - name: Rust toolchain
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          # rust-toolchain.toml pins 1.85; install exactly that toolchain and its target.
+          rustup toolchain install 1.85 --profile minimal --no-self-update
+          rustup target add "$TARGET"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: ${{ matrix.target }}
@@ -47,14 +136,32 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
+          TAG: ${{ needs.prepare.outputs.tag }}
           SHA: ${{ github.sha }}
         run: |
-          # build.rs stamps these into `aibus version` and `aibus doctor`.
-          if [ "$REF_TYPE" = tag ]; then export AIBUS_TAG="$REF_NAME"; fi
+          # build.rs stamps these into `aibus version` and `aibus doctor`. A dry run is not a
+          # release, so its binary carries the commit and no tag.
+          if [ "$PUBLISH" = true ]; then export AIBUS_TAG="$TAG"; fi
           export AIBUS_COMMIT="${SHA:0:12}"
           cargo build --release --locked --target "$TARGET" -p aibus
+      - name: Smoke run
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Every matrix runner is native to its target, so the binary can run here.
+          bin=aibus; if [ "$ARCHIVE" = zip ]; then bin=aibus.exe; fi
+          out=$("target/$TARGET/release/$bin" version)
+          echo "$out"
+          case "$out" in *"commit ${SHA:0:12}"*) ;; *) echo "::error::no commit in: $out"; exit 1 ;; esac
+          if [ "$PUBLISH" = true ]; then
+            case "$out" in *"tag $TAG,"*) ;; *) echo "::error::no tag in: $out"; exit 1 ;; esac
+          fi
       - name: Package
         shell: bash
         env:
@@ -68,15 +175,65 @@ jobs:
           cd dist
           if [ "$ARCHIVE" = zip ]; then 7z a "$name.zip" "$name" >/dev/null; else tar czf "$name.tar.gz" "$name"; fi
           rm -r "$name"
+          ls -l
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aibus-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 
+  # Read-only: collects the archives, writes the SBOM, copies the installers and writes SHA256SUMS.
+  # The dry run ends here.
+  package:
+    name: package
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install 1.85 --profile minimal --no-self-update
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-cyclonedx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          pattern: aibus-*
+          merge-multiple: true
+      - name: SBOM
+        run: |
+          cargo cyclonedx --format json --override-filename aibus.cdx
+          cp crates/aibus/aibus.cdx.json dist/aibus.cdx.json
+      - name: Installers
+        run: |
+          # install.sh and install.ps1 live at the repo root and ship with every release.
+          # prepare makes sure they exist on a real release; a dry run on an older branch has none.
+          for f in install.sh install.ps1; do
+            if [ -f "$f" ]; then cp "$f" dist/; else echo "::warning::$f not on this commit"; fi
+          done
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          export LC_ALL=C
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs sha256sum > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-files
+          path: dist/*
+          if-no-files-found: error
+
   # The one job that signs and publishes, so the only one with `id-token` and `contents: write`.
+  # Skipped outright on a dry run.
   publish:
-    needs: build
+    name: publish
+    needs: [prepare, build, package]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -85,38 +242,204 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
         with:
-          tool: cargo-cyclonedx
-      - uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+          cosign-release: v3.1.2
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: release-files
           path: dist
-          merge-multiple: true
-      - name: SBOM
-        run: |
-          cargo cyclonedx --format json --override-filename aibus.cdx
-          cp crates/aibus/aibus.cdx.json dist/aibus.cdx.json
-      - name: SHA256SUMS
-        working-directory: dist
-        run: sha256sum aibus-* aibus.cdx.json > SHA256SUMS
       - name: Sign (keyless)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release'
         working-directory: dist
         run: |
-          for f in aibus-* aibus.cdx.json SHA256SUMS; do
+          for f in *; do
             cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
           done
-      - name: Dry run result
-        if: github.ref_type != 'tag'
-        working-directory: dist
-        run: ls -l && cat SHA256SUMS
-      - name: Publish the release
-        if: github.ref_type == 'tag'
-        working-directory: dist
+          ls -l
+      - name: Tag and publish the release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes ./*
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The release notes are the CHANGELOG section for this version.
+          awk -v v="$VERSION" '
+            /^## / { if (on) exit; on = ($0 ~ "^## \\[?" v "\\]?([ ]|$)") ; next }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md
+          # `--target` makes gh create the tag, at the release commit, together with the release.
+          gh release create "$TAG" --target "$SHA" --title "$TAG" --notes-file notes.md dist/*
+
+  # Downloads what was published, as a user would get it, and checks it.
+  verify:
+    name: verify
+    needs: [prepare, publish]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+        with:
+          cosign-release: v3.1.2
+      - name: Tag points at the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          read -r type sha < <(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object | "\(.type) \(.sha)"')
+          if [ "$type" = tag ]; then
+            sha=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq .object.sha)
+          fi
+          echo "tag $TAG -> $sha, release commit $SHA"
+          [ "$sha" = "$SHA" ]
+      - name: Download the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release download "$TAG" --dir rel && ls -l rel
+      - name: Every asset is there
+        run: |
+          cd rel
+          export LC_ALL=C
+          want=$(
+            for f in aibus-aarch64-apple-darwin.tar.gz aibus-x86_64-apple-darwin.tar.gz \
+                     aibus-x86_64-unknown-linux-gnu.tar.gz aibus-aarch64-unknown-linux-gnu.tar.gz \
+                     aibus-x86_64-unknown-linux-musl.tar.gz aibus-x86_64-pc-windows-msvc.zip \
+                     aibus.cdx.json SHA256SUMS install.sh install.ps1; do
+              echo "$f"
+              echo "$f.sigstore.json"
+            done | sort
+          )
+          have=$(find . -maxdepth 1 -type f -printf '%P\n' | sort)
+          if [ "$want" != "$have" ]; then
+            diff <(echo "$want") <(echo "$have") || true
+            echo "::error::release assets differ from the contract"
+            exit 1
+          fi
+      - name: SHA256SUMS matches
+        run: |
+          cd rel
+          export LC_ALL=C
+          # It must cover every file except the bundles and itself, and every line must check out.
+          covered=$(awk '{print $2}' SHA256SUMS | sort)
+          expected=$(find . -maxdepth 1 -type f ! -name '*.sigstore.json' ! -name SHA256SUMS -printf '%P\n' | sort)
+          [ "$covered" = "$expected" ]
+          sha256sum -c SHA256SUMS
+      - name: Signatures verify against this workflow
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          cd rel
+          for f in *; do
+            case "$f" in *.sigstore.json) continue ;; esac
+            cosign verify-blob --bundle "$f.sigstore.json" \
+              --certificate-identity "https://github.com/$REPO/.github/workflows/release.yml@refs/heads/release" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$f"
+          done
+      - name: install.sh installs a working aibus
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The release just published is the latest one, so the installer needs no version pin.
+          # If it is not, the tag check below fails.
+          export AIBUS_INSTALL_DIR="$RUNNER_TEMP/aibus-bin" AIBUS_NO_MODIFY_PATH=1
+          sh rel/install.sh
+          out=$("$AIBUS_INSTALL_DIR/aibus" version)
+          echo "$out"
+          case "$out" in *"tag $TAG, commit ${SHA:0:12}"*) ;; *) echo "::error::unexpected version output"; exit 1 ;; esac
+
+  # Only runs when prepare, build, package, publish and verify all succeeded (a skipped or failed
+  # need stops it), and the conditions are spelled out so that stays true if someone adds an
+  # `always()` here. It commits the formula to `release`, then merges `release` into `main`.
+  finalize:
+    name: finalize
+    needs: [prepare, build, package, publish, verify]
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/release' &&
+      needs.prepare.result == 'success' && needs.build.result == 'success' &&
+      needs.package.result == 'success' && needs.publish.result == 'success' &&
+      needs.verify.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          # The one place the checkout token is kept: this job pushes.
+          persist-credentials: true
+      - name: Formula on release, then release into main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Nobody pushed to release while the run was going, and main has not moved off the
+          # commit prepare checked. Either way I stop rather than merge something nobody looked at.
+          [ "$(git ls-remote origin refs/heads/release | cut -f1)" = "$SHA" ]
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor origin/main "$SHA"
+
+          # The checksums of the published release, not the build artefacts.
+          gh release download "$TAG" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          # Overwrites the committed placeholder Formula/aibus.rb with one rendered from the real sums.
+          sh packaging/homebrew/render-formula.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS"
+          test -s Formula/aibus.rb
+          if grep -q 'PLACEHOLDER CHECKSUMS' Formula/aibus.rb; then echo "::error::placeholder formula left in place"; exit 1; fi
+          ruby -c Formula/aibus.rb
+          git add Formula/aibus.rb
+          git commit -m "Formula: aibus $VERSION"
+          git push origin HEAD:refs/heads/release
+          tip=$(git rev-parse HEAD)
+
+          git checkout -B main origin/main
+          git merge --no-ff -m "Merge release $TAG into main" "$tip"
+          git push origin HEAD:refs/heads/main
+          {
+            echo "### finalize"
+            echo "formula committed to release (\`${tip:0:12}\`), release merged into main"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Says why in the run summary when a real release did not get all the way through.
+  summary:
+    name: summary
+    needs: [prepare, build, package, publish, verify, finalize]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-22.04
+    permissions: {}
+    steps:
+      - name: Job results
+        env:
+          RESULTS: |
+            prepare ${{ needs.prepare.result }}
+            build ${{ needs.build.result }}
+            package ${{ needs.package.result }}
+            publish ${{ needs.publish.result }}
+            verify ${{ needs.verify.result }}
+            finalize ${{ needs.finalize.result }}
+        run: |
+          {
+            echo "### release result"
+            echo '```'
+            printf '%s' "$RESULTS"
+            echo '```'
+            if ! printf '%s' "$RESULTS" | grep -q '^finalize success$'; then
+              echo "The release did not finish. finalize only runs when everything before it succeeded, so main was not touched by this run. docs/RELEASE.md lists what to remove before trying again."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -240,6 +240,10 @@ fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
     let run = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
     let id = ndjson(&run).last().unwrap()["session"].as_str().unwrap().to_owned();
     let dir = home.path().join(".local/state/aibus/sessions").join(&id);
+    // The run wrote its own numbers on the way out (08 section 5).
+    let live = aibus(home.path(), &["doctor", "--session", &id]);
+    let live = String::from_utf8_lossy(&live.stdout);
+    assert!(live.contains(r#""log_cap":2000"#) && live.contains(r#""commit_cap":4096"#), "{live}");
     fs::write(dir.join("memory.json"), r#"{"rss_mb":42}"#).unwrap();
     let out = aibus(home.path(), &["doctor", "--session", &id]);
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));

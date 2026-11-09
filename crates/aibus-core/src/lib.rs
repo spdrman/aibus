@@ -15,6 +15,7 @@ pub mod error;
 pub mod hooks;
 pub mod ids;
 pub mod mcp;
+pub mod mem;
 pub mod msg;
 pub mod orchestrator;
 pub mod permission;

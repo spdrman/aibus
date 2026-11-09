@@ -1,8 +1,11 @@
-//! A1.3 stream-commit measurement on the `causl` backend: the same fixture as
+//! Stream-commit measurement on the `causl` backend: the same fixture and gate as
 //! `aibus-core/benches/commit_stream.rs`, included so the two cannot drift.
 
-#[path = "../../aibus-core/benches/commit_stream.rs"]
-#[allow(dead_code)]
+#[path = "../../aibus-core/benches/shared/fixture.rs"]
+mod fixture;
+#[path = "../../../benches/gate.rs"]
+mod gate;
+#[path = "../../aibus-core/benches/shared/stream.rs"]
 mod stream;
 
 fn main() {

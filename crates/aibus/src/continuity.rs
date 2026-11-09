@@ -30,7 +30,7 @@ pub struct Continuity {
     /// The ledger's hash at `session_start`, to tell at the end whether it changed.
     ledger_at_start: Option<String>,
     /// Asks the lead's model, for the learnings.
-    extractor: Arc<ModelCompactor>,
+    extractor: Option<Arc<ModelCompactor>>,
     /// The handoff written at `session_end`, for the `SessionEnd` event.
     pub ended: Option<PathBuf>,
 }
@@ -52,7 +52,7 @@ pub fn reindex(layout: &Layout) {
 }
 
 impl Continuity {
-    pub fn new(layout: Layout, extractor: Arc<ModelCompactor>) -> Self {
+    pub fn new(layout: Layout, extractor: Option<Arc<ModelCompactor>>) -> Self {
         let ledger_at_start = ledger_hash(&layout);
         Self {
             layout,
@@ -136,10 +136,12 @@ pub fn end(ctx: &mut Ctx) {
 
     let completed = read_runs(&session.dir).iter().any(|r| r.status == RunStatus::Completed.as_value());
     let wanted = cfg.memory.extract_on_end && cfg.continuity.extract_learnings;
-    if let (true, true, false, Some(conv), Some(rt)) = (wanted, completed, ctx.interrupted, &conv, ctx.rt.as_ref()) {
+    if let (true, true, false, Some(conv), Some(rt), Some(extractor)) =
+        (wanted, completed, ctx.interrupted, &conv, ctx.rt.as_ref(), &c.extractor)
+    {
         let cancel = tokio_util::sync::CancellationToken::new();
         let asked = rt.block_on(async {
-            tokio::time::timeout(EXTRACT_WITHIN, c.extractor.extract(conv, &cancel)).await
+            tokio::time::timeout(EXTRACT_WITHIN, extractor.extract(conv, &cancel)).await
         });
         match asked {
             Ok(Ok(found)) if !found.is_empty() => {

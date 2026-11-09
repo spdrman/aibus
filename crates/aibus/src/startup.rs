@@ -800,7 +800,7 @@ impl Step for EnterLoop {
 
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
         // `inherit` has no parent here, so it means the session's model. The TUI has none yet.
-        let plan = if ctx.interactive { None } else {
+        let planned = if ctx.interactive { None } else {
         let (target, hints) = match &resume {
             Some((_, meta)) => (
                 ModelRef::Full(meta.model.clone()),
@@ -866,7 +866,7 @@ impl Step for EnterLoop {
                 redactor: ctx.redactor.clone(),
             }),
         });
-        let continuity = Continuity::new(layout, compactor.clone());
+        let extractor = compactor.clone();
         let deps = RunDeps {
             provider: picked.provider,
             creds: picked.creds,
@@ -876,8 +876,13 @@ impl Step for EnterLoop {
             compactor: Some(compactor as Arc<dyn Compactor>),
             assist,
         };
-        Some((run_cfg, deps))
+        Some((run_cfg, deps, extractor))
         };
+        let (plan, extractor) = match planned {
+            Some((cfg, deps, e)) => (Some((cfg, deps)), Some(e)),
+            None => (None, None),
+        };
+        let session_continuity = Continuity::new(layout, extractor);
         if let Some(app) = ctx.app.as_mut() {
             app.set_limits(&limits)?;
             app.set_session_view(
@@ -925,19 +930,19 @@ impl Step for EnterLoop {
         // `model:handoff:latest` and `model:ledger` are filled in. A resumed run has its
         // conversation already.
         if let Some(app) = ctx.app.as_mut() {
-            let shown = continuity.start(app);
+            let shown = session_continuity.start(app);
             if let (Some((run_cfg, _)), None) = (ctx.plan.as_mut(), ctx.run.resume) {
                 run_cfg.context.splice(0..0, shown);
             }
         }
         // A second aibus in the same project can write a handoff at any time, so the directory
         // is watched too (07 section 5).
-        let handoffs = continuity.layout.handoffs();
+        let handoffs = session_continuity.layout.handoffs();
         let reload = {
             let dir = handoffs.clone();
             move || handoff::latest(&dir, None).map(|path| Msg::HandoffWritten { path })
         };
-        ctx.continuity = Some(continuity);
+        ctx.continuity = Some(session_continuity);
         match agent_watch::start(&[handoffs], RecursiveMode::Recursive, &tx, reload) {
             Ok(w) => ctx.handoff_watch = Some(w),
             Err(e) => eprintln!("aibus: warning: not watching the handoff directory: {e}"),

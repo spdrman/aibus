@@ -92,6 +92,9 @@ pub fn run(global: Global, prompt: Option<String>, redactor: Redactor) -> Result
     ctx.interactive = true;
     let started = startup::start(startup::interactive_steps(), &mut ctx)?;
     let driven = drive(&mut ctx);
+    // The end of the session's continuity work (a handoff if the ledger changed, the index)
+    // needs the runtime, so it comes before the steps stop.
+    crate::continuity::end(&mut ctx);
     let stopped = startup::stop(started, &mut ctx);
     driven?;
     stopped?;

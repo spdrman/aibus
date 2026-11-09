@@ -1,13 +1,13 @@
 name: nightly
 
+# The local run on MARS in docker is the real gate; this workflow is started by hand only.
+#
 # The nightly rows of the layer table in 10 section 1: the live provider contract tests (opt-in,
 # they need a real account) and the fuzz targets. The benches are in bench.yml, which has its
-# own nightly trigger. Both can also be started by hand.
+# own trigger.
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "43 2 * * *"
 
 permissions:
   contents: read
@@ -23,23 +23,19 @@ jobs:
     timeout-minutes: 30
     env:
       AIBUS_LIVE_ACCOUNT: nightly
-      AIBUS_LIVE_KEY_NIGHTLY: ${{ secrets.AIBUS_LIVE_KEY_NIGHTLY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Skip notice
-        if: env.AIBUS_LIVE_KEY_NIGHTLY == ''
-        run: echo "AIBUS_LIVE_KEY_NIGHTLY is not set, so the live provider tests are skipped"
       - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
-        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
       - name: Anthropic
-        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
+        env:
+          AIBUS_LIVE_KEY_NIGHTLY: ${{ secrets.AIBUS_LIVE_KEY_NIGHTLY }}
         run: cargo test --locked -p aibus-provider-anthropic --features live-tests --test live
       - name: OpenAI
-        if: env.AIBUS_LIVE_KEY_NIGHTLY != ''
+        env:
+          AIBUS_LIVE_KEY_NIGHTLY: ${{ secrets.AIBUS_LIVE_KEY_NIGHTLY }}
         run: cargo test --locked -p aibus-provider-openai --features live-tests --test live
 
   # cargo-fuzz on the targets under fuzz/ (frontmatter, handoff YAML, the redactor, the
@@ -55,7 +51,7 @@ jobs:
         id: has
         run: |
           if [ -f fuzz/Cargo.toml ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "no fuzz/ directory yet"; fi
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         if: steps.has.outputs.yes == 'true'
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         if: steps.has.outputs.yes == 'true'

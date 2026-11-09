@@ -7,8 +7,9 @@ the TUI snapshots, because they are the part that needs a routine.
 
 ## Layers
 
-These are the rows of 10 section 1. `.github/workflows/ci.yml` has one job per row that runs on
-every push, with the same command. Run them in the build container.
+These are the rows of 10 section 1. The local run on MARS in docker is the real gate: every "every
+push" row below runs there, with these commands. `.github/workflows/ci.yml` has one job per row with
+the same command, started by hand.
 
 | Layer | Command | When |
 |---|---|---|
@@ -19,13 +20,13 @@ every push, with the same command. Run them in the build container.
 | CLI | `cargo test --locked -p aibus --tests` | every push |
 | Replay | `cargo test --locked -p aibus-testkit --test replay --test session` and `-p aibus-core --test replay` | every push |
 | Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai` (cassettes) | every push |
-| Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly (`nightly.yml`), opt-in |
-| Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and on PRs touching `state/` or `tui/` (`bench.yml`) |
-| Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly (`nightly.yml`, skipped until `fuzz/` exists) |
+| Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |
+| Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
+| Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
 
 The conformance row says "both backends when available": `ci.yml` has a `causl` job that runs the
-`aibus-graph-causl` tests with `--features causl-rs` when the repository secret is exposed and
-says so in its log when it is not. The crate is private, so that is the only place it can run.
+`aibus-graph-causl` tests with `--features causl-rs`. The crate is private, so the job's fetch step
+needs the repository secret `CAUSL_CI_BUILD_1` and is the only step that sees it.
 
 ## The test kit
 

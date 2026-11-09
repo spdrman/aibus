@@ -1,23 +1,13 @@
 name: bench
 
-# 10 section 9: the p99 gates. They run nightly and on pull requests that touch the state
-# layer or the TUI (10 section 1); the local run on MARS in docker stays the real gate
-# (AIBUS_RUNNER_CLASS=mars, baselines in benches/baselines/mars/). This is the same thing on a
-# hosted runner, and can be started by hand too. A p99 over its budget, or more than 20 %
+# 10 section 9: the p99 gates. Manual only: the local run on MARS in docker is the real gate
+# (AIBUS_RUNNER_CLASS=mars, baselines in benches/baselines/mars/). This workflow is the same
+# thing on a hosted runner, for when someone wants it. A p99 over its budget, or more than 20 %
 # over the committed baseline for the runner class (see benches/gate.rs), fails. A class with no
 # baseline yet only enforces the budgets; `AIBUS_BENCH_SAVE=1` writes one.
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 3 * * *"
-  pull_request:
-    paths:
-      - "crates/aibus-core/src/state/**"
-      - "crates/aibus-core/benches/**"
-      - "crates/aibus-tui/**"
-      - "crates/aibus-graph/**"
-      - "benches/**"
 
 permissions:
   contents: read

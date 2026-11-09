@@ -43,7 +43,7 @@ jobs:
       - run: cargo test --workspace --locked --lib --bins
       - run: cargo test --workspace --locked --doc
 
-  # Graph conformance on mini (10 section 8). The second backend runs in `causl` below.
+  # Graph conformance on mini (10 section 8). The second backend runs in causl-spike.yml (`causl-differential`).
   conformance:
     runs-on: ubuntu-latest
     steps:

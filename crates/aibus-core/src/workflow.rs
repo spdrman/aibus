@@ -601,7 +601,7 @@ on_fail = "retry:2"
         let wf = Workflow::parse("fix", FIX).unwrap();
         let failed = (RunStatus::Failed, "tests red");
         let host = Scripted::new(
-            vec![ok("cause"), ok("low"), ok("p1"), failed.clone(), ok("p2"), failed.clone(), ok("p3"), failed],
+            vec![ok("cause"), ok("low"), ok("p1"), failed, ok("p2"), failed, ok("p3"), failed],
             vec![GateVerdict::Pass],
         );
         let report = execute(&wf, "x", &host).await;

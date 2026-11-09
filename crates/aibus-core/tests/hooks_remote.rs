@@ -247,11 +247,12 @@ async fn remote_hooks_share_the_timeouts_of_command_hooks() {
 
 #[test]
 fn config_checks_what_each_hook_kind_needs() {
-    let mut cfg = config::Config::default();
-    cfg.hooks = config("pre_tool_use", Hook { kind: HookKind::Prompt, ..Hook::default() });
+    let with = |hook| config::Config {
+        hooks: config("pre_tool_use", hook),
+        ..config::Config::default()
+    };
+    let cfg = with(Hook { kind: HookKind::Prompt, ..Hook::default() });
     assert!(cfg.problems().iter().any(|(p, m)| p == "hooks.pre_tool_use[1]" && m.contains("needs a prompt")));
-    cfg.hooks = config("pre_tool_use", http_hook("ftp://x", None));
-    assert!(cfg.problems().iter().any(|(_, m)| m.contains("http:// or https://")));
-    cfg.hooks = config("pre_tool_use", http_hook("https://x", None));
-    assert!(cfg.problems().is_empty());
+    assert!(with(http_hook("ftp://x", None)).problems().iter().any(|(_, m)| m.contains("http:// or https://")));
+    assert!(with(http_hook("https://x", None)).problems().is_empty());
 }

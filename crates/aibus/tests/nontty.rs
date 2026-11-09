@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use common::{aibus, command, stderr};
 use serde_json::Value;
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -18,7 +18,7 @@ fn stdout(out: &std::process::Output) -> String {
 
 #[test]
 fn plain_mode_streams_the_text_and_keeps_tool_notices_on_stderr() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["run", "--agent", "explore", "map this repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
@@ -34,7 +34,7 @@ fn plain_mode_streams_the_text_and_keeps_tool_notices_on_stderr() {
 #[test]
 fn the_prompt_comes_from_stdin_in_plain_mode_too() {
     for args in [vec!["run", "--agent", "explore"], vec!["run", "--agent", "explore", "-"]] {
-        let home = TempDir::new().unwrap();
+        let home = xdg_temp();
         let mut child = command(home.path())
             .args(&args)
             .stdin(Stdio::piped())
@@ -51,7 +51,7 @@ fn the_prompt_comes_from_stdin_in_plain_mode_too() {
 
 #[test]
 fn no_subcommand_with_stdout_piped_behaves_as_run_and_says_so() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let mut child = command(home.path())
         .args(["--agent", "explore"])
         .stdin(Stdio::piped())
@@ -73,7 +73,7 @@ fn no_subcommand_with_stdout_piped_behaves_as_run_and_says_so() {
 
 #[test]
 fn escape_sequences_in_the_model_text_never_reach_a_pipe() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let script = home.path().join("ansi.ron");
     fs::write(&script, r#"[Text("\u{1b}[31mred\u{1b}[0m and \u{1b}]0;title\u{7}plain"), Stop(EndTurn)]"#).unwrap();
     for no_color in [None, Some("1")] {
@@ -91,7 +91,7 @@ fn escape_sequences_in_the_model_text_never_reach_a_pipe() {
 
 #[test]
 fn a_default_mode_prompt_is_refused_with_no_tty_in_plain_mode() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let script = home.path().join("bash.ron");
     fs::write(&script, r#"[ToolCall(name: "bash", input: {"command": "echo hi > out.txt"}), Stop(ToolUse), Text("done")]"#).unwrap();
     let out = command(home.path())
@@ -132,7 +132,7 @@ fn signal(child: &std::process::Child, sig: &str) {
 
 #[test]
 fn sighup_is_a_graceful_stop_that_exits_7_well_inside_ten_seconds() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let began = Instant::now();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-HUP");
@@ -153,7 +153,7 @@ fn sighup_is_a_graceful_stop_that_exits_7_well_inside_ten_seconds() {
 
 #[test]
 fn sigwinch_becomes_a_resize_message() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-WINCH");
     let mut line = String::new();
@@ -175,7 +175,7 @@ fn term_dumb_refuses_the_tui_with_exit_2() {
         eprintln!("skipped: no script(1) here");
         return;
     }
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let bin = env!("CARGO_BIN_EXE_aibus");
     let mut child = std::process::Command::new("script")
         .env("TERM", "dumb")

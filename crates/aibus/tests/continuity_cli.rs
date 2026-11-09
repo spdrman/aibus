@@ -10,7 +10,7 @@ use std::process::Output;
 use common::schema::assert_valid;
 use common::{aibus, command, ndjson, stderr};
 use serde_json::{json, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -41,7 +41,7 @@ fn handoffs(home: &Path, topic: &str) -> Vec<PathBuf> {
 
 #[test]
 fn a_ledger_is_started_changed_and_shown() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let out = aibus(h, &["ledger", "show"]);
     assert_eq!(out.status.code(), Some(2));
@@ -77,7 +77,7 @@ fn a_ledger_is_started_changed_and_shown() {
 
 #[test]
 fn the_most_recently_modified_ledger_is_the_topic_unless_one_is_given() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     ok(h, &["ledger", "new", "first"]);
     ok(h, &["ledger", "new", "second"]);
@@ -110,7 +110,7 @@ fn the_most_recently_modified_ledger_is_the_topic_unless_one_is_given() {
 
 #[test]
 fn handoffs_are_created_listed_and_shown() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let none = aibus(h, &["handoff", "show"]);
     assert_eq!(none.status.code(), Some(2), "{}", stderr(&none));
@@ -166,7 +166,7 @@ fn handoffs_are_created_listed_and_shown() {
 
 #[test]
 fn memory_is_added_indexed_and_recalled() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let user = h.join(".local/share/aibus/agent-memory/lead/LEARNINGS.md");
     ok(h, &["memory", "add", "The cache key is the file hash", "--type", "fact"]);
@@ -201,7 +201,7 @@ fn memory_is_added_indexed_and_recalled() {
 
 #[test]
 fn the_local_scope_is_gitignored_when_it_is_first_written() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     ok(h, &["memory", "add", "private note", "--scope", "local"]);
     assert!(proj(h).join(".aibus/agent-memory-local/lead/LEARNINGS.md").exists());
@@ -246,7 +246,7 @@ fn first_session(home: &Path) -> Output {
 
 #[test]
 fn a_session_ends_with_a_handoff_a_learning_and_the_next_one_sees_both() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let out = first_session(h);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -315,7 +315,7 @@ fn a_session_ends_with_a_handoff_a_learning_and_the_next_one_sees_both() {
 
 #[test]
 fn another_topic_does_not_see_the_handoff_and_a_worker_never_sees_the_ledger() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     assert!(first_session(h).status.success());
 
@@ -346,7 +346,7 @@ fn another_topic_does_not_see_the_handoff_and_a_worker_never_sees_the_ledger() {
 #[test]
 fn the_end_of_a_session_respects_its_switches() {
     // No ledger change: no handoff. `extract_on_end = false`: no learnings.
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     fs::create_dir_all(proj(h).join(".aibus")).unwrap();
     fs::write(proj(h).join(".aibus/settings.toml"), "[memory]\nextract_on_end = false\n").unwrap();
@@ -372,7 +372,7 @@ fn the_end_of_a_session_respects_its_switches() {
 
 #[test]
 fn a_run_that_did_not_complete_extracts_nothing() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     // The provider fails: the lead's run does not complete, so nothing is asked of the model.
     let s = script(h, "fail.ron", r#"[Error((kind: Server, retryable: false, message: "down"))]"#);

@@ -1,0 +1,8 @@
+[
+    Text("Two searches, one after the other."),
+    ToolCall(name: "delegate", input: {"agent": "explore", "prompt": "map src", "background": false}), Stop(ToolUse),
+    Text("src has a main.rs"), Stop(EndTurn),
+    ToolCall(name: "delegate", input: {"agent": "explore", "prompt": "map the docs", "background": false}), Stop(ToolUse),
+    Text("the docs are one README"), Stop(EndTurn),
+    Text("Both reports are in: a main.rs and a README."),
+]

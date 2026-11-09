@@ -14,6 +14,7 @@ aibus-provider.workspace = true
 aibus-tui.workspace = true
 base64 = "0.22"
 ratatui = "0.29"
+serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["time", "test-util", "rt"] }
 ulid = "1"
@@ -25,6 +26,5 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 aibus-provider-anthropic.workspace = true
 aibus-provider-openai.workspace = true
 wiremock = "0.6"
-serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time", "test-util"] }
 tokio-util = "0.7"

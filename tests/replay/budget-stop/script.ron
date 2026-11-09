@@ -1,0 +1,6 @@
+[
+    Text("pricey"),
+    Usage(input: 1000000, output: 0),
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    Text("never reached"),
+]

@@ -7,7 +7,7 @@ use std::path::Path;
 use aibus_core::agent::discover::discover;
 use aibus_core::agent::import::{import, Outcome};
 use aibus_core::{AgentName, HookKind};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 const REVIEWER: &str = "---
 name: reviewer
@@ -33,7 +33,7 @@ fn write(dir: &Path, name: &str, text: &str) {
 
 #[test]
 fn definitions_are_copied_and_every_hook_is_reported_and_switched_off() {
-    let project = TempDir::new().unwrap();
+    let project = xdg_temp();
     let from = project.path().join(".claude/agents");
     let to = project.path().join(".aibus/agents");
     write(&from, "reviewer.md", REVIEWER);
@@ -71,7 +71,7 @@ fn definitions_are_copied_and_every_hook_is_reported_and_switched_off() {
 
 #[test]
 fn nothing_is_overwritten_and_a_broken_file_is_skipped_with_its_reason() {
-    let project = TempDir::new().unwrap();
+    let project = xdg_temp();
     let from = project.path().join("theirs");
     let to = project.path().join(".aibus/agents");
     write(&from, "scout.md", PLAIN);
@@ -90,7 +90,7 @@ fn nothing_is_overwritten_and_a_broken_file_is_skipped_with_its_reason() {
 
 #[test]
 fn a_bom_or_a_quoted_key_cannot_keep_a_hook_switched_on() {
-    let project = TempDir::new().unwrap();
+    let project = xdg_temp();
     let from = project.path().join("theirs");
     let to = project.path().join(".aibus/agents");
     write(&from, "bom.md", &format!("\u{feff}{REVIEWER}").replace("reviewer", "bom"));
@@ -116,7 +116,7 @@ fn a_bom_or_a_quoted_key_cannot_keep_a_hook_switched_on() {
 /// and then the hooks of those definitions are stripped unless the directory is trusted.
 #[test]
 fn claude_agents_are_not_read_unless_extra_dirs_names_them() {
-    let project = TempDir::new().unwrap();
+    let project = xdg_temp();
     write(&project.path().join(".claude/agents"), "reviewer.md", REVIEWER);
 
     let without = discover(None, project.path(), None, &[], &[]).unwrap();

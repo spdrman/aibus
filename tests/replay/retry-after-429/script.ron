@@ -1,0 +1,5 @@
+[
+    Error((kind: RateLimit, retryable: true, retry_after: Some((secs: 1, nanos: 0)), message: "slow down")),
+    Text("recovered"),
+    Usage(input: 30, output: 3),
+]

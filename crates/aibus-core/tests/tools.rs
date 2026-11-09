@@ -6,7 +6,7 @@ use std::time::Duration;
 use aibus_core::*;
 use aibus_provider::ToolSpec;
 use serde_json::{json, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -209,7 +209,7 @@ fn background_runs_lose_the_interactive_tools() {
 #[tokio::test]
 async fn unknown_names_are_denied_before_dispatch() {
     let (ex, calls) = spy_executor("bash", "ran", false);
-    let tmp = TempDir::new().unwrap();
+    let tmp = xdg_temp();
     let r = ex
         .call(&eff(&["read"]), &cx(tmp.path()), "bash", json!({"command": "ls"}))
         .await;
@@ -242,7 +242,7 @@ async fn bash_specifiers_follow_the_09_examples() {
         ("git", false),
         ("gitk", false),
     ];
-    let tmp = TempDir::new().unwrap();
+    let tmp = xdg_temp();
     for (cmd, ok) in table {
         let (ex, calls) = spy_executor("bash", "", false);
         let r = ex
@@ -262,8 +262,8 @@ async fn bash_specifiers_follow_the_09_examples() {
     assert!(ex.call(&both, &cx(tmp.path()), "bash", json!({"command": "git pull"})).await.is_ok());
 }
 
-fn project() -> TempDir {
-    let tmp = TempDir::new().unwrap();
+fn project() -> Xdg {
+    let tmp = xdg_temp();
     let p = tmp.path();
     std::fs::create_dir_all(p.join("src/deep")).unwrap();
     std::fs::write(p.join("src/a.rs"), "fn alpha() {}\nfn beta() {}\n").unwrap();
@@ -338,7 +338,7 @@ async fn glob_ls_and_grep_stay_in_the_project() {
 #[tokio::test]
 async fn symlinks_cannot_leave_the_project() {
     let tmp = project();
-    let outside = TempDir::new().unwrap();
+    let outside = xdg_temp();
     std::fs::write(outside.path().join("secret.txt"), "beta secret\n").unwrap();
     std::os::unix::fs::symlink(outside.path().join("secret.txt"), tmp.path().join("link.txt")).unwrap();
     std::os::unix::fs::symlink(outside.path(), tmp.path().join("linkdir")).unwrap();
@@ -363,7 +363,7 @@ async fn symlinks_cannot_leave_the_project() {
 #[tokio::test]
 async fn an_abs_specifier_admits_an_outside_path() {
     let tmp = project();
-    let outside = TempDir::new().unwrap();
+    let outside = xdg_temp();
     let outside_dir = outside.path().canonicalize().unwrap();
     std::fs::write(outside_dir.join("x.txt"), "hello\n").unwrap();
     let abs = outside_dir.join("x.txt");
@@ -376,7 +376,7 @@ async fn an_abs_specifier_admits_an_outside_path() {
     let r = ro().call(&eff(&[&spec]), &cx(tmp.path()), "read", input.clone()).await;
     assert_eq!(r.unwrap().content, "     1\thello\n");
 
-    let other = TempDir::new().unwrap();
+    let other = xdg_temp();
     std::fs::write(other.path().join("y.txt"), "no\n").unwrap();
     let r = ro()
         .call(&eff(&[&spec]), &cx(tmp.path()), "read", json!({"path": other.path().join("y.txt")}))
@@ -387,7 +387,7 @@ async fn an_abs_specifier_admits_an_outside_path() {
 #[tokio::test]
 async fn output_keeps_the_tail_behind_a_head_marker() {
     let (ex, _) = spy_executor("bash", &format!("{}END", "x".repeat(1000)), false);
-    let tmp = TempDir::new().unwrap();
+    let tmp = xdg_temp();
     let mut c = cx(tmp.path());
     c.limits.bash_max_output_bytes = 100;
     let out = ex.call(&eff(&["bash"]), &c, "bash", json!({"command": "echo"})).await.unwrap();
@@ -400,7 +400,7 @@ async fn output_keeps_the_tail_behind_a_head_marker() {
 #[tokio::test(start_paused = true)]
 async fn cancelling_a_hanging_call_returns_within_100ms() {
     let (ex, calls) = spy_executor("bash", "", true);
-    let tmp = TempDir::new().unwrap();
+    let tmp = xdg_temp();
     let c = cx(tmp.path());
     let cancel = c.cancel.clone();
     let e = eff(&["bash"]);

@@ -1,0 +1,6 @@
+[
+    Usage(input: 500, output: 5),
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    MatchPrompt(contains: "Summarise the conversation below", then: [Text("SUMMARY: listed the directory"), Stop(EndTurn)]),
+    Text("done after compacting"),
+]

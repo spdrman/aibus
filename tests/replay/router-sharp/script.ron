@@ -1,0 +1,6 @@
+[
+    Text("Now I will list the files."), Stop(EndTurn),
+    RouterAnswer(choice: "ls", p: 0.95), Stop(EndTurn),
+    ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse),
+    Text("done"),
+]

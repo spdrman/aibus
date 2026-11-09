@@ -1,0 +1,7 @@
+[
+    ToolCall(name: "ledger_update", input: {"section": "Goal", "text": "Move auth to middleware"}),
+    ToolCall(name: "ledger_update", input: {"section": "In Progress", "text": "run the migration\nadd a test"}),
+    Stop(ToolUse),
+    Text("The ledger is up to date."), Stop(EndTurn),
+    Text("[]"),
+]

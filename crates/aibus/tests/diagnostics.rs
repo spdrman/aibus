@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 
 use common::{aibus, command, ndjson, stderr};
 use serde_json::Value;
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 
@@ -31,12 +31,12 @@ fn log_text(home: &Path) -> String {
 
 #[test]
 fn the_log_level_follows_the_flags_and_aibus_log_adds_directives() {
-    let quiet = TempDir::new().unwrap();
+    let quiet = xdg_temp();
     let out = aibus(quiet.path(), &["-q", "run", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(log_text(quiet.path()).is_empty(), "-q logs only errors");
 
-    let loud = TempDir::new().unwrap();
+    let loud = xdg_temp();
     let out = aibus(loud.path(), &["-vv", "run", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = log_text(loud.path());
@@ -45,7 +45,7 @@ fn the_log_level_follows_the_flags_and_aibus_log_adds_directives() {
     assert!(!stderr(&out).contains("DEBUG"), "never to the terminal");
 
     // AIBUS_LOG alone, without -v: what the directive asks for reaches the file.
-    let filtered = TempDir::new().unwrap();
+    let filtered = xdg_temp();
     let out = command(filtered.path())
         .env("AIBUS_LOG", "trace")
         .args(["run", "--agent", "explore", "hi"])
@@ -55,7 +55,7 @@ fn the_log_level_follows_the_flags_and_aibus_log_adds_directives() {
     assert!(!log_text(filtered.path()).is_empty(), "AIBUS_LOG=trace logs something");
 
     // A directive that does not parse is ignored and noted in the file.
-    let bad = TempDir::new().unwrap();
+    let bad = xdg_temp();
     let out = command(bad.path())
         .env("AIBUS_LOG", "loud=sometimes")
         .args(["run", "--agent", "explore", "hi"])
@@ -67,7 +67,7 @@ fn the_log_level_follows_the_flags_and_aibus_log_adds_directives() {
 
 #[test]
 fn old_log_files_rotate_and_only_log_files_kept_remain() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     user_config(home.path(), "[persist]\nlog_files_kept = 3\n");
     let dir = logs(home.path());
     fs::create_dir_all(&dir).unwrap();
@@ -99,7 +99,7 @@ fn old_log_files_rotate_and_only_log_files_kept_remain() {
 
 #[test]
 fn trace_writes_chrome_trace_events_for_every_kind_of_span() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     user_config(
         home.path(),
         "[hooks]\nsession_start = [{ command = \"true\" }]\n",
@@ -142,7 +142,7 @@ fn trace_writes_chrome_trace_events_for_every_kind_of_span() {
 
 #[test]
 fn without_trace_nothing_is_written_and_no_span_reaches_the_log() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["-vvv", "run", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!log_text(home.path()).contains("recompute_us"));
@@ -153,7 +153,7 @@ fn without_trace_nothing_is_written_and_no_span_reaches_the_log() {
 
 #[test]
 fn limits_and_the_outcome_come_from_the_environment() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let show = command(home.path())
         .env("AIBUS_MAX_SPAWN_DEPTH", "1")
         .env("AIBUS_MAX_CONCURRENT_RUNS", "2")
@@ -192,7 +192,7 @@ fn limits_and_the_outcome_come_from_the_environment() {
 
 #[test]
 fn the_environment_is_never_listed_in_the_log() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = command(home.path())
         .env("AIBUS_ACCOUNT_SECRETLY_KEY", "sk-from-the-environment-123456")
         .env("SOME_OTHER_VARIABLE", "marker-value-should-not-appear")
@@ -207,7 +207,7 @@ fn the_environment_is_never_listed_in_the_log() {
 
 #[test]
 fn config_edit_opens_the_editor_on_the_user_config_and_checks_the_result() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let edit = |editor: &str| {
         command(home.path()).env("EDITOR", editor).args(["config", "edit"]).output().unwrap()
     };
@@ -229,7 +229,7 @@ fn config_edit_opens_the_editor_on_the_user_config_and_checks_the_result() {
 
 #[test]
 fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let kept = home.path().join(".cache/aibus/worktrees/S1/R1");
     fs::create_dir_all(&kept).unwrap();
     let out = aibus(home.path(), &["doctor"]);
@@ -256,7 +256,7 @@ fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
 
 #[test]
 fn every_shell_gets_a_script_and_the_help_prints_the_key_map() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     for shell in ["bash", "zsh", "fish", "powershell"] {
         let out = aibus(home.path(), &["completions", shell]);
         assert!(out.status.success(), "{shell}: {}", stderr(&out));
@@ -272,7 +272,7 @@ fn every_shell_gets_a_script_and_the_help_prints_the_key_map() {
 
 #[test]
 fn the_names_helpers_list_one_name_per_line() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     user_config(
         home.path(),
         "[[account]]\nname = \"work\"\nprovider = \"fake\"\nauth = { env = \"WORK_KEY\" }\n",
@@ -299,7 +299,7 @@ fn bash_completes_account_names_dynamically() {
         eprintln!("skipped: no bash");
         return;
     }
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     user_config(
         home.path(),
         "[[account]]\nname = \"work\"\nprovider = \"fake\"\nauth = { env = \"WORK_KEY\" }\n\n[[account]]\nname = \"wasp\"\nprovider = \"fake\"\nauth = { env = \"WASP_KEY\" }\n\n[[account]]\nname = \"home\"\nprovider = \"fake\"\nauth = { env = \"HOME_KEY\" }\n",

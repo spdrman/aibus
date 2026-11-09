@@ -1,0 +1,5 @@
+[
+    Text("Grüße, 世界! Ça va? Ünïcödé résumé, naïve café, 日本語のテキスト, and an emoji pair: 🚀✨. "),
+    Text("The stream is cut into small chunks, never in the middle of a character."),
+    Usage(input: 40, output: 60),
+]

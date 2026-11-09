@@ -18,7 +18,7 @@ use aibus_provider::{ContentBlock, MessageRole, StopReason};
 use aibus_testkit::{fake_credential, FakeClock};
 use common::{app, A};
 use serde_json::{json, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {
@@ -59,7 +59,7 @@ fn script(steps: impl IntoIterator<Item = Step>) -> Script {
 }
 
 fn defs() -> BTreeMap<AgentName, AgentDef> {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     found
         .agents
@@ -168,7 +168,7 @@ struct Rig {
     rx: mpsc::Receiver<Msg>,
     orch: Arc<Orchestrator>,
     launcher: Arc<TestLauncher>,
-    dir: TempDir,
+    dir: Xdg,
     lead: RunId,
     lead_fake: Arc<FakeProvider>,
     auto_compact_at: Option<u32>,
@@ -199,7 +199,7 @@ impl Rig {
         lead: Script,
         children: impl Fn(&SpawnSpec) -> Script + Send + Sync + 'static,
     ) -> Self {
-        let dir = TempDir::new().unwrap();
+        let dir = xdg_temp();
         std::fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let orch = Orchestrator::new(set.limits.clone(), tx.clone());

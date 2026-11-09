@@ -174,7 +174,7 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
     assert_eq!((stats.wrap_width, stats.wrap_blocks), (100, 1));
 
     // The snapshot is handles only: well under 2 MiB on disk after a whole day.
-    let dir = aibus_testkit::TempDir::new().unwrap();
+    let dir = xdg_temp();
     write_snapshot(dir.path(), &app.graph.snapshot()).unwrap();
     let snapshot = std::fs::metadata(dir.path().join(SNAPSHOT)).unwrap().len();
     println!("snapshot on disk: {snapshot} bytes (budget {SNAPSHOT_BUDGET})");

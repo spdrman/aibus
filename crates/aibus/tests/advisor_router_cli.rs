@@ -8,7 +8,7 @@ use std::fs;
 
 use common::schema::assert_valid;
 use common::{command, ndjson, stderr};
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 
 const SCRIPT: &str = r##"[
     // the lead: a plan that ends on an intention
@@ -22,7 +22,7 @@ const SCRIPT: &str = r##"[
     Text("done"),
 ]"##;
 
-fn run(home: &TempDir, extra: &[&str]) -> std::process::Output {
+fn run(home: &Xdg, extra: &[&str]) -> std::process::Output {
     let script = home.path().join("script.ron");
     fs::write(&script, SCRIPT).unwrap();
     command(home.path())
@@ -36,7 +36,7 @@ fn run(home: &TempDir, extra: &[&str]) -> std::process::Output {
 
 #[test]
 fn both_events_show_up_in_the_json_output() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = run(&home, &["--advisor", "fake-large", "--router", "fake-small"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let lines = ndjson(&out);
@@ -56,7 +56,7 @@ fn both_events_show_up_in_the_json_output() {
 
 #[test]
 fn off_flags_leave_them_out_with_a_note() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     // With both off the script's advisor and router steps go to the lead instead, so the run
     // may end differently; what matters is that neither event appears and the notes are said.
     let out = run(&home, &["--advisor", "off", "--router", "off"]);

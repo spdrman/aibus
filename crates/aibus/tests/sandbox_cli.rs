@@ -4,7 +4,7 @@
 
 mod common;
 
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 use common::{aibus, command};
 use serde_json::Value;
 
@@ -24,7 +24,7 @@ fn doctor(home: &std::path::Path, config: &str, path: &std::path::Path) -> (Opti
 
 #[test]
 fn doctor_names_the_active_sandbox_and_fails_when_its_program_is_missing() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let empty = home.path().join("empty-path");
     let bin = home.path().join("bin");
     std::fs::create_dir_all(&empty).unwrap();
@@ -50,7 +50,7 @@ fn doctor_names_the_active_sandbox_and_fails_when_its_program_is_missing() {
 
 #[test]
 fn an_unknown_sandbox_name_is_a_config_error() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let cfg = home.path().join("config.toml");
     std::fs::write(&cfg, "[tools]\nsandbox = \"docker\"\n").unwrap();
     let out = command(home.path()).env("AIBUS_CONFIG", &cfg).args(["config", "show"]).output().unwrap();
@@ -60,7 +60,7 @@ fn an_unknown_sandbox_name_is_a_config_error() {
 
 #[test]
 fn the_bypass_help_says_the_allow_list_is_not_a_sandbox() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["--help"]);
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");

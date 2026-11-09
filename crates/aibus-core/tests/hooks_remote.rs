@@ -10,7 +10,7 @@ use aibus_core::config::{Hook, Hooks};
 use aibus_core::*;
 use aibus_testkit::FakeClock;
 use serde_json::{json, Map, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio_util::sync::CancellationToken;
 
 /// Answers from a queue and remembers what it was asked.
@@ -116,7 +116,7 @@ async fn fire(r: &HookRunner, dir: &Path, event: HookEvent, extra: Map<String, V
 
 #[tokio::test]
 async fn a_prompt_hook_sends_its_prompt_and_the_event_and_a_deny_blocks() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let t = fake(&[Ok("{\"decision\":\"deny\",\"reason\":\"that deletes the build\"}")], 200);
     let r = runner(dir.path(), &config("pre_tool_use", prompt_hook("Refuse anything that deletes", None)), Some(t.clone()));
     let fired = fire(&r, dir.path(), HookEvent::PreToolUse, tool_extra()).await;
@@ -133,7 +133,7 @@ async fn a_prompt_hook_sends_its_prompt_and_the_event_and_a_deny_blocks() {
 
 #[tokio::test]
 async fn a_prompt_hook_can_allow_or_ask() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let t = fake(&[Ok("{\"decision\":\"allow\"}"), Ok("```json\n{\"decision\":\"ask\",\"reason\":\"unsure\"}\n```")], 200);
     let r = runner(dir.path(), &config("pre_tool_use", prompt_hook("p", None)), Some(t));
     let allowed = fire(&r, dir.path(), HookEvent::PreToolUse, tool_extra()).await;
@@ -144,7 +144,7 @@ async fn a_prompt_hook_can_allow_or_ask() {
 
 #[tokio::test]
 async fn a_reply_off_the_schema_fails_closed_where_the_event_can_block() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     for bad in ["sure, go ahead", "{\"decision\":\"allow\",\"extra\":1}", "{\"decision\":\"maybe\"}"] {
         let t = fake(&[Ok(bad)], 200);
         let r = runner(dir.path(), &config("pre_tool_use", prompt_hook("p", None)), Some(t));
@@ -161,7 +161,7 @@ async fn a_reply_off_the_schema_fails_closed_where_the_event_can_block() {
 
 #[tokio::test]
 async fn without_a_transport_a_remote_hook_is_an_error_not_a_pass() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(dir.path(), &config("pre_tool_use", http_hook("https://hooks.example/x", None)), None);
     let fired = fire(&r, dir.path(), HookEvent::PreToolUse, tool_extra()).await;
     assert!(fired.block.unwrap().reason.contains("no model or network access"));
@@ -169,7 +169,7 @@ async fn without_a_transport_a_remote_hook_is_an_error_not_a_pass() {
 
 #[tokio::test]
 async fn an_http_hook_posts_the_stdin_json_and_reads_the_decision_from_the_answer() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let t = fake(&[Ok("{\"decision\":\"deny\",\"reason\":\"not on a Friday\"}")], 200);
     let r = runner(
         dir.path(),
@@ -191,7 +191,7 @@ async fn an_http_hook_posts_the_stdin_json_and_reads_the_decision_from_the_answe
 
 #[tokio::test]
 async fn an_http_hook_that_answers_nothing_or_updates_the_input_is_read_like_a_command() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let t = fake(&[Ok(""), Ok("{\"updated_input\":{\"command\":\"ls\"}}")], 204);
     let r = runner(dir.path(), &config("pre_tool_use", http_hook("https://h.example/", None)), Some(t));
     let none = fire(&r, dir.path(), HookEvent::PreToolUse, tool_extra()).await;
@@ -202,7 +202,7 @@ async fn an_http_hook_that_answers_nothing_or_updates_the_input_is_read_like_a_c
 
 #[tokio::test]
 async fn a_server_error_is_a_non_blocking_error_and_a_dead_server_blocks_a_blockable_event() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let t = fake(&[Ok("oops")], 500);
     let r = runner(dir.path(), &config("pre_tool_use", http_hook("https://h.example/", None)), Some(t));
     let fired = fire(&r, dir.path(), HookEvent::PreToolUse, tool_extra()).await;
@@ -218,7 +218,7 @@ async fn a_server_error_is_a_non_blocking_error_and_a_dead_server_blocks_a_block
 #[tokio::test]
 async fn remote_hooks_share_the_timeouts_of_command_hooks() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
 
     // Its own timeout, and fail closed on an event that can block.
     let t = fake(&[Ok("{\"decision\":\"allow\"}")], 200);

@@ -1,0 +1,11 @@
+{"account":"fake","agent":"guarded","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"msg":"UsageUpdate","run":"01M6Z6N6MMQR950SG5R3NAY3TB","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"event":"PreToolUse","exit_code":2,"message":"listing is off limits","msg":"HookFired","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"call":"00000000000000000000000001","content_len":43,"is_error":true,"ms":0,"msg":"ToolCallFinished","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"chunks":[{"k":"text","v":"The listing is off limits, so I read the readme instead."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6MMQR950SG5R3NAY3TB"}
+{"msg":"UsageUpdate","run":"01M6Z6N6MMQR950SG5R3NAY3TB","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"msg":"RunFinished","result":{"agent":"guarded","duration":{"nanos":12968555,"secs":0},"error":null,"run_id":"01M6Z6N6MMQR950SG5R3NAY3TB","status":"Completed","summary":"","summary_file":null,"summary_len":56,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6MMQR950SG5R3NAY3TB"}

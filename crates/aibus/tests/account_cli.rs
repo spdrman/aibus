@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use common::{aibus, command, ndjson, stderr};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 const KEY: &str = "sk-cli-0123456789abcdef";
 
@@ -33,7 +33,7 @@ fn any_file_holds(dir: &Path, needle: &str) -> bool {
 
 #[test]
 fn add_list_show_test_disable_enable_remove_with_a_key_from_the_environment() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
 
     let out = with_key(
@@ -79,7 +79,7 @@ fn add_list_show_test_disable_enable_remove_with_a_key_from_the_environment() {
 
 #[test]
 fn a_key_file_that_others_can_read_exits_4_with_the_chmod_hint() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let key = home.path().join("key");
     fs::write(&key, format!("{KEY}\n")).unwrap();
     fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
@@ -96,7 +96,7 @@ fn a_key_file_that_others_can_read_exits_4_with_the_chmod_hint() {
 
 #[test]
 fn an_unset_variable_is_exit_4_and_an_unknown_provider_exit_3() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let unset = aibus(h, &["account", "add", "w", "--provider", "fake", "--env", "NOT_SET_ANYWHERE"]);
     assert_eq!(unset.status.code(), Some(4));
@@ -106,7 +106,7 @@ fn an_unset_variable_is_exit_4_and_an_unknown_provider_exit_3() {
 
 #[test]
 fn run_uses_the_named_account_and_exits_4_when_its_key_is_missing() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     fs::create_dir_all(h.join(".config/aibus")).unwrap();
     fs::write(

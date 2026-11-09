@@ -1,17 +1,21 @@
 //! Fixtures, fake clock, TestBackend helpers and snapshot macros.
 #![forbid(unsafe_code)]
 
+pub mod replay;
+mod session;
 pub mod tui;
+
+pub use session::{big_session, xdg_temp, Xdg};
 
 use std::cell::RefCell;
 use std::io;
-use std::path::Path;
+
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::{AccountName, AuthMethodKind, Credential, Secret};
-use base64::Engine as _;
+
 
 /// Virtual time over `tokio::time::pause()`. Sleeps, timeouts and backoffs in the code under
 /// test finish as soon as every task is idle, and the clock jumps forward by exactly what
@@ -156,8 +160,8 @@ impl Drop for LogCapture {
         if !std::thread::panicking() {
             self.check();
         }
-        // Only clear the slot if it is still ours: a test that makes its own capture after a
-        // `TempDir` did replaces the slot, and the older one must not clear the newer.
+        // Only clear the slot if it is still ours: a test that makes its own capture after an
+        // `xdg_temp` did replaces the slot, and the older one must not clear the newer.
         ACTIVE.with(|a| {
             let mut slot = a.borrow_mut();
             if slot.as_ref().is_some_and(|s| Arc::ptr_eq(&s.buf, &self.buf)) {
@@ -165,6 +169,13 @@ impl Drop for LogCapture {
             }
         });
     }
+}
+
+/// `capture_logs()` unless one is already running on this thread; `xdg_temp` uses it so every
+/// test that makes a directory also checks its logs for the fake key.
+pub(crate) fn capture_unless_live() -> Option<LogCapture> {
+    let live = ACTIVE.with(|a| a.borrow().is_some());
+    (!live).then(capture_logs)
 }
 
 /// Panics if the fake key (or any key added with `LogCapture::forbid`) appears in what
@@ -183,99 +194,4 @@ pub fn assert_no_secret_logged() {
             );
         }
     });
-}
-
-/// Panics if a file under `root` holds the fake key, or a key added with `LogCapture::forbid`,
-/// as it is or in base64. Files that end in `.zst` are decompressed first, since that is how
-/// the session logs and message recordings are written. Symlinks are not followed.
-pub fn assert_no_secret_on_disk(root: &Path) {
-    let mut keys = vec![FAKE_KEY.to_owned()];
-    ACTIVE.with(|a| {
-        if let Some(active) = a.borrow().as_ref() {
-            keys.extend(active.forbidden.lock().unwrap().iter().cloned());
-        }
-    });
-    let needles: Vec<(String, Vec<u8>)> = keys
-        .iter()
-        .flat_map(|k| {
-            [
-                ("as it is", k.clone().into_bytes()),
-                ("in base64", base64::engine::general_purpose::STANDARD.encode(k).into_bytes()),
-            ]
-        })
-        .map(|(how, n)| (how.to_owned(), n))
-        .collect();
-    let mut todo = vec![root.to_path_buf()];
-    while let Some(dir) = todo.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for entry in entries.flatten() {
-            let Ok(kind) = entry.file_type() else { continue };
-            let path = entry.path();
-            if kind.is_dir() {
-                todo.push(path);
-                continue;
-            }
-            if !kind.is_file() || entry.metadata().is_ok_and(|m| m.len() > MAX_SCANNED) {
-                continue;
-            }
-            let Ok(raw) = std::fs::read(&path) else { continue };
-            let unpacked = path
-                .extension()
-                .is_some_and(|e| e == "zst")
-                .then(|| zstd::stream::decode_all(raw.as_slice()).unwrap_or_default());
-            for bytes in std::iter::once(&raw).chain(unpacked.as_ref()) {
-                for (how, needle) in &needles {
-                    assert!(
-                        !bytes.windows(needle.len()).any(|w| w == needle.as_slice()),
-                        "{} holds a secret {how}",
-                        path.display()
-                    );
-                }
-            }
-        }
-    }
-}
-
-/// Files bigger than this are not read by `assert_no_secret_on_disk`.
-const MAX_SCANNED: u64 = 32 * 1024 * 1024;
-
-/// A drop-in for `tempfile::TempDir` that the integration tests use for their temp project,
-/// home and XDG trees. When it is dropped (and the test has not already failed) it greps the
-/// whole tree for the fake key (`assert_no_secret_on_disk`), and it holds a `capture_logs()` for
-/// the test unless one is already running, so every test that makes a directory also checks
-/// that nothing it logged held the key (10 section 4).
-pub struct TempDir {
-    inner: tempfile::TempDir,
-    _logs: Option<LogCapture>,
-}
-
-impl TempDir {
-    pub fn new() -> io::Result<Self> {
-        let live = ACTIVE.with(|a| a.borrow().is_some());
-        Ok(Self {
-            inner: tempfile::TempDir::new()?,
-            _logs: (!live).then(capture_logs),
-        })
-    }
-}
-
-impl std::ops::Deref for TempDir {
-    type Target = tempfile::TempDir;
-    fn deref(&self) -> &tempfile::TempDir {
-        &self.inner
-    }
-}
-
-impl AsRef<Path> for TempDir {
-    fn as_ref(&self) -> &Path {
-        self.inner.path()
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        if !std::thread::panicking() {
-            assert_no_secret_on_disk(self.inner.path());
-        }
-    }
 }

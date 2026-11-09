@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use aibus_core::replay::replay_hash;
 use common::{aibus, command, ndjson, stderr};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 
@@ -21,7 +21,7 @@ fn mode(p: &Path) -> u32 {
 
 #[test]
 fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     fs::create_dir_all(home.path().join("proj")).unwrap();
     fs::write(home.path().join("proj/README.md"), "hello").unwrap();
     let rec = home.path().join("rec");
@@ -90,7 +90,7 @@ fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
 
 #[test]
 fn bad_usage_exits_2() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     assert_eq!(aibus(h, &["run"]).status.code(), Some(2));
     assert_eq!(aibus(h, &["run", "--json", "--agent", "nope", "hi"]).status.code(), Some(3), "an unknown agent is a config error");
@@ -106,7 +106,7 @@ fn bad_usage_exits_2() {
 
 #[test]
 fn a_failing_provider_exits_5_and_says_so_on_the_last_line() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let script = home.path().join("fail.ron");
     fs::write(&script, r#"[Error((kind: Server, retryable: false, message: "down"))]"#).unwrap();
     let out = aibus(
@@ -128,7 +128,7 @@ fn user_config(home: &Path, text: &str) {
 
 #[test]
 fn configured_hooks_run_for_the_session_and_a_block_reaches_the_tool_result() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     user_config(
         home.path(),
         r#"[hooks]
@@ -162,7 +162,7 @@ session_end = [{ command = "touch ../ended" }]
 
 #[test]
 fn no_hooks_warns_and_nothing_runs() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     user_config(home.path(), "[hooks]\nsession_start = [{ command = \"touch ../hooked\" }]\n");
     let out = aibus(home.path(), &["run", "--json", "--no-hooks", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -178,7 +178,7 @@ fn no_hooks_warns_and_nothing_runs() {
 fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_is_gone() {
     let script = r#"[ToolCall(name: "bash", input: {"command": "printf %s \"$MY_TOKEN\" > passed.txt"}), Stop(ToolUse), Text("done")]"#;
     for (config, want) in [("[hooks]\npass_env = [\"MY_TOKEN\"]\n", "hunter2-hunter2"), ("", "")] {
-        let home = TempDir::new().unwrap();
+        let home = xdg_temp();
         user_config(home.path(), config);
         let script_path = home.path().join("bash.ron");
         fs::write(&script_path, script).unwrap();
@@ -198,7 +198,7 @@ fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_
 #[test]
 fn the_prompt_can_come_from_stdin() {
     for args in [vec!["run", "--json", "--agent", "explore"], vec!["run", "--json", "--agent", "explore", "-"]] {
-        let home = TempDir::new().unwrap();
+        let home = xdg_temp();
         let mut child = command(home.path())
             .args(&args)
             .stdin(Stdio::piped())
@@ -215,7 +215,7 @@ fn the_prompt_can_come_from_stdin() {
 
 #[test]
 fn sessions_land_under_the_xdg_state_dir_with_private_modes() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let id = ndjson(&out).last().unwrap()["session"].as_str().unwrap().to_owned();
@@ -236,7 +236,7 @@ fn sessions_land_under_the_xdg_state_dir_with_private_modes() {
 
 #[test]
 fn every_xdg_variable_moves_its_directory() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let x = |n: &str| home.path().join("x").join(n);
     let out = command(home.path())
         .env("XDG_STATE_HOME", x("state"))
@@ -254,7 +254,7 @@ fn every_xdg_variable_moves_its_directory() {
 
 #[test]
 fn the_log_file_is_private_and_holds_no_credential() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["-vv", "run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let log = home.path().join(".local/state/aibus/logs/aibus.log");
@@ -269,7 +269,7 @@ fn the_log_file_is_private_and_holds_no_credential() {
 
 #[test]
 fn user_scope_memory_comes_from_the_xdg_data_dir() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let data = home.path().join("d");
     let config = home.path().join("c");
     fs::create_dir_all(config.join("aibus/agents")).unwrap();
@@ -299,7 +299,7 @@ fn user_scope_memory_comes_from_the_xdg_data_dir() {
 
 #[test]
 fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let cfg = home.path().join("elsewhere.toml");
     fs::write(&cfg, "[defaults]\nmodel = \"tiny\"\n[models]\ntiny = \"fake-small\"\n").unwrap();
     let out = command(home.path())
@@ -323,7 +323,7 @@ fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
 
 #[test]
 fn a_bad_config_exits_3_with_the_line_and_unknown_keys_only_warn() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let cfg = home.path().join("c.toml");
     fs::write(&cfg, "[limits]\nmax_turns = \"many\"\n").unwrap();
     let out = command(home.path())
@@ -373,7 +373,7 @@ fn signal(child: &std::process::Child, sig: &str) {
 
 #[test]
 fn sigint_cancels_the_run_and_exits_7() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let began = Instant::now();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-INT");
@@ -389,7 +389,7 @@ fn sigint_cancels_the_run_and_exits_7() {
 
 #[test]
 fn a_second_sigint_within_two_seconds_forces_the_quit() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-INT");
     signal(&child, "-INT");
@@ -400,7 +400,7 @@ fn a_second_sigint_within_two_seconds_forces_the_quit() {
 
 #[test]
 fn sigterm_is_a_graceful_stop_too() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-TERM");
     let mut rest = String::new();

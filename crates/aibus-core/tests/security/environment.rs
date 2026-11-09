@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use aibus_core::config::{Hook, Hooks};
 use aibus_core::tools::Bash;
 use aibus_core::*;
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 use serde_json::{json, Map};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -55,7 +55,7 @@ fn assert_scrubbed(env: &str, who: &str) {
 
 #[tokio::test]
 async fn a_hook_and_a_bash_call_both_start_from_the_scrubbed_environment() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let pass = vec!["PASSED_TOKEN".to_owned()];
 
     let hooks = Hooks {
@@ -95,7 +95,7 @@ async fn a_hook_and_a_bash_call_both_start_from_the_scrubbed_environment() {
 
 #[tokio::test]
 async fn without_pass_env_the_listed_name_is_scrubbed_too() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let bash = Bash::new(20, vec![], host(), dir.path().to_path_buf(), "s".into());
     let cx = ToolCx {
         run: RunId::new(),

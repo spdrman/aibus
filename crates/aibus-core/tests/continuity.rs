@@ -9,12 +9,12 @@ use aibus_core::continuity::handoff::Handoff;
 use aibus_core::continuity::{ledger, Layout};
 use aibus_core::*;
 use serde_json::{json, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 struct Rig {
-    dir: TempDir,
+    dir: Xdg,
     layout: Layout,
     redactor: Redactor,
     rx: mpsc::Receiver<Msg>,
@@ -22,7 +22,7 @@ struct Rig {
 }
 
 fn rig() -> Rig {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let project = dir.path().join("proj");
     fs::create_dir_all(&project).unwrap();
     let layout = Layout::new(&project, &Config::default(), &dir.path().join("data"), Some("auth")).unwrap();

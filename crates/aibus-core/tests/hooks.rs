@@ -9,7 +9,7 @@ use aibus_core::config::{Hook, Hooks};
 use aibus_core::*;
 use aibus_testkit::FakeClock;
 use serde_json::{json, Map, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio_util::sync::CancellationToken;
 
 fn path_env() -> Vec<(String, String)> {
@@ -35,7 +35,7 @@ fn config(events: &[(&str, Vec<Hook>)]) -> Hooks {
     }
 }
 
-fn runner(dir: &TempDir, hooks: &Hooks) -> HookRunner {
+fn runner(dir: &Xdg, hooks: &Hooks) -> HookRunner {
     HookRunner::new(
         hooks,
         path_env(),
@@ -92,7 +92,7 @@ fn spec(matcher: Option<&str>, command: &str) -> HookSpec {
 
 #[tokio::test]
 async fn stdin_carries_every_common_field_and_the_event_extras() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(&dir, &config(&[("pre_tool_use", vec![hook(None, "cat > stdin.json", None)])]));
     let i = input(
         HookEvent::PreToolUse,
@@ -123,7 +123,7 @@ async fn stdin_carries_every_common_field_and_the_event_extras() {
 
 #[tokio::test]
 async fn all_eleven_events_fire_with_their_own_name() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let cmd = "cat >> seen.jsonl; echo >> seen.jsonl";
     let events: Vec<(&str, Vec<Hook>)> = HookEvent::ALL
         .iter()
@@ -164,7 +164,7 @@ async fn only_blocking_events_can_block() {
 
 #[tokio::test]
 async fn a_matcher_picks_the_tools_it_names() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(
         &dir,
         &config(&[(
@@ -186,7 +186,7 @@ async fn a_matcher_picks_the_tools_it_names() {
 
 #[tokio::test]
 async fn exit_zero_json_gives_the_verdict_and_the_updated_input() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let cases: [(&str, bool, bool, Option<&str>); 4] = [
         (r#"echo '{"decision":"deny","reason":"no psql"}'"#, true, false, None),
         (r#"echo '{"decision":"ask","reason":"hm"}'"#, false, true, None),
@@ -224,7 +224,7 @@ async fn exit_zero_json_gives_the_verdict_and_the_updated_input() {
 
 #[tokio::test]
 async fn updated_input_reaches_the_next_hook_of_the_event() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(
         &dir,
         &config(&[(
@@ -246,7 +246,7 @@ async fn updated_input_reaches_the_next_hook_of_the_event() {
 
 #[tokio::test]
 async fn plain_stdout_is_context_only_on_user_prompt_submit_and_session_start() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     for (event, kept) in [
         (HookEvent::UserPromptSubmit, true),
         (HookEvent::SessionStart, true),
@@ -262,7 +262,7 @@ async fn plain_stdout_is_context_only_on_user_prompt_submit_and_session_start() 
 
 #[tokio::test]
 async fn exit_two_blocks_with_stderr_where_it_can_and_is_a_note_where_it_cannot() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(
         &dir,
         &config(&[
@@ -284,7 +284,7 @@ async fn exit_two_blocks_with_stderr_where_it_can_and_is_a_note_where_it_cannot(
 
 #[tokio::test]
 async fn any_other_exit_code_is_a_hook_error_and_the_action_goes_on() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(&dir, &config(&[("pre_tool_use", vec![hook(None, "false", None)])]));
     let f = fire(&r, &input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, Map::new())).await;
     assert!(f.block.is_none());
@@ -344,7 +344,7 @@ async fn given_up_at(clock: &FakeClock, r: &HookRunner, i: &HookInput<'_>, secs:
 #[tokio::test]
 async fn a_timeout_blocks_a_blocking_event_and_is_an_error_for_the_rest() {
     let clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(
         &dir,
         &config(&[
@@ -366,7 +366,7 @@ async fn a_timeout_blocks_a_blocking_event_and_is_an_error_for_the_rest() {
 #[tokio::test]
 async fn the_default_is_sixty_seconds_and_user_prompt_submit_is_capped_at_ten() {
     let clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(
         &dir,
         &config(&[
@@ -384,7 +384,7 @@ async fn the_default_is_sixty_seconds_and_user_prompt_submit_is_capped_at_ten() 
 
 #[tokio::test]
 async fn hooks_run_in_the_project_root_with_a_scrubbed_environment() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let mut env = path_env();
     env.extend([
         ("OPENAI_API_KEY".into(), "sk-live".into()),
@@ -401,7 +401,7 @@ async fn hooks_run_in_the_project_root_with_a_scrubbed_environment() {
     };
     let r = HookRunner::new(&hooks, env, dir.path().to_path_buf(), "01SESSION".into(), None, None);
     // The run's own directory (a worktree, say) is not where hooks start.
-    let elsewhere = TempDir::new().unwrap();
+    let elsewhere = xdg_temp();
     let i = input(HookEvent::PreToolUse, Some("bash"), elsewhere.path(), Role::Lead, Map::new());
     fire(&r, &i).await;
 
@@ -421,7 +421,7 @@ async fn hooks_run_in_the_project_root_with_a_scrubbed_environment() {
 
 #[tokio::test]
 async fn output_is_capped_at_one_mebibyte_and_logged_under_logs_hooks() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(
         &dir,
         &config(&[("post_tool_use", vec![hook(None, "head -c 3145728 /dev/zero | tr '\\0' a", None)])]),
@@ -444,7 +444,7 @@ async fn output_is_capped_at_one_mebibyte_and_logged_under_logs_hooks() {
 
 #[tokio::test]
 async fn secrets_are_masked_in_the_log_and_in_what_goes_back_to_the_model() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let redactor = Redactor::new();
     let secret = "sk-ant-0123456789abcdefSECRET";
     redactor.register(&AccountName("work".into()), secret);
@@ -471,7 +471,7 @@ async fn secrets_are_masked_in_the_log_and_in_what_goes_back_to_the_model() {
 
 #[tokio::test]
 async fn a_definitions_hooks_run_only_when_the_call_brings_them() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(&dir, &Hooks::default());
     let mut scoped = HookSet::new();
     scoped.insert("pre_tool_use".into(), vec![spec(Some("bash"), "echo mine > scoped.txt")]);
@@ -486,7 +486,7 @@ async fn a_definitions_hooks_run_only_when_the_call_brings_them() {
 
 #[tokio::test]
 async fn a_workers_stop_is_delivered_as_subagent_stop_and_a_leads_is_not() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = runner(&dir, &Hooks::default());
     let mut scoped = HookSet::new();
     scoped.insert("stop".into(), vec![spec(None, "echo halt >&2; exit 2")]);
@@ -502,7 +502,7 @@ async fn a_workers_stop_is_delivered_as_subagent_stop_and_a_leads_is_not() {
 
 #[tokio::test]
 async fn the_default_runner_runs_nothing_which_is_what_no_hooks_gives() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let r = HookRunner::default();
     let mut scoped = HookSet::new();
     scoped.insert("pre_tool_use".into(), vec![spec(None, "echo x > ran.txt")]);
@@ -514,7 +514,7 @@ async fn the_default_runner_runs_nothing_which_is_what_no_hooks_gives() {
 
 #[test]
 fn config_names_only_real_events_and_reads_pass_env() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let file = dir.path().join("config.toml");
     std::fs::write(
         &file,

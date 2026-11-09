@@ -355,6 +355,10 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         }
         let hash = replay_hash(&recorded).map_err(AibusError::Usage)?;
         write_private(dir.join("snapshot.hash"), format!("{hash}\n"))?;
+        let views = aibus_tui::replay_views(aibus_graph::mini::MiniGraph::new(), &recorded)
+            .map_err(AibusError::Usage)?;
+        let views = serde_json::to_string_pretty(&views).expect("views serialise");
+        write_private(dir.join("views.json"), format!("{views}\n"))?;
     }
     Ok(())
 }

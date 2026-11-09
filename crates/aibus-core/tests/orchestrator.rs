@@ -14,7 +14,7 @@ use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::*;
 use aibus_graph::Graph;
 use common::*;
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 
 fn wired() -> (A, Rc<RefCell<Vec<Effect>>>) {
     let mut a = app();
@@ -399,8 +399,8 @@ fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
 
 // ---- the schema ---------------------------------------------------------------------------
 
-fn defs_with_reviewer() -> (TempDir, Vec<AgentDef>) {
-    let dir = TempDir::new().unwrap();
+fn defs_with_reviewer() -> (Xdg, Vec<AgentDef>) {
+    let dir = xdg_temp();
     let agents = dir.path().join(".aibus/agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(

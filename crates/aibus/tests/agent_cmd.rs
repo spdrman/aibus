@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use common::{aibus, command, stderr};
 use serde_json::Value;
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 
 fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -34,7 +34,7 @@ fn write(path: &Path, text: &str) {
 
 #[test]
 fn list_shows_the_nine_built_ins_with_the_json_shape() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["agent", "list", "--json"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let rows = json(&out);
@@ -63,7 +63,7 @@ fn list_shows_the_nine_built_ins_with_the_json_shape() {
 
 #[test]
 fn list_follows_the_precedence_and_names_is_one_per_line() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let p = proj(home.path());
     write(
         &p.join(".aibus/agents/explore.md"),
@@ -93,7 +93,7 @@ fn list_follows_the_precedence_and_names_is_one_per_line() {
 
 #[test]
 fn list_includes_cli_definitions_first() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(
         home.path(),
         &["--agents", r#"{"reviewer":{"description":"d","prompt":"p"}}"#, "agent", "list", "--names"],
@@ -103,7 +103,7 @@ fn list_includes_cli_definitions_first() {
 
 #[test]
 fn show_prints_a_built_in_as_a_file_you_can_copy_and_as_json() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["agent", "show", "explore"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
@@ -130,7 +130,7 @@ fn show_prints_a_built_in_as_a_file_you_can_copy_and_as_json() {
 
 #[test]
 fn show_of_an_unknown_or_malformed_name_is_a_usage_error() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     for name in ["nobody", "Bad:Name"] {
         let out = aibus(home.path(), &["agent", "show", name]);
         assert_eq!(out.status.code(), Some(2), "{name}");
@@ -140,7 +140,7 @@ fn show_of_an_unknown_or_malformed_name_is_a_usage_error() {
 
 #[test]
 fn new_writes_a_template_in_the_project_and_refuses_to_overwrite() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let p = proj(home.path());
     // No terminal here, so no editor is started even with one set.
     let out = command(home.path())
@@ -167,7 +167,7 @@ fn new_writes_a_template_in_the_project_and_refuses_to_overwrite() {
 
 #[test]
 fn new_without_a_project_goes_to_the_user_scope() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     // `proj` exists (the working directory) but has neither `.aibus` nor `.git`, and the
     // temp dir above it has none either.
     let out = aibus(home.path(), &["agent", "new", "solo"]);
@@ -177,7 +177,7 @@ fn new_without_a_project_goes_to_the_user_scope() {
 
 #[test]
 fn where_lists_the_directories_in_precedence_order() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let p = proj(home.path());
     write(
         &p.join(".aibus/settings.toml"),
@@ -201,7 +201,7 @@ fn where_lists_the_directories_in_precedence_order() {
 
 #[test]
 fn extra_dirs_load_without_hooks_and_the_warning_goes_to_stderr() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let p = proj(home.path());
     write(&p.join(".aibus/settings.toml"), "[agents]\nextra_dirs = [\".claude/agents\"]\n");
     write(
@@ -218,9 +218,9 @@ fn extra_dirs_load_without_hooks_and_the_warning_goes_to_stderr() {
 }
 
 #[cfg(unix)]
-fn corpus_home(accounts: &str) -> TempDir {
+fn corpus_home(accounts: &str) -> Xdg {
     use std::os::unix::fs::PermissionsExt;
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let p = proj(home.path());
     let corpus = p.join("corpus");
     for dir in ["valid", "invalid", "warnings", "semantic"] {
@@ -283,7 +283,7 @@ fn validate_on_the_fixture_corpus_matches_the_expected_output() {
 
 #[test]
 fn validate_with_no_path_checks_every_scope_and_exits_12_on_errors() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let p = proj(home.path());
     let out = aibus(home.path(), &["agent", "validate", "--json"]);
     assert_eq!(out.status.code(), Some(0));

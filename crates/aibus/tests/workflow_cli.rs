@@ -9,7 +9,7 @@ use std::process::Output;
 
 use common::{aibus, command, ndjson, stderr};
 use serde_json::{json, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -47,7 +47,7 @@ const CHAIN: &str = r#"[
 
 #[test]
 fn init_installs_the_four_example_workflows_and_leaves_existing_files_alone() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let out = ok(h, &["init"]);
     assert_eq!(stdout(&out).lines().count(), 4, "{}", stdout(&out));
@@ -66,7 +66,7 @@ fn init_installs_the_four_example_workflows_and_leaves_existing_files_alone() {
 
 #[test]
 fn workflow_list_describes_each_chain_and_names_a_broken_one() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     ok(h, &["init"]);
     fs::write(proj(h).join(".aibus/workflows/broken.toml"), "[[step]]\nagent = \"x\"\nprompt = \"{{nope}}\"\n").unwrap();
@@ -85,7 +85,7 @@ fn workflow_list_describes_each_chain_and_names_a_broken_one() {
 
 #[test]
 fn slash_fix_runs_the_chain_with_its_gate_and_the_lead_reports_it() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     ok(h, &["init"]);
     let out = run(h, CHAIN, &["/fix login fails silently"]);
@@ -103,7 +103,7 @@ fn slash_fix_runs_the_chain_with_its_gate_and_the_lead_reports_it() {
 
 #[test]
 fn a_gate_that_blocks_ends_the_chain_early() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     ok(h, &["init"]);
     let script = r#"[
@@ -121,7 +121,7 @@ fn a_gate_that_blocks_ends_the_chain_early() {
 
 #[test]
 fn workflow_run_is_run_with_the_workflow_flag() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     ok(h, &["init"]);
     let file = h.join("s.ron");
@@ -137,7 +137,7 @@ fn workflow_run_is_run_with_the_workflow_flag() {
 
 #[test]
 fn an_unknown_workflow_is_a_usage_error() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["run", "--workflow", "nope", "hi"]);
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     assert!(stderr(&out).contains("no workflow named nope"), "{}", stderr(&out));
@@ -145,7 +145,7 @@ fn an_unknown_workflow_is_a_usage_error() {
 
 #[test]
 fn a_trigger_hint_reaches_the_lead_and_nothing_is_delegated() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     fs::create_dir_all(proj(h).join(".aibus")).unwrap();
     fs::write(
@@ -172,7 +172,7 @@ fn a_trigger_hint_reaches_the_lead_and_nothing_is_delegated() {
 
 #[test]
 fn agent_import_prints_every_hook_and_writes_them_disabled() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let theirs = proj(h).join(".claude/agents");
     fs::create_dir_all(&theirs).unwrap();
@@ -211,7 +211,7 @@ fn agent_import_prints_every_hook_and_writes_them_disabled() {
 
 #[test]
 fn an_mcp_server_in_the_config_gives_the_lead_its_tools() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     let server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mcp/server.sh");
     fs::create_dir_all(proj(h).join(".aibus")).unwrap();
@@ -243,7 +243,7 @@ fn an_mcp_server_in_the_config_gives_the_lead_its_tools() {
 
 #[test]
 fn a_server_that_is_not_there_is_a_warning_and_the_session_goes_on() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     fs::create_dir_all(proj(h).join(".aibus")).unwrap();
     fs::write(proj(h).join(".aibus/settings.toml"), "[mcp.ghost]\ncommand = \"/no/such/program\"\n").unwrap();

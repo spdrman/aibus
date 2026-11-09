@@ -1,0 +1,5 @@
+[
+    Text("I will write a note."),
+    ToolCall(name: "write", input: {"path": "notes.txt", "content": "hello"}), Stop(ToolUse),
+    Text("The write was refused, so I stopped."),
+]

@@ -5,7 +5,7 @@ mod common;
 use std::fs;
 
 use common::{aibus, command, stderr};
-use aibus_testkit::TempDir;
+use aibus_testkit::xdg_temp;
 
 const KEY_MSG: &str = "credentials do not go in config; run: aibus account add <name> --key-stdin";
 
@@ -15,7 +15,7 @@ fn stdout(out: &std::process::Output) -> String {
 
 #[test]
 fn version_prints_and_exits_0() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["version"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(stdout(&out), format!("aibus {}\n", env!("CARGO_PKG_VERSION")));
@@ -25,7 +25,7 @@ fn version_prints_and_exits_0() {
 
 #[test]
 fn help_lists_every_top_level_command() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["--help"]);
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
@@ -39,14 +39,14 @@ fn help_lists_every_top_level_command() {
 
 #[test]
 fn an_unknown_subcommand_or_flag_is_a_usage_error() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     assert_eq!(aibus(home.path(), &["frobnicate", "--x"]).status.code(), Some(2));
     assert_eq!(aibus(home.path(), &["--no-such-flag", "version"]).status.code(), Some(2));
 }
 
 #[test]
 fn config_path_shows_both_files_and_honours_the_overrides() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["config", "path"]);
     let h = home.path().display();
     assert_eq!(
@@ -69,7 +69,7 @@ fn config_path_shows_both_files_and_honours_the_overrides() {
 
 #[test]
 fn config_init_writes_defaults_once_and_validate_and_show_agree() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     assert_eq!(aibus(h, &["config", "init"]).status.code(), Some(0));
     let file = h.join(".config/aibus/config.toml");
@@ -93,7 +93,7 @@ fn config_init_writes_defaults_once_and_validate_and_show_agree() {
 
 #[test]
 fn an_empty_config_is_valid_and_project_settings_override_it() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     fs::create_dir_all(h.join(".config/aibus")).unwrap();
     fs::write(h.join(".config/aibus/config.toml"), "").unwrap();
@@ -119,7 +119,7 @@ fn an_empty_config_is_valid_and_project_settings_override_it() {
 
 #[test]
 fn validate_exits_3_with_path_and_line_and_the_exact_key_message() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let h = home.path();
     fs::create_dir_all(h.join(".config/aibus")).unwrap();
     let file = h.join(".config/aibus/config.toml");

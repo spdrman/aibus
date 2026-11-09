@@ -19,7 +19,7 @@ use aibus_provider::{ContentBlock, MessageRole, StopReason};
 use aibus_testkit::fake_credential;
 use common::{app, A};
 use serde_json::{json, Value};
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {
@@ -34,7 +34,7 @@ fn script(texts: &[&str]) -> Script {
 }
 
 fn defs() -> BTreeMap<AgentName, AgentDef> {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     found
         .agents
@@ -116,7 +116,7 @@ struct Rig {
     rx: mpsc::Receiver<Msg>,
     orch: Arc<Orchestrator>,
     launcher: Arc<ChainLauncher>,
-    dir: TempDir,
+    dir: Xdg,
     lead: RunId,
     lead_fake: Arc<FakeProvider>,
 }
@@ -130,7 +130,7 @@ impl Rig {
         workflows: &[(&str, &str)],
         triggers: Option<&str>,
     ) -> Self {
-        let dir = TempDir::new().unwrap();
+        let dir = xdg_temp();
         std::fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
         let wf_dir = dir.path().join(".aibus/workflows");
         std::fs::create_dir_all(&wf_dir).unwrap();

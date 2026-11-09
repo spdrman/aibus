@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 use aibus_core::config::SandboxKind;
 use aibus_core::tools::Bash;
 use aibus_core::*;
-use aibus_testkit::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -37,12 +37,12 @@ fn usable() -> Option<SandboxKind> {
 }
 
 struct World {
-    base: TempDir,
+    base: Xdg,
 }
 
 impl World {
     fn new() -> Self {
-        let base = TempDir::new().unwrap();
+        let base = xdg_temp();
         for d in ["home/.config/aibus", "proj", "tmp"] {
             std::fs::create_dir_all(base.path().join(d)).unwrap();
         }

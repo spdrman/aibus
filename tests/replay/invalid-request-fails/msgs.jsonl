@@ -1,0 +1,3 @@
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N6B2VV0D78ED62QAWA2Q"}
+{"error":{"kind":"Provider","message":"run ended early: bad schema","retryable":false},"msg":"RunFailed","run":"01M6Z6N6B2VV0D78ED62QAWA2Q"}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":1820338,"secs":0},"error":{"kind":"Provider","message":"run ended early: bad schema","retryable":false},"run_id":"01M6Z6N6B2VV0D78ED62QAWA2Q","status":"Failed","summary":"","summary_file":null,"summary_len":0,"turns":0,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6B2VV0D78ED62QAWA2Q"}

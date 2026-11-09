@@ -26,6 +26,7 @@ causl-engine-core = { git = "https://git.opsite.ca/causl/causl-core-rs.git", rev
 [dev-dependencies]
 aibus-core = { path = "../aibus-core" }
 aibus-provider = { path = "../aibus-provider" }
+aibus-testkit = { path = "../aibus-testkit" }
 proptest = { version = "1", default-features = false, features = ["std"] }
 serde_json = "1"
 

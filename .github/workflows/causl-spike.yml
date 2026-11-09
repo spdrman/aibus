@@ -4,9 +4,24 @@ name: causl-spike
 # conformance suite on it and repeat the A1.3 stream-commit measurement next to mini.
 # Manual only. The private source (git.opsite.ca) is fetched in exactly one step, which is the
 # only step that sees the secret; every later step builds offline from the cargo cache.
+#
+# C2.4 adds the `causl-differential` job (the D-02 gate): conformance, the differential replay
+# over every fixture and the side-by-side commit_stream bench, with a distinct
+# "skipped: causl-engine-core unavailable" status when the source cannot be fetched. Pick which
+# job runs with the `which` input (default: only the differential).
 
 on:
   workflow_dispatch:
+    inputs:
+      which:
+        description: "Which job to run"
+        type: choice
+        options: [differential, spike, both]
+        default: differential
+      refresh_lock:
+        description: "causl-differential: resolve without --locked and upload the new Cargo.lock"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,6 +32,7 @@ env:
 
 jobs:
   causl:
+    if: inputs.which != 'differential'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -161,5 +177,163 @@ jobs:
         if: always()
         with:
           name: causl-spike-results
+          path: results/
+          if-no-files-found: warn
+
+  # C2.4: the D-02 gate. Conformance on causl, the differential over every fixture (byte-identical
+  # snapshots, identical commit intents, the recorded hash and view: nodes on causl) and the
+  # commit_stream bench for both backends in one run.
+  causl-differential:
+    if: inputs.which != 'spike'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Toolchains
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          rustup toolchain install 1.99.1 --profile minimal --component clippy
+          rustup default 1.85.0
+          mkdir -p results
+
+      # The only step with the secret, same shape as the spike job's. It fails when the secret is
+      # empty or the remote refuses it; `continue-on-error` lets the job end with the explicit
+      # "skipped" status below instead of a red run that looks like a test failure.
+      - name: Fetch the private source
+        id: fetch
+        continue-on-error: true
+        env:
+          CAUSL_CI_BUILD_1: ${{ secrets.CAUSL_CI_BUILD_1 }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          GIT_TERMINAL_PROMPT: "0"
+          REFRESH_LOCK: ${{ inputs.refresh_lock }}
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: |
+          set +x
+          host=https://git.opsite.ca
+          remote=$host/causl/causl-core-rs.git
+          if [ -z "$CAUSL_CI_BUILD_1" ]; then
+            echo "CAUSL_CI_BUILD_1 is empty (secret missing or not exposed to this run)"
+            exit 1
+          fi
+          case $CAUSL_CI_BUILD_1 in
+            *:*) basic_src=$CAUSL_CI_BUILD_1 ;;
+            *) basic_src="x-access-token:$CAUSL_CI_BUILD_1" ;;
+          esac
+          basic=$(printf '%s' "$basic_src" | base64 | tr -d '\n')
+          echo "::add-mask::$basic"
+          code=$(printf 'header = "Authorization: Basic %s"\n' "$basic" | curl -sS -o /dev/null -w '%{http_code}' -K - \
+            "$remote/info/refs?service=git-upload-pack" || true)
+          echo "remote answered HTTP $code"
+          if [ "$code" != 200 ]; then
+            echo "the remote did not accept the credential"
+            exit 1
+          fi
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.$host/.extraheader"
+          export GIT_CONFIG_VALUE_0="Authorization: Basic $basic"
+          if [ "$REFRESH_LOCK" = true ]; then
+            cargo fetch --manifest-path "$CAUSL_MANIFEST"
+          else
+            cargo fetch --locked --manifest-path "$CAUSL_MANIFEST"
+          fi
+          echo "fetched"
+
+      - name: Resolved source
+        if: steps.fetch.outcome == 'success'
+        run: |
+          {
+            echo "remote: https://git.opsite.ca/causl/causl-core-rs.git (private, needs CAUSL_CI_BUILD_1)"
+            grep -A3 'name = "causl-engine-core"' crates/aibus-graph-causl/Cargo.lock
+            rustc --version
+          } | tee results/source.txt
+
+      - name: Conformance suite on causl
+        if: steps.fetch.outcome == 'success'
+        run: |
+          set -o pipefail
+          cargo test --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs --test causl 2>&1 | tee results/conformance.txt
+
+      - name: Differential replay over every fixture
+        if: steps.fetch.outcome == 'success' && !cancelled()
+        run: |
+          set -o pipefail
+          cargo test --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs --test differential 2>&1 | tee results/differential.txt
+
+      - name: commit_stream on mini and causl side by side
+        if: steps.fetch.outcome == 'success' && !cancelled()
+        run: |
+          set -o pipefail
+          cargo bench --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs --bench commit_stream 2>&1 | tee results/bench.txt
+
+      - name: Clippy on 1.99.1
+        if: steps.fetch.outcome == 'success' && !cancelled()
+        run: |
+          set -o pipefail
+          RUSTFLAGS="-D warnings" cargo +1.99.1 clippy --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs --all-targets -- -D warnings 2>&1 | tee results/clippy.txt
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        if: steps.fetch.outcome == 'success' && !cancelled()
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny on the causl crate
+        if: steps.fetch.outcome == 'success' && !cancelled()
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          set -o pipefail
+          cargo deny --config crates/aibus-graph-causl/deny.toml --manifest-path "$CAUSL_MANIFEST" check 2>&1 | tee results/deny.txt
+
+      - name: Keep the resolved lockfile
+        if: inputs.refresh_lock && steps.fetch.outcome == 'success'
+        run: cp crates/aibus-graph-causl/Cargo.lock results/Cargo.lock
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.fetch.outcome }}" != success ]; then
+            echo "::warning::skipped: causl-engine-core unavailable"
+          fi
+          {
+            echo "## causl-differential"
+            echo
+            if [ "${{ steps.fetch.outcome }}" != success ]; then
+              echo "**skipped: causl-engine-core unavailable** (the fetch step failed or the secret is not exposed; nothing below ran, and this is not a pass)"
+            else
+              echo '```'
+              cat results/source.txt 2>/dev/null || true
+              echo '```'
+              echo
+              echo "### Conformance (A1.2) on causl"
+              echo '```'
+              grep -E '^test |^test result' results/conformance.txt 2>/dev/null || echo "no result"
+              echo '```'
+              echo
+              echo "### Differential replay, mini against causl"
+              echo '```'
+              grep -E '^test |^test result' results/differential.txt 2>/dev/null || echo "no result"
+              echo '```'
+              echo
+              echo "### commit_stream, mini and causl"
+              echo '```'
+              grep -E '^(backend|side_by_side|stream_commit)' results/bench.txt 2>/dev/null || echo "no result"
+              echo '```'
+              echo
+              echo "### Clippy 1.99.1 and cargo deny"
+              echo '```'
+              tail -n 3 results/clippy.txt 2>/dev/null || echo "clippy did not run"
+              tail -n 3 results/deny.txt 2>/dev/null || echo "deny did not run"
+              echo '```'
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY" > results/summary.md
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: causl-differential-results
           path: results/
           if-no-files-found: warn

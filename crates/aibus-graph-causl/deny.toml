@@ -17,12 +17,6 @@ ignore = [
 [licenses]
 version = 2
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
-# Same exceptions as the root deny.toml (the test kit pulls in aibus-core and aibus-tui).
-exceptions = [
-    { crate = "notify", allow = ["CC0-1.0"] },
-    { crate = "clipboard-win", allow = ["BSL-1.0"] },
-    { crate = "error-code", allow = ["BSL-1.0"] },
-]
 
 [bans]
 multiple-versions = "warn"

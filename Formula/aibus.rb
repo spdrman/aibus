@@ -1,34 +1,35 @@
-# Template for the Homebrew tap formula (docs/RELEASE.md, "Homebrew and crates.io").
-#
-# The tap repository (spdrman/homebrew-aibus) is created by the owner, not from here. After a tag,
-# copy this file to Formula/aibus.rb in the tap, set `version`, and replace each PLACEHOLDER_*
-# checksum with the matching line of the release's SHA256SUMS. Nothing in this file has been
-# installed on a clean machine yet.
+# PLACEHOLDER CHECKSUMS: the sha256 lines below are all zeros. The release workflow replaces
+# this file with one rendered from the real SHA256SUMS (packaging/homebrew/render-formula.sh).
 class Aibus < Formula
   desc "Terminal client that drives several LLM providers and agents"
   homepage "https://github.com/spdrman/aibus"
-  version "0.0.0"
+  version "0.1.0"
   license "MIT"
+
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
 
   on_macos do
     on_arm do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-aarch64-apple-darwin.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_AARCH64_APPLE_DARWIN"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-x86_64-apple-darwin.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_X86_64_APPLE_DARWIN"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_AARCH64_UNKNOWN_LINUX_GNU"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_X86_64_UNKNOWN_LINUX_MUSL"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 

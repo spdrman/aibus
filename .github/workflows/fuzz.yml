@@ -1,13 +1,12 @@
 name: fuzz
 
-# 10 section 1: the four fuzz targets (agent_def, handoff, redactor, tool_pattern) every night.
-# GitHub Actions are switched off for this repo, so the same run is `sh tools/fuzz.sh 120` inside
-# a rust container (see docs/SECURITY.md). A crash is saved under fixtures/fuzz/<target>/ with a
-# unit test, and fuzz/corpus is replayed on every push by crates/aibus-core/tests/security/fuzz.rs.
+# 10 section 1: the four fuzz targets (agent_def, handoff, redactor, tool_pattern).
+# Manual only. The real gate is the local run on MARS in a rust container:
+# `sh tools/fuzz.sh 120` (see docs/SECURITY.md). This workflow is the same thing on a hosted
+# runner, for when someone wants it. A crash is saved under fixtures/fuzz/<target>/ with a unit
+# test, and fuzz/corpus is replayed on every push by crates/aibus-core/tests/security/fuzz.rs.
 
 on:
-  schedule:
-    - cron: "17 2 * * *"
   workflow_dispatch:
 
 permissions:

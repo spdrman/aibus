@@ -38,7 +38,7 @@ Run it in a container, never on a host. The script installs nightly and `cargo-f
 docker run --rm -v "$PWD":/work -w /work rust:1.85 sh tools/fuzz.sh 60
 ```
 
-The nightly job is `.github/workflows/fuzz.yml`: 120 seconds per target, and the crash artifacts are uploaded.
+The local run on MARS is the real gate. `.github/workflows/fuzz.yml` is the same thing, manual only (120 seconds per target, crash artifacts uploaded).
 
 ## The optional shell sandbox
 

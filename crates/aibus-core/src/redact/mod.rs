@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn patterns_compile() {
         let r = Redactor::new();
-        assert_eq!(r.0.patterns.len(), 10);
+        assert_eq!(r.0.patterns.len(), 13);
     }
 
     #[test]

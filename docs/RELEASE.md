@@ -165,7 +165,8 @@ message too. A bump never rides in a patch release.
 
 ### Homebrew and crates.io
 
-* Homebrew: this repository is the tap. `Formula/aibus.rb` is rendered by `finalize` from the
+* Homebrew: this repository is the tap. The committed `Formula/aibus.rb` has all-zero placeholder
+  checksums (template `packaging/homebrew/aibus.rb.in`); `finalize` overwrites it, rendered from the
   release's `SHA256SUMS` with `packaging/homebrew/render-formula.sh`, so it carries real checksums
   after a release. Install with `brew tap spdrman/aibus https://github.com/spdrman/aibus && brew
   install spdrman/aibus/aibus`.

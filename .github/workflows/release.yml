@@ -398,13 +398,11 @@ jobs:
 
           # The checksums of the published release, not the build artefacts.
           gh release download "$TAG" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
-          rm -f Formula/aibus.rb
-          mkdir -p Formula
-          out=$(bash packaging/homebrew/render-formula.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS")
-          if [ -n "$out" ]; then printf '%s\n' "$out" > Formula/aibus.rb; fi
+          # Overwrites the committed placeholder Formula/aibus.rb with one rendered from the real sums.
+          sh packaging/homebrew/render-formula.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS"
           test -s Formula/aibus.rb
+          if grep -q 'PLACEHOLDER CHECKSUMS' Formula/aibus.rb; then echo "::error::placeholder formula left in place"; exit 1; fi
           ruby -c Formula/aibus.rb
-          if grep -q PLACEHOLDER Formula/aibus.rb; then echo "::error::placeholder checksum left in the formula"; exit 1; fi
           git add Formula/aibus.rb
           git commit -m "Formula: aibus $VERSION"
           git push origin HEAD:refs/heads/release

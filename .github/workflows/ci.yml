@@ -121,37 +121,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo test --workspace --locked
 
-  # The second backend: conformance and the replay differential. The crate is private, so the
-  # fetch step needs the repository secret, and it is the only step that sees it (the builds
-  # after it are offline).
-  causl:
-    runs-on: ubuntu-latest
-    env:
-      CAUSL_MANIFEST: crates/aibus-graph-causl/Cargo.toml
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
-      - name: Fetch the private source
-        env:
-          CAUSL_CI_BUILD_1: ${{ secrets.CAUSL_CI_BUILD_1 }}
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_TERMINAL_PROMPT: "0"
-        run: |
-          set +x
-          if [ -z "$CAUSL_CI_BUILD_1" ]; then
-            echo "CAUSL_CI_BUILD_1 is empty (secret missing or not exposed to this run)"
-            exit 1
-          fi
-          basic=$(printf 'x-access-token:%s' "$CAUSL_CI_BUILD_1" | base64 | tr -d '\n')
-          echo "::add-mask::$basic"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0="http.https://git.opsite.ca/.extraheader"
-          export GIT_CONFIG_VALUE_0="Authorization: Basic $basic"
-          cargo fetch --locked --manifest-path "$CAUSL_MANIFEST"
-      - name: Conformance and differential replay on causl
-        run: cargo test --locked --offline --manifest-path "$CAUSL_MANIFEST" --features causl-rs
+  # The second backend (conformance, the replay differential, the side-by-side bench) is the
+  # `causl-differential` job in causl-spike.yml, so the private source is fetched in one workflow
+  # only. That file is the one that is already dispatchable from main.
 
   supply-chain:
     runs-on: ubuntu-latest

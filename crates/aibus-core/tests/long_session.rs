@@ -80,7 +80,7 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
                 account: AccountName("a".into()),
             })
             .unwrap();
-            let entry = match app.graph.read_key(&run_key(&run.to_string(), "blocks")) {
+            let entry = match app.graph.read_key(&run_key(run, "blocks")) {
                 Some(Value::Handle(h)) => h.id,
                 other => panic!("no transcript handle for the new run: {other:?}"),
             };

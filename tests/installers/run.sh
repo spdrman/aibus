@@ -29,4 +29,5 @@ step "install.sh end to end, alpine (busybox wget, ash)" alpine:3.20 \
 step "render-formula.sh" ruby:3.3-alpine "sh $t/test-render-formula.sh"
 step "install.ps1 (parse, PSScriptAnalyzer, tests)" mcr.microsoft.com/powershell:ubuntu-22.04 "sh $t/test-install-ps1.sh"
 step "brew audit --strict" homebrew/brew:latest "sh $t/test-brew-audit.sh"
+step "brew install against a fake release" homebrew/brew:latest "sh $t/test-brew-install.sh"
 exit $status

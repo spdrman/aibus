@@ -32,9 +32,9 @@ class Aibus < Formula
   end
 
   def install
-    # The archive unpacks to a folder named after the target.
-    bin.install Dir["aibus-*/aibus"].first => "aibus"
-    generate_completions_from_executable(bin/"aibus", "completions", shell_parameter_format: :arg)
+    # Homebrew enters the archive's single top-level folder (aibus-<target>/) before this runs.
+    bin.install "aibus"
+    generate_completions_from_executable(bin/"aibus", "completions")
   end
 
   test do

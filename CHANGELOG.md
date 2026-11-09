@@ -14,11 +14,18 @@ First release. What is in it:
   memory that carry state from one session to the next.
 * The whole application state as one Causl graph, with the commit log as the audit trail and
   snapshots as the session save.
-* Anthropic, OpenAI-compatible (OpenAI, Kimi/Moonshot) and Bedrock/Vertex providers, several
-  accounts per provider, credentials in the OS keychain, OAuth sign-in.
+* Anthropic and OpenAI-compatible (OpenAI, Kimi/Moonshot) providers, several accounts per
+  provider, credentials in the OS keychain. The OAuth method and the Bedrock and Vertex
+  transports are in the code but not usable yet (see Known issues).
 * `aibus version` prints the release tag and commit, `aibus doctor` checks the setup.
 * Release builds for aarch64 and x86_64 macOS, x86_64 and aarch64 Linux (glibc), x86_64 Linux
   (musl) and x86_64 Windows, with a CycloneDX SBOM, `SHA256SUMS` and keyless cosign signatures.
+
+### Known issues
+
+* `aibus account add --oauth` is refused until a provider offers an OAuth login; none does yet.
+* The Bedrock and Vertex transports exist as constructors, but `auth = "sigv4"` and
+  `auth = "gcloud"` cannot be selected from the config file yet.
 
 Not proven yet: no real provider has been exercised against a live account by the release
 pipeline, and the Windows build has not been run on a Windows machine. `docs/RELEASE.md` lists

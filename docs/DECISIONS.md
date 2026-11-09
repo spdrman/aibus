@@ -1,0 +1,115 @@
+# Decisions
+
+The contested calls from the spec panel, written up short. Each entry: context, decision, the alternatives that lost, and why. Numbering is stable; new entries append.
+
+## D-01: Cargo workspace, not a single crate
+
+**Context.** The Rust engineer wanted one crate until it hurt. The architecture expert wanted the engine to compile without ratatui and the TUI without reqwest as a build-time fact, not a convention. The security expert wanted provider dependency trees scoped so `cargo-deny` can reason about them one at a time.
+
+**Decision.** A workspace: `aibus` (bin), `aibus-core`, `aibus-graph`, `aibus-provider`, `aibus-provider-anthropic`, `aibus-provider-openai`, `aibus-tui`, `aibus-testkit`. Provider implementations are separate crates registered by one line in the binary.
+
+**Alternatives.** Single crate with feature flags (rejected: features do not stop `use ratatui` in core; a reviewer has to catch it). Providers as modules in one `aibus-providers` crate (rejected: every provider's deps compile for everyone, and a new provider edits a shared crate).
+
+**Why.** Compile-time boundaries are cheaper than review discipline, and the extra `Cargo.toml` files are the whole cost.
+
+## D-02: Causl contract behind a trait, two backends, in-house mini engine first
+
+**Context.** The requirement is that aibus uses Causl as its state layer, consuming the Rust engine in-process. I verified the engine: `causl-engine-core`, `no_std` + `alloc`, `forbid(unsafe)`, real and usable from a plain binary, but distributed only from a private Gitea at version 0.0.0 with `publish = false` (the GitHub name I was given, `causljs/causl-wasm`, returns 404), and it exposes the state-machine layer (`State`, `Action::CommitWithValues`, `transition_phased_with_callbacks`, `ComputeCallback`, dense `NodeId`, `JsonValue`) rather than the §12 ergonomic surface. String ids, tracked `get`, closures, subscribe ergonomics and `snapshot`/`hydrate` live in the wasm bridge aibus does not want; `Persister` in core is `unimplemented!()`.
+
+The Rust engineer: a young crate with stubbed traits, every value boxed to `JsonValue`, a learning curve for every contributor, and a private git dependency in the supply chain. The architecture expert: the glitch-free derived view model, a structured commit log for free, replay-based testing and snapshot persistence are exactly the hard parts of a TUI orchestrator, and they fall out of the model. The performance expert: fine, as long as heavy values never enter the graph.
+
+**Decision.** `aibus-graph` defines `trait Graph` with the §12 semantics and a conformance suite. Two backends: `mini` (in-house, under 1,500 lines, default) and `causl` (a host layer over `causl-engine-core`, feature `causl-rs`, git dependency pinned by commit or vendored). A differential replay test keeps them byte-identical. The default flips to `causl-rs` at the M6 gate if the crate is obtainable under the supply-chain rules.
+
+**Alternatives.** A plain `AppState` struct with manual invalidation (rejected: every derived value becomes a bug waiting for the case where two fields changed in one event; no audit log; snapshots by hand). `tokio::sync::watch` per field with derived tasks (rejected: glitches by construction, since two watches update at different instants; no atomic multi-field commit). Depend on `causl-engine-core` directly with no trait (rejected: the dependency is private and 0.0.0; the build must work from crates.io alone). Wait for the crate before building (rejected: the trait is cheap and the mini engine is a week).
+
+**Why.** The semantics are the contract and they are stable; the crate's distribution is logistics. A trait lets the semantics land now and the real engine land when it can be pinned. The honest costs stay: boxing across the node boundary (mitigated by handles for heavy values), one more concept for contributors (mitigated by the `Tracker` API making tracked reads the only reads), and a second engine to keep in lockstep (the differential test is the price).
+
+## D-03: Elm loop over a Causl graph, with actors for IO
+
+**Context.** Three options for the event architecture: a classic Elm loop with a plain model; an actor model where every run, provider and widget is an actor passing messages; the hybrid.
+
+**Decision.** One `Msg` channel into the main thread; `reduce(graph, msg) -> writes`; exactly one `graph.commit(intent = msg.name(), writes)` per `Msg`; an effects executor reads derived nodes after each commit and does IO; each run is a tokio task with a mailbox feeding `Msg`s back.
+
+**Alternatives.** Pure actor model (rejected: UI state scattered over mailboxes, no single snapshot, ordering bugs between actors). Pure Elm with IO in `update` (rejected: Causl forbids side effects in compute and the panel wants the same rule for `reduce`, so the boundary has to be explicit).
+
+**Why.** Single-owner graph, one commit per event, IO quarantined in one place. The commit log is then a complete history and replay is trivial.
+
+## D-04: Heavy values live in a side store, the graph holds handles
+
+**Context.** The performance expert's condition on D-02: a 100k-line transcript as a node value would be cloned on every retained commit and serialised into every snapshot.
+
+**Decision.** `Value::Handle { store, id, version }`. Transcript blocks, wrapped-line caches and the session log ring live in `aibus_core::state::store`. The handle version is the change signal; compute reads content through the `Tracker` so the dependency is tracked.
+
+**Alternatives.** Everything in the graph (rejected on measurement: snapshot size and commit cost both scale with content). Everything outside the graph with manual dirty flags (rejected: reintroduces the bugs D-02 exists to remove).
+
+**Why.** The graph stays small and fast; the content stays where it is append-only anyway (the transcript file).
+
+## D-05: Tool allow-lists enforced by the executor, OS sandbox deferred
+
+**Context.** The security expert asked for honesty about what a tool allow-list is.
+
+**Decision.** The allow-list is a boundary at the aibus process boundary: the model never receives schemas it cannot call, and the executor rejects unknown names and specifier mismatches. What a `bash` child does once started is not bounded in v1. An optional OS sandbox is M6, off by default until it has run a release.
+
+**Alternatives.** Ship a sandbox in v1 (rejected: platform-specific, a release blocker, and the design is independent of the rest). Call the allow-list a sandbox (rejected: it is not one).
+
+**Why.** Saying exactly where the boundary is lets users choose `isolation: worktree` and permission modes with open eyes.
+
+## D-06: Credentials in the OS keychain only; never in config, graph or logs
+
+**Context.** Two Anthropic accounts, Kimi, OpenAI, and a graph that snapshots itself to disk.
+
+**Decision.** `keyring` as primary; `env` and `0600` file as explicit alternatives; the config `auth` table has no key field. `Secret<T>` with zeroising drop and no `Serialize`. The graph holds `AccountView` with a `key_ref`. The redactor registers live secrets and also pattern-matches.
+
+**Alternatives.** Encrypted file with a passphrase (rejected: another secret to manage, and the keychain already does this). Plaintext fallback with a warning (rejected: warnings get ignored).
+
+**Why.** The snapshot and commit log are the reason the graph cannot hold secrets; everything else follows.
+
+## D-07: The model decides delegation; keyword triggers are hints only
+
+**Context.** Claude Code lets the model match `description` fields. Continuous-Claude's `skill-rules.json` matches keywords and intent regexes and injects suggestions. The agentic AI expert wanted both; the architecture expert wanted one path.
+
+**Decision.** The lead's `delegate` tool carries the roster; the model picks. `.aibus/triggers.toml` patterns are injected as `[hint]` system reminders, never acted on directly.
+
+**Alternatives.** Deterministic keyword routing (rejected: brittle, and it bypasses the model's judgement that the whole system relies on). No hints at all (rejected: users of Continuous-Claude want the nudge).
+
+**Why.** One decision path, with the hints as a visible input to it.
+
+## D-08: The recording's "fork layer" is a router, not a conversation fork
+
+**Context.** The recording's `JEV · fork layer` counts "forks" and makes small decisions with confidences. Claude Code's "fork" is a sub-agent that inherits the whole conversation. Same word, two things.
+
+**Decision.** aibus has both: `fork` (the conversation-inheriting run) and the `router` role (the fork layer). The router's panel keeps the recording's "forks" counter label; its title defaults to `ROUTER · fork layer` with `router.label` to rename it.
+
+**Alternatives.** Drop one of the two (rejected: both are in the brief).
+
+**Why.** The behaviour in the frames (p values, sharp/split, "runs in code" vs "to Sonnet") is a routing layer; the name is incidental.
+
+## D-09: JSONL transcripts plus a SQLite index, not SQLite for everything
+
+**Context.** Transcripts are append-only streams; recall needs search; sessions need listing.
+
+**Decision.** Transcripts and commit logs as JSONL (zstd); `index.sqlite` with FTS5 as a rebuildable cache for listing and recall.
+
+**Alternatives.** SQLite as the only store (rejected: streaming appends and crash-safety are simpler with append-only files, and the files are greppable). Files only (rejected: recall over thousands of handoffs needs an index).
+
+**Why.** Each format where it is strong; the index being a cache means it can be thrown away.
+
+## D-10: tokio and crossterm
+
+**Context.** Runtime and terminal backend.
+
+**Decision.** tokio multi-thread; crossterm.
+
+**Alternatives.** `smol` (rejected: provider HTTP crates assume tokio). `termion` (rejected: Unix only). `termwiz` (rejected: heavier, and crossterm is ratatui's default and the best-tested path).
+
+**Why.** Ecosystem fit; nothing in aibus needs anything the defaults do not provide.
+
+## D-11: Continuous-Claude's loop natively, without Python, Docker or PostgreSQL
+
+**Context.** The repo implements continuity with TypeScript hooks, a Python wizard, a daemon, and PostgreSQL with pgvector.
+
+**Decision.** Ledgers, handoffs (same YAML schema), memory directories, FTS5 recall, learning extraction inline at `session_end`, workflows as TOML chains. No daemon, no database server, no embeddings in v1; `MemoryIndex` is a trait.
+
+**Alternatives.** Embed the same stack (rejected: the brief is a single Rust binary). Skip continuity until later (rejected: it is one of the three pillars).
+
+**Why.** The ideas port cleanly; the infrastructure does not need to.

@@ -16,18 +16,20 @@ use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
 use aibus_core::config::{self, Loaded};
 use aibus_core::persist::fs::create_private_dir;
 use aibus_core::persist::index::Index;
-use aibus_core::persist::paths::{continuity_dir, project_dir, Paths};
+use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::persist::retention::prune_if_due;
 use aibus_core::persist::session::{read_runs, SessionMeta, SessionWriter};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
     expand, parse_mention, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
-    Bash, Budgets, Compactor, CredentialStore, Delegate, Effects, Fork, Gate, HookEvent, HookInput,
-    HookRunner, Limits, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode,
+    AutoHandoff, Bash, Budgets, Compactor, CreateHandoff, CredentialStore, Delegate, Effects, Fork,
+    Gate, HookEvent, HookInput, HookRunner, LedgerUpdate, Limits, MemoryAppend, MemoryRead,
+    MemoryWrite, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode, Recall,
     Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, SelectHints,
     SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry,
     MSG_CAPACITY,
 };
+use aibus_core::continuity::{handoff, Layout};
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script};
 use aibus_provider::{
@@ -41,8 +43,8 @@ use tokio::sync::mpsc;
 use crate::agent_watch::{self, AgentWatch};
 use crate::cli::{Global, RunArgs};
 use crate::control::{self, Line};
+use crate::continuity::{self, Continuity};
 use crate::events;
-use crate::handoff;
 use crate::keychain::OsKeychain;
 use crate::launch::ChildLauncher;
 use crate::providers::{builtin_factories, provider_configs, refresh_stale_models};
@@ -99,6 +101,8 @@ pub struct Ctx {
     pub control: Option<mpsc::UnboundedReceiver<Line>>,
     /// The outcome for the handoff from `--outcome` or `AIBUS_OUTCOME`, canonical.
     pub outcome: Option<String>,
+    /// The ledger, handoffs, memory and learnings of the session (01 section 8).
+    pub continuity: Option<Continuity>,
     /// Closes the `--trace` file when the session's context is dropped.
     pub trace_guard: Option<TraceGuard>,
     /// `start <name>` and `stop <name>`, in the order they happened.
@@ -135,6 +139,7 @@ impl Ctx {
             interrupted: false,
             control: None,
             outcome: None,
+            continuity: None,
             trace_guard: None,
             trace: Vec::new(),
         }
@@ -717,6 +722,20 @@ impl Step for EnterLoop {
         registry.register(Arc::new(Fork::new(orch.clone())));
         registry.register(Arc::new(ResumeRun::new(orch.clone())));
         registry.register(Arc::new(SendMessage::new(orch.clone())));
+        // The ledger, the handoffs and the memory (01 section 8). The allow-list decides who
+        // gets which: the continuity tools are the lead's, `memory_*` need `memory:`.
+        let layout = Layout::new(&ctx.cwd, cfg, &paths.data, ctx.global.topic.as_deref())
+            .map_err(AibusError::Usage)?;
+        registry.register(Arc::new(LedgerUpdate::new(layout.clone(), ctx.redactor.clone())));
+        registry.register(Arc::new(CreateHandoff::new(
+            layout.clone(),
+            ctx.redactor.clone(),
+            ctx.outcome.clone(),
+        )));
+        registry.register(Arc::new(Recall::new(layout.clone(), cfg.memory.recall_k as usize)));
+        registry.register(Arc::new(MemoryRead));
+        registry.register(Arc::new(MemoryWrite::new(ctx.redactor.clone())));
+        registry.register(Arc::new(MemoryAppend::new(ctx.redactor.clone())));
         let tools = ToolExecutor::with_gate(registry, gate)
             .map_err(|e| AibusError::Usage(format!("tools.deny_patterns: {e}")))?;
         // `--no-hooks` leaves the runner's default in place, which runs nothing.
@@ -781,7 +800,7 @@ impl Step for EnterLoop {
 
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
         // `inherit` has no parent here, so it means the session's model. The TUI has none yet.
-        let plan = if ctx.interactive { None } else {
+        let planned = if ctx.interactive { None } else {
         let (target, hints) = match &resume {
             Some((_, meta)) => (
                 ModelRef::Full(meta.model.clone()),
@@ -836,22 +855,34 @@ impl Step for EnterLoop {
             start: if resume.is_some() { Start::Resume } else { Start::New },
             worktree,
         };
-        let compactor: Arc<dyn Compactor> = Arc::new(ModelCompactor {
+        // The lead writes an auto-handoff before every compaction (`auto_handoff_on_compact`);
+        // the same model is asked for learnings when the session ends.
+        let compactor = Arc::new(ModelCompactor {
             provider: picked.provider.clone(),
             creds: picked.creds.clone(),
             model: run_cfg.model.clone(),
+            handoff: cfg.continuity.auto_handoff_on_compact.then(|| AutoHandoff {
+                layout: layout.clone(),
+                redactor: ctx.redactor.clone(),
+            }),
         });
+        let extractor = compactor.clone();
         let deps = RunDeps {
             provider: picked.provider,
             creds: picked.creds,
             tools,
             tx: tx.clone(),
             hooks: hooks.clone(),
-            compactor: Some(compactor),
+            compactor: Some(compactor as Arc<dyn Compactor>),
             assist,
         };
-        Some((run_cfg, deps))
+        Some((run_cfg, deps, extractor))
         };
+        let (plan, extractor) = match planned {
+            Some((cfg, deps, e)) => (Some((cfg, deps)), Some(e)),
+            None => (None, None),
+        };
+        let session_continuity = Continuity::new(layout, extractor);
         if let Some(app) = ctx.app.as_mut() {
             app.set_limits(&limits)?;
             app.set_session_view(
@@ -895,16 +926,23 @@ impl Step for EnterLoop {
             }
         }
 
-        // The newest handoff is `model:handoff:latest`; a second aibus in the same project can
-        // write one at any time, so the directory is watched too (07 section 5).
-        let handoffs = continuity_dir(&ctx.cwd, &cfg.continuity.dir).join("shared/handoffs");
-        if let (Some(app), Some(path)) = (ctx.app.as_mut(), handoff::latest(&handoffs)) {
-            app.step(Msg::HandoffWritten { path })?;
+        // At `session_start` the lead is shown the topic's newest handoff and the ledger, and
+        // `model:handoff:latest` and `model:ledger` are filled in. A resumed run has its
+        // conversation already.
+        if let Some(app) = ctx.app.as_mut() {
+            let shown = session_continuity.start(app);
+            if let (Some((run_cfg, _)), None) = (ctx.plan.as_mut(), ctx.run.resume) {
+                run_cfg.context.splice(0..0, shown);
+            }
         }
+        // A second aibus in the same project can write a handoff at any time, so the directory
+        // is watched too (07 section 5).
+        let handoffs = session_continuity.layout.handoffs();
         let reload = {
             let dir = handoffs.clone();
-            move || handoff::latest(&dir).map(|path| Msg::HandoffWritten { path })
+            move || handoff::latest(&dir, None).map(|path| Msg::HandoffWritten { path })
         };
+        ctx.continuity = Some(session_continuity);
         match agent_watch::start(&[handoffs], RecursiveMode::Recursive, &tx, reload) {
             Ok(w) => ctx.handoff_watch = Some(w),
             Err(e) => eprintln!("aibus: warning: not watching the handoff directory: {e}"),
@@ -929,7 +967,7 @@ impl Step for EnterLoop {
 // 9 ---------------------------------------------------------------------------------------
 
 /// `session_start` hooks (what they print goes in front of the lead's task), and `session_end`
-/// when the steps stop. The latest handoff arrives with the continuity files (B2.x).
+/// when the steps stop, followed by the continuity work of the end of a session.
 #[derive(Default)]
 struct StartHooks {
     /// The lead's name and role, kept for `session_end` once the plan has been taken.
@@ -1008,6 +1046,9 @@ impl Step for StartHooks {
                 .is_none_or(|r| r.status == aibus_core::RunStatus::Failed);
             Self::fire(ctx, &lead, HookEvent::SessionEnd, if failed { "error" } else { "exit" });
         }
+        // The handoff, the learnings and the index come after the hooks, so a `session_end`
+        // hook can still change the ledger. `--no-hooks` does not skip them.
+        continuity::end(ctx);
         Ok(())
     }
 }

@@ -411,6 +411,7 @@ async fn advise(
         cancel: t.cancel.clone(),
         limits: t.cfg.limits,
         tx: t.deps.tx.clone(),
+        memory: None,
     };
     let mut advice = String::new();
     for _ in 0..ADVISOR_ROUNDS {

@@ -900,6 +900,13 @@ async fn drive(
         .map_or(8_192, |m| m.max_output);
     let price = deps.provider.price(&cfg.model);
     let specs = deps.tools.specs(eff);
+    // The directory the `memory_*` tools are rooted at, found the way the run's first message
+    // finds `MEMORY.md`.
+    let memory = crate::continuity::memory::memory_dir(
+        &cfg.def,
+        crate::agent::discover::project_root(&cfg.cwd).unwrap_or(&cfg.cwd),
+        cfg.data_home.as_deref(),
+    );
     // `enter_plan_mode` switches `mode` to plan and `exit_plan_mode` goes back to `base_mode`.
     let base_mode = cfg.def.permission_mode;
     let mut mode = base_mode;
@@ -1144,6 +1151,7 @@ async fn drive(
                 cancel: cancel.clone(),
                 limits: cfg.limits,
                 tx: deps.tx.clone(),
+                memory: memory.clone(),
             };
             let t0 = Instant::now();
             let mut result = ToolResult::default();

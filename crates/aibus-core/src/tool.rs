@@ -39,6 +39,9 @@ pub struct ToolCx {
     pub cancel: CancellationToken,
     pub limits: ToolLimits,
     pub tx: mpsc::Sender<Msg>,
+    /// The run's memory directory, when its definition has `memory` (01 section 8.3); what the
+    /// `memory_*` tools are rooted at.
+    pub memory: Option<PathBuf>,
 }
 
 /// A file a run marked as one of its outputs (`report_artifact`).

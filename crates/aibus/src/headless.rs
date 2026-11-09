@@ -32,20 +32,22 @@ pub fn run(global: Global, args: RunArgs, redactor: Redactor) -> Result<u8, Aibu
     let verdict = verdict(ctx.finished.as_ref(), ctx.interrupted);
     let code = verdict.as_ref().map_or_else(AibusError::exit_code, |_| 0);
     let session = ctx.session.as_ref().map(|s| s.id.to_string());
-    let ended = session.filter(|_| json).map(|id| {
-        // The last line of a session; `handoff` names the file once handoffs are written.
-        serde_json::json!({
+    let stopped = startup::stop(started, &mut ctx);
+    if let Some(id) = session.filter(|_| json) {
+        // The last line of a session, after the steps are stopped so the run task has flushed
+        // everything it was going to and the handoff of the end of the session is on disk.
+        // `handoff` is that file, relative to the project, or null when none was written.
+        let handoff = ctx.continuity.as_ref().and_then(|c| {
+            let path = c.ended.as_ref()?;
+            Some(path.strip_prefix(&c.layout.project).unwrap_or(path).to_path_buf())
+        });
+        let mut line = serde_json::json!({
             "type": "SessionEnd",
             "t": events::rfc3339(SystemTime::now()),
             "session": id,
             "exit_code": code,
-            "handoff": null,
-        })
-    });
-    let stopped = startup::stop(started, &mut ctx);
-    if let Some(line) = ended {
-        // After the steps are stopped, so the run task has flushed everything it was going to.
-        let mut line = line;
+            "handoff": handoff,
+        });
         ctx.redactor.redact_json(&mut line);
         let _ = writeln!(std::io::stdout().lock(), "{line}");
     }

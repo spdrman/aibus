@@ -134,27 +134,13 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         }));
     }
     if ctx.global.verbose > 0 {
-        opts.mem = Some(rss_mib);
+        opts.mem = Some(aibus_core::mem::rss_mib);
     }
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();
     }
     ran
-}
-
-/// Resident memory in MiB, for the status bar under `-v`: `/proc` where there is one, else `ps`.
-fn rss_mib() -> Option<u32> {
-    if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
-        let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
-        return u32::try_from(pages * 4096 / (1024 * 1024)).ok();
-    }
-    let out = std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-    u32::try_from(kib / 1024).ok()
 }
 
 #[cfg(test)]
@@ -227,12 +213,6 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("unknown action `nonsense`"), "{warnings:?}");
         assert_eq!(o.hz, 30);
-    }
-
-    #[test]
-    fn memory_is_read_in_mib() {
-        // This test process is some megabytes resident, on `/proc` and under `ps` alike.
-        assert!(rss_mib().is_some_and(|m| m > 0));
     }
 
     #[test]

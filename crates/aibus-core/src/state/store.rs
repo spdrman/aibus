@@ -57,6 +57,20 @@ struct Inner {
     wrap_width: usize,
 }
 
+/// What the store holds right now, for the 08 section 5 budget: `doctor --session` prints it and
+/// the long-session test checks the caps against it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StoreStats {
+    /// `Store::content_bytes`.
+    pub content_bytes: usize,
+    pub transcripts: usize,
+    pub log_rows: usize,
+    /// Sealed blocks with a wrapped-line cache entry, and the one width the cache is for
+    /// (0 before anything was wrapped).
+    pub wrap_blocks: usize,
+    pub wrap_width: usize,
+}
+
 #[derive(Clone, Default)]
 pub struct Store(Arc<Mutex<Inner>>);
 
@@ -334,5 +348,17 @@ impl Store {
             })
             .sum();
         t + g.texts.values().map(|x| x.len()).sum::<usize>()
+    }
+
+    pub fn stats(&self) -> StoreStats {
+        let content_bytes = self.content_bytes();
+        let g = self.lock();
+        StoreStats {
+            content_bytes,
+            transcripts: g.transcripts.len(),
+            log_rows: g.log.len(),
+            wrap_blocks: g.wrap.len(),
+            wrap_width: g.wrap_width,
+        }
     }
 }

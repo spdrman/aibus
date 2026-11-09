@@ -1,21 +1,16 @@
 name: bench
 
-# 10 section 9: the p99 gates. Nightly, and on pull requests that touch the graph state or the
-# TUI. A p99 over its budget, or more than 20 % over the committed baseline for this runner
-# class (benches/baselines/<class>/, scaled by a calibration loop, see benches/gate.rs), fails.
-# A class with no baseline yet only enforces the budgets; `AIBUS_BENCH_SAVE=1` writes one.
+# 10 section 9: the p99 gates. Manual only: the local run on MARS in docker is the real gate
+# (AIBUS_RUNNER_CLASS=mars, baselines in benches/baselines/mars/). This workflow is the same
+# thing on a hosted runner, for when someone wants it. A p99 over its budget, or more than 20 %
+# over the committed baseline for the runner class (see benches/gate.rs), fails. A class with no
+# baseline yet only enforces the budgets; `AIBUS_BENCH_SAVE=1` writes one.
 
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "crates/aibus-core/src/state/**"
-      - "crates/aibus-core/benches/**"
-      - "crates/aibus-graph/**"
-      - "crates/aibus-tui/**"
-      - "benches/**"
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: never
@@ -27,9 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: commit_stream on mini
         run: cargo bench --locked -p aibus-core --bench commit_stream
       - name: hydrate_snapshot

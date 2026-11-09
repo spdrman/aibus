@@ -12,7 +12,7 @@ use aibus_provider::fake::{FakeProvider, Script, Step};
 use aibus_provider::{MessageRole, StopReason, ToolChoice};
 use aibus_testkit::fake_credential;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {
@@ -20,7 +20,7 @@ fn path_env() -> Vec<(String, String)> {
 }
 
 fn def(name: &str, hooks: &[(&str, &str)]) -> AgentDef {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     let mut d = found.agents[&name.parse::<AgentName>().unwrap()].clone();
     d.permission_mode = PermissionMode::Bypass;
@@ -61,9 +61,9 @@ struct World {
     advisor: Arc<FakeProvider>,
     router: Arc<FakeProvider>,
     assist: Arc<Assist>,
-    dir: TempDir,
+    dir: Xdg,
     /// Where the runs' saved conversations go: outside the project, as in a real session.
-    runs: TempDir,
+    runs: Xdg,
     max_per_turn: u32,
 }
 
@@ -92,7 +92,7 @@ impl Default for Setup<'_> {
 }
 
 async fn go(s: Setup<'_>, before: impl FnOnce(&World)) -> (World, Vec<Msg>) {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     for (name, text) in s.files {
         std::fs::write(dir.path().join(name), text).unwrap();
     }
@@ -114,7 +114,7 @@ async fn go(s: Setup<'_>, before: impl FnOnce(&World)) -> (World, Vec<Msg>) {
         label: "ROUTER".into(),
     });
     let assist = Assist::new(adv, rt);
-    let world = World { lead: lead.clone(), advisor, router, assist: assist.clone(), dir, runs: TempDir::new().unwrap(), max_per_turn: s.max_per_turn };
+    let world = World { lead: lead.clone(), advisor, router, assist: assist.clone(), dir, runs: xdg_temp(), max_per_turn: s.max_per_turn };
     before(&world);
     let bash = Arc::new(Bash::new(20, vec![], path_env(), world.dir.path().to_path_buf(), "s".into()));
     let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);

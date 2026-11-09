@@ -9,7 +9,7 @@ use std::fs;
 use common::schema::{assert_valid, check};
 use common::{aibus, command, ndjson, stderr};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 
 fn out_json(out: &std::process::Output) -> Value {
     serde_json::from_slice(&out.stdout)
@@ -32,7 +32,7 @@ fn the_checker_catches_what_the_schemas_ask_for() {
 
 #[test]
 fn every_event_of_a_run_validates_and_the_listed_ones_carry_their_fields() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "map this repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let lines = ndjson(&out);
@@ -59,7 +59,7 @@ fn the_events_the_fake_run_does_not_produce_validate_too() {
 
 #[test]
 fn a_tool_input_over_result_max_bytes_is_not_inlined() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     fs::create_dir_all(home.path().join(".config/aibus")).unwrap();
     fs::write(home.path().join(".config/aibus/config.toml"), "[limits]\nresult_max_bytes = 256\n").unwrap();
     let big = "x".repeat(2000);
@@ -86,7 +86,7 @@ fn a_tool_input_over_result_max_bytes_is_not_inlined() {
 
 #[test]
 fn agent_commands_validate() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let list = aibus(home.path(), &["agent", "list", "--json"]);
     assert_valid("agent-list", &out_json(&list));
     let show = aibus(home.path(), &["agent", "show", "explore", "--json"]);
@@ -104,7 +104,7 @@ fn agent_commands_validate() {
 
 #[test]
 fn account_commands_validate() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let key = "sk-cli-0123456789abcdef";
     let with_key = |args: &[&str]| command(home.path()).env("WORK_KEY", key).args(args).output().unwrap();
     let add = with_key(&["account", "add", "work", "--provider", "fake", "--env", "WORK_KEY", "--label", "Work"]);
@@ -125,7 +125,7 @@ fn account_commands_validate() {
 
 #[test]
 fn session_commands_validate_after_a_run() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let run = aibus(home.path(), &["run", "--json", "--agent", "explore", "--topic", "mapping", "hi"]);
     assert!(run.status.success(), "{}", stderr(&run));
     let id = ndjson(&run).last().unwrap()["session"].as_str().unwrap().to_owned();
@@ -165,7 +165,7 @@ fn session_commands_validate_after_a_run() {
 
 #[test]
 fn doctor_and_config_show_validate() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let doctor = aibus(home.path(), &["doctor", "--json"]);
     assert_eq!(doctor.status.code(), Some(0), "{}", String::from_utf8_lossy(&doctor.stdout));
     let v = out_json(&doctor);

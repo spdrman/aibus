@@ -1,0 +1,48 @@
+# Error bodies in the shapes providers, gateways and proxies send them, with the credential
+# text they can carry. `secrets` are the substrings that must be gone after redaction. The keys
+# are made up (they only have the shape of a real one). tests/security/redaction.rs reads this.
+
+[[case]]
+name = "openai 401, project key echoed in full by a proxy"
+body = '{"error":{"message":"Incorrect API key provided: sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12Wx34Yz56Ab78Cd90Ef12Gh34. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}'
+secrets = ["sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12Wx34Yz56Ab78Cd90Ef12Gh34"]
+
+[[case]]
+name = "openai 401, classic key echoed in full"
+body = '{"error":{"message":"Incorrect API key provided: sk-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12Wx34. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}'
+secrets = ["sk-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12Wx34"]
+
+[[case]]
+name = "service account key in a 403"
+body = '{"error":{"message":"You are not allowed to use key sk-svcacct-Zz11Yy22Xx33Ww44Vv55Uu66Tt77Ss88Rr99 for this project.","type":"invalid_request_error","code":"insufficient_permissions"}}'
+secrets = ["sk-svcacct-Zz11Yy22Xx33Ww44Vv55Uu66Tt77Ss88Rr99"]
+
+[[case]]
+name = "anthropic key echoed by a gateway"
+body = '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request":{"headers":{"x-api-key":"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AbCdEf"}}}'
+secrets = ["sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AbCdEf"]
+
+[[case]]
+name = "gateway echoes a header it does not know the shape of"
+body = '{"error":"upstream 401","debug":{"headers":{"x-api-key":"gw-9f8e7d6c5b4a3210aa","accept":"text/event-stream"}}}'
+secrets = ["gw-9f8e7d6c5b4a3210aa"]
+
+[[case]]
+name = "kimi 401"
+body = '{"error":{"message":"Incorrect API key provided: sk-Kk12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12Wx34.","type":"incorrect_api_key_error"}}'
+secrets = ["sk-Kk12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12Wx34"]
+
+[[case]]
+name = "google style compatible endpoint with the key in the url"
+body = '{"error":{"code":400,"message":"API key not valid. Please pass a valid API key. GET https://generativelanguage.googleapis.com/v1beta/openai/models?key=AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q","status":"INVALID_ARGUMENT"}}'
+secrets = ["AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q"]
+
+[[case]]
+name = "bearer token and a jwt in a 401 from a local server"
+body = '{"detail":"Invalid token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c","request":"Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789"}'
+secrets = ["SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "abcdefghijklmnopqrstuvwxyz0123456789"]
+
+[[case]]
+name = "a url with a token in the query"
+body = 'Failed to fetch https://hooks.example/v1/ping?user=7&token=d34db33f0000&retry=1: 401'
+secrets = ["d34db33f0000"]

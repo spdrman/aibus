@@ -5,7 +5,7 @@
 
 use aibus_core::config::{self, Config};
 use aibus_core::persist::paths::{project_dir, Paths};
-use aibus_core::{AibusError, KeyRef, Keychain, Redactor, SessionId, StoreHealth};
+use aibus_core::{AibusError, KeyRef, Keychain, Redactor, Sandbox, SessionId, StoreHealth};
 use serde_json::{json, Value};
 
 use crate::cli::Global;
@@ -42,6 +42,23 @@ fn config_check(g: &Global, paths: &Paths) -> (Check, Option<Config>) {
         }
         Err(e) => (check("config", false, e.to_string()), None),
     }
+}
+
+/// `none` (the default), or the sandbox `[tools] sandbox` names. A kind whose program is not
+/// on `PATH` fails the check, since `bash` would refuse every call.
+fn sandbox_check(cfg: Option<&Config>) -> Check {
+    let tools = cfg.map(|c| &c.tools);
+    let Some(tools) = tools.filter(|t| t.sandbox != config::SandboxKind::None) else {
+        return check("shell sandbox", true, "none");
+    };
+    let sandbox = Sandbox { kind: tools.sandbox, network: tools.sandbox_network };
+    let name = tools.sandbox.as_str();
+    let path = std::env::var("PATH").unwrap_or_default();
+    if !sandbox.available(&path) {
+        return check("shell sandbox", false, format!("{name} is configured but not on PATH"));
+    }
+    let net = if tools.sandbox_network { "" } else { ", network off" };
+    check("shell sandbox", true, format!("{name}{net}"))
 }
 
 /// `keyring (<backend>)` or `unavailable, env/file only`. It only fails when an account is
@@ -177,7 +194,7 @@ pub fn doctor(
     let mut checks = vec![
         config,
         store_check(keychain, cfg.as_ref()),
-        check("shell sandbox", true, "none"),
+        sandbox_check(cfg.as_ref()),
         worktree_check(&paths),
         index_check(&paths),
         dirs_check(&paths),

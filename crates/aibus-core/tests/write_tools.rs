@@ -7,7 +7,7 @@ use std::path::Path;
 use aibus_core::tools::{Edit, Write};
 use aibus_core::*;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -82,7 +82,7 @@ fn write_and_edit_ask_by_default_and_never_in_accept_edits() {
 
 #[tokio::test]
 async fn write_creates_files_and_directories_and_leaves_no_temp_file() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let ex = executor(None);
     let e = eff(&["write"]);
     let r = call(&ex, PermissionMode::AcceptEdits, &e, dir.path(), "write", json!({"path": "a/b/c.txt", "content": "hello"})).await;
@@ -101,7 +101,7 @@ async fn write_creates_files_and_directories_and_leaves_no_temp_file() {
 
 #[tokio::test]
 async fn replacing_a_file_keeps_its_permissions() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let f = dir.path().join("run.sh");
     std::fs::write(&f, "old").unwrap();
     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -115,7 +115,7 @@ async fn replacing_a_file_keeps_its_permissions() {
 
 #[tokio::test]
 async fn a_failed_write_leaves_the_original_and_no_temp_file() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     std::fs::write(dir.path().join("keep.txt"), "original").unwrap();
     // The target is a directory, so the final rename fails after the temp file was written.
     std::fs::create_dir(dir.path().join("d")).unwrap();
@@ -126,13 +126,14 @@ async fn a_failed_write_leaves_the_original_and_no_temp_file() {
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(names.iter().all(|n| n == "keep.txt" || n == "d"), "{names:?}");
+    // `home` is the XDG tree xdg_temp makes beside the files.
+    assert!(names.iter().all(|n| matches!(n.as_str(), "keep.txt" | "d" | "home")), "{names:?}");
     assert_eq!(std::fs::read_to_string(dir.path().join("keep.txt")).unwrap(), "original");
 }
 
 #[tokio::test]
 async fn edit_needs_an_exact_unique_match_unless_all_is_set() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let f = dir.path().join("f.txt");
     let ex = executor(None);
     let e = eff(&["edit"]);
@@ -173,8 +174,8 @@ async fn edit_needs_an_exact_unique_match_unless_all_is_set() {
 
 #[tokio::test]
 async fn the_deny_list_holds_even_in_bypass() {
-    let dir = TempDir::new().unwrap();
-    let home = TempDir::new().unwrap();
+    let dir = xdg_temp();
+    let home = xdg_temp();
     let p = dir.path();
     std::fs::create_dir_all(p.join(".git/hooks")).unwrap();
     std::fs::create_dir(p.join("sub")).unwrap();
@@ -228,7 +229,7 @@ async fn the_deny_list_holds_even_in_bypass() {
 
 #[tokio::test]
 async fn a_specifier_naming_the_path_lifts_the_deny_list() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     std::fs::create_dir_all(dir.path().join(".aibus")).unwrap();
     let ex = executor(None);
     let e = eff(&["write(.aibus/settings.toml)"]);
@@ -243,8 +244,8 @@ async fn a_specifier_naming_the_path_lifts_the_deny_list() {
 
 #[tokio::test]
 async fn paths_are_confined_to_the_project_unless_a_specifier_reaches_out() {
-    let dir = TempDir::new().unwrap();
-    let outside = TempDir::new().unwrap();
+    let dir = xdg_temp();
+    let outside = xdg_temp();
     let ex = executor(None);
     let bare = eff(&["write"]);
     for path in [
@@ -272,7 +273,7 @@ async fn paths_are_confined_to_the_project_unless_a_specifier_reaches_out() {
 
 #[tokio::test]
 async fn a_cancelled_write_does_nothing() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let ex = executor(None);
     let c = cx(dir.path());
     c.cancel.cancel();

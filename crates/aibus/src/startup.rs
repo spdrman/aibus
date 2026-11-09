@@ -26,7 +26,7 @@ use aibus_core::{
     Gate, HookEvent, HookInput, HookRunner, LedgerUpdate, Limits, MemoryAppend, MemoryRead,
     MemoryWrite, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode, Recall,
     Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, RunWorkflow, SelectHints,
-    SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, Triggers,
+    Sandbox, SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, Triggers,
     WebFetch, MSG_CAPACITY,
 };
 use aibus_core::assist::Seat;
@@ -713,13 +713,19 @@ impl Step for EnterLoop {
         // Only the `--json` control channel can answer a prompt in `aibus run`. Without it
         // `default` mode refuses what would ask, with `PermissionNeeded` then
         // `PermissionDecided { denied, "no tty" }`.
-        let bash = Arc::new(Bash::new(
-            cfg.tools.bash_timeout_secs,
-            cfg.hooks.pass_env.clone(),
-            std::env::vars().collect(),
-            ctx.cwd.clone(),
-            session.id.to_string(),
-        ));
+        let bash = Arc::new(
+            Bash::new(
+                cfg.tools.bash_timeout_secs,
+                cfg.hooks.pass_env.clone(),
+                std::env::vars().collect(),
+                ctx.cwd.clone(),
+                session.id.to_string(),
+            )
+            .with_sandbox(Sandbox {
+                kind: cfg.tools.sandbox,
+                network: cfg.tools.sandbox_network,
+            }),
+        );
         let gate = Gate {
             allow: pre_approved,
             deny_patterns: cfg.tools.deny_patterns.clone(),

@@ -19,6 +19,7 @@ use aibus_core::state::store::{LOG_RING, SUMMARY_HEAD, TAIL_MAX};
 use aibus_core::state::run_key;
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
+use aibus_testkit::xdg_temp;
 use aibus_graph::{Graph, Value, COMMIT_HISTORY_CAP};
 use aibus_provider::StreamChunk;
 
@@ -174,7 +175,7 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
     assert_eq!((stats.wrap_width, stats.wrap_blocks), (100, 1));
 
     // The snapshot is handles only: well under 2 MiB on disk after a whole day.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = xdg_temp();
     write_snapshot(dir.path(), &app.graph.snapshot()).unwrap();
     let snapshot = std::fs::metadata(dir.path().join(SNAPSHOT)).unwrap().len();
     println!("snapshot on disk: {snapshot} bytes (budget {SNAPSHOT_BUDGET})");

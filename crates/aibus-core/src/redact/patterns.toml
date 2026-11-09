@@ -41,3 +41,19 @@ regex = '\bBearer [A-Za-z0-9._-]{20,}'
 [[pattern]]
 name = "assignment"
 regex = '(?i)(?:password|passwd|token)=[^\s&"]+'
+
+# Added from the provider error corpus (fixtures/redact/provider-errors.toml). OpenAI project,
+# service-account and admin keys have a hyphen after `sk-`, so `openai-key` stops at the first one.
+[[pattern]]
+name = "openai-project-key"
+regex = '\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}'
+
+[[pattern]]
+name = "google-api-key"
+regex = '\bAIza[0-9A-Za-z_-]{35}'
+
+# A gateway or proxy that echoes the request back in an error: `x-api-key: ...`, `"api-key":"..."`,
+# `?api_key=...`.
+[[pattern]]
+name = "api-key-field"
+regex = '(?i)(?:x-api-key|x-goog-api-key|api[_-]?key)"?\s*[:=]\s*"?[A-Za-z0-9._~+/=-]{8,}'

@@ -18,7 +18,7 @@ use aibus_provider::{
 };
 use aibus_testkit::{fake_credential, FakeClock};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -29,7 +29,7 @@ fn path_env() -> Vec<(String, String)> {
 /// A built-in definition, in `bypass` so that tool calls are not parked on a prompt, with
 /// `hooks` as `(event, matcher, command)`.
 fn def(name: &str, hooks: &[(&str, Option<&str>, &str)]) -> AgentDef {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     let mut d = found.agents[&name.parse::<AgentName>().unwrap()].clone();
     d.permission_mode = PermissionMode::Bypass;
@@ -44,8 +44,8 @@ fn def(name: &str, hooks: &[(&str, Option<&str>, &str)]) -> AgentDef {
     d
 }
 
-fn repo() -> TempDir {
-    let d = TempDir::new().unwrap();
+fn repo() -> Xdg {
+    let d = xdg_temp();
     std::fs::write(d.path().join("a.txt"), "alpha\n").unwrap();
     d
 }
@@ -88,7 +88,7 @@ struct Plan {
     cfg: RunConfig,
     deps: RunDeps,
     fake: Arc<FakeProvider>,
-    dir: TempDir,
+    dir: Xdg,
 }
 
 fn plan(script: Script, def: AgentDef) -> (Plan, mpsc::Receiver<Msg>) {
@@ -135,7 +135,7 @@ fn plan(script: Script, def: AgentDef) -> (Plan, mpsc::Receiver<Msg>) {
 struct Done {
     fake: Arc<FakeProvider>,
     msgs: Vec<Msg>,
-    dir: TempDir,
+    dir: Xdg,
 }
 
 impl Done {

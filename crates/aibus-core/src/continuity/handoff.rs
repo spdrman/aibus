@@ -218,16 +218,25 @@ impl Handoff {
             let into = if in_front { &mut front } else { &mut body };
             into.insert(k.clone(), v.clone());
         }
+        let docs: Vec<Yaml> = [front, body]
+            .into_iter()
+            .filter(|d| !d.is_empty())
+            .map(Yaml::Hash)
+            .collect();
         let mut out = String::new();
-        for doc in [front, body] {
-            if doc.is_empty() {
-                continue;
-            }
+        for doc in &docs {
             if !out.is_empty() {
                 out.push('\n');
             }
             // Writing to a String cannot fail.
-            let _ = YamlEmitter::new(&mut out).dump(&Yaml::Hash(doc));
+            let _ = YamlEmitter::new(&mut out).dump(doc);
+        }
+        // The emitter writes some scalars (a control character inside a key, say) in a form its
+        // own reader refuses, and a handoff that was read has to be writable again. JSON is YAML
+        // too, so when the text does not read back as what was written, write that instead
+        // (found by the handoff fuzz target, fixtures/fuzz/handoff).
+        if !YamlLoader::load_from_str(&out).is_ok_and(|back| back == docs) {
+            out = docs.iter().map(|d| format!("---\n{}\n", to_json(d))).collect::<Vec<_>>().join("\n");
         }
         out.push('\n');
         out

@@ -12,7 +12,7 @@ use aibus_provider::{
 };
 use aibus_testkit::fake_credential;
 use async_trait::async_trait;
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -59,8 +59,8 @@ impl Provider for Costed {
 }
 
 async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
-    let dir = TempDir::new().unwrap();
-    let runs = TempDir::new().unwrap();
+    let dir = xdg_temp();
+    let runs = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     let def = found.agents[&"explore".parse::<AgentName>().unwrap()].clone();
     let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);

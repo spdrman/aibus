@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use aibus_core::config::McpServer;
 use aibus_core::*;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -33,12 +33,12 @@ struct Rig {
     exec: ToolExecutor,
     cx: ToolCx,
     cancel: CancellationToken,
-    _dir: TempDir,
+    _dir: Xdg,
     _rx: mpsc::Receiver<Msg>,
 }
 
 async fn rig(servers: BTreeMap<String, McpServer>) -> (Rig, Vec<String>) {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (tools, warnings) = aibus_core::mcp::connect_all(&servers, &env(), dir.path(), "s").await;
     let mut registry = ToolRegistry::default();
     for t in tools {
@@ -206,7 +206,7 @@ async fn a_server_that_will_not_start_is_a_warning_and_the_others_still_work() {
 
 #[tokio::test]
 async fn the_servers_environment_is_scrubbed_of_secrets() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let out = dir.path().join("env.txt");
     let servers = BTreeMap::from([(
         "env".to_owned(),
@@ -233,7 +233,7 @@ async fn the_servers_environment_is_scrubbed_of_secrets() {
 #[test]
 fn a_roles_tool_set_reaches_mcp_servers_only_through_mcp_entries() {
     let lead = {
-        let dir = TempDir::new().unwrap();
+        let dir = xdg_temp();
         let found = aibus_core::agent::discover::discover(None, dir.path(), None, &[], &[]).unwrap();
         found.agents[&"lead".parse::<AgentName>().unwrap()].clone()
     };

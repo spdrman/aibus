@@ -12,7 +12,7 @@ use aibus_provider::{
     AuthMethodKind, ConfigError, ModelRef, Provider, ProviderConfig, ProviderFactory, ProviderId,
     ProviderRegistry, Secret,
 };
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc;
 
 const WORK_KEY: &str = "sk-work-aaaaaaaaaaaa";
@@ -53,7 +53,7 @@ fn name(n: &str) -> AccountName {
 }
 
 fn general() -> AgentDef {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     found.agents[&"general".parse::<AgentName>().unwrap()].clone()
 }
@@ -106,7 +106,7 @@ impl Rig {
             .select(&ModelRef::Full(ModelId("fake-small".into())), &hints)
             .unwrap();
         let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);
-        let dir = TempDir::new().unwrap();
+        let dir = xdg_temp();
         let handle = spawn(
             RunConfig {
                 run: RunId::new(),

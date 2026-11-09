@@ -1,0 +1,26 @@
+---
+session: auth-refactor
+date: 2026-11-07
+status: partial            # complete | partial | blocked
+outcome: PARTIAL_PLUS      # SUCCEEDED | PARTIAL_PLUS | PARTIAL_MINUS | FAILED
+---
+goal: Move session auth to middleware
+now: Run the migration and add one test for the expired-token path
+test: cargo test -p server auth::
+done_this_session:
+  - task: Extracted AuthLayer
+    files: [src/auth/layer.rs, src/main.rs]
+blockers: []
+questions: [Should refresh tokens rotate on every use?]
+decisions:
+  - middleware_over_extractor: keeps handlers free of auth plumbing
+findings:
+  - fixture_bug: test failed because the fixture, not the code, was stale
+worked: [running the failing test alone first]
+failed: [grepping for the error text, it is templated]
+next:
+  - Run migration 0042
+  - Add expired-token test
+files:
+  created: [src/auth/layer.rs]
+  modified: [src/main.rs, Cargo.toml]

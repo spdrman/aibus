@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use common::{aibus, ndjson, stderr};
 use serde_json::Value;
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 
@@ -69,7 +69,7 @@ fn json(home: &Path, args: &[&str]) -> Value {
 
 #[test]
 fn a_run_leaves_the_07_layout_and_no_credential() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let id = run(home.path(), &[], &format!("map the repo, key {FAKE_KEY}"));
     let dir = state(home.path()).join("sessions").join(&id);
     for f in ["session.json", "graph.snapshot.json.zst", "commits.jsonl.zst", "msgs.jsonl.zst"] {
@@ -86,7 +86,7 @@ fn a_run_leaves_the_07_layout_and_no_credential() {
 
 #[test]
 fn list_and_show_read_the_index_and_deleting_it_loses_nothing() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let id = run(home.path(), &["--topic", "layout"], "hi");
 
     let list = json(home.path(), &["session", "list"]);
@@ -116,7 +116,7 @@ fn list_and_show_read_the_index_and_deleting_it_loses_nothing() {
 
 #[test]
 fn log_prints_the_commits_as_ndjson_and_replay_prints_the_recorded_hash() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let rec = home.path().join("rec");
     let id = run(home.path(), &["--record", rec.to_str().unwrap()], "map this repo");
 
@@ -139,7 +139,7 @@ fn log_prints_the_commits_as_ndjson_and_replay_prints_the_recorded_hash() {
 
 #[test]
 fn export_renders_markdown_per_run_and_jsonl_on_stdout() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let id = run(home.path(), &[], "map this repo");
 
     let out = aibus(home.path(), &["session", "export", &id, "--format", "md"]);
@@ -158,7 +158,7 @@ fn export_renders_markdown_per_run_and_jsonl_on_stdout() {
 
 #[test]
 fn resume_hydrates_the_snapshot() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let id = run(home.path(), &[], "hi");
     let out = json(home.path(), &["session", "resume", &id]);
     assert_eq!(out["session"], id.as_str());
@@ -170,7 +170,7 @@ fn resume_hydrates_the_snapshot() {
 
 #[test]
 fn prune_removes_old_sessions_unless_pinned_and_takes_hook_logs_with_them() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let old = run(home.path(), &[], "one");
     let pinned = run(home.path(), &[], "two");
     let keep = state(home.path()).join("sessions").join(&pinned).join("session.json");

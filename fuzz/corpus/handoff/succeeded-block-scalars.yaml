@@ -1,0 +1,29 @@
+---
+session: general
+date: 2026-11-03
+status: complete
+outcome: SUCCEEDED
+---
+goal: >
+  Upgrade the logging crate to the new major
+  version without changing the output format
+now: |
+  Nothing is left to do.
+  Open the pull request when the release freeze ends.
+test: cargo test --workspace
+done_this_session:
+  - task: Bumped the dependency and fixed the two call sites
+    files: [Cargo.toml, src/log.rs, src/bin/serve.rs]
+  - task: Added a golden test for the line format
+    files: [tests/log_format.rs]
+blockers: []
+questions: []
+decisions:
+  - keep_old_format: dashboards parse it
+findings: []
+worked: [pinning the old formatter as a fallback]
+failed: []
+next: []
+files:
+  created: [tests/log_format.rs]
+  modified: [Cargo.toml, src/log.rs, src/bin/serve.rs]

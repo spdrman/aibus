@@ -61,6 +61,10 @@ pub struct Global {
     #[arg(long, global = true, value_name = "JSON")]
     pub agents: Option<String>,
     /// default, accept-edits, dont-ask, bypass or plan
+    ///
+    /// bypass needs AIBUS_I_KNOW=1 and skips every permission prompt. The tool allow-list is a
+    /// process boundary inside aibus and not a sandbox: a command that starts through `bash`
+    /// has your full rights. `[tools] sandbox` is the optional OS sandbox for it.
     #[arg(
         long,
         global = true,

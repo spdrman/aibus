@@ -10,7 +10,7 @@ use aibus_core::tools::Bash;
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
 use serde_json::json;
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio_util::sync::CancellationToken;
 
@@ -28,7 +28,7 @@ fn the_loop_channel_takes_4096_messages_and_then_says_full() {
 /// its tail behind one marker.
 #[tokio::test]
 async fn bash_output_over_256_kib_keeps_its_tail_with_a_head_marker() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let env = ["PATH", "HOME", "LANG"]
         .iter()
         .filter_map(|k| std::env::var(k).ok().map(|v| ((*k).to_owned(), v)))

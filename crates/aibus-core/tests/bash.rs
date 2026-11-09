@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use aibus_core::tools::Bash;
 use aibus_core::*;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -70,7 +70,7 @@ fn denied_with(r: &Result<ToolOutput, ToolError>, needle: &str) -> bool {
 
 #[tokio::test]
 async fn compound_commands_cannot_smuggle_a_denied_part_past_an_allow_glob() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash(echo *)"]);
     // Each of these would create PWN if any part after the first reached the shell.
@@ -119,7 +119,7 @@ async fn compound_commands_cannot_smuggle_a_denied_part_past_an_allow_glob() {
 
 #[tokio::test]
 async fn ambiguous_commands_are_denied_even_for_a_bare_allow() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash"]);
     let ambiguous = [
@@ -153,7 +153,7 @@ async fn ambiguous_commands_are_denied_even_for_a_bare_allow() {
 
 #[tokio::test]
 async fn commands_made_only_of_allowed_parts_run() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash(echo *)", "bash(cat *)"]);
     let table = [
@@ -180,7 +180,7 @@ async fn commands_made_only_of_allowed_parts_run() {
 
 #[tokio::test]
 async fn a_deny_specifier_catches_any_part_and_the_destructive_list_comes_first() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let both = EffectiveTools {
         allow: vec![pat("bash")],
@@ -228,7 +228,7 @@ async fn a_deny_specifier_catches_any_part_and_the_destructive_list_comes_first(
 
 #[tokio::test]
 async fn config_deny_patterns_extend_the_list() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let bash = Arc::new(Bash::new(20, vec![], host_env(), dir.path().into(), "s".into()));
     let ex = ToolExecutor::with_gate(
         ToolRegistry::standard(bash),
@@ -252,7 +252,7 @@ async fn config_deny_patterns_extend_the_list() {
 
 #[tokio::test]
 async fn the_environment_is_scrubbed_and_the_aibus_variables_are_set() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(
         dir.path(),
         20,
@@ -286,7 +286,7 @@ async fn the_environment_is_scrubbed_and_the_aibus_variables_are_set() {
 
 #[tokio::test]
 async fn the_working_directory_is_the_runs_and_both_streams_are_captured() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     std::fs::create_dir(dir.path().join("sub")).unwrap();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let wt = dir.path().join("sub");
@@ -302,7 +302,7 @@ async fn the_working_directory_is_the_runs_and_both_streams_are_captured() {
 
 #[tokio::test]
 async fn the_timeout_arg_and_the_config_default_end_a_slow_command() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 1, &[], &[]);
     let e = eff(&["bash"]);
     let t0 = Instant::now();
@@ -328,7 +328,7 @@ fn alive(pid: &str) -> bool {
 
 #[tokio::test]
 async fn cancelling_kills_the_process_group_including_grandchildren() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 120, &[], &[]);
     let c = cx(dir.path());
     let cancel = c.cancel.clone();
@@ -356,7 +356,7 @@ async fn cancelling_kills_the_process_group_including_grandchildren() {
 
 #[tokio::test]
 async fn dropping_the_call_kills_the_group_too() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 120, &[], &[]);
     let c = cx(dir.path());
     let e = eff(&["bash"]);
@@ -374,7 +374,7 @@ async fn dropping_the_call_kills_the_group_too() {
 
 #[tokio::test]
 async fn a_foreground_call_does_not_wait_for_a_backgrounded_child() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 120, &[], &[]);
     let t0 = Instant::now();
     let out = run(&ex, &eff(&["bash"]), &cx(dir.path()), json!({"command": "sleep 30 & echo started"}))
@@ -386,7 +386,7 @@ async fn a_foreground_call_does_not_wait_for_a_backgrounded_child() {
 
 #[tokio::test]
 async fn output_is_capped_to_its_tail() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let mut c = cx(dir.path());
     c.limits.bash_max_output_bytes = 1000;
@@ -403,7 +403,7 @@ async fn output_is_capped_to_its_tail() {
 
 #[tokio::test]
 async fn background_returns_a_handle_and_the_job_can_be_read_and_stopped() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, bash) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash"]);
     let started = run(&ex, &e, &cx(dir.path()), json!({"command": "echo bg-out; sleep 0.3", "background": true}))
@@ -451,7 +451,7 @@ async fn background_returns_a_handle_and_the_job_can_be_read_and_stopped() {
 
 #[tokio::test]
 async fn dropping_the_tool_stops_background_jobs() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let pid_file = dir.path().join("d.pid");
     {
         let (ex, _bash) = rig(dir.path(), 20, &[], &[]);
@@ -473,7 +473,7 @@ async fn dropping_the_tool_stops_background_jobs() {
 
 #[tokio::test]
 async fn bad_input_is_invalid_not_a_panic() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash"]);
     for input in [json!({}), json!({"command": 5}), json!({"command": "   "}), json!({"command": "ls", "bogus": 1})] {

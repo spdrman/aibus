@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{command, ndjson, stderr};
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 
 fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git")
@@ -65,7 +65,7 @@ fn delegate_to_scribe(home: &Path, script: &str) -> std::process::Output {
 
 #[test]
 fn a_worker_writes_in_its_worktree_and_the_project_tree_is_unchanged() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let proj = project(home.path());
     let out = delegate_to_scribe(
         home.path(),
@@ -89,7 +89,7 @@ fn a_worker_writes_in_its_worktree_and_the_project_tree_is_unchanged() {
 
 #[test]
 fn a_clean_worktree_is_removed_when_the_run_ends() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let proj = project(home.path());
     let out = delegate_to_scribe(home.path(), r#"[Text("nothing to write"), Stop(EndTurn), Text("all done")]"#);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -101,7 +101,7 @@ fn a_clean_worktree_is_removed_when_the_run_ends() {
 
 #[test]
 fn outside_a_repository_the_isolated_run_fails_cleanly() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let proj = project(home.path());
     fs::remove_dir_all(proj.join(".git")).unwrap();
     let out = delegate_to_scribe(home.path(), r#"[Text("never runs"), Text("lead carries on")]"#);
@@ -113,7 +113,7 @@ fn outside_a_repository_the_isolated_run_fails_cleanly() {
 
 #[test]
 fn session_resume_continues_a_run_with_its_history() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let first = home.path().join("one.ron");
     fs::write(&first, r#"[Text("first answer")]"#).unwrap();
     let out = command(home.path()).args(["run", "--json", "--script"]).arg(&first).arg("hello").output().unwrap();
@@ -152,7 +152,7 @@ fn session_resume_continues_a_run_with_its_history() {
 
 #[test]
 fn session_resume_needs_a_message_and_a_saved_run() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let out = command(home.path()).args(["session", "resume", "01JC0000000000000000000000", "--run", "x", "hi"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
 }

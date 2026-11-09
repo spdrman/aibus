@@ -244,6 +244,34 @@ pub struct Tools {
     pub allow: Vec<String>,
     /// Globs added to `tools/shell_deny.txt`; a match is refused before any prompt.
     pub deny_patterns: Vec<String>,
+    /// OS sandbox for `bash` (09 section 2). Off unless asked for.
+    pub sandbox: SandboxKind,
+    /// With a sandbox on: `false` cuts the network inside it.
+    pub sandbox_network: bool,
+}
+
+/// `[tools] sandbox`: what `bash` runs inside, if anything.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum SandboxKind {
+    #[default]
+    #[serde(rename = "none")]
+    None,
+    /// `bubblewrap`, Linux.
+    #[serde(rename = "bwrap")]
+    Bwrap,
+    /// `sandbox-exec`, macOS.
+    #[serde(rename = "sandbox-exec")]
+    SandboxExec,
+}
+
+impl SandboxKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SandboxKind::None => "none",
+            SandboxKind::Bwrap => "bwrap",
+            SandboxKind::SandboxExec => "sandbox-exec",
+        }
+    }
 }
 
 impl Default for Tools {
@@ -255,6 +283,8 @@ impl Default for Tools {
             read_max_lines: 2000,
             allow: Vec::new(),
             deny_patterns: Vec::new(),
+            sandbox: SandboxKind::None,
+            sandbox_network: true,
         }
     }
 }
@@ -540,5 +570,17 @@ mod tests {
         assert_eq!(c.persist.snapshot_every_commits, 64);
         assert_eq!(c.ui.tick_hz, 30);
         assert!(!c.persist.store_thinking);
+        // The sandbox is never on by default in v1.
+        assert_eq!(c.tools.sandbox, SandboxKind::None);
+        assert!(c.tools.sandbox_network);
+    }
+
+    #[test]
+    fn the_sandbox_names_are_the_three_spellings_and_nothing_else() {
+        for (text, want) in [("none", SandboxKind::None), ("bwrap", SandboxKind::Bwrap), ("sandbox-exec", SandboxKind::SandboxExec)] {
+            let t: Tools = toml::from_str(&format!("sandbox = \"{text}\"")).unwrap();
+            assert_eq!((t.sandbox, t.sandbox.as_str()), (want, text));
+        }
+        assert!(toml::from_str::<Tools>("sandbox = \"docker\"").is_err());
     }
 }

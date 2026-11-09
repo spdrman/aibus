@@ -7,6 +7,7 @@ use aibus_core::*;
 use aibus_graph::Graph;
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::StreamChunk;
+use base64::Engine as _;
 use tempfile::TempDir;
 
 use crate::tui::{run_id, NOW};
@@ -21,6 +22,24 @@ pub struct Xdg {
     dir: TempDir,
     pub paths: Paths,
     forbidden: Vec<String>,
+    /// A log capture for the test unless it already runs one, so the log grep of 10 section 3
+    /// is on for every test that makes a directory.
+    _logs: Option<crate::LogCapture>,
+}
+
+/// `.path()` and the rest of `tempfile::TempDir`, so a test that only needs a directory can
+/// use this one.
+impl std::ops::Deref for Xdg {
+    type Target = TempDir;
+    fn deref(&self) -> &TempDir {
+        &self.dir
+    }
+}
+
+impl AsRef<Path> for Xdg {
+    fn as_ref(&self) -> &Path {
+        self.dir.path()
+    }
 }
 
 pub fn xdg_temp() -> Xdg {
@@ -34,6 +53,7 @@ pub fn xdg_temp() -> Xdg {
         dir,
         paths,
         forbidden: vec![FAKE_KEY.to_owned()],
+        _logs: crate::capture_unless_live(),
     }
 }
 
@@ -68,9 +88,10 @@ impl Xdg {
             }
             let text = String::from_utf8_lossy(&bytes);
             for secret in &self.forbidden {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(secret);
                 assert!(
-                    !text.contains(secret.as_str()),
-                    "a secret reached {}",
+                    !text.contains(secret.as_str()) && !text.contains(&b64),
+                    "a secret reached {} (as it is or in base64)",
                     p.display()
                 );
             }

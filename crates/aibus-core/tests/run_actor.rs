@@ -15,11 +15,11 @@ use aibus_provider::{
 };
 use aibus_testkit::{fake_credential, FakeClock};
 use serde_json::json;
-use tempfile::TempDir;
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 
 fn builtin(name: &str) -> AgentDef {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     found.agents[&name.parse::<AgentName>().unwrap()].clone()
 }
@@ -36,8 +36,8 @@ fn texts(m: &aibus_provider::Message) -> Vec<&str> {
 
 // ---- context::build ---------------------------------------------------------------------
 
-fn project() -> TempDir {
-    let d = TempDir::new().unwrap();
+fn project() -> Xdg {
+    let d = xdg_temp();
     let p = d.path();
     std::fs::create_dir_all(p.join(".aibus/rules")).unwrap();
     std::fs::create_dir_all(p.join(".claude/rules")).unwrap();
@@ -117,7 +117,7 @@ fn explore_and_plan_skip_rules_and_git_status() {
 
 #[test]
 fn gather_git_is_none_outside_a_repository() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     assert_eq!(aibus_core::context::gather_git(dir.path()), None);
 }
 
@@ -228,12 +228,12 @@ impl Rig {
 }
 
 async fn run_to_end(script: Script, def: AgentDef, cwd: &Path) -> Done {
-    let runs = TempDir::new().unwrap();
+    let runs = xdg_temp();
     start(script, def, cwd, runs.path()).finish().await
 }
 
-fn repo() -> TempDir {
-    let d = TempDir::new().unwrap();
+fn repo() -> Xdg {
+    let d = xdg_temp();
     std::fs::create_dir_all(d.path().join("src")).unwrap();
     std::fs::write(d.path().join("src/main.rs"), "fn main() {}\n").unwrap();
     d
@@ -312,7 +312,7 @@ fn handle_sizes_follow_the_spec() {
 async fn the_stream_and_mailbox_channels_fill_at_the_spec_sizes() {
     let _clock = FakeClock::new();
     let dir = repo();
-    let runs = TempDir::new().unwrap();
+    let runs = xdg_temp();
     let fake = Arc::new(FakeProvider::new(Script::new().then(Step::Text("ok".into()))));
     let fitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let filling = Arc::new(Filling { inner: fake.clone(), fitted: fitted.clone() });
@@ -470,7 +470,7 @@ async fn a_provider_error_fails_the_run_or_leaves_it_partial() {
 async fn mail_is_appended_before_the_next_request() {
     let _clock = FakeClock::new();
     let dir = repo();
-    let runs = TempDir::new().unwrap();
+    let runs = xdg_temp();
     let rig = start(
         Script::new().then(Step::Text("ok".into())),
         builtin("explore"),
@@ -578,7 +578,7 @@ async fn a_tool_call_chunk_flushes_at_once() {
 async fn cancel_ends_the_run_cancelled_within_100_ms() {
     let clock = FakeClock::new();
     let dir = repo();
-    let runs = TempDir::new().unwrap();
+    let runs = xdg_temp();
     let script = Script::new()
         .then(Step::Text("thinking".into()))
         .then(Step::Delay(Duration::from_secs(3600)));
@@ -652,7 +652,7 @@ fn wrap_escapes_lines_that_look_like_markers() {
 
 #[test]
 fn cap_keeps_the_first_32_kib_and_writes_the_rest_to_result_md() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let max = ToolLimits::default().result_max_bytes;
     assert_eq!(max, 32 * 1024);
 
@@ -680,7 +680,7 @@ fn wrap_says_where_the_full_text_is() {
 async fn an_oversized_final_answer_is_capped_in_the_run_result() {
     let _clock = FakeClock::new();
     let dir = repo();
-    let runs = TempDir::new().unwrap();
+    let runs = xdg_temp();
     let script = Script::new().then(Step::Text("z".repeat(40_000)));
     let done = start(script, builtin("explore"), dir.path(), runs.path())
         .finish()

@@ -10,7 +10,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 
 use common::{command, schema};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 
 /// A tool call that needs permission under `default` mode, then an answer that depends on what
 /// the conversation holds.
@@ -84,7 +84,7 @@ impl Session {
 
 #[test]
 fn a_permission_allow_and_a_message_drive_the_session() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let mut s = Session::start(home.path());
     let started = s.until("RunStarted");
     let run = started["run"].as_str().unwrap().to_owned();
@@ -112,7 +112,7 @@ fn a_permission_allow_and_a_message_drive_the_session() {
 
 #[test]
 fn a_permission_deny_keeps_the_tool_from_running() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let mut s = Session::start(home.path());
     let needed = s.until("PermissionNeeded");
     s.send(&json!({"type": "Permission", "id": needed["id"], "decision": "deny"}));
@@ -124,7 +124,7 @@ fn a_permission_deny_keeps_the_tool_from_running() {
 
 #[test]
 fn bad_lines_are_reported_on_stderr_and_do_not_stop_the_session() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let script = home.path().join("ctl.ron");
     fs::write(&script, SCRIPT).unwrap();
     let mut child = command(home.path())
@@ -161,7 +161,7 @@ fn bad_lines_are_reported_on_stderr_and_do_not_stop_the_session() {
 
 #[test]
 fn a_closed_stdin_refuses_what_would_ask_so_the_run_cannot_hang() {
-    let home = TempDir::new().unwrap();
+    let home = xdg_temp();
     let mut s = Session::start(home.path());
     let needed = s.until("PermissionNeeded");
     // Nobody is left to answer.

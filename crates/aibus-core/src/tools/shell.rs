@@ -36,7 +36,7 @@ const DANGEROUS_ASSIGNMENTS: [&str; 12] = [
 /// `Err` carries the reason when the text is ambiguous: an unterminated quote or bracket, a
 /// heredoc, arithmetic or `$'...'` quoting, a nested backtick, a command word that is itself an
 /// expansion, or an assignment to something like `PATH`.
-pub(crate) fn split(cmd: &str) -> Result<Vec<String>, String> {
+pub fn split(cmd: &str) -> Result<Vec<String>, String> {
     if cmd.contains('\0') {
         return Err("command contains a NUL byte".into());
     }
@@ -326,7 +326,7 @@ impl ShellDeny {
         let starts = std::iter::once(0).chain(
             text.char_indices()
                 .filter(|(_, c)| c.is_whitespace())
-                .map(|(i, _)| i + 1),
+                .map(|(i, c)| i + c.len_utf8()),
         );
         for start in starts {
             let tail = &text[start..];
@@ -514,6 +514,15 @@ mod tests {
         for cmd in fine {
             assert_eq!(deny.hit(cmd), None, "{cmd:?}");
         }
+    }
+
+    /// Found by the tool_pattern fuzz target (fixtures/fuzz/tool_pattern): a suffix was cut one
+    /// byte after the space, which is the middle of a two-byte one.
+    #[test]
+    fn deny_hit_survives_multibyte_whitespace() {
+        let deny = ShellDeny::new(&[]).unwrap();
+        assert_eq!(deny.hit("git\u{a0}status"), None);
+        assert_eq!(deny.hit("sudo\u{3000}rm -rf /"), Some("rm-root"));
     }
 
     #[test]

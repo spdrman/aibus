@@ -1,0 +1,46 @@
+[package]
+name = "aibus-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# cargo-fuzz needs nightly and libFuzzer, so this is its own workspace with its own lockfile
+# (copied from the root one, so the pins in it hold here too). It is not part of
+# `cargo build --workspace`, `cargo deny` or the MSRV build.
+[workspace]
+
+[dependencies]
+aibus-core = { path = "../crates/aibus-core" }
+base64 = "0.22"
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "agent_def"
+path = "fuzz_targets/agent_def.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handoff"
+path = "fuzz_targets/handoff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "redactor"
+path = "fuzz_targets/redactor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tool_pattern"
+path = "fuzz_targets/tool_pattern.rs"
+test = false
+doc = false
+bench = false

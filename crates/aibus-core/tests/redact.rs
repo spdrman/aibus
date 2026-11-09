@@ -77,6 +77,24 @@ const POSITIVE: &[(&str, &str, &str)] = &[
     ("assignment", "export PASSWORD=correct-horse-battery", "correct-horse-battery"),
     ("assignment", "db passwd=hunter2 host=x", "hunter2"),
     ("assignment", "ACCESS_TOKEN=zzzz9999", "zzzz9999"),
+    (
+        "openai-project-key",
+        "Incorrect API key provided: sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56_Qr78-St90",
+        "sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56_Qr78-St90",
+    ),
+    (
+        "openai-project-key",
+        "key sk-svcacct-Zz11Yy22Xx33Ww44Vv55Uu66Tt77 rejected",
+        "sk-svcacct-Zz11Yy22Xx33Ww44Vv55Uu66Tt77",
+    ),
+    (
+        "google-api-key",
+        "GET https://generativelanguage.googleapis.com/v1beta/models?alt=sse&k=AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+        "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+    ),
+    ("api-key-field", r#"{"headers":{"x-api-key":"gw-9f8e7d6c5b4a3210"}}"#, "gw-9f8e7d6c5b4a3210"),
+    ("api-key-field", "retry https://gw.test/v1/chat?api_key=gw-9f8e7d6c5b4a3210&n=1", "gw-9f8e7d6c5b4a3210"),
+    ("api-key-field", "X-Goog-Api-Key: gw-9f8e7d6c5b4a3210", "gw-9f8e7d6c5b4a3210"),
 ];
 
 const NEGATIVE: &[&str] = &[
@@ -96,6 +114,10 @@ const NEGATIVE: &[&str] = &[
     "max tokens=5 was a typo for tokens = 5",
     "passwords are stored in the keychain",
     "token budget exceeded",
+    "sk-proj-****************************abcd is how a provider masks a key",
+    "AIzaShort and AIza alone are not keys",
+    "api_key is missing from the config",
+    "the api key: short",
     "# Heading\nplain prose, paths like crates/aibus/src/main.rs and numbers 12345",
 ];
 
@@ -126,6 +148,9 @@ fn every_pattern_is_exercised_by_the_corpus() {
         "bearer",
         "jwt",
         "assignment",
+        "openai-project-key",
+        "google-api-key",
+        "api-key-field",
     ];
     for s in spec {
         assert!(names.contains(s), "no positive line for {s}");

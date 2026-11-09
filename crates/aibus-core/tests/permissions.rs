@@ -19,7 +19,7 @@ use aibus_provider::fake::{FakeProvider, Script, Step};
 use aibus_provider::StopReason;
 use aibus_testkit::{fake_credential, FakeClock};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -132,7 +132,7 @@ fn patterns_round_trip_and_persist_without_losing_other_keys() {
     assert!("(x)".parse::<ToolPattern>().is_err());
     assert_eq!(pat("Bash(git *)").tool, "bash");
 
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let f = dir.path().join(".aibus/settings.toml");
     persist_allow(&f, &[pat("bash(cargo *)")]).unwrap();
     assert!(std::fs::read_to_string(&f).unwrap().contains("bash(cargo *)"));
@@ -189,7 +189,7 @@ fn denied(r: &Result<ToolOutput, ToolError>) -> Option<&str> {
 
 #[tokio::test]
 async fn the_executor_asks_denies_and_remembers_per_the_mode() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let echo = json!({"command": "echo hi"});
     let write = json!({"path": "a.txt", "content": "x"});
@@ -236,7 +236,7 @@ async fn the_executor_asks_denies_and_remembers_per_the_mode() {
 
 #[tokio::test]
 async fn always_for_this_pattern_is_session_scoped_and_covers_every_part() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let mode = PermissionMode::Default;
     let echo = |c: &str| json!({ "command": c });
@@ -267,7 +267,7 @@ async fn always_for_this_pattern_is_session_scoped_and_covers_every_part() {
 
 #[tokio::test]
 async fn pre_approved_patterns_from_config_and_the_flag_skip_the_prompt() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let gate = Gate {
         allow: vec![pat("bash(echo *)"), pat("write")],
         ..Gate::default()
@@ -290,7 +290,7 @@ async fn pre_approved_patterns_from_config_and_the_flag_skip_the_prompt() {
 
 #[tokio::test]
 async fn the_prompt_summary_is_redacted_and_short() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let redactor = Redactor::new();
     redactor.register(&AccountName("work".into()), "sk-live-123456789");
     let gate = Gate {
@@ -308,7 +308,7 @@ async fn the_prompt_summary_is_redacted_and_short() {
 
 #[tokio::test]
 async fn cancelling_while_a_prompt_is_open_ends_the_call() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let c = cx(dir.path());
     let cancel = c.cancel.clone();
@@ -330,7 +330,7 @@ async fn cancelling_while_a_prompt_is_open_ends_the_call() {
 
 #[tokio::test]
 async fn report_artifact_records_the_file_and_the_fraction() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     std::fs::write(dir.path().join("out.md"), "report").unwrap();
     let c = cx(dir.path());
     let out = ReportArtifact.call(&c, json!({"path": "out.md", "kind": "report", "progress": 0.25})).await.unwrap();
@@ -358,7 +358,7 @@ async fn report_artifact_records_the_file_and_the_fraction() {
 
 #[tokio::test]
 async fn ask_user_and_the_plan_tools_return_signals_for_the_run_loop() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let c = cx(dir.path());
     let out = AskUser.call(&c, json!({"question": "which?", "choices": ["a", "b"]})).await.unwrap();
     assert_eq!(out.signal, Some(Signal::AskUser { question: "which?".into(), choices: vec!["a".into(), "b".into()] }));
@@ -372,7 +372,7 @@ async fn ask_user_and_the_plan_tools_return_signals_for_the_run_loop() {
 
 #[test]
 fn interactive_and_plan_tools_are_lead_only_and_foreground_only() {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     let get = |n: &str| found.agents[&n.parse::<AgentName>().unwrap()].clone();
     let names = |d: &AgentDef, role, bg| -> Vec<String> {
@@ -430,7 +430,7 @@ fn every_tool_schema_matches_its_file_under_docs_schemas_tools() {
 #[tokio::test]
 async fn sample_inputs_validate_against_the_schemas_the_tools_publish() {
     // (tool, good inputs, bad inputs): the bad ones must be rejected by the tool itself.
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     std::fs::write(dir.path().join("f"), "x").unwrap();
     let (ex, _) = executor(Gate::default(), dir.path());
     let table: [(&str, Vec<Value>, Vec<Value>); 6] = [
@@ -456,7 +456,7 @@ async fn sample_inputs_validate_against_the_schemas_the_tools_publish() {
 // ---- the run loop ---------------------------------------------------------------------
 
 fn lead_or(name: &str) -> AgentDef {
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     found.agents[&name.parse::<AgentName>().unwrap()].clone()
 }
@@ -489,7 +489,7 @@ async fn drive(
 ) -> Vec<Msg> {
     let fake = Arc::new(FakeProvider::new(script));
     let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);
-    let runs = TempDir::new().unwrap();
+    let runs = xdg_temp();
     let handle = spawn(
         RunConfig {
             run: RunId::new(),
@@ -569,7 +569,7 @@ fn open_len(a: &common::A) -> usize {
 #[tokio::test]
 async fn a_prompt_parks_the_run_until_the_answer_arrives() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate { tty: true, ..Gate::default() }, dir.path());
     let mut saw_open = false;
     let msgs = drive(
@@ -611,7 +611,7 @@ async fn a_prompt_parks_the_run_until_the_answer_arrives() {
 #[tokio::test]
 async fn a_denied_call_is_an_error_result_and_the_run_carries_on() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate { tty: true, ..Gate::default() }, dir.path());
     let msgs = drive(
         script(&[("bash", json!({"command": "touch PWN"})), ("ls", json!({"path": "."}))]),
@@ -637,7 +637,7 @@ async fn a_denied_call_is_an_error_result_and_the_run_carries_on() {
 #[tokio::test]
 async fn headless_default_emits_needed_then_denied_with_no_tty() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let msgs = drive(
         script(&[("bash", json!({"command": "touch PWN"}))]),
@@ -667,7 +667,7 @@ async fn headless_default_emits_needed_then_denied_with_no_tty() {
 #[tokio::test]
 async fn always_applies_to_later_calls_in_the_same_session() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate { tty: true, ..Gate::default() }, dir.path());
     let msgs = drive(
         script(&[("bash", json!({"command": "echo one"})), ("bash", json!({"command": "echo two"}))]),
@@ -690,7 +690,7 @@ async fn always_applies_to_later_calls_in_the_same_session() {
 #[tokio::test]
 async fn dont_ask_and_accept_edits_in_the_loop() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let mut def = lead_or("general");
     def.permission_mode = PermissionMode::DontAsk;
@@ -724,7 +724,7 @@ async fn dont_ask_and_accept_edits_in_the_loop() {
 #[tokio::test]
 async fn enter_plan_mode_switches_the_effective_mode_until_exit() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let mut def = lead_or("lead");
     def.permission_mode = PermissionMode::AcceptEdits;
@@ -761,7 +761,7 @@ async fn enter_plan_mode_switches_the_effective_mode_until_exit() {
 #[tokio::test]
 async fn ask_user_commits_waiting_user_and_the_next_message_is_the_answer() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     let (ex, _) = executor(Gate::default(), dir.path());
     let mut waiting = false;
     let msgs = drive(
@@ -788,7 +788,7 @@ async fn ask_user_commits_waiting_user_and_the_next_message_is_the_answer() {
 #[tokio::test]
 async fn report_artifact_reaches_the_graph_as_an_artifact_and_a_percentage() {
     let _clock = FakeClock::new();
-    let dir = TempDir::new().unwrap();
+    let dir = xdg_temp();
     std::fs::write(dir.path().join("report.md"), "# r").unwrap();
     let (ex, _) = executor(Gate::default(), dir.path());
     let mut meta_artifacts = 0;

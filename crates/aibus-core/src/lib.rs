@@ -51,7 +51,7 @@ pub use tool::*;
 pub use worktree::WorktreeInfo;
 pub use tools::{
     effective_tools, Bash, CreateHandoff, Delegate, EffectiveTools, Fork, Gate, JobView,
-    LedgerUpdate, MemoryAppend, MemoryRead, MemoryWrite, Recall, ResumeRun, RunWorkflow,
+    LedgerUpdate, MemoryAppend, MemoryRead, MemoryWrite, Recall, ResumeRun, RunWorkflow, Sandbox,
     SendMessage, ShellDeny, ToolExecutor, ToolRegistry, WebFetch, WebFetcher,
 };
 pub use triggers::Triggers;

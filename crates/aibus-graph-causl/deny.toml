@@ -9,6 +9,10 @@ all-features = true
 version = 2
 unmaintained = "all"
 yanked = "deny"
+# Same as the root deny.toml: the test kit brings ratatui 0.29 in as a dev-dependency.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but only expands macros at build time; ratatui 0.29 requires it" },
+]
 
 [licenses]
 version = 2
@@ -20,6 +24,14 @@ wildcards = "allow"
 
 [[bans.deny]]
 crate = "tokio"
+deny-multiple-versions = true
+
+[[bans.deny]]
+crate = "reqwest"
+deny-multiple-versions = true
+
+[[bans.deny]]
+crate = "ratatui"
 deny-multiple-versions = true
 
 [[bans.deny]]

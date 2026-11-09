@@ -74,11 +74,55 @@ pub fn agent(cmd: &AgentCmd, g: &Global) -> Result<u8, AibusError> {
         AgentCmd::New { name } => new(&env, name),
         AgentCmd::Validate { path } => validate(&env, g, path.as_deref()),
         AgentCmd::Where => where_(&env, g),
-        AgentCmd::Import { .. } => {
-            eprintln!("aibus: agent import: not yet");
-            Ok(2)
+        AgentCmd::Import { dir } => import(&env, g, dir),
+    }
+}
+
+/// `agent import <dir>`: copies the definitions into `.aibus/agents/` with their hooks turned off
+/// and prints every hook with its command text (09 section 6).
+fn import(env: &Env, g: &Global, dir: &Path) -> Result<u8, AibusError> {
+    use aibus_core::agent::import::{import, Outcome};
+    let from = env.cwd.join(dir);
+    let to = project_dir(&env.cwd).join("agents");
+    let done = import(&from, &to).map_err(AibusError::Usage)?;
+    if g.json {
+        let rows: Vec<Value> = done
+            .iter()
+            .map(|i| {
+                let (status, detail) = match &i.outcome {
+                    Outcome::Copied(p) => ("copied", p.display().to_string()),
+                    Outcome::Skipped(why) => ("skipped", why.clone()),
+                };
+                json!({
+                    "file": i.file,
+                    "status": status,
+                    "detail": detail,
+                    "hooks": i.hooks.iter().map(|h| json!({
+                        "event": h.event, "matcher": h.matcher, "text": h.text, "enabled": false,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        println!("{}", Value::Array(rows));
+        return Ok(0);
+    }
+    for i in &done {
+        match &i.outcome {
+            Outcome::Copied(p) => println!("imported {} -> {}", i.file.display(), p.display()),
+            Outcome::Skipped(why) => println!("skipped {}: {why}", i.file.display()),
+        }
+        for h in &i.hooks {
+            let matcher = h.matcher.as_deref().map_or(String::new(), |m| format!(" [{m}]"));
+            println!("  hook DISABLED {}{matcher}: {}", h.event, h.text);
         }
     }
+    if done.iter().any(|i| !i.hooks.is_empty()) {
+        println!("hooks are off. To turn one on, read it and rename `disabled_hooks` to `hooks` in the file.");
+    }
+    if done.is_empty() {
+        println!("no definitions (*.md) in {}", from.display());
+    }
+    Ok(0)
 }
 
 fn scope_name(s: &Scope) -> &'static str {

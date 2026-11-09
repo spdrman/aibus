@@ -253,6 +253,12 @@ impl Orchestrator {
             .ok_or_else(|| format!("no run of an agent named {key} in this session"))
     }
 
+    /// The session's first run, the lead, while it is going.
+    pub fn lead(&self) -> Option<RunId> {
+        let g = lock(&self.inner);
+        g.known.first().map(|(r, _)| *r).filter(|r| g.live.contains_key(r))
+    }
+
     /// Whether `run` is going (it holds a mailbox).
     pub fn is_live(&self, run: RunId) -> bool {
         lock(&self.inner).live.contains_key(&run)

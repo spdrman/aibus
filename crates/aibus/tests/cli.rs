@@ -1,4 +1,4 @@
-//! The command line surface: what runs, what says "not yet", and what the config commands do.
+//! The command line surface: what runs and what the config commands do.
 
 mod common;
 
@@ -31,23 +31,9 @@ fn help_lists_every_top_level_command() {
     let text = stdout(&out);
     for c in [
         "run", "agent", "account", "session", "handoff", "ledger", "memory", "workflow",
-        "config", "doctor", "completions", "version", "--permission-mode", "--trace",
+        "config", "init", "doctor", "completions", "version", "--permission-mode", "--trace",
     ] {
         assert!(text.contains(c), "--help does not mention {c}");
-    }
-}
-
-#[test]
-fn everything_else_says_not_yet_and_exits_2() {
-    let home = TempDir::new().unwrap();
-    let cases: &[&[&str]] = &[
-        &["agent", "import", "somewhere"],
-    ];
-    for args in cases {
-        let out = aibus(home.path(), args);
-        assert_eq!(out.status.code(), Some(2), "{args:?}");
-        assert!(out.stdout.is_empty(), "{args:?}");
-        assert!(stderr(&out).contains("not yet"), "{args:?}: {}", stderr(&out));
     }
 }
 

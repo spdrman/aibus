@@ -13,8 +13,8 @@ use smol_str::SmolStr;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use super::{
-    AgentDef, CheckpointSpec, DefSource, Effort, HookSet, HookSpec, ModelRef, PermissionMode, Role,
-    RouterSpec, ToolPattern, ToolPolicy,
+    AgentDef, CheckpointSpec, DefSource, Effort, HookKind, HookSet, HookSpec, ModelRef,
+    PermissionMode, Role, RouterSpec, ToolPattern, ToolPolicy,
 };
 use crate::ids::{AgentName, InvalidAgentName};
 
@@ -232,6 +232,9 @@ pub(crate) fn from_fields(
         None => None,
     };
 
+    // `aibus agent import` parks the hooks of a foreign definition here; the user renames the key
+    // to `hooks` to turn them on, so it is not an unknown key.
+    m.remove("disabled_hooks");
     warnings.extend(m.into_keys().map(|k| format!("unknown key `{k}`")));
 
     Ok((
@@ -324,7 +327,15 @@ pub fn to_json(def: &AgentDef) -> Value {
                     if let Some(x) = &h.matcher {
                         o.insert("matcher".into(), x.clone().into());
                     }
-                    o.insert("command".into(), h.command.clone().into());
+                    let (key, kind) = match h.kind {
+                        HookKind::Command => ("command", "command"),
+                        HookKind::Prompt => ("prompt", "prompt"),
+                        HookKind::Http => ("url", "http"),
+                    };
+                    if h.kind != HookKind::Command {
+                        o.insert("type".into(), kind.into());
+                    }
+                    o.insert(key.into(), h.command.clone().into());
                     if let Some(t) = h.timeout_secs {
                         o.insert("timeout_secs".into(), t.into());
                     }
@@ -606,10 +617,26 @@ fn hooks(v: Value) -> Result<HookSet, DefError> {
             };
             let h: BTreeMap<String, Value> =
                 h.into_iter().map(|(k, v)| (canonical_key(&k), v)).collect();
-            let Some(Value::String(command)) = h.get("command") else {
-                return Err(want("hooks", "hook entries with a command"));
+            let kind = match h.get("type") {
+                None => HookKind::Command,
+                Some(Value::String(t)) => HookKind::parse(t)
+                    .ok_or_else(|| want("hooks", "a type of command, prompt or http"))?,
+                Some(_) => return Err(want("hooks", "a string type")),
             };
+            // The text that matters for the kind: a command line, a prompt, or a URL.
+            let (key, what) = match kind {
+                HookKind::Command => ("command", "hook entries with a command"),
+                HookKind::Prompt => ("prompt", "prompt hooks with a prompt"),
+                HookKind::Http => ("url", "http hooks with an http(s) url"),
+            };
+            let Some(Value::String(command)) = h.get(key) else {
+                return Err(want("hooks", what));
+            };
+            if kind == HookKind::Http && !(command.starts_with("http://") || command.starts_with("https://")) {
+                return Err(want("hooks", what));
+            }
             specs.push(HookSpec {
+                kind,
                 matcher: match h.get("matcher") {
                     None => None,
                     Some(Value::String(s)) => Some(s.clone()),

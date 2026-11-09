@@ -38,6 +38,7 @@ fn def(name: &str, hooks: &[(&str, Option<&str>, &str)]) -> AgentDef {
             matcher: matcher.map(Into::into),
             command: (*command).into(),
             timeout_secs: None,
+            kind: HookKind::Command,
         });
     }
     d

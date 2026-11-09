@@ -29,6 +29,7 @@ fn def(name: &str, hooks: &[(&str, &str)]) -> AgentDef {
             matcher: None,
             command: (*command).into(),
             timeout_secs: None,
+            kind: HookKind::Command,
         });
     }
     d

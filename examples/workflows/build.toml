@@ -1,0 +1,15 @@
+name = "build"
+description = "Plan a change, implement it, verify it"
+
+[[step]]
+agent = "plan"
+prompt = "Plan the change step by step, naming the files to touch: {{input}}"
+
+[[step]]
+agent = "general"
+prompt = "Implement this plan: {{prev.summary}}"
+
+[[step]]
+agent = "general"
+prompt = "Verify the change: build the project, run its tests and report the result. Task: {{input}}"
+on_fail = "retry:2"

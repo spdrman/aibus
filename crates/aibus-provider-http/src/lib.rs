@@ -74,7 +74,7 @@ fn message_of(body: &[u8]) -> String {
 }
 
 pub fn request_id(resp: &Response) -> Option<String> {
-    ["request-id", "x-request-id"]
+    ["request-id", "x-request-id", "x-amzn-requestid"]
         .iter()
         .find_map(|h| resp.headers().get(*h))
         .and_then(|v| v.to_str().ok())
@@ -156,6 +156,16 @@ pub async fn json(resp: Response) -> Result<serde_json::Value, ProviderError> {
     serde_json::from_slice(&bytes).map_err(|e| {
         ProviderError::new(ProviderErrorKind::Unknown, format!("answer is not JSON: {e}"))
     })
+}
+
+/// The next piece of a response body that is not SSE (Bedrock's binary event stream), `None` at
+/// the end. Gives up when `cancel` fires.
+pub async fn chunk(resp: &mut Response, cancel: &CancellationToken) -> Result<Option<Vec<u8>>, ProviderError> {
+    tokio::select! {
+        biased;
+        () = cancel.cancelled() => Err(cancelled()),
+        c = resp.chunk() => Ok(c.map_err(network)?.map(|b| b.to_vec())),
+    }
 }
 
 /// The events of a streaming response, one at a time.

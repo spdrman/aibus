@@ -25,6 +25,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 [dev-dependencies]
 aibus-provider-anthropic.workspace = true
 aibus-provider-openai.workspace = true
+async-trait = "0.1"
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time", "test-util"] }
 tokio-util = "0.7"

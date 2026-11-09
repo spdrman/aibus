@@ -5,6 +5,18 @@
 use aibus_core::Pane;
 use ratatui::layout::Rect;
 
+/// The clickable parts of the status bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Segment {
+    Swarm,
+    Subagents,
+    Advisor,
+    Router,
+    Ledger,
+    /// The permission alert.
+    Alert,
+}
+
 /// What a region is, which is also what a click on it means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HitId {
@@ -15,6 +27,12 @@ pub enum HitId {
     LogRow(usize),
     /// The nth advisor checkpoint diamond.
     Checkpoint(usize),
+    /// A status bar segment.
+    Status(Segment),
+    /// The nth item of the open context menu.
+    MenuItem(usize),
+    /// The open context menu's own box.
+    MenuBox,
     /// The 3-column rail strip.
     RailStrip,
     /// The border between the rail and the centre column.
@@ -103,8 +121,10 @@ impl HitMap {
     /// Whether anything on screen reacts to the pointer resting on it, which is what decides
     /// whether move events are worth asking the terminal for.
     pub fn hoverable(&self) -> bool {
+        // A context menu has a backdrop but its items still react to the pointer.
+        let menu = self.regions.iter().any(|r| matches!(r.id, HitId::MenuItem(_)));
         self.regions.iter().any(|r| !matches!(r.kind, HitKind::Modal))
-            && !self.regions.iter().any(|r| r.id == HitId::Backdrop)
+            && (menu || !self.regions.iter().any(|r| r.id == HitId::Backdrop))
     }
 }
 

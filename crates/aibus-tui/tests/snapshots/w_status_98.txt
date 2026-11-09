@@ -1,0 +1,1 @@
+  haiku [swarming]      subagents [3/3]      opus [on call]      jev [ 1,314 forks]

@@ -1,24 +1,24 @@
-              AIBUS   ·   SONNET 5.5 LEADS   ·   HAIKU 5.5 SWARMS
-──┌ help · key map ──────────────────────────────────────────────────────────┐──
-  │Tab         next pane                 p           oldest permission       │
-  │Shift+Tab   previous pane             y           allow this call         │
-  │Enter       send the prompt           n           deny this call          │
-  │Enter       open run transcript       a           always allow this tool  │
-  │Up k        up / scroll               e           edit input, then allow  │
-  │Down j      down / scroll             :           command palette         │
-  │Left h      previous card             /           filter / search         │
-  │Right l     next card                 f           follow newest           │
-  │x           stop or dismiss run       [           step time back          │
-  │r           retry failed run          ]           step time forward       │
-  │m           message the run           A           agents screen           │
-  │R           resume partial run        K           accounts screen         │
-  │b           background / foreground   ?           this help               │
-  │Ctrl+b      wait in background        Ctrl+c      cancel run, twice quits │
-  │t           lead transcript           q           quit                    │
-┌ │a           advisor rail              Esc q       close                   │─┐
-│2│Enter       show last advice          Esc         clear the prompt        │ │
-│2│                                                                          │ │
-│2│any key closes                                                            │ █
-└─└──────────────────────────────────────────────────────────────────────────┘─┘
- ~/app $ aibus --model sonnet --advisor opus ▌
- haiku 5.5 [swarming]  subagents [2/3]  advisor [reading]  router [ 1,314 forks]
+  ┌ help · key map ──────────────────────────────────────────────────────────┐
+──│Tab         next pane                 Enter       show last advice        │──
+  │Shift+Tab   previous pane             p           oldest permission       │ad
+  │Enter       send the prompt           y           allow this call         │
+  │Enter       open run transcript       n           deny this call          │
+  │Up k        up / scroll               a           always allow this tool  │
+  │Down j      down / scroll             e           edit input, then allow  │
+  │Left h      previous card             :           command palette         │
+  │Right l     next card                 /           filter / search         │
+  │x           stop or dismiss run       f           follow newest           │
+  │r           retry failed run          [           step time back          │
+  │M           message the run           ]           step time forward       │
+  │m           context menu              A           agents screen           │
+  │Space       show tooltip              K           accounts screen         │
+  │Enter       pick menu item            ?           this help               │
+  │R           resume partial run        Ctrl+c      cancel run, twice quits │
+  │b           background / foreground   q           quit                    │
+┌ │Ctrl+b      wait in background        Esc q       close                   │─┐
+│ │t           lead transcript           Esc         clear the prompt        │ │
+│ │a           advisor rail                                                  │ │
+│ │                                                                          │ █
+└─│any key closes                                                            │─┘
+ ~└──────────────────────────────────────────────────────────────────────────┘
+ haiku [swarming]  subagents [2/3]  opus [reading]  router [ 1,314 forks]

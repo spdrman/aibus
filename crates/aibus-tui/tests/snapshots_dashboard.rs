@@ -19,7 +19,7 @@ fn frame_80x24() {
 #[test]
 fn frame_98x46_after_two_ticks() {
     let mut app = replay_app();
-    let f = render(&mut app, (98, 46), 2);
+    let f = render(&mut app, (98, 46), 42);
     assert_frame!(f, "dashboard_98x46_tick2");
 }
 

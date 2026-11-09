@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use aibus_core::config::Config;
 use aibus_core::persist::paths::Paths;
-use aibus_core::{AibusError, Redactor};
+use aibus_core::{AibusError, Msg, Redactor, Roster};
 use aibus_tui::app::Options;
 use aibus_tui::keys::Keymap;
 use aibus_tui::{Prompt, Theme};
@@ -77,6 +77,10 @@ pub fn options(
         mouse: cfg.ui.mouse && !global.no_mouse,
         term: env.term.clone(),
         layout_file: Some(paths.state.join("ui.toml")),
+        log_rows: cfg.ui.log_rows,
+        msgs: None,
+        watch: None,
+        mem: None,
     };
     (opts, warnings)
 }
@@ -113,7 +117,41 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     let (Some(rt), Some(app)) = (ctx.rt.as_ref(), ctx.app.take()) else {
         return Err(not_ready("runtime"));
     };
-    rt.block_on(aibus_tui::app::run(app, opts))
+    let mut opts = opts;
+    // What the runs the orchestrator starts say arrives here, and the first prompt starts the
+    // lead through the launcher like any other run.
+    opts.msgs = ctx.rx.take();
+    if let (Some(orch), Some(launcher)) = (ctx.orch.clone(), ctx.launcher.clone()) {
+        // The next `delegate` offers the new roster and starts from it.
+        opts.watch = Some(Box::new(move |m| {
+            if let Msg::AgentsReloaded { defs, .. } = m {
+                orch.set_roster(Roster::of(defs.iter()));
+                launcher.reload(defs);
+            }
+        }));
+    }
+    if ctx.global.verbose > 0 {
+        opts.mem = Some(rss_mib);
+    }
+    let ran = rt.block_on(aibus_tui::app::run(app, opts));
+    if let Some(orch) = &ctx.orch {
+        orch.cancel_all();
+    }
+    ran
+}
+
+/// Resident memory in MiB, for the status bar under `-v`: `/proc` where there is one, else `ps`.
+fn rss_mib() -> Option<u32> {
+    if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
+        let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+        return u32::try_from(pages * 4096 / (1024 * 1024)).ok();
+    }
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    u32::try_from(kib / 1024).ok()
 }
 
 #[cfg(test)]
@@ -186,6 +224,21 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("unknown action `nonsense`"), "{warnings:?}");
         assert_eq!(o.hz, 30);
+    }
+
+    #[test]
+    fn memory_is_read_in_mib() {
+        // This test process is some megabytes resident, on `/proc` and under `ps` alike.
+        assert!(rss_mib().is_some_and(|m| m > 0));
+    }
+
+    #[test]
+    fn the_log_height_and_the_hooks_come_from_config() {
+        let mut cfg = Config::default();
+        cfg.ui.log_rows = 7;
+        let (o, _) = build(&[], &cfg, &Env::default());
+        assert_eq!(o.log_rows, 7);
+        assert!(o.msgs.is_none() && o.watch.is_none() && o.mem.is_none());
     }
 
     #[test]

@@ -34,7 +34,8 @@ pub const GLYPHS: [(&str, &str); 19] = [
 
 /// Drawing characters outside the glyph set that a frame also contains: borders, the partial
 /// blocks of a bar, the legend square.
-const DRAWING: [(&str, &str); 22] = [
+const DRAWING: [(&str, &str); 23] = [
+    ("…", "."),
     ("─", "-"),
     ("│", "|"),
     ("┌", "+"),

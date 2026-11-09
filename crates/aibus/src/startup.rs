@@ -169,8 +169,9 @@ pub fn steps() -> Vec<Box<dyn Step>> {
     ]
 }
 
-/// What the TUI needs before it can draw: steps 1 to 7. The lead run starts when the first
-/// prompt is sent, which is not wired yet (C1.2).
+/// What the TUI needs before it can draw: steps 1 to 8. Step 8 wires the orchestrator and the
+/// launcher into the app's effects and builds no lead: the reducer queues the lead when the first
+/// prompt is sent, and the launcher starts it like any other run.
 pub fn interactive_steps() -> Vec<Box<dyn Step>> {
     vec![
         Box::new(ParseCli),
@@ -180,6 +181,7 @@ pub fn interactive_steps() -> Vec<Box<dyn Step>> {
         Box::new(DiscoverAgents),
         Box::new(LoadAccounts),
         Box::new(StartRuntime),
+        Box::new(EnterLoop),
     ]
 }
 
@@ -589,15 +591,16 @@ impl Step for EnterLoop {
 
         // `--agent` submits the definition's `initial_prompt` first (01 section 4.2); a prompt
         // on the command line follows it.
-        let mut prompt = ctx.prompt.clone();
-        if let (Some(_), Some(initial)) = (&ctx.global.agent, &def.initial_prompt) {
+        // The TUI starts no lead here: its prompt waits in the input line.
+        let mut prompt = if ctx.interactive { String::new() } else { ctx.prompt.clone() };
+        if let (false, Some(_), Some(initial)) = (ctx.interactive, &ctx.global.agent, &def.initial_prompt) {
             prompt = if prompt.trim().is_empty() {
                 initial.clone()
             } else {
                 format!("{initial}\n\n{prompt}")
             };
         }
-        if prompt.trim().is_empty() {
+        if prompt.trim().is_empty() && !ctx.interactive {
             return Err(AibusError::Usage(
                 "aibus run [OPTIONS] <PROMPT>  (or pipe the prompt on stdin)".into(),
             ));
@@ -736,8 +739,19 @@ impl Step for EnterLoop {
             cfg,
         );
 
+        // What the panels call things: the flag that picked the lead's model, and the side seats.
+        let model_flag = ctx
+            .global
+            .model
+            .as_ref()
+            .map(|m| format!("--model {m}"))
+            .or_else(|| cfg.defaults.model.as_ref().map(|m| format!("defaults.model {m}")));
+        let advisor_seat = assist.as_ref().and_then(|a| a.advisor.as_ref()).map(|a| a.seat.model.0.to_string());
+        let router_seat = assist.as_ref().and_then(|a| a.router.as_ref()).map(|r| r.label.clone());
+
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
-        // `inherit` has no parent here, so it means the session's model.
+        // `inherit` has no parent here, so it means the session's model. The TUI has none yet.
+        let plan = if ctx.interactive { None } else {
         let target = match expand(&def.model, &defaults) {
             ModelRef::Inherit => session_default.clone(),
             r => r,
@@ -779,15 +793,22 @@ impl Step for EnterLoop {
             compactor: None,
             assist,
         };
+        Some((run_cfg, deps))
+        };
         if let Some(app) = ctx.app.as_mut() {
             app.set_limits(&limits)?;
+            app.set_session_view(
+                model_flag.as_deref(),
+                (advisor_seat.as_deref(), advisor_seat.is_some()),
+                (router_seat.as_deref(), router_seat.is_some()),
+            )?;
             app.effects =
                 Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
         }
         ctx.orch = Some(orch);
         ctx.launcher = Some(launcher);
         ctx.hooks = Some(hooks);
-        ctx.plan = Some((run_cfg, deps));
+        ctx.plan = plan;
         ctx.rx = Some(rx);
         if bypass {
             if let Some(app) = ctx.app.as_mut() {

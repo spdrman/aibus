@@ -1,0 +1,30 @@
+┌ OPUS 5.5 ──────────┐
+│ advisor · reading  │
+│                    │
+│ ◆ before a plan    │
+│ │ reads the whole  │
+│ │ session, every   │
+│ │ tool call and    │
+│ │ every result     │
+│ │ last advice:     │
+│ │ » plan skips auth│
+│ │ calls           1│
+│ │ tokens read  122k│
+│ │ silent on every  │
+│ │ routine turn     │
+│ ◇ same error x2    │
+│ │ never writes     │
+│ │ code itself.     │
+│ │ Sonnet applies   │
+│ │ the advice.      │
+│ ◇ before done      │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+└────────────────────┘

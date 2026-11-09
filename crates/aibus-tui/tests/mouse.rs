@@ -288,7 +288,7 @@ fn the_rail_strip_opens_on_a_click_and_a_checkpoint_opens_its_advice() {
     let msgs = r.click(HitId::RailStrip);
     assert!(names(&msgs).contains(&"Ui(ToggleRail)".to_owned()), "{msgs:?}");
     assert!(r.ui.drawn.areas.rail_open.is_some());
-    assert!(r.text().contains("ADVISOR"), "{}", r.text());
+    assert!(r.text().contains("OPUS 5.5 ─"), "{}", r.text());
     let msgs = r.click(HitId::Checkpoint(0));
     assert_eq!(names(&msgs), ["Ui(Focus(Advisor))", "Ui(Open(Advisor))"]);
     assert!(r.text().contains("last advice"), "{}", r.text());

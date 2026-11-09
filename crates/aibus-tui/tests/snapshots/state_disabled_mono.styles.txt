@@ -1,0 +1,47 @@
+00 00..72 fg=- bg=-
+01 00..06 fg=- bg=-
+01 06..25 fg=- bg=- BOLD | REVERSED
+01 25..27 fg=- bg=-
+01 27..33 fg=- bg=- BOLD
+01 33..47 fg=- bg=-
+01 47..54 fg=- bg=- BOLD
+01 54..72 fg=- bg=-
+02 00..06 fg=- bg=-
+02 06..25 fg=- bg=- BOLD | REVERSED
+02 25..72 fg=- bg=-
+03 00..06 fg=- bg=-
+03 06..25 fg=- bg=- BOLD | REVERSED
+03 25..72 fg=- bg=-
+04 00..06 fg=- bg=-
+04 06..15 fg=- bg=- BOLD | REVERSED
+04 15..16 fg=- bg=-
+04 16..24 fg=- bg=- BOLD
+04 24..72 fg=- bg=-
+05 00..06 fg=- bg=-
+05 06..15 fg=- bg=- BOLD | REVERSED
+05 15..17 fg=- bg=-
+05 17..34 fg=- bg=- BOLD | REVERSED
+05 34..72 fg=- bg=-
+06 00..06 fg=- bg=-
+06 06..15 fg=- bg=- BOLD | REVERSED
+06 15..72 fg=- bg=-
+07 00..06 fg=- bg=-
+07 06..15 fg=- bg=- BOLD | REVERSED
+07 15..72 fg=- bg=-
+08 00..17 fg=- bg=-
+08 17..25 fg=- bg=- DIM
+08 25..72 fg=- bg=-
+09 00..72 fg=- bg=-
+10 00..17 fg=- bg=-
+10 17..30 fg=- bg=- DIM
+10 30..36 fg=- bg=-
+10 36..37 fg=- bg=- BOLD
+10 37..72 fg=- bg=-
+11 00..36 fg=- bg=-
+11 36..44 fg=- bg=- BOLD
+11 44..72 fg=- bg=-
+12 00..72 fg=- bg=-
+13 00..72 fg=- bg=-
+14 00..72 fg=- bg=-
+15 00..72 fg=- bg=-
+16 00..72 fg=- bg=-

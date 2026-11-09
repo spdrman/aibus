@@ -103,6 +103,19 @@ pub enum UiIntent {
     ToggleRail,
     SetRailWidth(u16),
     SetLogRows(u16),
+    /// `f` in the log: follow the newest row, or hold the place.
+    ToggleFollow,
+    /// Right click on a run's card or row, or `m` on the selected one.
+    OpenMenu {
+        run: RunId,
+        col: u16,
+        row: u16,
+    },
+    CloseMenu,
+    /// The menu's highlighted item, by index.
+    MenuSelect(i64),
+    /// Resident memory in MiB, sampled by the loop under `-v`.
+    Mem(u32),
 }
 
 impl UiIntent {
@@ -117,6 +130,11 @@ impl UiIntent {
             UiIntent::ToggleRail => "toggle_rail",
             UiIntent::SetRailWidth(_) => "set_rail_width",
             UiIntent::SetLogRows(_) => "set_log_rows",
+            UiIntent::ToggleFollow => "toggle_follow",
+            UiIntent::OpenMenu { .. } => "open_menu",
+            UiIntent::CloseMenu => "close_menu",
+            UiIntent::MenuSelect(_) => "menu_select",
+            UiIntent::Mem(_) => "mem",
         }
     }
 }
@@ -430,6 +448,8 @@ pub enum Command {
     Compact {
         run: RunId,
     },
+    /// The text typed after `/` in the session log; empty shows every row.
+    LogFilter(String),
     Clear,
     Quit {
         force: bool,
@@ -735,6 +755,7 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::LedgerUpdate { .. } => "ledger_update",
         Command::CreateHandoff { .. } => "create_handoff",
         Command::Compact { .. } => "compact",
+        Command::LogFilter(_) => "log_filter",
         Command::Clear => "clear",
         Command::Quit { .. } => "quit",
     }

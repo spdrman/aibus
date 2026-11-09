@@ -1,0 +1,122 @@
+name: release
+
+# Runs on a pushed version tag only (v*), or by hand as a dry run: a dry run builds and checksums
+# everything but signs nothing and publishes nothing. docs/RELEASE.md has the tag procedure and
+# the manual checklist that goes with it. Nothing here has been run yet.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-14, archive: tar.gz }
+          - { target: x86_64-apple-darwin, os: macos-15-intel, archive: tar.gz }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, archive: tar.gz }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, archive: tar.gz }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, archive: tar.gz }
+          - { target: x86_64-pc-windows-msvc, os: windows-2022, archive: zip }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: ${{ matrix.target }}
+      - name: musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          # build.rs stamps these into `aibus version` and `aibus doctor`.
+          if [ "$REF_TYPE" = tag ]; then export AIBUS_TAG="$REF_NAME"; fi
+          export AIBUS_COMMIT="${SHA:0:12}"
+          cargo build --release --locked --target "$TARGET" -p aibus
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          name="aibus-$TARGET"
+          mkdir -p "dist/$name"
+          bin=aibus; if [ "$ARCHIVE" = zip ]; then bin=aibus.exe; fi
+          cp "target/$TARGET/release/$bin" LICENSE README.md "dist/$name/"
+          cd dist
+          if [ "$ARCHIVE" = zip ]; then 7z a "$name.zip" "$name" >/dev/null; else tar czf "$name.tar.gz" "$name"; fi
+          rm -r "$name"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aibus-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  # The one job that signs and publishes, so the only one with `id-token` and `contents: write`.
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@ccc8c1f930153b792217f06c65a38f23a882993a # 1.85
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-cyclonedx
+      - uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SBOM
+        run: |
+          cargo cyclonedx --format json --override-filename aibus.cdx
+          cp crates/aibus/aibus.cdx.json dist/aibus.cdx.json
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum aibus-* aibus.cdx.json > SHA256SUMS
+      - name: Sign (keyless)
+        if: github.ref_type == 'tag'
+        working-directory: dist
+        run: |
+          for f in aibus-* aibus.cdx.json SHA256SUMS; do
+            cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+          done
+      - name: Dry run result
+        if: github.ref_type != 'tag'
+        working-directory: dist
+        run: ls -l && cat SHA256SUMS
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes ./*

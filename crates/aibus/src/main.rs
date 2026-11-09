@@ -57,11 +57,17 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         None => bare(cli.global, cli.prompt, redactor),
         Some(Command::Run(args)) => headless::run(cli.global, args, redactor.clone()),
         Some(Command::Version) => {
-            let v = env!("CARGO_PKG_VERSION");
             if cli.global.json {
-                println!("{}", serde_json::json!({ "version": v }));
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "tag": Some(env!("AIBUS_BUILD_TAG")).filter(|t| !t.is_empty()),
+                        "commit": env!("AIBUS_BUILD_COMMIT"),
+                    })
+                );
             } else {
-                println!("aibus {v}");
+                println!("aibus {}", doctor::build_id());
             }
             Ok(0)
         }

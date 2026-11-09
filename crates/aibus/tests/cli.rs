@@ -18,9 +18,14 @@ fn version_prints_and_exits_0() {
     let home = xdg_temp();
     let out = aibus(home.path(), &["version"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(stdout(&out), format!("aibus {}\n", env!("CARGO_PKG_VERSION")));
-    let json = aibus(home.path(), &["version", "--json"]);
-    assert_eq!(stdout(&json).trim(), format!("{{\"version\":\"{}\"}}", env!("CARGO_PKG_VERSION")));
+    // `aibus <version> (commit <sha>)`, with `tag <tag>, ` before the commit on a tagged build.
+    let text = stdout(&out);
+    let prefix = format!("aibus {} (", env!("CARGO_PKG_VERSION"));
+    assert!(text.starts_with(&prefix) && text.contains("commit ") && text.ends_with(")\n"), "{text}");
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout(&aibus(home.path(), &["version", "--json"]))).unwrap();
+    assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    assert!(json["commit"].as_str().is_some_and(|c| !c.is_empty()));
 }
 
 #[test]

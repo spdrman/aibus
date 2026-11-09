@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use ulid::Ulid;
 
 use super::store::Store;
-use super::value::{as_i64, as_list, as_str, get, list, map, n, pushed, s, with};
+use super::value::{as_i64, as_list, as_str, get, list, map, map_of, n, pushed, s, with};
 use super::*;
 use crate::agent::{AgentDef, Isolation, Role};
 use crate::error::{AibusError, CredentialError};
@@ -96,13 +96,37 @@ impl R<'_> {
     }
 
     fn log(&mut self, level: &str, text: &str) {
-        let row = map([
+        self.log_row(level, "", None, text, Vec::new());
+    }
+
+    /// A log row with the columns the session log draws: who said it, which run it belongs to
+    /// (a double click opens that run's transcript) and, for a router answer, `p` and the verdict.
+    fn log_row(
+        &mut self,
+        level: &str,
+        actor: &str,
+        run: Option<String>,
+        text: &str,
+        extra: Vec<(&str, Value)>,
+    ) {
+        let mut fields = vec![
             ("at", n(self.env.now_ms)),
             ("level", s(level)),
+            ("actor", s(actor)),
+            ("run", run.map_or(Value::Null, |r| s(&r))),
             ("text", s(text)),
-        ]);
-        let h = self.store.log_push(row);
+        ];
+        fields.extend(extra);
+        let h = self.store.log_push(map_of(fields));
         self.out.insert(LOG.into(), Value::Handle(h));
+        // A log that is not following holds its place while rows arrive below it.
+        if matches!(self.now(LOG_FOLLOW), Value::Bool(false)) {
+            let key = scroll_key("log");
+            let at = as_i64(&self.now(&key)).unwrap_or(0);
+            if at > 0 {
+                self.put(key, n(at + 1));
+            }
+        }
     }
 
     fn status(&self, run: &str) -> Option<RunStatus> {
@@ -261,6 +285,14 @@ impl R<'_> {
         }
     }
 
+    /// The agent name of a run, for the log's actor column.
+    fn agent_of(&self, run: &str) -> String {
+        get(self.cur(&run_key(run, "meta")), "agent")
+            .and_then(as_str)
+            .unwrap_or("")
+            .to_owned()
+    }
+
     fn transcript_id(&self, run: &str) -> Option<u64> {
         match self.cur(&run_key(run, "blocks")) {
             Value::Handle(h) => Some(h.id),
@@ -359,16 +391,34 @@ impl R<'_> {
         self.put(key, v);
     }
 
-    /// The run id of the `index`th worker card, in the order the cards view lists them.
-    fn card_run(&self, index: usize) -> Option<String> {
-        as_list(self.cur(RUNS_ORDER))
+    /// The workers that have a card, in the order the cards view lists them (05 section 2.6): not
+    /// one dismissed with `x`, and not a finished one that a later run of the same agent replaced.
+    /// `aibus-tui`'s `view:cards` applies the same two rules.
+    fn visible_workers(&self) -> Vec<String> {
+        let all: Vec<&str> = as_list(self.cur(RUNS_ORDER))
             .iter()
             .filter_map(as_str)
             .filter(|id| {
                 get(self.cur(&run_key(id, "meta")), "role").and_then(as_str) == Some("worker")
             })
-            .nth(index)
-            .map(str::to_owned)
+            .collect();
+        let agent = |id: &str| get(self.cur(&run_key(id, "meta")), "agent").and_then(as_str);
+        all.iter()
+            .enumerate()
+            .filter(|(i, id)| {
+                let meta = self.cur(&run_key(id, "meta"));
+                let dismissed = matches!(get(meta, "dismissed"), Some(Value::Bool(true)));
+                let finished = self.status(id).is_some_and(RunStatus::is_terminal);
+                let replaced = all[i + 1..].iter().any(|later| agent(later) == agent(id));
+                !(dismissed || (finished && replaced))
+            })
+            .map(|(_, id)| (*id).to_owned())
+            .collect()
+    }
+
+    /// The run id of the `index`th card.
+    fn card_run(&self, index: usize) -> Option<String> {
+        self.visible_workers().into_iter().nth(index)
     }
 
     fn ui(&mut self, i: UiIntent) {
@@ -387,7 +437,37 @@ impl R<'_> {
                 self.put(FOCUS, s(ORDER[next].as_str()));
             }
             UiIntent::Select(pane, sel) => self.select(pane, sel),
-            UiIntent::Scroll { pane, lines, sideways } => self.scroll(pane, lines, sideways),
+            UiIntent::Scroll { pane, lines, sideways } => {
+                self.scroll(pane, lines, sideways);
+                if pane == Pane::Log && !sideways {
+                    let held = as_i64(&self.now(&scroll_key("log"))).unwrap_or(0);
+                    self.put(LOG_FOLLOW, Value::Bool(held == 0));
+                }
+            }
+            UiIntent::ToggleFollow => {
+                let on = !matches!(self.now(LOG_FOLLOW), Value::Bool(true));
+                self.put(LOG_FOLLOW, Value::Bool(on));
+                if on {
+                    self.put(scroll_key("log"), n(0));
+                }
+            }
+            UiIntent::OpenMenu { run, col, row } => self.put(
+                MENU,
+                map([
+                    ("run", s(&run.to_string())),
+                    ("col", n(col)),
+                    ("row", n(row)),
+                    ("selected", n(0)),
+                ]),
+            ),
+            UiIntent::CloseMenu => self.put(MENU, Value::Null),
+            UiIntent::MenuSelect(i) => {
+                let menu = self.now(MENU);
+                if !matches!(menu, Value::Null) {
+                    self.put(MENU, with(&menu, "selected", n(i.max(0))));
+                }
+            }
+            UiIntent::Mem(mib) => self.put(MEM, n(mib)),
             UiIntent::Open(Pane::Cards) => {
                 let index = as_i64(self.cur(SELECTED_CARD)).unwrap_or(0).max(0) as usize;
                 if let Some(id) = self.card_run(index) {
@@ -462,6 +542,14 @@ impl R<'_> {
                     _ => self.log("warn", "nothing to fork"),
                 }
             }
+            Command::Cancel { run } if self.status(&run.to_string()).is_some_and(RunStatus::is_terminal) => {
+                // `x` on a finished run dismisses its card; the selection stays on a card.
+                let key = run_key(run, "meta");
+                self.put(key.clone(), with(self.cur(&key), "dismissed", Value::Bool(true)));
+                let left = self.visible_workers().len().saturating_sub(1);
+                let sel = as_i64(self.cur(SELECTED_CARD)).unwrap_or(0).max(0);
+                self.put(SELECTED_CARD, n(sel.min(left.saturating_sub(1) as i64)));
+            }
             Command::Cancel { run } => {
                 self.put(run_key(run, "cancel_requested"), Value::Bool(true));
                 if self.status(&run.to_string()) == Some(RunStatus::Queued) {
@@ -514,6 +602,10 @@ impl R<'_> {
                 }
             }
             Command::Compact { run } => self.set_status(run, RunStatus::Compacting),
+            Command::LogFilter(text) => {
+                self.put(LOG_FILTER, s(text));
+                self.put(scroll_key("log"), n(0));
+            }
             Command::Clear => {
                 let h = self.store.log_clear();
                 self.put(LOG, Value::Handle(h));
@@ -708,7 +800,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             } else {
                 r.new_run(&id, meta, RunStatus::Starting);
             }
-            r.log("info", &format!("started {agent}"));
+            r.log_row("info", agent.as_str(), Some(id.clone()), "started", Vec::new());
         }
         Msg::Stream { run, chunks } => {
             let id = run.to_string();
@@ -857,7 +949,8 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.put(run_key(&id, "blocks"), Value::Handle(blocks));
                 r.put(run_key(&id, "tail"), Value::Handle(tail));
             }
-            r.log("info", &format!("finished {}", result.status.as_value()));
+            let who = r.agent_of(&id);
+            r.log_row("info", &who, Some(id.clone()), &format!("finished {}", result.status.as_value()), Vec::new());
             r.cancel_queued_below(&id);
         }
         Msg::RunFailed { run, error } => {
@@ -871,7 +964,8 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     ("retryable", Value::Bool(error.retryable)),
                 ]),
             );
-            r.log("error", &format!("failed: {}", error.kind.as_str()));
+            let who = r.agent_of(&id);
+            r.log_row("error", &who, Some(id.clone()), &format!("failed: {}", error.kind.as_str()), Vec::new());
             r.cancel_queued_below(&id);
         }
         Msg::UsageUpdate { run, usage } => r.put(run_key(run, "usage"), usage_abs(usage)),
@@ -933,7 +1027,16 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .cloned()
                 .collect();
             r.put(ROUTER_QUEUE, list(queue));
-            r.log("info", &format!("router {} answered", question.kind.as_str()));
+            r.log_row(
+                "info",
+                "router",
+                None,
+                &format!("{} → {}", question.kind.as_str().replace('_', " "), answer.choice),
+                vec![
+                    ("p", Value::F64((f64::from(answer.p) * 1e4).round() / 1e4)),
+                    ("verdict", s(answer.verdict.as_str())),
+                ],
+            );
         }
         Msg::CheckpointHit { checkpoint, .. } => {
             let a = with(
@@ -942,7 +1045,8 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 s(checkpoint.name()),
             );
             r.put(ADVISOR_STATE, with(&a, "status", s("reading")));
-            r.log("info", &format!("checkpoint {}", checkpoint.name()));
+            let what = checkpoint.name().replace('_', " ");
+            r.log_row("info", "advisor", None, &format!("{what} · reading full session"), Vec::new());
         }
         Msg::AdvisorSpoke {
             checkpoint,
@@ -955,12 +1059,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let st = with(&st, "calls", n(calls));
             let st = with(&st, "tokens_read", n(read));
             let st = with(&st, "status", s("on_call"));
+            let st = with(&st, "advice_tick", n(as_i64(r.cur(TICK)).unwrap_or(0)));
             r.put(ADVISOR_STATE, with(&st, "active_checkpoint", Value::Null));
             let mut all = as_list(r.cur(ADVISOR_ADVICE)).to_vec();
             all.push(r.store.inline_or_handle(advice));
             let skip = all.len().saturating_sub(ADVICE_KEEP);
             r.put(ADVISOR_ADVICE, list(all.split_off(skip)));
-            r.log("info", &format!("advisor spoke at {}", checkpoint.name()));
+            let what = checkpoint.name().replace('_', " ");
+            r.log_row("info", "advisor", None, &format!("{what} · advice sent"), Vec::new());
         }
         Msg::Compacted { run, .. } => {
             if r.status(&run.to_string()) == Some(RunStatus::Compacting) {

@@ -6,7 +6,8 @@ use std::io;
 
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{
-    scroll_key, FOCUS, LAYOUT, MODAL, RAIL_EXPANDED, SELECTED_CARD, SELECTED_LOG,
+    scroll_key, FOCUS, LAYOUT, LOG_FILTER, LOG_FOLLOW, MENU, MODAL, RAIL_EXPANDED, SELECTED_CARD,
+    SELECTED_LOG, TICK,
 };
 use aibus_core::Pane;
 use aibus_graph::{Graph, GraphTime, Value};
@@ -18,13 +19,14 @@ use ratatui::widgets::{Clear, Widget};
 use ratatui::Terminal;
 
 use crate::glyphs;
-use crate::hit::{z, HitId, HitKind, HitMap};
+use crate::hit::{z, HitId, HitKind, HitMap, Segment};
 pub use crate::layout::{areas, Areas, Layout};
 use crate::layout::{too_small, MIN_COLS, MIN_ROWS};
 use crate::keys::Keymap;
 use crate::theme::{Interact, Theme};
 use crate::view::{
-    CARDS, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, RAIL, RETURN_BOX, STATUS_BAR,
+    CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
+    RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
@@ -36,11 +38,14 @@ pub struct Views<'a> {
     header: &'a Value,
     rail: &'a Value,
     lead: &'a Value,
+    delegate: &'a Value,
     fork: &'a Value,
     cards: &'a Value,
     ret: &'a Value,
     log: &'a Value,
     status: &'a Value,
+    tips: &'a Value,
+    menu: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -50,11 +55,14 @@ impl<'a> Views<'a> {
             header: at(HEADER),
             rail: at(RAIL),
             lead: at(LEAD_BOX),
+            delegate: at(DELEGATE_ROW),
             fork: at(FORK_LAYER),
             cards: at(CARDS),
             ret: at(RETURN_BOX),
             log: at(LOG_LINES),
             status: at(STATUS_BAR),
+            tips: at(RUN_TIPS),
+            menu: at(MENU_VIEW),
         }
     }
 }
@@ -81,6 +89,12 @@ pub struct Chrome {
     pub rail_open: bool,
     pub modal: Option<String>,
     pub layout: Layout,
+    /// The animation counter the connectors' dots and the arrowhead are drawn from.
+    pub tick: i64,
+    /// The text after `/` in the log, and whether the log follows its newest row.
+    pub filter: String,
+    pub follow: bool,
+    pub menu_open: bool,
 }
 
 impl Chrome {
@@ -102,6 +116,10 @@ impl Chrome {
             rail_open: matches!(g.read_key(RAIL_EXPANDED), Some(Value::Bool(true))),
             modal: g.read_key(MODAL).and_then(as_str).map(str::to_owned),
             layout: Layout { rail: size(layout, "rail"), log: size(layout, "log") },
+            tick: int(TICK).unwrap_or(0),
+            filter: g.read_key(LOG_FILTER).and_then(as_str).unwrap_or("").to_owned(),
+            follow: !matches!(g.read_key(LOG_FOLLOW), Some(Value::Bool(false))),
+            menu_open: !matches!(g.read_key(MENU), None | Some(Value::Null)),
         }
     }
 }
@@ -112,6 +130,9 @@ impl Chrome {
 pub struct Pointer {
     pub hover: Option<HitId>,
     pub pressed: Option<HitId>,
+    /// The element whose tooltip is up: the one the pointer has rested on for 500 ms, or the
+    /// selected one after `Space`.
+    pub tip: Option<HitId>,
 }
 
 /// The size of a scrollable list and how much of it shows.
@@ -138,32 +159,52 @@ pub struct Scene<'a> {
     pub theme: &'a Theme,
     pub keys: &'a Keymap,
     pub prompt: &'a Prompt,
+    /// The log's filter is being typed.
+    pub filter_edit: bool,
 }
 
-fn connector(buf: &mut Buffer, area: Rect, glyph: &str, style: Style) {
-    let x = area.x + area.width / 2;
-    for y in area.y..area.bottom() {
-        buf.set_string(x, y, glyph, style);
+/// Dotted cells in `dim`, with a brighter `●` at step `at` of the path when there is one. Only
+/// blank cells are drawn on, so a connector never cuts through a box.
+fn dotted(buf: &mut Buffer, path: &[(u16, u16)], at: Option<usize>, dim: Style, bright: Style, th: &Theme) {
+    let full = buf.area;
+    for (i, &(x, y)) in path.iter().enumerate() {
+        // Blank cells only, except that a travelling dot may take the place of a plain one.
+        let here = buf[(x, y)].symbol();
+        let free = here == " " || (at == Some(i) && here == th.g("·"));
+        if x >= full.right() || y >= full.bottom() || !free {
+            continue;
+        }
+        if at == Some(i) {
+            buf.set_string(x, y, th.g("●"), bright);
+        } else {
+            buf.set_string(x, y, th.g("·"), dim);
+        }
     }
 }
 
+/// Where the centre column put things, for the connectors and the hit map.
+struct Centre {
+    cards: Vec<(usize, Rect)>,
+    lead: Rect,
+    ret: Rect,
+}
+
 /// The centre column: lead box, fork layer, delegate row, cards, return box. Items that do
-/// not fit are dropped from the bottom up. Returns where the cards went.
+/// not fit are dropped from the bottom up.
 fn centre(
     buf: &mut Buffer,
     area: Rect,
     v: &Views,
     th: &Theme,
-    compact: bool,
-    first_card: usize,
-) -> Vec<(usize, Rect)> {
+    (compact, first_card, tick): (bool, usize, i64),
+) -> Centre {
     const W: u16 = 40;
     let narrow = |r: Rect| Rect {
         x: r.x + r.width.saturating_sub(W) / 2,
         width: r.width.min(W),
         ..r
     };
-    let roomy = area.height >= 26;
+    let roomy = area.height >= 28;
     let fork_h = if compact { 5 } else { 6 };
     let y = std::cell::Cell::new(area.y);
     let place = |h: u16, buf: &mut Buffer, draw: &mut dyn FnMut(&mut Buffer, Rect)| {
@@ -175,25 +216,111 @@ fn centre(
         y.set(y.get() + h);
     };
     let dim = Style::new().fg(th.dim);
-    let mut cards = Vec::new();
-    place(4, buf, &mut |b, r| widgets::lead_box(b, narrow(r), v.lead, th));
-    if roomy {
-        place(1, buf, &mut |b, r| connector(b, r, th.g("·"), dim));
-    }
-    place(fork_h, buf, &mut |b, r| widgets::fork_layer(b, narrow(r), v.fork, th, !compact));
-    if roomy {
-        place(1, buf, &mut |b, r| widgets::delegate_label(b, r, v.cards, th));
-        place(2, buf, &mut |b, r| connector(b, r, "┼", dim));
-    }
-    let cards_h = area.bottom().saturating_sub(y.get()).min(7);
-    place(cards_h, buf, &mut |b, r| {
-        cards = widgets::cards(b, r, v.cards, th, first_card);
+    let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("").to_owned();
+    let mut c = Centre { cards: Vec::new(), lead: Rect::default(), ret: Rect::default() };
+    place(4, buf, &mut |b, r| {
+        c.lead = narrow(r);
+        widgets::lead_box(b, c.lead, v.lead, th);
     });
     if roomy {
-        place(2, buf, &mut |b, r| connector(b, r, "│", dim));
-        place(3, buf, &mut |b, r| widgets::return_box(b, narrow(r), v.ret, th));
+        // The lead's orange dot travels down to the fork layer.
+        place(2, buf, &mut |b, r| {
+            let n = narrow(r);
+            let x = n.x + n.width / 2;
+            let path = [(x, r.y), (x, r.y + 1)];
+            let at = usize::try_from(tick.rem_euclid(2)).unwrap_or(0);
+            dotted(b, &path, Some(at), dim, Style::new().fg(th.lead), th);
+        });
     }
-    cards
+    place(fork_h, buf, &mut |b, r| widgets::fork_layer(b, narrow(r), v.fork, th, !compact, &lead_label));
+    if roomy {
+        place(1, buf, &mut |b, r| widgets::delegate_label(b, r, v.delegate, th));
+    }
+    let connector_y = y.get();
+    if roomy {
+        y.set(connector_y + 2);
+    }
+    let cards_h = area.bottom().saturating_sub(y.get()).min(8);
+    let cards_top = y.get();
+    place(cards_h, buf, &mut |b, r| {
+        c.cards = widgets::cards(b, r, v.cards, th, first_card);
+    });
+    if roomy && !c.cards.is_empty() {
+        // The fork splits into one dotted path per card, a dot travelling down each working one.
+        let mid = narrow(Rect { y: connector_y, height: 1, ..area });
+        let xc = mid.x + mid.width / 2;
+        let offsets = as_list(get(v.delegate, "connectors").unwrap_or(&NULL));
+        for (i, r) in &c.cards {
+            let xi = r.x + r.width / 2;
+            let mut path = vec![(xc, connector_y), (xc, connector_y + 1)];
+            let across: Vec<u16> = if xi >= xc { (xc + 1..=xi).collect() } else { (xi..xc).rev().collect() };
+            path.extend(across.into_iter().map(|x| (x, connector_y + 1)));
+            let at = offsets
+                .get(*i)
+                .and_then(as_i64)
+                .filter(|o| *o >= 0)
+                .map(|o| usize::try_from(o).unwrap_or(0) % path.len());
+            dotted(buf, &path, at, dim, Style::new().fg(th.swarm), th);
+        }
+        // Below the cards the paths merge into one arrow at the return box; its head pulses
+        // while a result is on its way.
+        let merge = cards_top + cards_h;
+        if merge + 3 <= area.bottom() {
+            let xs: Vec<u16> = c.cards.iter().map(|(_, r)| r.x + r.width / 2).collect();
+            let (lo, hi) = (xs.iter().copied().min().unwrap_or(xc), xs.iter().copied().max().unwrap_or(xc));
+            let row: Vec<(u16, u16)> = (lo..=hi).map(|x| (x, merge)).collect();
+            dotted(buf, &row, None, dim, dim, th);
+            let pulse = matches!(get(v.ret, "pulse"), Some(Value::Bool(true)));
+            let head = if pulse && (tick / 4) % 2 != 0 {
+                Style::new().fg(th.dim_text)
+            } else {
+                Style::new().fg(th.lead).add_modifier(Modifier::BOLD)
+            };
+            buf.set_string(xc, merge + 1, th.g("▾"), head);
+        }
+    }
+    if roomy {
+        y.set(y.get().max(cards_top + cards_h + 2));
+        place(3, buf, &mut |b, r| {
+            c.ret = narrow(r);
+            widgets::return_box(b, c.ret, v.ret, th);
+        });
+    }
+    c
+}
+
+/// The checkpoint that is active now and where it was drawn on the rail, with the box it is
+/// about: the lead box, the failing worker's card or the return box. A dotted path with
+/// travelling dots joins them.
+fn advisor_link(buf: &mut Buffer, rail: Rect, marks: &[Rect], c: &Centre, v: &Views, th: &Theme, tick: i64) {
+    let checkpoints = as_list(get(v.rail, "checkpoints").unwrap_or(&NULL));
+    let Some(i) = checkpoints.iter().position(|m| matches!(get(m, "active"), Some(Value::Bool(true)))) else {
+        return;
+    };
+    let target = match i {
+        0 => Some(c.lead),
+        1 => as_list(v.cards)
+            .iter()
+            .position(|k| get(k, "border").and_then(as_str) == Some("advisor"))
+            .and_then(|n| c.cards.iter().find(|(k, _)| *k == n))
+            .map(|(_, r)| *r),
+        _ => Some(c.ret),
+    };
+    let (Some(target), Some(from)) = (target, marks.get(i)) else { return };
+    if target.width == 0 || from.width == 0 {
+        return;
+    }
+    let (gx, y0, y1) = (rail.right(), from.y, target.y + target.height / 2);
+    let mut path: Vec<(u16, u16)> = vec![(gx, y0)];
+    if y1 >= y0 {
+        path.extend((y0 + 1..=y1).map(|y| (gx, y)));
+    } else {
+        path.extend((y1..y0).rev().map(|y| (gx, y)));
+    }
+    path.extend((gx + 1..target.x).map(|x| (x, y1)));
+    let len = i64::try_from(path.len()).unwrap_or(1).max(1);
+    let at = usize::try_from(tick.rem_euclid(len)).unwrap_or(0);
+    dotted(buf, &path, Some(at), Style::new().fg(th.dim), Style::new().fg(th.advisor), th);
 }
 
 /// A style patched onto the four edges of a rectangle.
@@ -289,6 +416,48 @@ fn placeholder(buf: &mut Buffer, full: Rect, th: &Theme, name: &str) -> Rect {
     area
 }
 
+/// What a tooltip says about the element under `id`: the parts of it a card or row cuts off.
+fn tip_lines(id: HitId, v: &Views) -> Option<Vec<String>> {
+    let word = |x: &Value, k: &str| get(x, k).and_then(as_str).unwrap_or("").to_owned();
+    let of_run = |run: &str| -> Vec<String> {
+        let Some(t) = as_list(v.tips).iter().find(|t| get(t, "run_id").and_then(as_str) == Some(run)) else {
+            return Vec::new();
+        };
+        let mut out = vec![word(t, "name")];
+        let description = word(t, "description");
+        if !description.is_empty() {
+            out.push(description);
+        }
+        out.push(format!("model {}  account {}", word(t, "model"), word(t, "account")));
+        out.push(format!("cost {}", word(t, "cost")));
+        out.push(format!("run {run}"));
+        out
+    };
+    match id {
+        HitId::Card(i) => {
+            let card = as_list(v.cards).get(i)?;
+            let mut out = vec![word(card, "label")];
+            out.extend(of_run(&word(card, "run_id")));
+            Some(out)
+        }
+        HitId::LogRow(i) => {
+            let line = as_list(v.log).get(i)?;
+            let mut out = vec![format!("{}  {}", word(line, "time"), word(line, "actor")), word(line, "text")];
+            out.extend(of_run(&word(line, "run")));
+            Some(out)
+        }
+        HitId::Status(Segment::Ledger) => {
+            let l = get(v.status, "ledger")?;
+            Some(vec![format!("goal: {}", word(l, "goal")), format!("now: {}", word(l, "now"))])
+        }
+        HitId::Status(Segment::Alert) => {
+            let a = as_list(get(v.status, "alerts")?).iter().find(|a| get(a, "kind").and_then(as_str) == Some("permission"))?;
+            Some(vec![word(a, "text")])
+        }
+        _ => None,
+    }
+}
+
 /// Draws one frame into `buf` and returns the hit map and geometry it was built from.
 pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     let (th, c, v) = (sc.theme, sc.chrome, sc.views);
@@ -305,10 +474,13 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     widgets::header(buf, a.header, v.header, th);
     widgets::legend(buf, a.legend, v.header, th);
     let marks = widgets::rail(buf, a.rail, v.rail, th);
-    let cards = centre(buf, a.centre, v, th, a.compact, c.cards_x);
-    let log = widgets::session_log(buf, a.log, v.log, th, c.scroll_log);
+    let cen = centre(buf, a.centre, v, th, (a.compact, c.cards_x, c.tick));
+    advisor_link(buf, a.rail, &marks, &cen, v, th, c.tick);
+    let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("");
+    let filter = (c.filter.as_str(), sc.filter_edit, c.follow);
+    let log = widgets::session_log(buf, a.log, v.log, th, c.scroll_log, filter, lead_label);
     widgets::prompt(buf, a.prompt, th, sc.prompt, c.focus == Pane::Input);
-    widgets::status_bar(buf, a.status, v.status, th);
+    let segments = widgets::status_bar(buf, a.status, v.status, th);
     // Drawn over the centre column, so what is under it goes first.
     let open_marks = a.rail_open.map(|r| {
         Clear.render(r, buf);
@@ -335,8 +507,11 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     for (i, r) in marks.iter().enumerate() {
         hits.add(*r, HitId::Checkpoint(i), HitKind::Item, mark_z);
     }
-    for (i, r) in &cards {
+    for (i, r) in &cen.cards {
         hits.add(*r, HitId::Card(*i), HitKind::Item, z::ITEM);
+    }
+    for (seg, r) in &segments {
+        hits.add(*r, HitId::Status(*seg), HitKind::Item, z::ITEM);
     }
     for k in 0..log.shown {
         let row = Rect { y: log.inner.y + k as u16, height: 1, ..log.inner };
@@ -412,6 +587,33 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         }
     }
 
+    // The context menu, or else the tooltip: layers over the frame that move nothing.
+    if modal.is_none() && !matches!(v.menu, Value::Null) {
+        hits.add(full, HitId::Backdrop, HitKind::Modal, z::BACKDROP);
+        let item = |id: Option<HitId>| match id {
+            Some(HitId::MenuItem(i)) => Some(i),
+            _ => None,
+        };
+        let (rect, rows) = widgets::menu(buf, full, v.menu, th, (item(sc.pointer.hover), item(sc.pointer.pressed)));
+        hits.add(rect, HitId::MenuBox, HitKind::Modal, z::MODAL);
+        for (i, r) in rows.iter().enumerate() {
+            let enabled = as_list(get(v.menu, "items").unwrap_or(&NULL))
+                .get(i)
+                .is_some_and(|m| matches!(get(m, "enabled"), Some(Value::Bool(true))));
+            if enabled {
+                hits.add(*r, HitId::MenuItem(i), HitKind::Item, z::MODAL + 1);
+            } else {
+                // A disabled item swallows the click and does nothing.
+                hits.add(*r, HitId::MenuBox, HitKind::Modal, z::MODAL + 1);
+            }
+        }
+    } else if modal.is_none() {
+        let shown = sc.pointer.tip.and_then(|id| Some((hits.find(id)?.rect, tip_lines(id, v)?)));
+        if let Some((anchor, lines)) = shown {
+            widgets::tooltip(buf, full, anchor, &lines, th);
+        }
+    }
+
     if let Some(name) = modal {
         hits.add(full, HitId::Backdrop, HitKind::Modal, z::BACKDROP);
         let area = match name {
@@ -444,12 +646,14 @@ pub struct Ui {
     pub keys: Keymap,
     pub prompt: Prompt,
     pub pointer: Pointer,
+    /// The log's filter is being typed (`/`), so its title shows a cursor.
+    pub filter_edit: bool,
     /// The last frame's geometry: what pointer events resolve against.
     pub drawn: Drawn,
     seen: GraphTime,
     pending: bool,
     size: Option<(u16, u16)>,
-    last: Option<(Chrome, Pointer, Prompt, Theme)>,
+    last: Option<(Chrome, Pointer, Prompt, Theme, bool)>,
     /// Frames drawn so far.
     pub draws: u64,
 }
@@ -461,6 +665,7 @@ impl Ui {
             keys: Keymap::default(),
             prompt: Prompt::default(),
             pointer: Pointer::default(),
+            filter_edit: false,
             drawn: Drawn::default(),
             seen: 0,
             pending: false,
@@ -486,7 +691,7 @@ impl Ui {
         let size = term.size()?;
         let now = (size.width, size.height);
         let chrome = Chrome::read(g);
-        let state = (chrome, self.pointer, self.prompt.clone(), self.theme);
+        let state = (chrome, self.pointer, self.prompt.clone(), self.theme, self.filter_edit);
         if !self.pending && self.size == Some(now) && self.last.as_ref() == Some(&state) {
             return Ok(false);
         }
@@ -498,6 +703,7 @@ impl Ui {
             theme: &self.theme,
             keys: &self.keys,
             prompt: &self.prompt,
+            filter_edit: self.filter_edit,
         };
         let mut drawn = None;
         term.draw(|f| drawn = Some(render(f.buffer_mut(), &scene)))?;

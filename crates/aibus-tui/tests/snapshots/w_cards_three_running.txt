@@ -1,0 +1,12 @@
+                   delegate to subagents · Haiku 5.5
+                                    ●
+               ············●···········●················
+      ┌ ▸ search ───────┐ ┌ grep ───────────┐ ┌ audit ──────────┐
+      │ Haiku 5.5       │ │ Haiku 5.5       │ │ Haiku 5.5       │
+      │ ███████▏   71%  │ │ ███▌       35%  │ │      ██         │
+      │ maps the repo   │ │ finds call      │ │ runs in a       │
+      │                 │ │ sites           │ │ worktree        │
+      │ ◓ running       │ │ ◑ running       │ │ ◒ running       │
+      └─────────────────┘ └─────────────────┘ └─────────────────┘
+
+               ·········································

@@ -1,0 +1,34 @@
+00 00..01 fg=#9ece6a bg=#1f2029
+00 01..19 fg=#9ece6a bg=#1f2029 BOLD
+00 19..27 fg=#9ece6a bg=#1f2029
+00 27..38 fg=#9ece6a bg=#1f2029 BOLD
+00 38..40 fg=#9ece6a bg=#1f2029
+01 00..01 fg=#9ece6a bg=#1f2029
+01 01..17 fg=#c0caf5 bg=#1f2029
+01 17..27 fg=#9ece6a bg=#1f2029
+01 27..33 fg=#c0caf5 bg=#1f2029
+01 33..38 fg=#9ece6a bg=#1f2029
+01 38..39 fg=#c0caf5 bg=#1f2029
+01 39..40 fg=#9ece6a bg=#1f2029
+02 00..01 fg=#9ece6a bg=#1f2029
+02 01..17 fg=#c0caf5 bg=#1f2029
+02 17..27 fg=#9ece6a bg=#1f2029
+02 27..33 fg=#c0caf5 bg=#1f2029
+02 33..38 fg=#9ece6a bg=#1f2029
+02 38..39 fg=#c0caf5 bg=#1f2029
+02 39..40 fg=#9ece6a bg=#1f2029
+03 00..01 fg=#9ece6a bg=#1f2029
+03 01..17 fg=#c0caf5 bg=#1f2029
+03 17..23 fg=#f0a070 bg=#1f2029
+03 23..27 fg=#6b4a3a bg=#1f2029
+03 27..33 fg=#c0caf5 bg=#1f2029
+03 33..38 fg=#f0a070 bg=#1f2029
+03 38..39 fg=#c0caf5 bg=#1f2029
+03 39..40 fg=#9ece6a bg=#1f2029
+04 00..01 fg=#9ece6a bg=#1f2029
+04 01..02 fg=#c0caf5 bg=#1f2029
+04 02..24 fg=#8c96c2 bg=#1f2029
+04 24..38 fg=#f0a070 bg=#2a2b3d BOLD
+04 38..39 fg=#c0caf5 bg=#1f2029
+04 39..40 fg=#9ece6a bg=#1f2029
+05 00..40 fg=#9ece6a bg=#1f2029

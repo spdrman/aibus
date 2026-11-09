@@ -62,16 +62,16 @@ fn the_rail_is_a_strip_under_98_columns_and_a_opens_it() {
     assert_eq!(rig((97, 46)).ui.drawn.areas.rail.width, 3);
     assert_eq!(rig((98, 46)).ui.drawn.areas.rail.width, 22);
     let mut r = rig((80, 24));
-    assert!(!r.text().contains("ADVISOR"));
+    assert!(!r.text().contains("OPUS 5.5 ─"));
     focus_cards(&mut r);
     assert_eq!(names(&r.press('a')), ["Ui(Focus(Advisor))", "Ui(ToggleRail)"]);
-    assert!(r.text().contains("ADVISOR"), "{}", r.text());
+    assert!(r.text().contains("OPUS 5.5 ─"), "{}", r.text());
     assert_frame!(r.frame(), "shell_rail_open_80x24");
     // On the open rail `a` only keeps the focus there; the strip toggles back.
     assert_eq!(names(&r.press('a')), ["Ui(Focus(Advisor))"]);
     r.app.step(Msg::Ui(UiIntent::ToggleRail)).unwrap();
     r.settle();
-    assert!(!r.text().contains("ADVISOR"));
+    assert!(!r.text().contains("OPUS 5.5 ─"));
 }
 
 #[test]
@@ -269,7 +269,7 @@ fn ascii_swaps_every_glyph_and_widens_nothing_else() {
     let t = r.text();
     assert!(t.is_ascii(), "{}", t.chars().filter(|c| !c.is_ascii()).collect::<String>());
     assert!(t.contains("ok done"), "{t}");
-    assert!(t.contains(">> plan skips auth"), "{t}");
+    assert!(t.contains(">> plan skips"), "{t}");
     assert!(t.contains("sharp -> runs in code"), "{t}");
     assert!(t.contains("+-"), "borders are plus and minus");
     // The same layout: every line is as long as the unicode frame's.

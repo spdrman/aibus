@@ -1,0 +1,30 @@
+┌ OPUS 5.5 ──────────┐
+│ advisor · reading  │
+│                    │
+│ ◇ before a plan    │
+│ │ reads the whole  │
+│ │ session, every   │
+│ │ tool call and    │
+│ │ every result     │
+│ │ last advice:     │
+│ │ » split in 3 PRs │
+│ │ » wrong fixture  │
+│ │ calls           3│
+│ │ tokens read  305k│
+│ │ silent on every  │
+│ │ routine turn     │
+│ ◇ same error x2    │
+│ │ never writes     │
+│ │ code itself.     │
+│ │ Sonnet applies   │
+│ │ the advice.      │
+│ ◆ before done      │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+│                    │
+└────────────────────┘

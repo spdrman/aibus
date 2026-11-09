@@ -74,12 +74,17 @@ pub fn frame_of(buf: &Buffer) -> Frame {
 /// Renders the app's views at `size` (cols, rows) with the tick counter at `tick`.
 /// The app must have the `aibus_tui` views registered (`replay_app` does).
 pub fn render<G: Graph>(app: &mut App<G>, size: (u16, u16), tick: u64) -> Frame {
+    render_in(app, size, tick, Theme::recording())
+}
+
+/// `render` in another theme.
+pub fn render_in<G: Graph>(app: &mut App<G>, size: (u16, u16), tick: u64, theme: Theme) -> Frame {
     app.step(Msg::Resize { cols: size.0, rows: size.1 }).unwrap();
     while app.graph.read_key(TICK).and_then(as_i64).unwrap_or(0) < tick as i64 {
         app.step(Msg::Tick).unwrap();
     }
     let mut term = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
-    let mut ui = Ui::new(Theme::recording());
+    let mut ui = Ui::new(theme);
     ui.draw(&mut term, &app.graph).unwrap();
     frame_of(term.backend().buffer())
 }
@@ -137,7 +142,8 @@ pub fn poke<G: Graph>(app: &mut App<G>, key: &str, v: Value) {
     app.graph.commit("poke", &[(node, v)]).unwrap();
 }
 
-fn start<G: Graph>(app: &mut App<G>, seq: u128, agent: &str, role: Role, model: &str) {
+/// Starts the nth run of a fresh fixture.
+pub fn start<G: Graph>(app: &mut App<G>, seq: u128, agent: &str, role: Role, model: &str) {
     app.step(Msg::RunStarted {
         run: run_id(seq),
         agent: agent.parse().unwrap(),
@@ -149,7 +155,8 @@ fn start<G: Graph>(app: &mut App<G>, seq: u128, agent: &str, role: Role, model: 
     .unwrap();
 }
 
-fn answer<G: Graph>(app: &mut App<G>, fork: u64, kind: &str, p: f64, verdict: Verdict) {
+/// A router answer for the fork layer.
+pub fn answer<G: Graph>(app: &mut App<G>, fork: u64, kind: &str, p: f64, verdict: Verdict) {
     app.step(Msg::RouterAnswered {
         fork: ForkId(fork),
         question: RouterQuestion { kind: kind.into(), context: String::new(), choices: Vec::new() },
@@ -170,6 +177,7 @@ pub fn replay_app() -> App<MiniGraph> {
     let mut app = App::new(MiniGraph::new(), || NOW);
     let keys = aibus_tui::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
+    app.set_session_view(Some("--model sonnet"), (Some("opus 5.5"), true), (None, true)).unwrap();
     app.step(Msg::SubmitPrompt { text: "edits + runs tests".into() }).unwrap();
     start(&mut app, 1, "lead", Role::Lead, "Sonnet 5.5");
     for (seq, agent, task) in [
@@ -203,6 +211,10 @@ pub fn replay_app() -> App<MiniGraph> {
         tokens_read: 122_000,
     })
     .unwrap();
+    // The rail types its advice one character per tick; this is long enough for all of it.
+    for _ in 0..40 {
+        app.step(Msg::Tick).unwrap();
+    }
     app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforePlan, detail: String::new() })
         .unwrap();
     app

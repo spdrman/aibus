@@ -1,46 +1,46 @@
                        AIBUS   ·   SONNET 5.5 LEADS   ·   HAIKU 5.5 SWARMS
 ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ advisor
+  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ opus 5.5 · advisor
 
- ┌ ADVISOR ───────────┐                  ┌ Sonnet 5.5 · main session ───────────┐
- │ advisor · reading  │                  │edits + runs tests                    │
- │                    │                  │effort ▮▮▮▮ high                      │
- │ ◆ before a plan    │                  └──────────────────────────────────────┘
- │  reads the whole   │                                      ·
- │  session, every    │                  ┌ ROUTER · fork layer ─────forks 1,314─┐
- │  tool call, result │                  │which file     █████████▍ 0.94 sharp  │
- │ last adv┌ help · key map ──────────────────────────────────────────────────────────┐
- │ » plan s│Tab         next pane                 p           oldest permission       │
- │ calls   │Shift+Tab   previous pane             y           allow this call         │
- │ tokens r│Enter       send the prompt           n           deny this call          │
- │   silent│Enter       open run transcript       a           always allow this tool  │
- │   routin│Up k        up / scroll               e           edit input, then allow  │
- │         │Down j      down / scroll             :           command palette         │
- │ ◇ same e│Left h      previous card             /           filter / search         │──┐
- │ ◇ before│Right l     next card                 f           follow newest           │  │
- │         │x           stop or dismiss run       [           step time back          │  │
- │         │r           retry failed run          ]           step time forward       │  │
- │         │m           message the run           A           agents screen           │  │
- │         │R           resume partial run        K           accounts screen         │  │
- │         │b           background / foreground   ?           this help               │──┘
- │         │Ctrl+b      wait in background        Ctrl+c      cancel run, twice quits │
- │         │t           lead transcript           q           quit                    │
- │         │a           advisor rail              Esc q       close                   │
- │         │Enter       show last advice          Esc         clear the prompt        │
+ ┌ OPUS 5.5 ──────────┐                  ┌ Sonnet 5.5 · main session ───────────┐
+ │ advisor · reading  │                  │ edits + runs tests                   │
+ │                    │·●················│ effort ▮▮▮▮ high      --model sonnet │
+ │ ◆ before a plan    │·                 └──────────────────────────────────────┘
+ │ │ reads the whole  │                                      ●
+ │ │ session, every   │                                      ·
+ │ │ tool c┌ help · key map ──────────────────────────────────────────────────────────┐
+ │ │ every │Tab         next pane                 Enter       show last advice        │
+ │ │ last a│Shift+Tab   previous pane             p           oldest permission       │
+ │ │ » plan│Enter       send the prompt           y           allow this call         │
+ │ │ calls │Enter       open run transcript       n           deny this call          │
+ │ │ tokens│Up k        up / scroll               a           always allow this tool  │
+ │ │ silent│Down j      down / scroll             e           edit input, then allow  │
+ │ │ routin│Left h      previous card             :           command palette         │
+ │ ◇ same e│Right l     next card                 /           filter / search         │
+ │ │ never │x           stop or dismiss run       f           follow newest           │──┐
+ │ │ code i│r           retry failed run          [           step time back          │  │
+ │ │ Sonnet│M           message the run           ]           step time forward       │% │
+ │ │ the ad│m           context menu              A           agents screen           │  │
+ │ ◇ before│Space       show tooltip              K           accounts screen         │  │
+ │         │Enter       pick menu item            ?           this help               │  │
+ │         │R           resume partial run        Ctrl+c      cancel run, twice quits │──┘
+ │         │b           background / foreground   q           quit                    │
+ │         │Ctrl+b      wait in background        Esc q       close                   │
+ │         │t           lead transcript           Esc         clear the prompt        │
+ │         │a           advisor rail                                                  │
  │         │                                                                          │
  │         │any key closes                                                            │
  │         └──────────────────────────────────────────────────────────────────────────┘
- │                    │
  └────────────────────┘
 
 ┌ session log ───────────────────────────────────────────────────────────────────────────────────┐
-│22:13:20  info     router which_tool answered                                                   │
-│22:13:20  info     router retry_or_stop answered                                                │
-│22:13:20  info     advisor spoke at before_plan                                                 │
-│22:13:20  info     checkpoint before_plan                                                       █
+│ 22:13:20  router     which tool →                                        p=0.94  sharp → code  │
+│ 22:13:20  router     retry or stop →                               p=0.58  split → sonnet 5.5  │
+│ 22:13:20  opus 5.5   before plan · advice sent                                                 │
+│ 22:13:20  opus 5.5   before plan · reading full session                                        █
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 
  ~/app $ aibus --model sonnet --advisor opus ▌
 
-  haiku 5.5 [swarming]      subagents [2/3]      advisor [reading]      router [ 1,314 forks]
+  haiku [swarming]      subagents [2/3]      opus [reading]      router [ 1,314 forks]

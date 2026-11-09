@@ -1,0 +1,7 @@
+00 00..02 fg=#c0caf5 bg=#1a1b26
+00 02..18 fg=#7aa2f7 bg=#1a1b26
+00 18..45 fg=#c0caf5 bg=#1a1b26
+00 45..59 fg=#bb9af7 bg=#1a1b26
+00 59..65 fg=#c0caf5 bg=#1a1b26
+00 65..83 fg=#9ece6a bg=#1a1b26
+00 83..98 fg=#c0caf5 bg=#1a1b26

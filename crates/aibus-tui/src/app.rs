@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use aibus_core::state::ANIMATING;
+use aibus_core::state::{run_key, ANIMATING};
 use aibus_core::{
     AibusError, App, Command, KeyCode, KeyEvent, Msg, Ticker, UiIntent, MSG_CAPACITY,
 };
@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
-use crate::input::{self, Context, Input, MouseMode};
+use crate::input::{self, Clip, Context, Input, MouseMode};
 use crate::keys::Keymap;
 use crate::layout::Layout;
 use crate::theme::Theme;
@@ -44,6 +44,43 @@ pub struct Options {
     pub term: Option<String>,
     /// `state/ui.toml`, where dragged sizes are kept.
     pub layout_file: Option<PathBuf>,
+    /// `[ui] log_rows`: the log's height until the user drags its border.
+    pub log_rows: u16,
+    /// Messages from runs started outside the loop (the orchestrator's channel).
+    pub msgs: Option<mpsc::Receiver<Msg>>,
+    /// Sees every message before the loop steps it, for what must follow `AgentsReloaded` and
+    /// the like outside the graph.
+    #[allow(clippy::type_complexity)]
+    pub watch: Option<Box<dyn FnMut(&Msg)>>,
+    /// Samples resident memory in MiB for the status bar's `mem` segment (`-v`).
+    pub mem: Option<fn() -> Option<u32>>,
+}
+
+/// What a batch of terminal events asks of the loop besides the messages it stepped.
+#[derive(Debug, Default)]
+pub struct Handled {
+    /// A border drag ended: the sizes are final and worth saving.
+    pub layout_done: bool,
+    /// Text a menu pick wants on the clipboard.
+    pub copies: Vec<Clip>,
+}
+
+/// `text` for the terminal to put on the clipboard: an OSC 52 sequence, base64 inside.
+pub fn osc52(text: &str) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::from("\x1b]52;c;");
+    for chunk in text.as_bytes().chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |a, (i, b)| a | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ABC[(n >> (18 - 6 * i) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out.push('\x07');
+    out
 }
 
 /// Leaves the alternate screen, shows the cursor, stops mouse reporting and drops raw mode. Safe
@@ -143,8 +180,7 @@ pub fn key_from_crossterm(k: event::KeyEvent) -> Option<KeyEvent> {
 
 /// Handles a batch of terminal events: each one becomes messages that are stepped before the
 /// next event is looked at, so a click that follows a click sees what the first one did. Pointer
-/// and prompt state change on `input` and `ui`. Returns true when a border drag ended and the
-/// layout should be saved.
+/// and prompt state change on `input` and `ui`.
 pub fn terminal_events<G: Graph>(
     events: Vec<Event>,
     app: &mut App<G>,
@@ -153,8 +189,8 @@ pub fn terminal_events<G: Graph>(
     ctrl_c: &mut CtrlC,
     mouse: bool,
     now: Instant,
-) -> Result<bool, AibusError> {
-    let mut layout_done = false;
+) -> Result<Handled, AibusError> {
+    let mut done = Handled::default();
     for ev in input::coalesce(events) {
         let cx = Context::read(&app.graph);
         let out = match ev {
@@ -176,16 +212,36 @@ pub fn terminal_events<G: Graph>(
         for msg in out.msgs {
             app.step(msg)?;
         }
-        layout_done |= out.layout_done;
+        done.layout_done |= out.layout_done;
+        done.copies.extend(out.copy);
     }
     ui.pointer = input.pointer;
-    Ok(layout_done)
+    ui.filter_edit = input.filter_edit;
+    Ok(done)
+}
+
+/// What a menu pick wants copied, as text. A run's result is the last block of its transcript
+/// (or what is still being written), which is what the run produced.
+fn clip_text<G: Graph>(app: &App<G>, clip: &Clip) -> Option<String> {
+    match clip {
+        Clip::Text(t) => Some(t.clone()),
+        Clip::Result(run) => {
+            let Some(Value::Handle(h)) = app.graph.read_key(&run_key(run, "blocks")) else {
+                return None;
+            };
+            let tail = app.store.tail(h.id);
+            if !tail.is_empty() {
+                return Some(tail);
+            }
+            app.store.blocks(h.id).last().map(|b| b.text.to_string())
+        }
+    }
 }
 
 /// Runs the dashboard until quit. Registers the `view:` nodes, draws once, then draws only when
 /// `view:dirty` names a widget, the UI state or the pointer changed, or the terminal is resized.
-/// Ticks run only while `view:animating` is true.
-pub async fn run<G: Graph>(mut app: App<G>, opts: Options) -> Result<(), AibusError> {
+/// Ticks run only while `view:animating` is true, or while the rail is typing out advice.
+pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), AibusError> {
     install_panic_hook();
     let keys = view::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
@@ -208,24 +264,55 @@ pub async fn run<G: Graph>(mut app: App<G>, opts: Options) -> Result<(), AibusEr
     let mut ctrl_c = CtrlC::default();
     let supported = input::mouse_supported(opts.term.as_deref());
     let mut mode = MouseMode::Off;
+    let mut runs = opts.msgs.take();
+    let mut watch = opts.watch.take();
+    let mut mem = tokio::time::interval(Duration::from_secs(2));
 
     let size = session.term.size()?;
     app.step(Msg::Resize { cols: size.width, rows: size.height })?;
-    if let Some(file) = &opts.layout_file {
-        let saved = Layout::load(file);
-        if let Some(w) = saved.rail {
-            app.step(Msg::Ui(UiIntent::SetRailWidth(w)))?;
+    let saved = opts.layout_file.as_deref().map(Layout::load).unwrap_or_default();
+    if let Some(w) = saved.rail {
+        app.step(Msg::Ui(UiIntent::SetRailWidth(w)))?;
+    }
+    // Dragged sizes win; else the configured number of log rows (and its border).
+    match saved.log {
+        Some(h) => app.step(Msg::Ui(UiIntent::SetLogRows(h)))?,
+        None if opts.log_rows != 4 => {
+            app.step(Msg::Ui(UiIntent::SetLogRows(opts.log_rows.max(3) + 2)))?;
         }
-        if let Some(h) = saved.log {
-            app.step(Msg::Ui(UiIntent::SetLogRows(h)))?;
-        }
+        None => {}
     }
     ui.note_commit(&app.graph);
     ui.draw(&mut session.term, &app.graph)?;
     loop {
-        let mut layout_done = false;
+        let mut done = Handled::default();
+        let tip_due = input.tip_due(Instant::now());
+        let tip_timer = async {
+            match tip_due {
+                Some(d) => tokio::time::sleep(d).await,
+                None => std::future::pending().await,
+            }
+        };
+        let next_run = async {
+            match runs.as_mut() {
+                Some(r) => r.recv().await,
+                None => std::future::pending().await,
+            }
+        };
+        let sample = async {
+            match opts.mem {
+                Some(_) => mem.tick().await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             Some(m) = rx.recv() => app.step(m)?,
+            Some(m) = next_run => {
+                if let Some(f) = watch.as_mut() {
+                    f(&m);
+                }
+                app.step(m)?;
+            }
             Some(first) = ev_rx.recv() => {
                 // Everything that piled up while the last frame drew is one batch.
                 let mut batch = vec![first];
@@ -233,14 +320,32 @@ pub async fn run<G: Graph>(mut app: App<G>, opts: Options) -> Result<(), AibusEr
                     let Ok(e) = ev_rx.try_recv() else { break };
                     batch.push(e);
                 }
-                layout_done = terminal_events(
+                done = terminal_events(
                     batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(),
                 )?;
             }
+            () = tip_timer => {}
+            _ = sample => {
+                if let Some(mib) = opts.mem.and_then(|f| f()) {
+                    app.step(Msg::Ui(UiIntent::Mem(mib)))?;
+                }
+            }
             else => break,
         }
+        // A tooltip comes up once the pointer has rested long enough.
+        input.settle(Instant::now());
+        ui.pointer = input.pointer;
+        ui.filter_edit = input.filter_edit;
+        for clip in &done.copies {
+            if let Some(text) = clip_text(&app, clip) {
+                let mut out = io::stdout();
+                out.write_all(osc52(&text).as_bytes())?;
+                out.flush()?;
+            }
+        }
         ui.note_commit(&app.graph);
-        let animating = matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));
+        let typing = app.graph.read_key(view::RAIL).is_some_and(view::rail_typing);
+        let animating = typing || matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));
         ticker.set_animating(animating);
         ui.draw(&mut session.term, &app.graph)?;
         // Move events are only asked for while something on this frame reacts to hover.
@@ -251,7 +356,7 @@ pub async fn run<G: Graph>(mut app: App<G>, opts: Options) -> Result<(), AibusEr
             out.flush()?;
             mode = want;
         }
-        if layout_done {
+        if done.layout_done {
             if let Some(file) = &opts.layout_file {
                 // A failed save is not worth interrupting the session for.
                 let _ = Chrome::read(&app.graph).layout.save(file);
@@ -267,6 +372,14 @@ pub async fn run<G: Graph>(mut app: App<G>, opts: Options) -> Result<(), AibusEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clipboard_sequence_is_osc_52_with_standard_base64() {
+        // Every remainder of the 3-byte groups: none, two bytes short, one byte short.
+        for (text, b64) in [("", ""), ("a", "YQ=="), ("ab", "YWI="), ("abc", "YWJj"), ("hello", "aGVsbG8="), ("01HF7YAT", "MDFIRjdZQVQ=")] {
+            assert_eq!(osc52(text), format!("\x1b]52;c;{b64}\x07"), "{text:?}");
+        }
+    }
 
     #[test]
     fn second_ctrl_c_inside_two_seconds_quits() {

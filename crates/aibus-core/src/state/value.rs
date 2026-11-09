@@ -27,6 +27,16 @@ pub fn map<const N: usize>(pairs: [(&str, Value); N]) -> Value {
     ))
 }
 
+/// `map` for pairs known only at run time.
+pub fn map_of(pairs: Vec<(&str, Value)>) -> Value {
+    Value::Map(Arc::new(
+        pairs
+            .into_iter()
+            .map(|(k, v)| (SmolStr::new(k), v))
+            .collect(),
+    ))
+}
+
 pub fn get<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
     match v {
         Value::Map(m) => m.get(key),

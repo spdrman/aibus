@@ -1,24 +1,24 @@
   ┌ help · key map ──────────────────────────────────────────────────────────┐
-──│Tab         next pane                 Enter       show last advice        │──
-  │Shift+Tab   previous pane             p           oldest permission       │ad
-  │Enter       send the prompt           y           allow this call         │
-  │Enter       open run transcript       n           deny this call          │
-  │Up k        up / scroll               a           always allow this tool  │
-  │Down j      down / scroll             e           edit input, then allow  │
-  │Left h      previous card             :           command palette         │
-  │Right l     next card                 /           filter / search         │
-  │x           stop or dismiss run       f           follow newest           │
-  │r           retry failed run          [           step time back          │
-  │M           message the run           ]           step time forward       │
-  │m           context menu              A           agents screen           │
-  │Space       show tooltip              K           accounts screen         │
-  │Enter       pick menu item            ?           this help               │
-  │R           resume partial run        Ctrl+c      cancel run, twice quits │
-  │b           background / foreground   q           quit                    │
-┌ │Ctrl+b      wait in background        Esc q       close                   │─┐
-│ │t           lead transcript           Esc         clear the prompt        │ │
-│ │a           advisor rail                                                  │ │
-│ │                                                                          │ █
-└─│any key closes                                                            │─┘
- ~└──────────────────────────────────────────────────────────────────────────┘
- haiku [swarming]  subagents [2/3]  opus [reading]  router [ 1,314 forks]
+──│Tab         next pane                 p           oldest permission       │──
+  │Shift+Tab   previous pane             y           allow this call         │ad
+  │Enter       send the prompt           n           deny this call          │
+  │Enter       open run transcript       a           always allow this tool  │
+  │Up k        up / scroll               e           edit input, then allow  │
+  │Down j      down / scroll             :           command palette         │
+  │Left h      previous card             /           filter / search         │
+  │Right l     next card                 f           follow newest           │
+  │x           stop or dismiss run       [           step time back          │
+  │r           retry failed run          ]           step time forward       │
+  │M m         message the run           A           agents screen           │
+  │m           context menu              K           accounts screen         │
+  │Space       show tooltip              ?           this help               │
+  │Enter       pick menu item            Ctrl+c      cancel run, twice quits │
+  │R           resume partial run        q           quit                    │
+  │b           background / foreground   Esc q       close                   │
+┌ │Ctrl+b      wait in background        Esc         clear the prompt        │─┐
+│ │t           lead transcript           Tab         next tool call          │ │
+│ │a           advisor rail              Shift+Tab   previous tool call      │ │
+│ │Enter       show last advice          c           compact the run         │ █
+└─│                                                                          │─┘
+ ~│any key closes                                                            │
+ h└──────────────────────────────────────────────────────────────────────────┘

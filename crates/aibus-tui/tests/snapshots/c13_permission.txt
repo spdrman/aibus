@@ -1,0 +1,46 @@
+                                   AIBUS   ·   SONNET 5.5 LEADS
+──────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ■ Sonnet 5.5 · lead
+
+ ┌ OPUS 5.5 ──────────┐                  ┌ Sonnet 5.5 · main session ───────────┐
+ │ advisor · on call  │                  │ edits + runs tests                   │
+ │                    │                  │ effort ▮▮▮▮ high      --model sonnet │
+ │ ◇ before a plan    │                  └──────────────────────────────────────┘
+ │ │ reads the whole  │                                      ●
+ │ │ session, every   │                                      ·
+ │ │ tool call and    │                  ┌ JEV · fork layer ────────────forks 0─┐
+ │ │ every result     │                  │ which file     ···                   │
+ │ │ last advice:     │                  │ which tool     ···                   │
+ │ │ calls           0│                  │ retry or stop  ···                   │
+ │ │ tokens read     0│                  │ sharp → runs in code  split → Sonnet │
+ │ │ silent on every  │                  └──────────────────────────────────────┘
+ │ │ routine turn     │
+ │ ◇ same error x2 ┌ permission · lead (run 01HF7YAT…) ───────────────────────┐
+ │ │ never writes  │ bash                                                     │
+ │ │ code itself.  │ $ cargo test -p server auth::                            │
+ │ │ Sonnet applies│ cwd ~/app                                                │
+ │ │ the advice.   │                                                          │
+ │ ◇ before done   │  [y] Allow once    [a] Allow always    [n] Deny          │
+ │                 │  [e] Edit    [Esc] Cancel                                │
+ │                 │                                                          │
+ │                 └──────────────────────────────────────────────────────────┘
+ │                    │
+ │                    │
+ │                    │
+ │                    │                  ┌ back to Sonnet 5.5 · lead ───────────┐
+ │                    │                  │ review + verify                      │
+ │                    │                  └──────────────────────────────────────┘
+ │                    │
+ └────────────────────┘
+
+┌ session log ───────────────────────────────────────────────────────────────────────────────────┐
+│ 22:13:20  aibus      queued lead                                                               │
+│ 22:13:20  lead       started                                                                   │
+│                                                                                                │
+│                                                                                                │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ ~/app $ aibus --model sonnet --advisor opus ▌
+
+ swarm [idle]  subagents [0/0]  opus [on call]  jev [ 0 forks]         ! 1 permission waiting (p)

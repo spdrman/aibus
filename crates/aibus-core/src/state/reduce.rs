@@ -10,13 +10,13 @@ use aibus_provider::StreamChunk;
 use indexmap::IndexMap;
 use ulid::Ulid;
 
-use super::store::Store;
+use super::store::{Done, Ev, Store, Tool, OUTPUT_KEEP};
 use super::value::{as_i64, as_list, as_str, get, list, map, map_of, n, pushed, s, with};
 use super::*;
-use crate::agent::{AgentDef, Isolation, Role};
+use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{PermissionId, RunId};
-use crate::msg::{AccountView, Command, Decision, Msg, Pane, Selection, UiIntent};
+use crate::msg::{AccountView, Command, Decision, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
 
@@ -294,9 +294,193 @@ impl R<'_> {
     }
 
     fn transcript_id(&self, run: &str) -> Option<u64> {
-        match self.cur(&run_key(run, "blocks")) {
-            Value::Handle(h) => Some(h.id),
+        match self.now(&run_key(run, "blocks")) {
+            Value::Handle(h) if h.id != 0 => Some(h.id),
             _ => None,
+        }
+    }
+
+    /// Writes both handles of the run's transcript, after the store changed.
+    fn bump(&mut self, run: &str, entry: u64) {
+        let (blocks, tail) = self.store.handles(entry);
+        self.put(run_key(run, "blocks"), Value::Handle(blocks));
+        self.put(run_key(run, "tail"), Value::Handle(tail));
+    }
+
+    /// Puts an event into the run's transcript.
+    fn event(&mut self, run: &str, ev: Ev) {
+        if let Some(entry) = self.transcript_id(run) {
+            self.store.push_event(entry, ev);
+            self.bump(run, entry);
+        }
+    }
+
+    /// Opens a modal. A transcript starts with a fresh view state; a permission prompt remembers
+    /// what it covered.
+    fn open_modal(&mut self, name: &str) {
+        let cur = self.now(MODAL);
+        if name == "permission" && !matches!(cur, Value::Null) && as_str(&cur) != Some("permission") {
+            self.put(MODAL_UNDER, cur);
+        }
+        if let Some(run) = name.strip_prefix("transcript:") {
+            self.put(
+                TRANSCRIPT_UI,
+                map([
+                    ("run", s(run)),
+                    ("follow", Value::Bool(true)),
+                    ("top", n(0)),
+                    ("sel", Value::Null),
+                    ("expanded", list(vec![])),
+                    ("at", Value::Null),
+                    ("ver", Value::Null),
+                    ("evicted", Value::Null),
+                ]),
+            );
+        }
+        if matches!(name, "palette" | "agents" | "accounts") {
+            self.put(SCREEN_SEL, n(0));
+            self.put(PALETTE_TEXT, s(""));
+        }
+        self.put(MODAL, s(name));
+    }
+
+    /// Closes the modal. A finished run's transcript goes back out of memory; a prompt that was
+    /// covering another modal gives it back.
+    fn close_modal(&mut self) {
+        let cur = self.now(MODAL);
+        if let Some(run) = as_str(&cur).and_then(|m| m.strip_prefix("transcript:")) {
+            if self.status(run).is_some_and(RunStatus::is_terminal) {
+                if let Some(entry) = self.transcript_id(run) {
+                    self.store.evict_finished(entry);
+                    self.bump(run, entry);
+                }
+            }
+            self.put(TRANSCRIPT_UI, Value::Null);
+        }
+        let back = if as_str(&cur) == Some("permission") { self.now(MODAL_UNDER) } else { Value::Null };
+        if !matches!(self.now(MODAL_UNDER), Value::Null) {
+            self.put(MODAL_UNDER, Value::Null);
+        }
+        self.put(MODAL, back);
+    }
+
+    /// A key or click in the open transcript.
+    fn transcript_op(&mut self, op: TrOp) {
+        let st = self.now(TRANSCRIPT_UI);
+        let Some(run) = get(&st, "run").and_then(as_str).map(str::to_owned) else { return };
+        let Some(entry) = self.transcript_id(&run) else { return };
+        let size = self.now(SIZE);
+        let cols = get(&size, "cols").and_then(as_i64).unwrap_or(80);
+        let rows = get(&size, "rows").and_then(as_i64).unwrap_or(24);
+        let (width, height) = transcript_body(cols.clamp(0, 9999) as u16, rows.clamp(0, 9999) as u16);
+        let expanded: Vec<String> = get(&st, "expanded")
+            .map(as_list)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(as_str)
+            .map(str::to_owned)
+            .collect();
+        let ver = get(&st, "ver").and_then(as_i64).and_then(|v| u32::try_from(v).ok());
+        let total = |r: &Self, expanded: &[String]| r.store.transcript_rows(entry, width, expanded, ver, (None, 0)).total;
+        let follow = matches!(get(&st, "follow"), Some(Value::Bool(true)));
+        let max_top = |t: usize| t.saturating_sub(height);
+        let mut st = st;
+        match op {
+            TrOp::Scroll(lines) => {
+                let t = total(self, &expanded);
+                let cur = if follow { max_top(t) } else { get(&st, "top").and_then(as_i64).unwrap_or(0).max(0) as usize };
+                let top = (cur.min(max_top(t)) as i64 - i64::from(lines)).clamp(0, max_top(t) as i64) as usize;
+                st = with(&st, "top", n(top));
+                st = with(&st, "follow", Value::Bool(top >= max_top(t)));
+            }
+            TrOp::Top => {
+                st = with(&st, "top", n(0));
+                st = with(&st, "follow", Value::Bool(total(self, &expanded) <= height));
+            }
+            TrOp::Bottom => st = with(&st, "follow", Value::Bool(true)),
+            TrOp::Tool(sel) => {
+                let t = total(self, &expanded);
+                let first = if follow { max_top(t) } else { get(&st, "top").and_then(as_i64).unwrap_or(0).max(0) as usize };
+                let seen = self.store.transcript_rows(entry, width, &expanded, ver, (Some(first), height));
+                let visible: Vec<i64> = seen
+                    .rows
+                    .iter()
+                    .filter_map(|r| match r {
+                        super::store::Row::Tool { ordinal, .. } => Some(*ordinal as i64),
+                        _ => None,
+                    })
+                    .collect();
+                let cur = get(&st, "sel").and_then(as_i64);
+                let next = match sel {
+                    Selection::Index(i) => Some(i),
+                    Selection::Clear => None,
+                    Selection::Next => cur
+                        .and_then(|c| visible.iter().copied().find(|v| *v > c))
+                        .or_else(|| visible.first().copied()),
+                    Selection::Prev => cur
+                        .and_then(|c| visible.iter().copied().rev().find(|v| *v < c))
+                        .or_else(|| visible.last().copied()),
+                };
+                st = with(&st, "sel", next.map_or(Value::Null, n));
+            }
+            TrOp::Toggle => {
+                let call = get(&st, "sel")
+                    .and_then(as_i64)
+                    .and_then(|o| usize::try_from(o).ok())
+                    .and_then(|o| self.store.tool_call(entry, o));
+                if let Some(call) = call {
+                    let mut now = expanded.clone();
+                    if let Some(i) = now.iter().position(|c| *c == call) {
+                        now.remove(i);
+                    } else {
+                        now.push(call);
+                    }
+                    st = with(&st, "expanded", list(now.iter().map(|c| s(c)).collect()));
+                }
+            }
+            TrOp::Back | TrOp::Forward | TrOp::Live => st = self.travel(st, &run, op),
+        }
+        self.put(TRANSCRIPT_UI, st);
+    }
+
+    /// Steps the transcript view through graph time (03 section 6): to the previous or the next
+    /// commit that changed the run's transcript, or back to now. Past the retained window the
+    /// view says so and stays where it was.
+    fn travel(&self, st: Value, run: &str, op: TrOp) -> Value {
+        let live = with(&with(&with(&st, "at", Value::Null), "ver", Value::Null), "evicted", Value::Null);
+        let Some(node) = self.g.node(&run_key(run, "tail")) else { return st };
+        if op == TrOp::Live {
+            return live;
+        }
+        let log = self.g.commit_log();
+        let changes: Vec<u64> = log.iter().filter(|c| c.changed_nodes.contains(&node)).map(|c| c.time).collect();
+        let shown = get(&st, "at").and_then(as_i64).map_or_else(|| changes.last().copied(), |t| Some(t as u64));
+        let target = match (op, shown) {
+            (TrOp::Back, Some(shown)) => changes.iter().rev().find(|t| **t < shown).copied(),
+            (TrOp::Back, None) => None,
+            (_, Some(shown)) => changes.iter().find(|t| **t > shown).copied(),
+            (_, None) => return st,
+        };
+        let Some(target) = target else {
+            if op == TrOp::Back {
+                // Nothing earlier is retained: say where the window starts if history was cut.
+                if let aibus_graph::RetentionResult::Evicted { oldest_retained } = self.g.snapshot_at(1) {
+                    return with(&st, "evicted", n(oldest_retained));
+                }
+            }
+            return st;
+        };
+        if changes.last() == Some(&target) {
+            return live;
+        }
+        match self.g.read_at(node, target) {
+            aibus_graph::RetentionResult::Found(Value::Handle(h)) => {
+                let st = with(&st, "at", n(target));
+                let st = with(&st, "ver", n(h.version));
+                with(&st, "evicted", Value::Null)
+            }
+            aibus_graph::RetentionResult::Evicted { oldest_retained } => with(&st, "evicted", n(oldest_retained)),
+            _ => st,
         }
     }
 
@@ -329,6 +513,9 @@ impl R<'_> {
             .into_iter()
             .filter(|r| get(r, "id").and_then(as_str) != Some(&key))
             .collect();
+        if rest.is_empty() && as_str(&self.now(MODAL)) == Some("permission") {
+            self.close_modal();
+        }
         self.put(PERMISSIONS_OPEN, list(rest));
         let run = get(&req, "run").and_then(as_str).unwrap_or("").to_owned();
         if self.status(&run) == Some(RunStatus::WaitingPermission(id)) {
@@ -471,10 +658,32 @@ impl R<'_> {
             UiIntent::Open(Pane::Cards) => {
                 let index = as_i64(self.cur(SELECTED_CARD)).unwrap_or(0).max(0) as usize;
                 if let Some(id) = self.card_run(index) {
-                    self.put(MODAL, s(&format!("transcript:{id}")));
+                    self.open_modal(&format!("transcript:{id}"));
                 }
             }
-            UiIntent::Open(Pane::Advisor) => self.put(MODAL, s("advice")),
+            UiIntent::Open(Pane::Advisor) => self.open_modal("advice"),
+            UiIntent::Transcript(op) => self.transcript_op(op),
+            UiIntent::Loaded(run) => {
+                let id = run.to_string();
+                if let Some(entry) = self.transcript_id(&id) {
+                    self.bump(&id, entry);
+                }
+            }
+            UiIntent::Pick(sel) => {
+                let cur = as_i64(&self.now(SCREEN_SEL)).unwrap_or(0);
+                let next = match sel {
+                    Selection::Index(i) => i.max(0),
+                    Selection::Next => cur + 1,
+                    Selection::Prev => (cur - 1).max(0),
+                    Selection::Clear => 0,
+                };
+                self.put(SCREEN_SEL, n(next));
+            }
+            UiIntent::ShowPermission => {
+                if !as_list(&self.now(PERMISSIONS_OPEN)).is_empty() {
+                    self.open_modal("permission");
+                }
+            }
             UiIntent::Open(_) => {}
             UiIntent::ToggleRail => {
                 let open = matches!(self.cur(RAIL_EXPANDED), Value::Bool(true));
@@ -588,10 +797,17 @@ impl R<'_> {
             Command::Focus(p) => self.put(FOCUS, s(p.as_str())),
             Command::Scroll(p, d) => self.scroll(*p, *d, false),
             Command::Select(pane, sel) => self.select(*pane, *sel),
-            Command::OpenTranscript(run) => self.put(MODAL, s(&format!("transcript:{run}"))),
-            Command::CloseModal => self.put(MODAL, Value::Null),
-            Command::OpenPalette => self.put(MODAL, s("palette")),
-            Command::OpenHelp => self.put(MODAL, s("help")),
+            Command::OpenTranscript(run) => self.open_modal(&format!("transcript:{run}")),
+            Command::CloseModal => self.close_modal(),
+            Command::OpenPalette => self.open_modal("palette"),
+            Command::PaletteText(text) => {
+                self.put(PALETTE_TEXT, s(text));
+                self.put(SCREEN_SEL, n(0));
+            }
+            Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
+            Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
+            Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
+            Command::OpenHelp => self.open_modal("help"),
             Command::LedgerUpdate { section, text } => {
                 if ["goal", "now", "in_progress"].contains(&section.as_str()) {
                     let v = self.store.inline_or_handle(text);
@@ -611,18 +827,41 @@ impl R<'_> {
                 self.put(LOG, Value::Handle(h));
             }
             Command::Quit { force } => {
-                let why = if *force { "forced" } else { "user_quit" };
-                self.put(SHUTDOWN, s(why));
+                // A session that got something done asks how it went first (Q11); the answer
+                // comes back as a second quit with the modal already open.
+                let worked = as_list(self.cur(RUNS_ORDER))
+                    .iter()
+                    .filter_map(as_str)
+                    .any(|id| self.status(id) == Some(RunStatus::Completed));
+                if !*force && worked && as_str(&self.now(MODAL)) != Some("outcome") {
+                    self.open_modal("outcome");
+                } else {
+                    let why = if *force { "forced" } else { "user_quit" };
+                    self.put(SHUTDOWN, s(why));
+                }
             }
             // Delivery to a run's mailbox, workflows and handoffs are effects that land with
             // the orchestrator; the model only records that they were asked for.
-            Command::SendMessage { .. }
-            | Command::Workflow { .. }
-            | Command::CreateHandoff { .. } => {
+            Command::SendMessage { run, text } => {
+                self.event(&run.to_string(), Ev::User(text.clone()));
+                self.log("info", "queued request");
+            }
+            Command::Workflow { .. } | Command::CreateHandoff { .. } => {
                 self.log("info", "queued request");
             }
         }
     }
+}
+
+/// The one line a collapsed tool call shows: the command, the path, the pattern.
+pub fn tool_summary(name: &str, input: &serde_json::Value) -> String {
+    let pick = |keys: &[&str]| keys.iter().find_map(|k| input.get(*k).and_then(|v| v.as_str()));
+    let line = match name {
+        "bash" => pick(&["command"]),
+        _ => pick(&["path", "file_path", "pattern", "query", "url", "command", "prompt", "agent"]),
+    }
+    .map_or_else(|| input.to_string(), str::to_owned);
+    line.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect()
 }
 
 /// `/compact` and `/fork <task>` typed while a lead runs: the command, aimed at the lead.
@@ -672,6 +911,33 @@ fn def_summary(store: &Store, d: &AgentDef) -> Value {
         ("background", Value::Bool(d.background)),
         ("isolation", s(d.isolation.as_str())),
         ("max_turns", d.max_turns.map_or(Value::Null, n)),
+        // What the agents screen lists: where the definition lives, its model and its tools.
+        (
+            "scope",
+            s(match &d.source.scope {
+                Scope::Cli => "cli",
+                Scope::Project => "project",
+                Scope::User => "user",
+                Scope::Extra(_) => "extra",
+                Scope::Builtin => "builtin",
+            }),
+        ),
+        ("path", d.source.path.as_ref().map_or(Value::Null, |p| s(&p.to_string_lossy()))),
+        (
+            "model",
+            s(&match &d.model {
+                ModelRef::Alias(a) => a.to_string(),
+                ModelRef::Full(m) => m.0.to_string(),
+                ModelRef::Inherit => "inherit".to_owned(),
+            }),
+        ),
+        (
+            "tools",
+            s(&match &d.tools.allow {
+                None => "all".to_owned(),
+                Some(allow) => allow.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+            }),
+        ),
         // Prompt bodies never enter the graph.
         ("prompt", Value::Handle(store.put_text(&d.system_prompt))),
     ])
@@ -801,6 +1067,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.new_run(&id, meta, RunStatus::Starting);
             }
             r.log_row("info", agent.as_str(), Some(id.clone()), "started", Vec::new());
+            let prompt = match get(r.cur(&run_key(&id, "meta")), "prompt").cloned().or_else(|| get(&old, "prompt").cloned()) {
+                Some(Value::Handle(h)) => r.store.text(&h).map(|t| t.to_string()).unwrap_or_default(),
+                Some(v) => as_str(&v).unwrap_or("").to_owned(),
+                None => String::new(),
+            };
+            if !prompt.is_empty() {
+                r.event(&id, Ev::User(prompt));
+            }
         }
         Msg::Stream { run, chunks } => {
             let id = run.to_string();
@@ -855,6 +1129,17 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             ]);
             r.put(TOOLS_PENDING, pushed(r.cur(TOOLS_PENDING), entry));
             r.log("info", &format!("tool {} requested", call.name));
+            let input = serde_json::to_string_pretty(&call.input).unwrap_or_default();
+            r.event(
+                &run.to_string(),
+                Ev::Tool(Tool {
+                    call: call.id.0.to_string(),
+                    name: call.name.to_string(),
+                    summary: tool_summary(&call.name, &call.input),
+                    input: input.chars().take(OUTPUT_KEEP).collect(),
+                    done: None,
+                }),
+            );
             // `ask_user` parks the run until the user answers.
             let id = run.to_string();
             if call.name == "ask_user"
@@ -883,6 +1168,17 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .filter(|p| get(p, "id").and_then(as_str) != Some(&key))
                 .collect();
             r.put(TOOLS_PENDING, list(rest));
+            if let Some(entry) = r.transcript_id(&run.to_string()) {
+                let output: String = result.content.chars().take(OUTPUT_KEEP).collect();
+                let done = Done {
+                    ok: !result.is_error,
+                    ms: duration.as_millis() as u64,
+                    bytes: result.content.len(),
+                    output,
+                };
+                r.store.finish_tool(entry, &key, done);
+                r.bump(&run.to_string(), entry);
+            }
             let ok = if result.is_error { "failed" } else { "ok" };
             r.log("info", &format!("{name} {ok} {} ms", duration.as_millis()));
             let id = run.to_string();
@@ -918,6 +1214,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 ("summary", r.store.inline_or_handle(&request.summary)),
             ]);
             r.put(PERMISSIONS_OPEN, pushed(r.cur(PERMISSIONS_OPEN), entry));
+            r.open_modal("permission");
             r.set_status(request.run, RunStatus::WaitingPermission(request.id));
             let call = request.call.0.to_string();
             let pending: Vec<Value> = as_list(r.cur(TOOLS_PENDING))
@@ -964,6 +1261,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     ("retryable", Value::Bool(error.retryable)),
                 ]),
             );
+            r.event(&id, Ev::Note { error: true, text: format!("failed: {}: {}", error.kind.as_str(), error.message) });
             let who = r.agent_of(&id);
             r.log_row("error", &who, Some(id.clone()), &format!("failed: {}", error.kind.as_str()), Vec::new());
             r.cancel_queued_below(&id);
@@ -1068,7 +1366,8 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let what = checkpoint.name().replace('_', " ");
             r.log_row("info", "advisor", None, &format!("{what} · advice sent"), Vec::new());
         }
-        Msg::Compacted { run, .. } => {
+        Msg::Compacted { run, pre_tokens } => {
+            r.event(&run.to_string(), Ev::Compact { pre_tokens: *pre_tokens });
             if r.status(&run.to_string()) == Some(RunStatus::Compacting) {
                 r.set_status(run, RunStatus::Running);
             }

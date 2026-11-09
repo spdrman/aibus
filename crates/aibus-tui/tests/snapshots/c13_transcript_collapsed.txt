@@ -1,0 +1,46 @@
+┌ lead · sonnet · acct · running ────────────────────────────────────────────────────────────────┐
+│                                                                                                │
+│ │ edits + runs tests                                                                           │
+│ I'll run the tests first.                                                                      │
+│ ▸ bash  cargo test  (1.2 s, 4 KiB)                                                             │
+│ All green. Compacting before the next step.                                                    │
+│ ⌁ compacted at 167k                                                                            │
+│ Done.                                                                                          │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│  [Esc] Close    [Enter] Expand    [[] Older    []] Newer    [x] Stop    [c] Compact            │
+│  [m] Message                                                                                   │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘

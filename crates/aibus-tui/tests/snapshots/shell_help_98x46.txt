@@ -10,29 +10,29 @@
  │ │ reads the whole  │                                      ●
  │ │ session, every   │                                      ·
  │ │ tool c┌ help · key map ──────────────────────────────────────────────────────────┐
- │ │ every │Tab         next pane                 Enter       show last advice        │
- │ │ last a│Shift+Tab   previous pane             p           oldest permission       │
- │ │ » plan│Enter       send the prompt           y           allow this call         │
- │ │ calls │Enter       open run transcript       n           deny this call          │
- │ │ tokens│Up k        up / scroll               a           always allow this tool  │
- │ │ silent│Down j      down / scroll             e           edit input, then allow  │
- │ │ routin│Left h      previous card             :           command palette         │
- │ ◇ same e│Right l     next card                 /           filter / search         │
- │ │ never │x           stop or dismiss run       f           follow newest           │──┐
- │ │ code i│r           retry failed run          [           step time back          │  │
- │ │ Sonnet│M           message the run           ]           step time forward       │% │
- │ │ the ad│m           context menu              A           agents screen           │  │
- │ ◇ before│Space       show tooltip              K           accounts screen         │  │
- │         │Enter       pick menu item            ?           this help               │  │
- │         │R           resume partial run        Ctrl+c      cancel run, twice quits │──┘
- │         │b           background / foreground   q           quit                    │
- │         │Ctrl+b      wait in background        Esc q       close                   │
- │         │t           lead transcript           Esc         clear the prompt        │
- │         │a           advisor rail                                                  │
+ │ │ every │Tab         next pane                 p           oldest permission       │
+ │ │ last a│Shift+Tab   previous pane             y           allow this call         │
+ │ │ » plan│Enter       send the prompt           n           deny this call          │
+ │ │ calls │Enter       open run transcript       a           always allow this tool  │
+ │ │ tokens│Up k        up / scroll               e           edit input, then allow  │
+ │ │ silent│Down j      down / scroll             :           command palette         │
+ │ │ routin│Left h      previous card             /           filter / search         │
+ │ ◇ same e│Right l     next card                 f           follow newest           │
+ │ │ never │x           stop or dismiss run       [           step time back          │──┐
+ │ │ code i│r           retry failed run          ]           step time forward       │  │
+ │ │ Sonnet│M m         message the run           A           agents screen           │% │
+ │ │ the ad│m           context menu              K           accounts screen         │  │
+ │ ◇ before│Space       show tooltip              ?           this help               │  │
+ │         │Enter       pick menu item            Ctrl+c      cancel run, twice quits │  │
+ │         │R           resume partial run        q           quit                    │──┘
+ │         │b           background / foreground   Esc q       close                   │
+ │         │Ctrl+b      wait in background        Esc         clear the prompt        │
+ │         │t           lead transcript           Tab         next tool call          │
+ │         │a           advisor rail              Shift+Tab   previous tool call      │
+ │         │Enter       show last advice          c           compact the run         │
  │         │                                                                          │
  │         │any key closes                                                            │
- │         └──────────────────────────────────────────────────────────────────────────┘
- └────────────────────┘
+ └─────────└──────────────────────────────────────────────────────────────────────────┘
 
 ┌ session log ───────────────────────────────────────────────────────────────────────────────────┐
 │ 22:13:20  router     which tool →                                        p=0.94  sharp → code  │
@@ -41,6 +41,6 @@
 │ 22:13:20  opus 5.5   before plan · reading full session                                        █
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 
- ~/app $ aibus --model sonnet --advisor opus ▌
+ ~/app $ aibus --model sonnet --advisor opus
 
   haiku [swarming]      subagents [2/3]      opus [reading]      router [ 1,314 forks]

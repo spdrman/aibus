@@ -247,7 +247,7 @@ fn the_menu_key_works_in_the_log_too_and_the_pointer_events_are_ignored_when_the
     });
     let mut off = rig();
     let before = off.int("eng:msg_seq");
-    terminal_events(vec![event], &mut off.app, &mut ui, &mut Input::default(), &mut CtrlC::default(), false, Instant::now()).unwrap();
+    terminal_events(vec![event], &mut off.app, &mut ui, &mut Input::default(), &mut CtrlC::default(), false, Instant::now(), &mut |app, m| app.step(m)).unwrap();
     assert_eq!(off.int("eng:msg_seq"), before);
 }
 

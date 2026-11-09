@@ -20,5 +20,5 @@
 │ 22:13:20  opus 5.5   before plan · advice sent                               │
 │ 22:13:20  opus 5.5   before plan · reading full session                      █
 └──────────────────────────────────────────────────────────────────────────────┘
- ~/app $ aibus --model sonnet --advisor opus ▌
+ ~/app $ aibus --model sonnet --advisor opus
  haiku [swarming]  subagents [2/3]  opus [reading]  router [ 1,314 forks]

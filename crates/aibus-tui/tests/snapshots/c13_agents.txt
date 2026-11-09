@@ -1,0 +1,46 @@
+┌ agents ────────────────────────────────────────────────────────────────────────────────────────┐
+│ name               scope     role       model              tools                               │
+│ search             project   worker     haiku              read, grep                          │
+│ grep               project   worker     haiku              read, grep                          │
+│ audit              project   worker     haiku              read, grep                          │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│ ── search ──────────────────────────────────────────────────────────────────────────────────── │
+│ You are search. Map the repo and report.                                                       │
+│ Second line.                                                                                   │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│                                                                                                │
+│  [n] New    [e] Edit    [v] Validate    [d] Delegate now    [Esc] Close                        │
+│                                                                                                │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -18,7 +18,8 @@ use super::time::rfc3339;
 use crate::ids::{RunId, ToolCallId};
 use crate::msg::{Msg, ToolResult};
 use crate::redact::Redactor;
-use crate::state::store::SUMMARY_HEAD;
+use crate::state::reduce::tool_summary;
+use crate::state::store::{Done, Ev, Store, Tool, OUTPUT_KEEP, SUMMARY_HEAD};
 
 /// `runs/<id>/meta.json`, and the row the index keeps per run.
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
@@ -238,6 +239,102 @@ impl Transcript {
             _ => Ok(()),
         }
     }
+}
+
+/// What one line of `transcript.jsonl` adds to a run's view.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item {
+    Text(String),
+    Ev(Ev),
+    /// The result of the call `.0`.
+    Done(String, Done),
+}
+
+/// The view items of one line; a line that is not one of ours, or is cut short, gives none.
+pub fn items(line: &str) -> Vec<Item> {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+    let text_of = |b: &Value| b.get("text").and_then(Value::as_str).unwrap_or("").to_owned();
+    match v.get("type").and_then(Value::as_str) {
+        Some("message") => {
+            let blocks = v.get("blocks").and_then(Value::as_array).cloned().unwrap_or_default();
+            if v.get("role").and_then(Value::as_str) == Some("user") {
+                let text = blocks.iter().map(text_of).collect::<Vec<_>>().join("\n");
+                return if text.is_empty() { Vec::new() } else { vec![Item::Ev(Ev::User(text))] };
+            }
+            blocks
+                .iter()
+                .filter_map(|b| match b.get("type").and_then(Value::as_str) {
+                    Some("text") => Some(Item::Text(text_of(b))),
+                    Some("tool_use") => {
+                        let name = b.get("name").and_then(Value::as_str).unwrap_or("tool");
+                        let input = b.get("input").cloned().unwrap_or(Value::Null);
+                        Some(Item::Ev(Ev::Tool(Tool {
+                            call: b.get("id").and_then(Value::as_str).unwrap_or("").to_owned(),
+                            name: name.to_owned(),
+                            summary: tool_summary(name, &input),
+                            input: serde_json::to_string_pretty(&input)
+                                .unwrap_or_default()
+                                .chars()
+                                .take(OUTPUT_KEEP)
+                                .collect(),
+                            done: None,
+                        })))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+        Some("tool_result") => {
+            let content = v.get("content").and_then(Value::as_str).unwrap_or("");
+            vec![Item::Done(
+                v.get("id").and_then(Value::as_str).unwrap_or("").to_owned(),
+                Done {
+                    ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                    ms: 0,
+                    bytes: v.get("bytes").and_then(Value::as_u64).map_or(content.len(), |b| b as usize),
+                    output: content.chars().take(OUTPUT_KEEP).collect(),
+                },
+            )]
+        }
+        Some("compact_boundary") => vec![Item::Ev(Ev::Compact {
+            pre_tokens: v.get("pre_tokens").and_then(Value::as_u64).unwrap_or(0),
+        })],
+        _ => Vec::new(),
+    }
+}
+
+/// Reads `path` back into the store entry `entry`, `chunk` lines at a time, calling `after` once
+/// per chunk so a view can draw what has arrived. Returns the number of lines read.
+pub fn reload(store: &Store, entry: u64, path: &Path, chunk: usize, mut after: impl FnMut()) -> io::Result<usize> {
+    use std::io::BufRead;
+    let file = io::BufReader::new(File::open(path)?);
+    let mut n = 0;
+    let mut open_text = false;
+    for line in file.lines() {
+        let line = line?;
+        n += 1;
+        for item in items(&line) {
+            match item {
+                Item::Text(t) => {
+                    if open_text {
+                        store.append(entry, "\n");
+                    }
+                    store.append(entry, &t);
+                    open_text = true;
+                }
+                Item::Ev(ev) => {
+                    store.push_event(entry, ev);
+                    open_text = false;
+                }
+                Item::Done(call, done) => store.finish_tool(entry, &call, done),
+            }
+        }
+        if n % chunk.max(1) == 0 {
+            after();
+        }
+    }
+    after();
+    Ok(n)
 }
 
 /// The run a message belongs to, for the messages a transcript records.

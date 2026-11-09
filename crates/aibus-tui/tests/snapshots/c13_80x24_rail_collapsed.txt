@@ -1,0 +1,24 @@
+              AIBUS   ·   SONNET 5.5 LEADS   ·   HAIKU 5.5 SWARMS
+────────────────────────────────────────────────────────────────────────────────
+  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ opus 5.5 · ad
+  ◇                   ┌ Sonnet 5.5 · main session ───────────┐
+                      │ edits + runs tests                   │
+  ◇                   │ effort ▮▮▮▮ high      --model sonnet │
+                      └──────────────────────────────────────┘
+  ◇                   ┌ ROUTER · fork layer ─────forks 1,314─┐
+                      │ which file     █████████▌ 0.94 sharp │
+                      │ which tool     █████████▌ 0.94 sharp │
+                      │ retry or stop  ██████████ 0.58 split │
+                      └──────────────────────────────────────┘
+             ┌ ▸ search ───────┐ ┌ grep ───────────┐ ┌ audit ──────────┐
+             │ Haiku 5.5       │ │ Haiku 5.5       │ │ Haiku 5.5       │
+             │ ███████▏   71%  │ │ ███▌       35%  │ │ ██████████ 100% │
+             │ maps the repo   │ │ finds call      │ │ runs in a       │
+             └─────────────────┘ └─────────────────┘ └─────────────────┘
+┌ session log ─────────────────────────────────────────────────────────────────┐
+│ 22:13:20  opus 5.5   before plan · advice sent                               │
+│ 22:13:20  opus 5.5   before plan · reading full session                      │
+│ 22:13:20  opus 5.5   before plan · advice sent                               █
+└──────────────────────────────────────────────────────────────────────────────┘
+ ~/app $ aibus --model sonnet --advisor opus ▌
+ haiku [swarming]  subagents [2/3]  opus [on call]  router [ 1,314 forks]

@@ -119,7 +119,7 @@ fn account_op(op: AccountOp, paths: &Paths, redactor: &Redactor) -> String {
         AccountOp::Test(name) => (AccountCmd::Test { name }, String::new()),
         AccountOp::Disable(name) => (AccountCmd::Disable { name }, String::new()),
         AccountOp::Add { name, provider, key } => (
-            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, base_url: None, label: None }),
+            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None }),
             key,
         ),
     };
@@ -133,6 +133,7 @@ fn account_op(op: AccountOp, paths: &Paths, redactor: &Redactor) -> String {
             factories: crate::providers::builtin_factories(),
             env: Arc::new(|v| std::env::var(v).ok()),
             redactor,
+            oauth: None,
             stdin: &mut stdin,
             prompt: None,
             out: &mut out,

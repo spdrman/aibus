@@ -96,6 +96,8 @@ pub struct Auth {
     pub file: Option<String>,
     /// A local server that needs no key.
     pub none: bool,
+    /// OAuth tokens in the keychain, refreshed before use. Off unless asked for.
+    pub oauth: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -437,7 +439,7 @@ impl Account {
         let a = &self.auth;
         if a.none {
             None
-        } else if a.keyring {
+        } else if a.keyring || a.oauth {
             Some(KeyRef::Keyring {
                 service: KEYCHAIN_SERVICE.into(),
                 name: self.account_name(),

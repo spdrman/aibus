@@ -243,6 +243,9 @@ pub struct AccountAdd {
     /// Read the key from this file
     #[arg(long, value_name = "PATH", group = "source")]
     pub file: Option<PathBuf>,
+    /// Log in with OAuth instead of a key (only for providers that offer it)
+    #[arg(long, group = "source")]
+    pub oauth: bool,
     #[arg(long, value_name = "URL")]
     pub base_url: Option<String>,
     #[arg(long, value_name = "TEXT")]

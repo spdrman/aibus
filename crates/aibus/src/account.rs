@@ -12,7 +12,8 @@ use aibus_core::config::{self, Account};
 use aibus_core::persist::fs::{create_private_dir, write_private};
 use aibus_core::persist::paths::Paths;
 use aibus_core::{
-    AibusError, CredentialError, CredentialStore, KeyRef, Keychain, Redactor, StoreHealth,
+    AibusError, CredentialError, CredentialStore, KeyRef, Keychain, OAuthFlow, Redactor,
+    StoreHealth,
 };
 use aibus_provider::{
     AccountInfo, AccountName, AuthMethodKind, Credential, ProviderErrorKind,
@@ -33,6 +34,8 @@ pub struct Io<'a> {
     #[allow(clippy::type_complexity)]
     pub env: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
     pub redactor: Redactor,
+    /// The login and refresh exchange for `--oauth`. `None` when no provider has one.
+    pub oauth: Option<Arc<dyn OAuthFlow>>,
     pub stdin: &'a mut dyn Read,
     /// Asks for a key with the echo off. `None` when there is no terminal to ask on.
     pub prompt: Option<&'a dyn Fn() -> std::io::Result<String>>,
@@ -55,7 +58,11 @@ pub fn run(cmd: &AccountCmd, json: bool, io: &mut Io) -> Result<u8, AibusError> 
 
 fn store(io: &Io) -> CredentialStore {
     let env = io.env.clone();
-    CredentialStore::new(io.keychain.clone(), io.redactor.clone()).with_env(move |v| env(v))
+    let s = CredentialStore::new(io.keychain.clone(), io.redactor.clone()).with_env(move |v| env(v));
+    match &io.oauth {
+        Some(flow) => s.with_oauth(flow.clone()),
+        None => s,
+    }
 }
 
 fn accounts(file: &Path) -> Result<Vec<Account>, AibusError> {
@@ -139,7 +146,38 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
     let name = account.account_name();
 
     // `--env` and `--file` name where the key already is; nothing is stored for them.
-    let cred = if let Some(var) = &a.env {
+    let cred = if a.oauth {
+        let offered = io
+            .factories
+            .iter()
+            .any(|f| f.id().0 == account.provider && f.auth_methods().contains(&AuthMethodKind::OAuth));
+        let Some(flow) = io.oauth.clone().filter(|_| offered) else {
+            return Err(AibusError::Usage(format!(
+                "provider {} has no OAuth login; use a key (--key-stdin, --env or --file)",
+                account.provider
+            )));
+        };
+        account.auth.oauth = true;
+        if let StoreHealth::Unavailable(why) = store.probe() {
+            return Err(CredentialError::NoKeychain(why).into());
+        }
+        let out = std::cell::RefCell::new(&mut *io.out);
+        let tokens = flow
+            .authorize(&|line| {
+                let _ = writeln!(out.borrow_mut(), "{line}");
+            })
+            .map_err(CredentialError::OAuth)?;
+        io.redactor.register(&name, tokens.access.expose());
+        let cred = Credential {
+            account: name.clone(),
+            secret: Secret::new(tokens.access.expose().clone()),
+            kind: AuthMethodKind::OAuth,
+            resolved_at: Instant::now(),
+        };
+        verify(io, &account, &cred)?;
+        store.store_oauth(&name, &tokens)?;
+        cred
+    } else if let Some(var) = &a.env {
         account.auth.env = Some(var.clone());
         store.resolve(&account)?
     } else if let Some(path) = &a.file {
@@ -161,7 +199,9 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         }
     };
 
-    verify(io, &account, &cred)?;
+    if !account.auth.oauth {
+        verify(io, &account, &cred)?;
+    }
     if account.auth.keyring {
         store.store(&name, &cred.secret)?;
     }
@@ -176,6 +216,7 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         }
         let mut auth = InlineTable::new();
         match (&account.auth.env, &account.auth.file) {
+            _ if account.auth.oauth => auth.insert("oauth", true.into()),
             (Some(var), _) => auth.insert("env", var.as_str().into()),
             (_, Some(path)) => auth.insert("file", path.as_str().into()),
             _ => auth.insert("keyring", true.into()),
@@ -185,7 +226,7 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         Ok(())
     });
     if let Err(e) = written {
-        if account.auth.keyring {
+        if account.auth.keyring || account.auth.oauth {
             // Do not leave a key behind that no account points to.
             let _ = store.remove(&name);
         }
@@ -196,6 +237,9 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
 }
 
 fn auth_kind(a: &Account) -> &'static str {
+    if a.auth.oauth {
+        return "oauth";
+    }
     match a.key_ref() {
         Some(KeyRef::Keyring { .. }) => "keyring",
         Some(KeyRef::Env { .. }) => "env",

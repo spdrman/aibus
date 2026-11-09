@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aibus_core::{AibusError, CredentialError, Keychain, MemoryKeychain, Redactor};
+use aibus_core::{
+    AibusError, CredentialError, FakeOAuth, Keychain, MemoryKeychain, OAuthFlow, Redactor,
+};
 use aibus_provider::fake::{FakeProvider, Script};
 use aibus_provider::{
     AuthMethodKind, ConfigError, Provider, ProviderConfig, ProviderFactory, ProviderId,
@@ -32,10 +34,29 @@ impl ProviderFactory for Strict {
     }
 }
 
+/// The fake with an OAuth login: it accepts the first token `FakeOAuth` hands out.
+struct Oauthy;
+
+impl ProviderFactory for Oauthy {
+    fn id(&self) -> ProviderId {
+        ProviderId("fake")
+    }
+    fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", TOKEN)))
+    }
+    fn auth_methods(&self) -> &'static [AuthMethodKind] {
+        &[AuthMethodKind::ApiKey, AuthMethodKind::OAuth]
+    }
+}
+
+const TOKEN: &str = "oauth-access-1-abcdef";
+
 struct Rig {
     home: TempDir,
     keychain: Arc<MemoryKeychain>,
     env: HashMap<String, String>,
+    oauth: Option<Arc<dyn OAuthFlow>>,
+    offers_oauth: bool,
 }
 
 struct Ran {
@@ -49,6 +70,8 @@ impl Rig {
             home: TempDir::new().unwrap(),
             keychain: Arc::new(MemoryKeychain::default()),
             env: HashMap::new(),
+            oauth: None,
+            offers_oauth: false,
         }
     }
 
@@ -80,9 +103,10 @@ impl Rig {
             })
             .unwrap(),
             keychain: self.keychain.clone(),
-            factories: vec![Box::new(Strict)],
+            factories: if self.offers_oauth { vec![Box::new(Oauthy)] } else { vec![Box::new(Strict)] },
             env: Arc::new(move |v| env.get(v).cloned()),
             redactor: Redactor::new(),
+            oauth: self.oauth.clone(),
             stdin: &mut input,
             prompt: asked.as_ref().map(|f| f as &dyn Fn() -> std::io::Result<String>),
             out: &mut out,
@@ -123,6 +147,7 @@ fn add(name: &str) -> AccountAdd {
         key_stdin: false,
         env: None,
         file: None,
+        oauth: false,
         base_url: None,
         label: None,
     }
@@ -384,4 +409,62 @@ fn disable_and_enable_flip_the_flag_in_the_file() {
     rig.run(&name_cmd(|name| AccountCmd::Enable { name }), "", None);
     assert!(enabled());
     assert_eq!(exit(&rig.run(&AccountCmd::Enable { name: "ghost".into() }, "", None).result), 4);
+}
+
+fn oauth_rig() -> Rig {
+    Rig {
+        oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))),
+        offers_oauth: true,
+        ..Rig::new()
+    }
+}
+
+fn oauth_cmd() -> AccountCmd {
+    add_cmd(|a| a.oauth = true)
+}
+
+#[test]
+fn add_oauth_logs_in_verifies_and_keeps_tokens_only_in_the_keychain() {
+    let rig = oauth_rig();
+    let ran = rig.run(&oauth_cmd(), "", None);
+    assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
+    assert!(ran.out.contains("enter code ABCD-1234") && ran.out.ends_with("added work\n"), "{}", ran.out);
+    assert!(!ran.out.contains("oauth-access"));
+
+    let kept = rig.keychain.get("aibus", "account:work").unwrap().unwrap();
+    assert!(kept.expose().contains(TOKEN) && kept.expose().contains("oauth-refresh-1-abcdef"));
+    assert!(std::fs::read_to_string(rig.config()).unwrap().contains("auth = { oauth = true }"));
+    // Neither token is in any file under the home, nor in what `account show --json` prints.
+    for needle in [TOKEN, "oauth-refresh-1-abcdef"] {
+        assert_eq!(rig.secret_in_files(needle), Vec::<PathBuf>::new());
+    }
+    let shown = rig.json(&AccountCmd::Show { name: "work".into() });
+    assert_eq!(shown["auth"], "oauth");
+    assert!(!shown.to_string().contains("oauth-"));
+    assert_eq!(shown["status"], "ok");
+}
+
+#[test]
+fn add_oauth_is_refused_for_a_provider_that_does_not_offer_it() {
+    let rig = Rig { oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))), ..Rig::new() };
+    let ran = rig.run(&oauth_cmd(), "", None);
+    assert!(matches!(&ran.result, Err(AibusError::Usage(m)) if m.contains("no OAuth login")), "{:?}", ran.result);
+    assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none());
+    assert!(!rig.config().exists());
+
+    // And with no flow at all, as in the shipped binary.
+    let none = Rig { offers_oauth: true, ..Rig::new() }.run(&oauth_cmd(), "", None);
+    assert!(matches!(none.result, Err(AibusError::Usage(_))));
+}
+
+#[test]
+fn a_rejected_oauth_token_is_not_stored_or_written() {
+    let rig = Rig { oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))), offers_oauth: true, ..Rig::new() };
+    // Burn the first token so the login hands out `-2`, which the provider does not accept.
+    let flow = rig.oauth.clone().unwrap();
+    let _ = flow.authorize(&|_| {});
+    let ran = rig.run(&oauth_cmd(), "", None);
+    assert_eq!(exit(&ran.result), 4, "{:?}", ran.result);
+    assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none());
+    assert!(!rig.config().exists());
 }

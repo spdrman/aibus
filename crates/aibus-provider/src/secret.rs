@@ -32,6 +32,8 @@ pub enum AuthMethodKind {
     ApiKey,
     Bearer,
     Env,
+    /// A short-lived access token the credential store refreshed; sent like a bearer token.
+    OAuth,
     None,
 }
 

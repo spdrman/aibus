@@ -37,7 +37,7 @@ pub use app::{App, Ticker, MSG_CAPACITY};
 pub use assist::{AdvisorSeat, Assist, RouterSeat, Seat};
 pub use credentials::{
     AccountCredential, CredentialSource, CredentialStore, KeyRef, Keychain, KeychainError,
-    MemoryKeychain, StoreHealth,
+    FakeOAuth, MemoryKeychain, OAuthFlow, OAuthTokens, StoreHealth,
 };
 pub use redact::Redactor;
 pub use effects::{Effect, Effects, PendingTool, SpawnSpec};

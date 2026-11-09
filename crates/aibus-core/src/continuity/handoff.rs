@@ -291,7 +291,7 @@ fn text_of(c: &Conversation, role: MessageRole, first: bool) -> Option<String> {
     if first {
         texts.next()
     } else {
-        texts.last()
+        texts.next_back()
     }
 }
 

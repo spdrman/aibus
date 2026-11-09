@@ -85,6 +85,7 @@ pub fn title(v: &Value) -> String {
     t
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, sel: Option<Cells>, entry: Option<&Entry>, copied: bool) -> Geom {
     Clear.render(full, buf);
     let border = match text(v, "role") {
@@ -104,10 +105,8 @@ pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
         Some((format!("stepped back to t={t}  ([ older, ] newer, f live)"), Style::new().fg(th.warn)))
     } else if flag(v, "loading") {
         Some(("reading the transcript from disk...".to_owned(), dim))
-    } else if let Some(e) = get(v, "error").and_then(aibus_core::state::value::as_str) {
-        Some((format!("failed: {e}"), Style::new().fg(th.error)))
     } else {
-        None
+        get(v, "error").and_then(aibus_core::state::value::as_str).map(|e| (format!("failed: {e}"), Style::new().fg(th.error)))
     };
     if let Some((line, style)) = notice {
         put(buf, inner, 0, 0, &clip(&line, usize::from(inner.width)), style);

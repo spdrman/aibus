@@ -57,12 +57,7 @@ actions! {
     ClearPrompt "clear_prompt" "clear the prompt";
     NextTool "next_tool" "next tool call";
     PrevTool "prev_tool" "previous tool call";
-    ToggleTool "toggle_tool" "expand or collapse the call";
-    PageUp "page_up" "page up";
-    PageDown "page_down" "page down";
     CompactRun "compact_run" "compact the run";
-    ScrollTop "scroll_top" "first row";
-    ScrollBottom "scroll_bottom" "latest row";
 }
 
 impl Action {
@@ -183,7 +178,7 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (FocusNext, "tab", &[Global]),
     (FocusPrev, "shift+tab", &[Global]),
     (Submit, "enter", &[Prompt]),
-    (OpenTranscript, "enter", &[Cards, Log]),
+    (OpenTranscript, "enter", &[Cards, Log, Transcript]),
     (MoveUp, "up", &[Cards, Log, Rail, Menu, Transcript]),
     (MoveUp, "k", &[Cards, Log, Rail, Menu, Transcript]),
     (MoveDown, "down", &[Cards, Log, Rail, Menu, Transcript]),
@@ -226,12 +221,7 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (ClearPrompt, "esc", &[Prompt]),
     (NextTool, "tab", &[Transcript]),
     (PrevTool, "shift+tab", &[Transcript]),
-    (ToggleTool, "enter", &[Transcript]),
-    (PageUp, "pageup", &[Transcript, Log]),
-    (PageDown, "pagedown", &[Transcript, Log]),
     (CompactRun, "c", &[Transcript]),
-    (ScrollTop, "g", &[Transcript]),
-    (ScrollBottom, "G", &[Transcript]),
 ];
 
 /// `ctrl+b`, `shift+tab`, `esc`, `R`, `f5`: modifiers joined by `+`, then a key name or one
@@ -548,7 +538,7 @@ mod tests {
             );
         }
         assert_eq!(map.conflicts(), Vec::<String>::new());
-        assert_eq!(ACTIONS.len(), 45);
+        assert_eq!(ACTIONS.len(), 40);
     }
 
     #[test]

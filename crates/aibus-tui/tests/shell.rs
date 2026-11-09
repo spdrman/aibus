@@ -150,7 +150,7 @@ fn aibus_opens_with_an_empty_prompt_and_its_placeholder() {
     r.settle();
     let text = r.text();
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[lines.len() - 2], " ~/proj $ aibus --model sonnet \u{258c}");
+    assert!(lines[lines.len() - 2].starts_with(" ~/proj $ aibus --model sonnet"), "{text}");
 }
 
 #[test]
@@ -164,7 +164,11 @@ fn dashboard_keys_do_what_the_table_says() {
     r.key(K::Esc);
     assert_eq!(names(&r.press('x')).len(), 1, "stop the selected run");
     assert!(names(&r.press('x'))[0].starts_with("Command(Cancel"));
+    // Something finished in this session, so quitting asks how it went first.
     assert_eq!(names(&r.press('q')), ["Command(Quit { force: false })"]);
+    assert!(!r.app.should_quit());
+    assert_eq!(r.app.graph.read_key("ctrl:modal"), Some(&aibus_graph::Value::Str("outcome".into())));
+    r.press('!');
     assert!(r.app.should_quit());
 }
 

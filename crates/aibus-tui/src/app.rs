@@ -68,12 +68,17 @@ pub struct Options {
     /// Where a new agent definition is written (`n` on the agents screen).
     pub agents_dir: Option<PathBuf>,
     /// The agents screen's `v`: validates the definition and says what it found.
-    #[allow(clippy::type_complexity)]
-    pub validate: Option<Box<dyn FnMut(&str, Option<&Path>) -> String>>,
+    pub validate: Option<Validator>,
     /// The accounts screen's `t`, `a` and `d`: what was done, in a line.
-    #[allow(clippy::type_complexity)]
-    pub account: Option<Box<dyn FnMut(AccountOp) -> String>>,
+    pub account: Option<AccountHook>,
 }
+
+/// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
+pub type Validator = Box<dyn FnMut(&str, Option<&Path>) -> String>;
+/// Does an account operation and says what happened, in a line.
+pub type AccountHook = Box<dyn FnMut(AccountOp) -> String>;
+/// Steps one message; the loop's version also tells the run's mailbox and the session writer.
+pub type StepFn<'a, G> = dyn FnMut(&mut App<G>, Msg) -> Result<(), AibusError> + 'a;
 
 /// What a batch of terminal events asks of the loop besides the messages it stepped.
 #[derive(Debug, Default)]
@@ -202,6 +207,7 @@ pub fn key_from_crossterm(k: event::KeyEvent) -> Option<KeyEvent> {
 /// Handles a batch of terminal events: each one becomes messages that are stepped before the
 /// next event is looked at, so a click that follows a click sees what the first one did. Pointer
 /// and prompt state change on `input` and `ui`.
+#[allow(clippy::too_many_arguments)]
 pub fn terminal_events<G: Graph>(
     events: Vec<Event>,
     app: &mut App<G>,
@@ -210,7 +216,7 @@ pub fn terminal_events<G: Graph>(
     ctrl_c: &mut CtrlC,
     mouse: bool,
     now: Instant,
-    step: &mut dyn FnMut(&mut App<G>, Msg) -> Result<(), AibusError>,
+    step: &mut StepFn<G>,
 ) -> Result<Handled, AibusError> {
     let mut done = Handled::default();
     for ev in input::coalesce(events) {
@@ -280,8 +286,8 @@ pub fn editor(visual: Option<&str>, editor: Option<&str>) -> String {
 pub fn run_job(
     job: Job,
     agents_dir: Option<&Path>,
-    validate: &mut Option<Box<dyn FnMut(&str, Option<&Path>) -> String>>,
-    account: &mut Option<Box<dyn FnMut(AccountOp) -> String>>,
+    validate: &mut Option<Validator>,
+    account: &mut Option<AccountHook>,
     note: &mut String,
 ) -> Option<PathBuf> {
     match job {
@@ -503,6 +509,9 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             }
         }
         sync(&mut ui, &input);
+        if let Some(key) = view::ensure_lines(&mut app.graph) {
+            app.keys.push(key);
+        }
         ui.note_commit(&app.graph);
         let typing = app.graph.read_key(view::RAIL).is_some_and(view::rail_typing);
         let animating = typing || matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));

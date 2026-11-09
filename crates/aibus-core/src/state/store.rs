@@ -25,6 +25,8 @@ pub const SUMMARY_HEAD: usize = 2 * 1024;
 pub const INLINE_MAX: usize = 4 * 1024;
 /// How much of a result the expanded view keeps in memory; the rest is on disk.
 pub const OUTPUT_KEEP: usize = 4 * 1024;
+/// How many rows of a result an expanded call shows.
+pub const DETAIL_ROWS: usize = 12;
 
 pub const TRANSCRIPT: &str = "transcript";
 pub const TAIL: &str = "tail";
@@ -175,7 +177,12 @@ fn detail(tool: &Tool, width: usize) -> Vec<String> {
     let w = width.saturating_sub(4).max(1);
     let mut out: Vec<String> = wrap_text(&tool.input, w).into_iter().map(|l| format!("  {l}")).collect();
     if let Some(d) = &tool.done {
-        out.extend(wrap_text(&d.output, w).into_iter().map(|l| format!("  {l}")));
+        let lines = wrap_text(&d.output, w);
+        let more = lines.len().saturating_sub(DETAIL_ROWS);
+        out.extend(lines.into_iter().take(DETAIL_ROWS).map(|l| format!("  {l}")));
+        if more > 0 || d.bytes > d.output.len() {
+            out.push(format!("  … {more} more rows, {} bytes in all", d.bytes));
+        }
     }
     out
 }

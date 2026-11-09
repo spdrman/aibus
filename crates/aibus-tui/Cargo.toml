@@ -17,7 +17,10 @@ tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 toml = "0.8"
 
 [dev-dependencies]
+aibus-provider.workspace = true
 aibus-testkit.workspace = true
+serde_json = "1"
+tempfile = "3"
 ulid = "1"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros", "test-util"] }
 

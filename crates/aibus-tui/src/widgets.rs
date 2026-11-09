@@ -653,7 +653,9 @@ pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<(S
     let mut hits = Vec::new();
     // Wide gaps as in the recording while the bar has nothing else to say; tighter ones once
     // the ledger needs the room.
+    let alerting = !as_list(get(v, "alerts").unwrap_or(&Value::Null)).is_empty();
     let (mut x, gap) = match area.width {
+        _ if alerting => (1, 2),
         w if w >= LEDGER_COLS => (2, 3),
         w if w >= 98 => (2, 6),
         _ => (1, 2),

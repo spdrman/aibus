@@ -1,0 +1,50 @@
+                                  AIBUS   ·   SONNET 5.5 LEADS   ·   HAIKU 5.5 SWARMS
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ■ Sonnet 5.5 · lead   ■ Haiku 5.5 · swarm   ■ router · forks   ■ opus 5.5 · advisor
+
+ ┌ OPUS 5.5 ──────────┐                             ┌ Sonnet 5.5 · main session ───────────┐
+ │ advisor · on call  │                             │ edits + runs tests                   │
+ │                    │                             │ effort ▮▮▮▮ high      --model sonnet │
+ │ ◇ before a plan    │                             └──────────────────────────────────────┘
+ │ │ reads the whole  │                                                 ●
+ │ │ session, every   │                                                 ·
+ │ │ tool call and    │                             ┌ ROUTER · fork layer ─────forks 1,314─┐
+ │ │ every result     │                             │ which file     █████████▌ 0.94 sharp │
+ │ │ last advice:     │                             │ which tool     █████████▌ 0.94 sharp │
+ │ │ » plan skips auth│                             │ retry or stop  ██████████ 0.58 split │
+ │ │ » split in 3 PRs │                             │ sharp → runs in code  split → Sonnet │
+ │ │ calls           2│                             └──────────────────────────────────────┘
+ │ │ tokens read  213k│                                delegate to subagents · Haiku 5.5
+ │ │ silent on every  │                                                 ·
+ │ │ routine turn     │                            ····●···············●····················
+ │ ◇ same error x2    │                   ┌ ▸ search ───────┐ ┌ grep ───────────┐ ┌ audit ──────────┐
+ │ │ never writes     │                   │ Haiku 5.5       │ │ Haiku 5.5       │ │ Haiku 5.5       │
+ │ │ code itself.     │                   │ ███████▏   71%  │ │ ███▌       35%  │ │ ██████████ 100% │
+ │ │ Sonnet applies   │                   │ maps the repo   │ │ finds call      │ │ runs in a       │
+ │ │ the advice.      │                   │                 │ │ sites           │ │ worktree        │
+ │ ◇ before done      │                   │ ◑ running       │ │ ◒ running       │ │ ✓ done          │
+ │                    │                   └─────────────────┘ └─────────────────┘ └─────────────────┘
+ │                    │
+ │                    │                            ·········································
+ │                    │                                                 ▾
+ │                    │                             ┌ back to Sonnet 5.5 · lead ───────────┐
+ │                    │                             │ review + verify                      │
+ │                    │                             └──────────────────────────────────────┘
+ │                    │
+ └────────────────────┘
+
+┌ session log ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 22:13:20  aibus      queued audit                                                                                    │
+│ 22:13:20  audit      started                                                                                         │
+│ 22:13:20  router     which file →                                                              p=0.94  sharp → code  │
+│ 22:13:20  router     which tool →                                                              p=0.94  sharp → code  │
+│ 22:13:20  router     retry or stop →                                                     p=0.58  split → sonnet 5.5  █
+│ 22:13:20  opus 5.5   before plan · advice sent                                                                       █
+│ 22:13:20  opus 5.5   before plan · reading full session                                                              █
+│ 22:13:20  opus 5.5   before plan · advice sent                                                                       █
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ ~/app $ aibus --model sonnet --advisor opus ▌
+
+  haiku [swarming]   subagents [2/3]   opus [on call]   router [ 1,314 forks]    ledger: ship the auth fix · now: tests

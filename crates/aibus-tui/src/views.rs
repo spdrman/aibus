@@ -78,7 +78,12 @@ pub fn permission(store: &Store, t: &mut Tracker) -> Value {
         ("run", s(&run)),
         ("run_short", s(&short(&run))),
         ("tool", get(first, "tool").cloned().unwrap_or(s(""))),
-        ("summary", s(&get(first, "summary").map(|v| text_of(store, v)).unwrap_or_default())),
+        ("summary", s(&{
+            // The gate's line is `<tool>: <input>`; the modal names the tool on its own line.
+            let line = get(first, "summary").map(|v| text_of(store, v)).unwrap_or_default();
+            let tool = get(first, "tool").and_then(as_str).unwrap_or("");
+            line.strip_prefix(&format!("{tool}: ")).map_or_else(|| line.clone(), str::to_owned)
+        })),
         ("index", n(1)),
         ("of", n(open.len())),
         // A run other than the lead's is named in the prompt (Claude Code does the same).
@@ -86,12 +91,15 @@ pub fn permission(store: &Store, t: &mut Tracker) -> Value {
     ])
 }
 
+/// A palette row before it is ranked: `(id, kind, label, hint)`.
+type Entry = (String, &'static str, String, String);
+
 pub fn palette(t: &mut Tracker) -> Value {
     if t.get_key(MODAL).and_then(as_str) != Some("palette") {
         return Value::Null;
     }
     let text = t.get_key(PALETTE_TEXT).and_then(as_str).unwrap_or("").to_owned();
-    let mut all: Vec<(String, &'static str, String, String)> = Vec::new();
+    let mut all: Vec<Entry> = Vec::new();
     for (id, label, hint) in PALETTE_COMMANDS {
         all.push((format!("cmd:{id}"), "command", label.to_owned(), hint.to_owned()));
     }
@@ -106,7 +114,7 @@ pub fn palette(t: &mut Tracker) -> Value {
         let status = t.get_key(&run_key(id, "status")).and_then(as_str).unwrap_or("").to_owned();
         all.push((format!("run:{id}"), "run", format!("run {agent} {}", short(id)), status));
     }
-    let mut scored: Vec<(i64, usize, &(String, &'static str, String, String))> = all
+    let mut scored: Vec<(i64, usize, &Entry)> = all
         .iter()
         .enumerate()
         .filter_map(|(i, it)| if text.is_empty() { Some((0, i, it)) } else { fuzzy(&text, &it.2).map(|sc| (sc, i, it)) })

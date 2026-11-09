@@ -233,7 +233,7 @@ impl Context {
 }
 
 /// Something the terminal loop does outside the graph because a key or a click asked for it.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
     /// Open this file in `$EDITOR`.
     EditFile(PathBuf),
@@ -253,15 +253,12 @@ pub enum AccountOp {
 }
 
 // A key must not reach a log through Debug.
-impl std::fmt::Debug for Job {
+impl std::fmt::Debug for AccountOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Job::EditFile(p) => write!(f, "EditFile({})", p.display()),
-            Job::NewAgent(n) => write!(f, "NewAgent({n})"),
-            Job::Validate { name, .. } => write!(f, "Validate({name})"),
-            Job::Account(AccountOp::Add { name, provider, .. }) => write!(f, "Account(Add {name} {provider} <hidden>)"),
-            Job::Account(AccountOp::Test(n)) => write!(f, "Account(Test {n})"),
-            Job::Account(AccountOp::Disable(n)) => write!(f, "Account(Disable {n})"),
+            AccountOp::Add { name, provider, .. } => write!(f, "Add {name} {provider} <hidden>"),
+            AccountOp::Test(n) => write!(f, "Test {n}"),
+            AccountOp::Disable(n) => write!(f, "Disable {n}"),
         }
     }
 }
@@ -795,7 +792,7 @@ impl Input {
             (Ctx::Permission, "deny") => Some(Action::Deny),
             (Ctx::Permission, "edit") => Some(Action::EditInput),
             (Ctx::Permission | Ctx::Transcript, "cancel" | "close") => Some(Action::CloseModal),
-            (Ctx::Transcript, "toggle") => Some(Action::ToggleTool),
+            (Ctx::Transcript, "toggle") => Some(Action::OpenTranscript),
             (Ctx::Transcript, "older") => Some(Action::TimeBack),
             (Ctx::Transcript, "newer") => Some(Action::TimeForward),
             (Ctx::Transcript, "retry") => Some(Action::RetryRun),
@@ -949,6 +946,11 @@ impl Input {
             return out;
         }
         let ctx = cx.keys();
+        if let (Ctx::Transcript, KeyCode::PageUp | KeyCode::PageDown) = (ctx, ev.code) {
+            let page = cx.transcript.as_ref().map_or(10, |t| i32::try_from(t.height.saturating_sub(1)).unwrap_or(10).max(1));
+            out.msgs.push(tr(TrOp::Scroll(if ev.code == KeyCode::PageUp { page } else { -page })));
+            return out;
+        }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
             Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Outcome | Ctx::Confirm => {
@@ -1229,7 +1231,6 @@ impl Input {
             ui(UiIntent::Select(Pane::Cards, Selection::Index(to)))
         };
         let in_transcript = cx.keys() == Ctx::Transcript;
-        let page = cx.transcript.as_ref().map_or(10, |t| i32::try_from(t.height.saturating_sub(1)).unwrap_or(10).max(1));
         match action {
             FocusNext => out.msgs.push(ui(UiIntent::FocusNext)),
             FocusPrev => out.msgs.push(ui(UiIntent::FocusPrev)),
@@ -1246,6 +1247,7 @@ impl Input {
                 out.redraw = !prompt.is_empty();
                 prompt.escape();
             }
+            OpenTranscript if in_transcript => out.msgs.push(tr(TrOp::Toggle)),
             OpenTranscript if focus == Pane::Log => {
                 if let Some(run) = cx.log_run() {
                     out.msgs.push(cmd(Command::OpenTranscript(run)));
@@ -1256,18 +1258,8 @@ impl Input {
             MoveUp | MoveDown if in_transcript => {
                 out.msgs.push(tr(TrOp::Scroll(if action == MoveUp { 1 } else { -1 })));
             }
-            PageUp | PageDown if in_transcript => out.msgs.push(tr(TrOp::Scroll(if action == PageUp { page } else { -page }))),
-            PageUp | PageDown => {
-                let by = if action == PageUp { drawn.log.visible as i32 } else { -(drawn.log.visible as i32) };
-                out.msgs.push(ui(UiIntent::Scroll { pane: Pane::Log, lines: by, sideways: false }));
-            }
-            ScrollTop => out.msgs.push(tr(TrOp::Top)),
-            ScrollBottom => out.msgs.push(tr(TrOp::Bottom)),
             NextTool => out.msgs.push(tr(TrOp::Tool(Selection::Next))),
             PrevTool => out.msgs.push(tr(TrOp::Tool(Selection::Prev))),
-            ToggleTool => {
-                out.msgs.push(tr(TrOp::Toggle));
-            }
             MoveUp | MoveDown if cx.menu.is_some() => {
                 // The next item that applies, wrapping round; disabled ones are skipped.
                 if let Some(menu) = &cx.menu {

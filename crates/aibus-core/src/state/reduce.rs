@@ -358,7 +358,9 @@ impl R<'_> {
             self.put(TRANSCRIPT_UI, Value::Null);
         }
         let back = if as_str(&cur) == Some("permission") { self.now(MODAL_UNDER) } else { Value::Null };
-        self.put(MODAL_UNDER, Value::Null);
+        if !matches!(self.now(MODAL_UNDER), Value::Null) {
+            self.put(MODAL_UNDER, Value::Null);
+        }
         self.put(MODAL, back);
     }
 
@@ -453,20 +455,17 @@ impl R<'_> {
         let log = self.g.commit_log();
         let changes: Vec<u64> = log.iter().filter(|c| c.changed_nodes.contains(&node)).map(|c| c.time).collect();
         let shown = get(&st, "at").and_then(as_i64).map_or_else(|| changes.last().copied(), |t| Some(t as u64));
-        let Some(shown) = shown else { return st };
-        let target = if op == TrOp::Back {
-            changes.iter().rev().find(|t| **t < shown).copied()
-        } else {
-            changes.iter().find(|t| **t > shown).copied()
+        let target = match (op, shown) {
+            (TrOp::Back, Some(shown)) => changes.iter().rev().find(|t| **t < shown).copied(),
+            (TrOp::Back, None) => None,
+            (_, Some(shown)) => changes.iter().find(|t| **t > shown).copied(),
+            (_, None) => return st,
         };
         let Some(target) = target else {
             if op == TrOp::Back {
                 // Nothing earlier is retained: say where the window starts if history was cut.
-                let start = log.first().map_or(0, |c| c.time);
-                if start > 1 {
-                    if let aibus_graph::RetentionResult::Evicted { oldest_retained } = self.g.snapshot_at(start - 1) {
-                        return with(&st, "evicted", n(oldest_retained));
-                    }
+                if let aibus_graph::RetentionResult::Evicted { oldest_retained } = self.g.snapshot_at(1) {
+                    return with(&st, "evicted", n(oldest_retained));
                 }
             }
             return st;

@@ -576,6 +576,19 @@ fn menu(t: &mut Tracker) -> Value {
     ])
 }
 
+/// Registers `view:transcript:<run>:lines` for the transcript that is open, once. The node is a
+/// store handle that moves a version when the text does (03 section 8); the screen draws from
+/// `view:transcript`, which reads the same two run handles.
+pub fn ensure_lines<G: Graph>(g: &mut G) -> Option<NodeKey> {
+    let run = g.read_key(aibus_core::state::MODAL).and_then(as_str)?.strip_prefix("transcript:")?.to_owned();
+    let key = NodeKey::from(crate::views::lines_key(&run));
+    if g.node(&key).is_none() {
+        g.derived(&key, Box::new(move |t| crate::views::lines(t, &run)));
+        return Some(key);
+    }
+    None
+}
+
 /// Registers the `view:` nodes and `view:dirty`, and returns their keys.
 ///
 /// The router rows are inputs the core creates on the first answer; registering them here

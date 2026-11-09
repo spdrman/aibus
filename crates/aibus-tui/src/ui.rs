@@ -499,7 +499,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     // A prompt of several rows and the hint under it take rows from the dashboard, as long as
     // what is left is still a dashboard.
     let want_hint = sc.prompt.hints || sc.prompt.notice.is_some();
-    let wanted = u16::try_from(sc.prompt.rows().saturating_sub(1)).unwrap_or(0) + u16::from(want_hint);
+    let wanted = sc.prompt.rows().saturating_sub(1) + u16::from(want_hint);
     let extra = if full.height.saturating_sub(wanted) >= MIN_ROWS { wanted } else { 0 };
     let mut a = areas(Rect { height: full.height - extra, ..full }, &c.layout, c.rail_open);
     let hint = extra > 0 && want_hint;
@@ -709,7 +709,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         cards: as_list(v.cards).len(),
         transcript: transcript_geom,
         prompt_rows,
-        prompt_indent: u16::try_from(sc.prompt.cwd.chars().count() + 5).unwrap_or(0),
+        prompt_indent: u16::try_from(sc.prompt.cwd.chars().count() + 4).unwrap_or(0),
     }
 }
 

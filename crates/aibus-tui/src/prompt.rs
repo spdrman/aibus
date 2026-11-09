@@ -598,11 +598,11 @@ mod tests {
 
     #[test]
     fn escape_closes_the_popup_first_then_clears_the_line() {
-        let mut p = Prompt::default().with_text("/co");
+        let mut p = Prompt::default().with_text("/a");
         p.tab(&[], &[]);
         assert!(p.popup.is_some());
         assert!(p.escape());
-        assert!(p.popup.is_none() && p.text == "/co");
+        assert!(p.popup.is_none() && p.text == "/a");
         assert!(p.escape());
         assert!(p.text.is_empty());
     }

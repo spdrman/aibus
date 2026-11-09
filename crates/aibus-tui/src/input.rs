@@ -305,8 +305,9 @@ impl Input {
             "fork" => out.msgs.push(Msg::Command(Command::Fork {
                 prompt: format!("continue the work of run {run}"),
                 parent: Some(run),
+                run: None,
             })),
-            "resume" => out.msgs.push(Msg::Command(Command::Resume { run, message: "continue".into() })),
+            "resume" => out.msgs.push(Msg::Command(Command::Resume { run, message: "continue".into(), parent: None })),
             "copy_id" => out.copy = Some(Clip::Text(run.to_string())),
             "copy_result" => out.copy = Some(Clip::Result(run)),
             _ => {}

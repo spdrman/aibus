@@ -35,13 +35,14 @@ async fn the_first_prompt_starts_the_lead_through_the_launcher() {
 
     app.step(Msg::SubmitPrompt { text: "build the thing".into() }).unwrap();
 
-    let launched = launcher.0.lock().unwrap();
-    assert_eq!(launched.len(), 1, "one lead");
-    let (spec, prompt) = &launched[0];
-    assert_eq!(spec.agent.as_str(), "lead");
-    assert_eq!((spec.parent, spec.depth), (None, 0));
-    assert_eq!(prompt, "build the thing");
-    drop(launched);
+    {
+        let launched = launcher.0.lock().unwrap();
+        assert_eq!(launched.len(), 1, "one lead");
+        let (spec, prompt) = &launched[0];
+        assert_eq!(spec.agent.as_str(), "lead");
+        assert_eq!((spec.parent, spec.depth), (None, 0));
+        assert_eq!(prompt, "build the thing");
+    }
 
     // A launcher that cannot build the run fails it where the session sees it.
     let told = rx.recv().await.expect("the orchestrator reports the failure");

@@ -140,8 +140,8 @@ fn a_fraction_is_a_bar_and_a_percentage_and_an_unknown_one_a_bouncing_block() {
     }
     let steps: Vec<i64> = seen.windows(2).map(|w| w[1] as i64 - w[0] as i64).collect();
     assert!(steps.iter().all(|s| s.abs() == 1), "one cell per tick: {seen:?}");
-    assert!(seen.iter().any(|x| *x == 0) && seen.iter().any(|x| *x == 8), "end to end: {seen:?}");
-    assert!(steps.iter().any(|s| *s == 1) && steps.iter().any(|s| *s == -1), "and back: {seen:?}");
+    assert!(seen.contains(&0) && seen.contains(&8), "end to end: {seen:?}");
+    assert!(steps.contains(&1) && steps.contains(&-1), "and back: {seen:?}");
 }
 
 #[test]

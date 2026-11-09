@@ -50,6 +50,7 @@ pub struct Options {
     pub msgs: Option<mpsc::Receiver<Msg>>,
     /// Sees every message before the loop steps it, for what must follow `AgentsReloaded` and
     /// the like outside the graph.
+    #[allow(clippy::type_complexity)]
     pub watch: Option<Box<dyn FnMut(&Msg)>>,
     /// Samples resident memory in MiB for the status bar's `mem` segment (`-v`).
     pub mem: Option<fn() -> Option<u32>>,

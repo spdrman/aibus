@@ -118,3 +118,43 @@ async fn the_fake_key_never_reaches_the_logs_when_the_server_fails() {
     }
     assert!(!logs.text().contains(FAKE_KEY));
 }
+
+struct Token;
+
+#[async_trait::async_trait]
+impl aibus_provider_anthropic::TokenSource for Token {
+    async fn token(&self) -> Result<aibus_provider::Secret<String>, aibus_provider::ProviderError> {
+        Ok(aibus_provider::Secret::new("ya29.fake-token-5c0e91".to_owned()))
+    }
+}
+
+/// Bedrock and Vertex build their auth headers from a secret and a token; neither may reach a
+/// log or a body, on success or on a server error, and each leaves in its one auth header.
+#[tokio::test]
+async fn the_bedrock_and_vertex_secrets_never_reach_the_logs() {
+    let logs = capture_logs();
+    let aws = credential("aws", "AKIDEXAMPLE:wJalrXUtnFEMI-secret-half-7d1e44");
+    for (status, body) in [(200, ANTHROPIC_SSE), (403, r#"{"message":"denied"}"#)] {
+        let server = serve(status, body).await;
+        let cfg = ProviderConfig { base_url: Some(server.uri()), ..ProviderConfig::default() };
+        let bedrock = aibus_provider_anthropic::Anthropic::bedrock(&cfg, "us-east-1", std::time::SystemTime::now).unwrap();
+        let vertex = aibus_provider_anthropic::Anthropic::vertex(&cfg, "proj", "us-east5", Arc::new(Token)).unwrap();
+        run(Arc::new(bedrock), "claude-sonnet-4-5", &aws).await;
+        run(Arc::new(vertex), "claude-sonnet-4-5", &fake_credential()).await;
+        for r in server.received_requests().await.unwrap() {
+            let mut sent = String::from_utf8_lossy(&r.body).into_owned();
+            sent.push_str(r.url.as_ref());
+            assert!(!sent.contains("secret-half") && !sent.contains("ya29."), "a secret went into a body or a URL");
+            let in_headers: Vec<_> = r
+                .headers
+                .iter()
+                .filter(|(_, v)| v.to_str().is_ok_and(|v| v.contains("secret-half") || v.contains("ya29.")))
+                .map(|(k, _)| k.as_str().to_owned())
+                .collect();
+            assert!(in_headers.iter().all(|h| h == "authorization"), "{in_headers:?}");
+        }
+    }
+    let text = logs.text();
+    assert!(text.contains("anthropic: stream"), "{text}");
+    assert!(!text.contains("secret-half") && !text.contains("ya29.") && !text.contains(FAKE_KEY));
+}

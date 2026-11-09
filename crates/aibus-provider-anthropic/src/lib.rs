@@ -4,8 +4,13 @@
 //! header, and nothing here logs a header, a body or the credential.
 #![forbid(unsafe_code)]
 
+mod cloud;
+mod eventstream;
+mod sigv4;
 mod stream;
 mod wire;
+
+pub use cloud::TokenSource;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -15,11 +20,12 @@ use aibus_provider::models::ModelTable;
 use aibus_provider::{
     AccountInfo, AliasTable, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, ConfigError,
     Credential, ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig, ProviderError,
-    ProviderFactory, ProviderId, StreamChunk, SystemRole,
+    ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk, SystemRole,
 };
-use aibus_provider_http::reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use aibus_provider_http::{cancelled, emit, json, request_id, sensitive, Events, Http};
+use aibus_provider_http::reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use aibus_provider_http::{cancelled, chunk, emit, json, request_id, sensitive, Events, Http};
 use async_trait::async_trait;
+use cloud::Transport;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
@@ -50,11 +56,21 @@ pub struct Anthropic {
     table: Mutex<ModelTable>,
     cache_dir: Option<PathBuf>,
     http: Http,
+    transport: Transport,
 }
 
 impl Anthropic {
     pub fn new(cfg: &ProviderConfig) -> Result<Self, ConfigError> {
-        let base = cfg.base_url.as_deref().unwrap_or(DEFAULT_BASE_URL).trim_end_matches('/');
+        Self::with_transport(cfg, DEFAULT_BASE_URL.to_owned(), Transport::Direct, &["claude-"])
+    }
+
+    pub(crate) fn with_transport(
+        cfg: &ProviderConfig,
+        default_base: String,
+        transport: Transport,
+        prefixes: &'static [&'static str],
+    ) -> Result<Self, ConfigError> {
+        let base = cfg.base_url.as_deref().unwrap_or(&default_base).trim_end_matches('/');
         if !(base.starts_with("https://") || base.starts_with("http://")) {
             return Err(ConfigError::Invalid(
                 "anthropic".into(),
@@ -67,11 +83,12 @@ impl Anthropic {
                 "anthropic",
                 include_str!("models.json"),
                 cfg,
-                &["claude-"],
+                prefixes,
                 false,
             )?),
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
+            transport,
         })
     }
 
@@ -144,6 +161,9 @@ impl Provider for Anthropic {
     }
 
     async fn refresh_models(&self, creds: &Credential) -> Result<Vec<ModelInfo>, ProviderError> {
+        if !matches!(self.transport, Transport::Direct) {
+            return Ok(self.models());
+        }
         let (ids, _) = self.list_models(creds).await?;
         Ok(self.table().refreshed(
             "anthropic",
@@ -185,28 +205,30 @@ impl Provider for Anthropic {
         let beta = req.effort.is_some() && effort_ok;
         tracing::debug!(account = %creds.account, model = %req.model, "anthropic: stream");
 
-        let url = format!("{}/v1/messages", self.base);
-        let mut headers = Self::headers(creds)?;
-        if beta {
-            headers.insert("anthropic-beta", HeaderValue::from_static(EFFORT_BETA));
-        }
-        let resp = self
-            .http
-            .send(&cancel, |c| {
-                c.post(&url)
-                    .headers(headers)
-                    .header(CONTENT_TYPE, "application/json")
-                    .header(ACCEPT, "text/event-stream")
-                    .body(body.to_string())
-            })
-            .await?;
+        let (url, headers, body) = self.prepare(creds, &req.model, body, beta).await?;
+        let mut resp = self.http.send(&cancel, |c| c.post(&url).headers(headers).body(body)).await?;
         let request_id = request_id(&resp);
 
-        let mut events = Events::new(resp, cancel.clone());
         let mut turn = stream::Turn::new(price);
-        while let Some(ev) = events.next().await? {
-            for chunk in turn.event(&ev)? {
-                emit(&out, &cancel, chunk).await?;
+        if matches!(self.transport, Transport::Bedrock { .. }) {
+            let mut frames = eventstream::Frames::default();
+            while let Some(bytes) = chunk(&mut resp, &cancel).await? {
+                frames.push(&bytes);
+                while let Some(ev) = frames.next()? {
+                    for c in turn.event(&ev)? {
+                        emit(&out, &cancel, c).await?;
+                    }
+                }
+            }
+            if frames.is_partial() {
+                return Err(ProviderError::new(ProviderErrorKind::Network, "the event stream broke off inside a frame"));
+            }
+        } else {
+            let mut events = Events::new(resp, cancel.clone());
+            while let Some(ev) = events.next().await? {
+                for c in turn.event(&ev)? {
+                    emit(&out, &cancel, c).await?;
+                }
             }
         }
         if cancel.is_cancelled() {
@@ -220,6 +242,10 @@ impl Provider for Anthropic {
         creds: &Credential,
         req: &ChatRequest,
     ) -> Option<Result<u64, ProviderError>> {
+        // Bedrock and Vertex have no counting endpoint here: the caller falls back to its estimate.
+        if !matches!(self.transport, Transport::Direct) {
+            return None;
+        }
         let body = wire::count_body(&self.capabilities().degrade(req.clone()));
         let url = format!("{}/v1/messages/count_tokens", self.base);
         let result = async {
@@ -242,6 +268,11 @@ impl Provider for Anthropic {
     }
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
+        if !matches!(self.transport, Transport::Direct) {
+            self.check_cloud_auth(creds).await?;
+            let models = self.models().into_iter().map(|m| m.id).collect();
+            return Ok(AccountInfo { label: creds.account.to_string(), org: None, models });
+        }
         let (models, org) = self.list_models(creds).await?;
         Ok(AccountInfo { label: creds.account.to_string(), org, models })
     }

@@ -13,6 +13,20 @@ What the real providers (B1.5) read from the config and from disk. The account f
 
 One provider id is one client for all its accounts, so two enabled accounts with the same `provider` must agree on `base_url` and `api`. If they do not, startup stops and names both accounts, because picking one would send the other account's key to the wrong server. Two local servers therefore need two ids, which `openai-compatible` does not offer yet (see the PR).
 
+## Claude on Bedrock and Vertex
+
+Both are off by default: the plain `anthropic` provider never talks to either. They live in `aibus-provider-anthropic` and are built with `Anthropic::bedrock(cfg, region, clock)` or `Anthropic::vertex(cfg, project, region, token_source)`, with the account's `base_url` overriding the default host.
+
+| | Bedrock (`auth = sigv4`) | Vertex (`auth = gcloud`) |
+|---|---|---|
+| Default host | `https://bedrock-runtime.<region>.amazonaws.com` | `https://<region>-aiplatform.googleapis.com` (`global` has no region prefix) |
+| Endpoint | `POST /model/<id>/invoke-with-response-stream` | `POST /v1/projects/<project>/locations/<region>/publishers/anthropic/models/<id>:streamRawPredict` |
+| Auth | SigV4 over the request, from the account secret `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]` | `Authorization: Bearer <token>` from a `TokenSource` (for example `gcloud auth print-access-token`), asked for on every request |
+| Stream | AWS event stream, each chunk a base64 Messages API event | the usual SSE |
+| Model ids | `anthropic.claude-...-v1:0` or an inference profile such as `us.anthropic.claude-...` | `claude-sonnet-4-5@20250929` |
+
+The signer is about sixty lines on `hmac` and `sha2` (already in the lock file) instead of the AWS SDK, which would add dozens of crates and a second HTTP stack to `cargo deny`. Neither transport has a token counting endpoint (the estimate is used) or a model list, and `aibus account test` only checks that the secret parses or that a token can be had, with no network call. Prices are only known for the plain `claude-` ids, so a Bedrock id shows cost `n/a` until you add it to your `models.json`.
+
 ## Model tables
 
 Each provider starts from a built-in table (`context_window`, `max_output`, `family`, `deprecated`, and a `price` where I know one). Three layers, later ones winning:

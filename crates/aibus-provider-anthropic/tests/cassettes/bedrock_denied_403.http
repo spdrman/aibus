@@ -1,0 +1,6 @@
+HTTP 403
+content-type: application/json
+x-amzn-requestid: 0d9c4b1e-77a3-4f0a-8e26-5b13a9c2d7f4
+x-amzn-errortype: AccessDeniedException:http://internal.amazon.com/coral/com.amazon.bedrock/
+
+{"message":"User: arn:aws:iam::123456789012:user/aibus is not authorized to perform: bedrock:InvokeModelWithResponseStream on resource: arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"}

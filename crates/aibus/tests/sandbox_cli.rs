@@ -54,7 +54,7 @@ fn an_unknown_sandbox_name_is_a_config_error() {
     let cfg = home.path().join("config.toml");
     std::fs::write(&cfg, "[tools]\nsandbox = \"docker\"\n").unwrap();
     let out = command(home.path()).env("AIBUS_CONFIG", &cfg).args(["config", "show"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(2), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains("sandbox"), "{}", String::from_utf8_lossy(&out.stderr));
 }
 

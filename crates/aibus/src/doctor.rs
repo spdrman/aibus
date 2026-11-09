@@ -194,7 +194,7 @@ pub fn doctor(
     let mut checks = vec![
         config,
         store_check(keychain, cfg.as_ref()),
-        check("shell sandbox", true, "none"),
+        sandbox_check(cfg.as_ref()),
         worktree_check(&paths),
         index_check(&paths),
         dirs_check(&paths),

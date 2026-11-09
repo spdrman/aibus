@@ -33,7 +33,8 @@ else
 #!/bin/sh
 case "\$1" in
   version) echo "aibus $version $target" ;;
-  completions) echo "# $target completions for \$2" ;;
+  completions) # like the real CLI: exactly one positional shell, no flags
+    case "\$2" in bash|zsh|fish) [ \$# -eq 2 ] && echo "# $target completions for \$2" ;; *) exit 2 ;; esac ;;
   *) exit 2 ;;
 esac
 SCRIPT

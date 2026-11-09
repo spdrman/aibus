@@ -61,6 +61,8 @@ struct World {
     router: Arc<FakeProvider>,
     assist: Arc<Assist>,
     dir: TempDir,
+    /// Where the runs' saved conversations go: outside the project, as in a real session.
+    runs: TempDir,
     max_per_turn: u32,
 }
 
@@ -111,7 +113,7 @@ async fn go(s: Setup<'_>, before: impl FnOnce(&World)) -> (World, Vec<Msg>) {
         label: "ROUTER".into(),
     });
     let assist = Assist::new(adv, rt);
-    let world = World { lead: lead.clone(), advisor, router, assist: assist.clone(), dir, max_per_turn: s.max_per_turn };
+    let world = World { lead: lead.clone(), advisor, router, assist: assist.clone(), dir, runs: TempDir::new().unwrap(), max_per_turn: s.max_per_turn };
     before(&world);
     let bash = Arc::new(Bash::new(20, vec![], path_env(), world.dir.path().to_path_buf(), "s".into()));
     let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);
@@ -124,7 +126,7 @@ async fn go(s: Setup<'_>, before: impl FnOnce(&World)) -> (World, Vec<Msg>) {
         model: ModelId("fake-small".into()),
         account: AccountName("fake".into()),
         cwd: world.dir.path().to_path_buf(),
-        runs_dir: world.dir.path().join("runs"),
+        runs_dir: world.runs.path().to_path_buf(),
         limits: ToolLimits::default(),
         budgets: Budgets::default(),
         date: "2026-11-08".into(),

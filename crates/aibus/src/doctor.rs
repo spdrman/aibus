@@ -24,6 +24,15 @@ fn check(name: &'static str, ok: bool, detail: impl Into<String>) -> Check {
     }
 }
 
+/// `0.1.0 (tag v0.1.0, commit abc123def456)`; no tag part for an untagged build.
+pub fn build_id() -> String {
+    let (tag, commit) = (env!("AIBUS_BUILD_TAG"), env!("AIBUS_BUILD_COMMIT"));
+    match tag {
+        "" => format!("{} (commit {commit})", env!("CARGO_PKG_VERSION")),
+        _ => format!("{} (tag {tag}, commit {commit})", env!("CARGO_PKG_VERSION")),
+    }
+}
+
 fn config_check(g: &Global, paths: &Paths) -> (Check, Option<Config>) {
     let project = g
         .project_dir()
@@ -191,7 +200,9 @@ pub fn doctor(
 ) -> Result<u8, AibusError> {
     let paths = g.paths()?;
     let (config, cfg) = config_check(g, &paths);
+    let os = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
     let mut checks = vec![
+        check("build", true, format!("{} on {os}", build_id())),
         config,
         store_check(keychain, cfg.as_ref()),
         sandbox_check(cfg.as_ref()),

@@ -7,11 +7,12 @@ mod agent_watch;
 mod cli;
 mod commands;
 mod completions;
+mod continuity;
+mod continuity_cmd;
 mod control;
 mod doctor;
 mod env;
 mod events;
-mod handoff;
 mod headless;
 mod keychain;
 mod launch;
@@ -82,6 +83,9 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             headless::run(cli.global, args, redactor.clone())
         }
         Some(Command::Session(c)) => session_cmd::session(&c, &cli.global, redactor),
+        Some(Command::Ledger(c)) => continuity_cmd::ledger(&c, &cli.global),
+        Some(Command::Handoff(c)) => continuity_cmd::handoff(&c, &cli.global),
+        Some(Command::Memory(c)) => continuity_cmd::memory(&c, &cli.global, redactor),
         Some(Command::Workflow(WorkflowCmd::List { names })) => {
             commands::workflow_list(&cli.global, names)
         }

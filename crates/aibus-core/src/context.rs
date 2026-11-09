@@ -7,7 +7,8 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use crate::agent::discover::project_root;
-use crate::agent::{AgentDef, MemoryScope};
+use crate::agent::AgentDef;
+use crate::continuity::memory::memory_dir;
 use crate::run::{ContentBlock, Conversation, Message, MessageRole};
 
 /// `git status --short` and the branch, as they were when the run started.
@@ -146,19 +147,7 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
             }
         ));
     }
-    if let Some(memory) = def.memory.and_then(|scope| {
-        let dir = match scope {
-            MemoryScope::User => input
-                .data_home?
-                .join("agent-memory")
-                .join(def.name.as_str()),
-            MemoryScope::Project => root.join(".aibus/agent-memory").join(def.name.as_str()),
-            MemoryScope::Local => root
-                .join(".aibus/agent-memory-local")
-                .join(def.name.as_str()),
-        };
-        memory_block(&dir)
-    }) {
+    if let Some(memory) = memory_dir(def, root, input.data_home).and_then(|dir| memory_block(&dir)) {
         blocks.push(memory);
     }
     blocks.push(input.prompt.to_owned());

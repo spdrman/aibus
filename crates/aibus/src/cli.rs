@@ -288,11 +288,21 @@ pub enum SessionCmd {
 
 #[derive(Subcommand, Debug)]
 pub enum HandoffCmd {
+    /// Write a handoff from the topic's ledger
     Create {
+        /// How the session went: SUCCEEDED, PARTIAL_PLUS, PARTIAL_MINUS or FAILED (or AIBUS_OUTCOME)
         #[arg(long, value_name = "OUTCOME")]
         outcome: Option<String>,
+        /// Instead of the ledger's Goal
+        #[arg(long, value_name = "TEXT")]
+        goal: Option<String>,
+        /// Instead of the ledger's first In Progress item
+        #[arg(long, value_name = "TEXT")]
+        now: Option<String>,
     },
+    /// The handoffs of --topic, or of every topic, newest first
     List,
+    /// A handoff, by default the newest
     Show {
         path: Option<PathBuf>,
     },
@@ -302,7 +312,13 @@ pub enum HandoffCmd {
 pub enum LedgerCmd {
     Show,
     New { topic: String },
-    Update { section: String, text: String },
+    Update {
+        section: String,
+        text: String,
+        /// Add to the section instead of replacing it
+        #[arg(long)]
+        append: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

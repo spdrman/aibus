@@ -8,6 +8,7 @@ pub mod app;
 pub mod assist;
 pub mod config;
 pub mod context;
+pub mod continuity;
 pub mod credentials;
 pub mod effects;
 pub mod error;
@@ -45,6 +46,7 @@ pub use run::*;
 pub use tool::*;
 pub use worktree::WorktreeInfo;
 pub use tools::{
-    effective_tools, Bash, Delegate, EffectiveTools, Fork, Gate, JobView, ResumeRun, SendMessage,
+    effective_tools, Bash, CreateHandoff, Delegate, EffectiveTools, Fork, Gate, JobView,
+    LedgerUpdate, MemoryAppend, MemoryRead, MemoryWrite, Recall, ResumeRun, SendMessage,
     ShellDeny, ToolExecutor, ToolRegistry,
 };

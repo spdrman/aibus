@@ -42,9 +42,6 @@ fn everything_else_says_not_yet_and_exits_2() {
     let home = TempDir::new().unwrap();
     let cases: &[&[&str]] = &[
         &["agent", "import", "somewhere"],
-        &["handoff", "list"],
-        &["ledger", "show"],
-        &["memory", "recall", "auth", "-k", "3"],
     ];
     for args in cases {
         let out = aibus(home.path(), args);

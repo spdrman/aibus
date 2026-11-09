@@ -1,6 +1,6 @@
 //! Every `--json` output of 06 section 4 that exists, validated against `docs/schemas/cli/`.
-//! `handoff` and `memory recall` have schemas but no command yet (they arrive with the
-//! continuity task), so they are not run here.
+//! `handoff` and `memory recall` are checked in `continuity_cli.rs`, next to the commands'
+//! other behaviour.
 
 mod common;
 

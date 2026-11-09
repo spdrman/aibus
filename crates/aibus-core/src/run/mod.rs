@@ -10,7 +10,7 @@ pub mod transcript;
 mod compact;
 
 pub use budget::Budgets;
-pub use compact::ModelCompactor;
+pub use compact::{AutoHandoff, ModelCompactor};
 pub use loop_::{
     spawn, Compactor, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
     STREAM_CAPACITY,

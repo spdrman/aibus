@@ -3,8 +3,10 @@
 //! call the run was not granted.
 
 mod bash;
+mod continuity;
 mod delegate;
 mod lifecycle;
+mod memory;
 mod policy;
 mod readonly;
 mod shell;
@@ -27,8 +29,10 @@ use crate::tool::{Tool, ToolCx, ToolError, ToolOutput};
 
 pub(crate) use bash::{kill_group, scrubbed_env, Tail};
 pub use bash::{Bash, JobView};
+pub use continuity::{CreateHandoff, LedgerUpdate, Recall};
 pub use delegate::Delegate;
 pub use lifecycle::{Fork, ResumeRun, SendMessage};
+pub use memory::{MemoryAppend, MemoryRead, MemoryWrite};
 pub use readonly::{Glob, Grep, Ls, Read};
 pub use shell::ShellDeny;
 pub use user::{AskUser, EnterPlanMode, ExitPlanMode, Plan, ReportArtifact};
@@ -438,6 +442,7 @@ impl ToolExecutor {
                         cancel: cx.cancel.clone(),
                         limits: cx.limits,
                         tx: cx.tx.clone(),
+                        memory: cx.memory.clone(),
                     });
                 }
                 if writes {

@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use aibus_provider::{AliasTable, RateLimits};
 use smol_str::SmolStr;
 
+use crate::agent::MemoryScope;
 use crate::credentials::{KeyRef, KEYCHAIN_SERVICE};
 use crate::ids::AccountName;
 use serde::{Deserialize, Serialize};
@@ -193,6 +194,9 @@ pub struct Continuity {
     pub handoff_on_end: bool,
     pub extract_learnings: bool,
     pub ask_outcome: bool,
+    /// Where the session's topic comes from: "newest" (the most recently modified ledger) or
+    /// "branch" (the git branch), Q10. `--topic` beats both.
+    pub topic: String,
 }
 
 impl Default for Continuity {
@@ -203,6 +207,7 @@ impl Default for Continuity {
             handoff_on_end: true,
             extract_learnings: true,
             ask_outcome: true,
+            topic: "newest".into(),
         }
     }
 }
@@ -212,6 +217,8 @@ impl Default for Continuity {
 pub struct Memory {
     pub scopes: Vec<String>,
     pub recall_k: u32,
+    /// Extract learnings into `LEARNINGS.md` when a session ends (Q11).
+    pub extract_on_end: bool,
 }
 
 impl Default for Memory {
@@ -219,6 +226,7 @@ impl Default for Memory {
         Self {
             scopes: vec!["user".into(), "project".into()],
             recall_k: 5,
+            extract_on_end: true,
         }
     }
 }
@@ -400,6 +408,15 @@ impl Config {
             if crate::msg::HookEvent::parse(event).is_none() {
                 bad(&format!("hooks.{event}"), "not a hook event".into());
             }
+        }
+        if !["newest", "branch"].contains(&self.continuity.topic.as_str()) {
+            bad("continuity.topic", "expected newest or branch".into());
+        }
+        if let Some(s) = self.memory.scopes.iter().find(|s| MemoryScope::parse(s).is_none()) {
+            bad("memory.scopes", format!("{s}: expected user, project or local"));
+        }
+        if self.memory.recall_k == 0 {
+            bad("memory.recall_k", "must be at least 1".into());
         }
         if self.ui.tick_hz == 0 {
             bad("ui.tick_hz", "must be at least 1".into());

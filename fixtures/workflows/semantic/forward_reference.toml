@@ -1,0 +1,7 @@
+[[step]]
+agent = "explore"
+prompt = "Look: {{steps.general.summary}}"
+
+[[step]]
+agent = "general"
+prompt = "Go on: {{prev.summary}}"

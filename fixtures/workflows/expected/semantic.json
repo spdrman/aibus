@@ -1,0 +1,7 @@
+{
+  "forward_reference.toml": {"ok": false, "errors": [{"step": 1, "field": null, "message": "`steps.general.summary` names a step that does not come before this one"}], "warnings": []},
+  "prev_in_first_step.toml": {"ok": false, "errors": [{"step": 1, "field": null, "message": "the first step has no `{{prev.summary}}`"}], "warnings": []},
+  "unclosed_template.toml": {"ok": false, "errors": [{"step": 1, "field": null, "message": "a `{{` is never closed"}], "warnings": []},
+  "unknown_agent.toml": {"ok": false, "errors": [{"step": 2, "field": "agent", "message": "no agent named `ghost` in the roster"}], "warnings": []},
+  "unknown_template.toml": {"ok": false, "errors": [{"step": 1, "field": null, "message": "unknown template `{{inpt}}`"}], "warnings": []}
+}

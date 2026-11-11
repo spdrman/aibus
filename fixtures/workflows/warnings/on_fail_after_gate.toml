@@ -1,0 +1,9 @@
+[[step]]
+agent = "explore"
+prompt = "Look: {{input}}"
+gate = "true"
+
+[[step]]
+agent = "general"
+prompt = "Go on: {{prev.summary}}"
+on_fail = "retry:1"

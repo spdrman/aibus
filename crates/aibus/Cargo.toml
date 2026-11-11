@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Forwarded to the TUI; off by default, release.yml builds defaults.
+flow-diagram = ["aibus-tui/flow-diagram"]
+
 [dependencies]
 aibus-core.workspace = true
 aibus-graph.workspace = true

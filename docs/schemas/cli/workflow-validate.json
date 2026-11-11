@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "aibus workflow validate --json",
+  "type": "object",
+  "required": ["ok", "errors", "warnings"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/problem" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/problem" }
+    }
+  },
+  "definitions": {
+    "problem": {
+      "type": "object",
+      "required": ["path", "step", "field", "message"],
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "step": { "type": ["integer", "null"], "minimum": 1 },
+        "field": { "type": ["string", "null"] },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

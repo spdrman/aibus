@@ -31,3 +31,4 @@ bytes = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["sync", "time", "macros", "rt", "test-util"] }
 wiremock = "0.6"
+aibus-testkit.workspace = true

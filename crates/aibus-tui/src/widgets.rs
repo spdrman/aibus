@@ -383,75 +383,97 @@ pub fn fork_layer(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, footer: b
 /// Rows of a card's inside: model, bar, two label lines, status.
 pub const CARD_W: u16 = 19;
 
+/// Where up to three cards go, centred in `area`, starting at card `start` (clamped so the
+/// window stays full). Each is the card's index in the view and its rect.
+pub fn card_rects(area: Rect, len: usize, start: usize) -> Vec<(usize, Rect)> {
+    let start = start.min(len.saturating_sub(3));
+    let end = (start + 3).min(len);
+    let shown = end - start;
+    if shown == 0 {
+        return Vec::new();
+    }
+    let total = shown as u16 * CARD_W + (shown as u16 - 1);
+    let x0 = area.x + area.width.saturating_sub(total) / 2;
+    let card_h = area.height.min(7);
+    (0..shown)
+        .map(|i| {
+            let rect = Rect { x: x0 + i as u16 * (CARD_W + 1), width: CARD_W, height: card_h, ..area }.intersection(area);
+            (start + i, rect)
+        })
+        .collect()
+}
+
 /// Up to three cards, centred, starting at card `start`. Cards before or after the window are
 /// counted on the row below them. Returns each drawn card's index in the view and where it is.
 pub fn cards(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, start: usize) -> Vec<(usize, Rect)> {
     let all = as_list(v);
-    let start = start.min(all.len().saturating_sub(3));
-    let end = (start + 3).min(all.len());
-    let shown = &all[start..end];
-    let mut out = Vec::new();
-    if shown.is_empty() {
-        return out;
+    let out = card_rects(area, all.len(), start);
+    for (i, rect) in &out {
+        card(buf, *rect, &all[*i], th);
     }
-    let total = shown.len() as u16 * CARD_W + (shown.len() as u16 - 1);
-    let x0 = area.x + area.width.saturating_sub(total) / 2;
-    let card_h = area.height.min(7);
-    for (i, c) in shown.iter().enumerate() {
-        let rect = Rect { x: x0 + i as u16 * (CARD_W + 1), width: CARD_W, height: card_h, ..area }.intersection(area);
-        out.push((start + i, rect));
-        let border = if text(c, "border") == "advisor" { th.advisor } else { th.swarm };
-        let name = if flag(c, "selected") {
-            format!("{} {}", th.g("▸"), text(c, "name"))
-        } else {
-            text(c, "name").to_owned()
-        };
-        let inner = padded(buf, rect, &name, border, th);
-        put(buf, inner, 0, 0, text(c, "model_label"), Style::new().fg(th.swarm));
-        let progress = get(c, "progress").unwrap_or(&Value::Null);
-        let blue = Style::new().fg(th.swarm);
-        match text(progress, "kind") {
-            "indeterminate" => {
-                // A 2-cell block bouncing along the 10-cell bar.
-                let at = usize::try_from(int(progress, "value").clamp(0, 8)).unwrap_or(0);
-                put(buf, inner, at as u16, 1, &th.g("█").repeat(2), blue);
-            }
-            _ => {
-                let p = real(progress, "value").unwrap_or(0.0);
-                let (filled, _) = bar(p, 10);
-                let x = put(buf, inner, 0, 1, &filled, blue);
-                let pad = 10u16.saturating_sub(x);
-                put(buf, inner, x + pad + 1, 1, &format!("{:.0}%", p * 100.0), Style::new().fg(th.fg));
-            }
-        }
-        let label = wrap(text(c, "label"), usize::from(inner.width));
-        for (j, (_, line)) in label.iter().take(2).enumerate() {
-            let last = j == 1 && label.len() > 2;
-            let line = if last { clip(&format!("{line} …"), usize::from(inner.width)) } else { line.clone() };
-            put(buf, inner, 0, 2 + j as u16, &line, Style::new().fg(th.dim_text));
-        }
-        let (glyph, colour, word) = match text(c, "status") {
-            "done" => (th.g("✓").to_owned(), th.ok, "done"),
-            "failed" => (th.g("✗").to_owned(), th.error, "failed"),
-            "queued" => (th.g("◌").to_owned(), th.dim_text, "queued"),
-            _ => {
-                let phase = int(c, "spinner_phase").rem_euclid(4) as usize;
-                (th.g(SPINNER[phase]).to_owned(), th.swarm, "running")
-            }
-        };
-        put(buf, inner, 0, 4, &format!("{glyph} {word}"), Style::new().fg(colour));
-    }
-    let dim = Style::new().fg(th.dim_text);
-    if area.height > card_h {
-        let row = Rect { y: area.y + card_h, height: 1, ..area };
-        if start > 0 {
-            put(buf, row, 0, 0, &format!("{} {start} more", th.g("◂")), dim);
-        }
-        if end < all.len() {
-            put_right(buf, row, 0, &format!("{} more {}", all.len() - end, th.g("▸")), dim);
+    if let (Some((first, _)), Some((last, _))) = (out.first(), out.last()) {
+        let card_h = area.height.min(7);
+        if area.height > card_h {
+            card_counts(buf, Rect { y: area.y + card_h, height: 1, ..area }, th, (*first, last + 1, all.len()));
         }
     }
     out
+}
+
+/// One worker card inside `rect`.
+pub fn card(buf: &mut Buffer, rect: Rect, c: &Value, th: &Theme) {
+    let border = if text(c, "border") == "advisor" { th.advisor } else { th.swarm };
+    let name = if flag(c, "selected") {
+        format!("{} {}", th.g("▸"), text(c, "name"))
+    } else {
+        text(c, "name").to_owned()
+    };
+    let inner = padded(buf, rect, &name, border, th);
+    put(buf, inner, 0, 0, text(c, "model_label"), Style::new().fg(th.swarm));
+    let progress = get(c, "progress").unwrap_or(&Value::Null);
+    let blue = Style::new().fg(th.swarm);
+    match text(progress, "kind") {
+        "indeterminate" => {
+            // A 2-cell block bouncing along the 10-cell bar.
+            let at = usize::try_from(int(progress, "value").clamp(0, 8)).unwrap_or(0);
+            put(buf, inner, at as u16, 1, &th.g("█").repeat(2), blue);
+        }
+        _ => {
+            let p = real(progress, "value").unwrap_or(0.0);
+            let (filled, _) = bar(p, 10);
+            let x = put(buf, inner, 0, 1, &filled, blue);
+            let pad = 10u16.saturating_sub(x);
+            put(buf, inner, x + pad + 1, 1, &format!("{:.0}%", p * 100.0), Style::new().fg(th.fg));
+        }
+    }
+    let label = wrap(text(c, "label"), usize::from(inner.width));
+    for (j, (_, line)) in label.iter().take(2).enumerate() {
+        let last = j == 1 && label.len() > 2;
+        let line = if last { clip(&format!("{line} …"), usize::from(inner.width)) } else { line.clone() };
+        put(buf, inner, 0, 2 + j as u16, &line, Style::new().fg(th.dim_text));
+    }
+    let (glyph, colour, word) = match text(c, "status") {
+        "done" => (th.g("✓").to_owned(), th.ok, "done"),
+        "failed" => (th.g("✗").to_owned(), th.error, "failed"),
+        "queued" => (th.g("◌").to_owned(), th.dim_text, "queued"),
+        _ => {
+            let phase = int(c, "spinner_phase").rem_euclid(4) as usize;
+            (th.g(SPINNER[phase]).to_owned(), th.swarm, "running")
+        }
+    };
+    put(buf, inner, 0, 4, &format!("{glyph} {word}"), Style::new().fg(colour));
+}
+
+/// The row under the cards: how many are before the window and how many after it. `window` is
+/// the first card shown, the end of the shown ones and the total.
+pub fn card_counts(buf: &mut Buffer, row: Rect, th: &Theme, (start, end, total): (usize, usize, usize)) {
+    let dim = Style::new().fg(th.dim_text);
+    if start > 0 {
+        put(buf, row, 0, 0, &format!("{} {start} more", th.g("◂")), dim);
+    }
+    if end < total {
+        put_right(buf, row, 0, &format!("{} more {}", total - end, th.g("▸")), dim);
+    }
 }
 
 /// The label above the cards: `delegate to subagents · <model>`.

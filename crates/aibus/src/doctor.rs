@@ -165,12 +165,16 @@ fn dirs_check(paths: &Paths) -> Check {
             }
         }
     }
+    // The MCP server's audit files (`aibus mcp`), one per process.
+    let mcp = paths.state.join("logs").join("mcp");
+    let audits = std::fs::read_dir(&mcp).map_or(0, |d| d.flatten().count());
     let list = format!(
-        "config {}, data {}, state {}, cache {}",
+        "config {}, data {}, state {}, cache {}, mcp audit {} ({audits} files)",
         paths.config.display(),
         paths.data.display(),
         paths.state.display(),
-        paths.cache.display()
+        paths.cache.display(),
+        mcp.display()
     );
     if problems.is_empty() {
         check("xdg dirs", true, list)

@@ -107,12 +107,26 @@ fn provider_crates_use_rustls_and_never_openssl() {
 
 #[test]
 fn only_the_provider_http_crates_open_sockets() {
-    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider"] {
+    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider", "aibus-mcp"] {
         let deps = closure(krate);
         for banned in ["reqwest", "hyper", "h2", "rustls"] {
             assert!(!deps.contains(banned), "{krate} depends on {banned}");
         }
     }
+}
+
+/// D-13: rmcp comes in with `server`, `macros` and `transport-io` only. Anything that opens a
+/// socket, draws a terminal or talks to a provider stays out of the crate that serves MCP, and
+/// `aibus-mcp` sits on `aibus-core` and nothing above it.
+#[test]
+fn mcp_crate_never_sees_a_transport_or_ui_crate() {
+    let deps = closure("aibus-mcp");
+    assert!(deps.contains("rmcp") && deps.contains("aibus-core"), "aibus-mcp lost its parts");
+    for banned in ["reqwest", "hyper", "h2", "rustls", "ratatui", "crossterm", "aibus-tui", "aibus"] {
+        assert!(!deps.contains(banned), "aibus-mcp depends on {banned}");
+    }
+    let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
+    assert!(providers.is_empty(), "aibus-mcp depends on provider crates {providers:?}");
 }
 
 #[test]
@@ -139,8 +153,8 @@ fn every_crate_forbids_unsafe_code() {
             }
         }
     }
-    // Nine workspace members plus aibus-graph-causl, which sits outside the workspace.
-    assert_eq!(checked, 10, "expected one root file per crate");
+    // Ten workspace members plus aibus-graph-causl, which sits outside the workspace.
+    assert_eq!(checked, 11, "expected one root file per crate");
 }
 
 #[test]

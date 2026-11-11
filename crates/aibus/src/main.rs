@@ -18,6 +18,7 @@ mod keychain;
 mod launch;
 mod logfile;
 mod logging;
+mod mcp_cmd;
 mod net;
 mod plain;
 mod providers;
@@ -105,6 +106,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             };
             headless::run(cli.global, args, redactor.clone())
         }
+        Some(Command::Mcp(args)) => mcp_cmd::mcp(&cli.global, &args, redactor),
         Some(Command::Init) => commands::init(&cli.global),
         Some(Command::Doctor { session }) => {
             doctor::doctor(&cli.global, session.as_deref(), redactor, &keychain::OsKeychain)

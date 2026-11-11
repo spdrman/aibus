@@ -40,6 +40,17 @@ uses as the release notes, so every release needs its entry before it is merged 
 * A model row can carry `price_from`, so an announced price sits beside the current one and starts on its date.
 * For OpenRouter the response's `usage.cost` replaces the estimate, and `Usage.cost_source` says which one it was.
 
+### Providers, docs and doctor (F10, #118)
+
+* The providers epic in one place: a provider is a definition (a preset or a `[[provider]]`) that names a wire protocol, models carry their own capabilities, there are adapters for Gemini and for Claude on Bedrock and Vertex, OAuth works where a vendor publishes a login for third-party applications, the model tables live in `catalog/`, and accounts can fall back to one another. This closes what 0.1.0 listed as in the code but not usable: the OAuth method and the Bedrock and Vertex transports.
+* `docs/PROVIDERS.md` is rewritten around account, provider definition, api and auth, with a page per api. `docs/CAPABILITIES.md` is new and generated (one row per preset, 24 of them) by a test that also fails when the committed page is out of date. `docs/MIGRATION.md` covers a 0.1.0 config: it loads unchanged, and three cases change shape. `docs/SECURITY.md` has rows for a hostile `[[provider]]` and for the OAuth callback, and notes on the `gcloud` subprocess and on the catalog never being fetched at run time.
+* `aibus doctor` prints a row per provider (wire, URL, preset or custom, auth, catalog rows, cache age) and warns about a `[[provider]]` no enabled account uses.
+* Loading a config warns, with the file and line, about a `base_url` that is plain `http://` to an address that is neither loopback nor a private network.
+
+### Known issues
+
+* No live run against Gemini, Bedrock or Vertex has happened in CI, the OpenRouter login has not been tried against openrouter.ai from a release build, and the Windows build has not been run on a Windows machine. `docs/RELEASE.md` lists the manual checks.
+
 ### Build
 
 * The TUI is on ratatui 0.30 and crossterm 0.29, and `deny.toml` has no ignored advisories any more: `paste` (RUSTSEC-2024-0436) left the tree with ratatui 0.29. `crossterm` joins `ratatui` in the one-version-only ban list.

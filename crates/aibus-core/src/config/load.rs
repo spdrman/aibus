@@ -180,7 +180,52 @@ pub fn load(user: &Path, project: Option<&Path>) -> Result<Loaded, ConfigFileErr
             message: format!("{key}: {message}"),
         });
     }
+    // A key sent over plain http to an address that is neither this machine nor a private
+    // network can be read on the way. A warning, not an error: a lab VPN is a legitimate case.
+    let user_text = texts.first().filter(|(p, _)| p == user).map(|(p, t)| (p.as_path(), t.as_str()));
+    let urls = config
+        .providers
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| Some((format!("provider.{i}.base_url"), d.id.as_str(), d.base_url.as_deref()?)))
+        .chain(
+            config
+                .accounts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, a)| Some((format!("account.{i}.base_url"), a.name.as_str(), a.base_url.as_deref()?))),
+        );
+    for (key, who, url) in urls.filter(|(_, _, url)| is_open_http(url)) {
+        let at = user_text.map_or(String::new(), |(path, text)| {
+            format!("{}:{}: ", path.display(), find_line(text, &key).unwrap_or(1))
+        });
+        warnings.push(format!(
+            "{at}{who}: base_url {url} is plain http to an address that is not loopback or a private network, so a key sent there can be read on the way"
+        ));
+    }
     Ok(Loaded { config, warnings })
+}
+
+/// `http://` to a host that is not `localhost`, a loopback address or an RFC 1918 address. A
+/// name other than `localhost` counts as public, since it could resolve anywhere.
+fn is_open_http(url: &str) -> bool {
+    let Some(rest) = url.trim().strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => host.split(':').next().unwrap_or_default(),
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return false;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => !(ip.is_loopback() || ip.is_private()),
+        Ok(std::net::IpAddr::V6(ip)) => !ip.is_loopback(),
+        Err(_) => true,
+    }
 }
 
 fn split_key(k: &str) -> Vec<String> {
@@ -407,6 +452,30 @@ mod tests {
         assert_eq!(find_line(text, "acct.0.auth.keyring"), Some(5));
         assert_eq!(find_line(text, "w.q.r"), Some(7));
         assert_eq!(find_line(text, "nope"), None);
+    }
+
+    #[test]
+    fn plain_http_to_a_public_address_warns_with_its_line_and_loopback_and_private_do_not() {
+        let provider = |url: &str| format!("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"{url}\"\n");
+        for ok in [
+            "https://api.example.com/v1",
+            "http://127.0.0.1:11434/v1",
+            "http://localhost:8000/v1",
+            "http://[::1]:8000/v1",
+            "http://10.0.0.5:8000/v1",
+            "http://172.16.3.4/v1",
+            "http://192.168.1.20:8080/v1",
+        ] {
+            assert!(load_text(&provider(ok)).unwrap().warnings.is_empty(), "{ok}");
+        }
+        for bad in ["http://203.0.113.9/v1", "http://api.example.com/v1", "http://172.32.0.1/v1", "http://user@8.8.8.8/v1"] {
+            let w = load_text(&provider(bad)).unwrap().warnings;
+            assert_eq!(w.len(), 1, "{bad}: {w:?}");
+            assert!(w[0].contains(":4: p: base_url") && w[0].contains("plain http"), "{}", w[0]);
+        }
+        // The old account-level form is checked too.
+        let w = load_text("[[account]]\nname = \"old\"\nprovider = \"openai-compatible\"\nbase_url = \"http://203.0.113.9/v1\"\n").unwrap().warnings;
+        assert!(w.len() == 1 && w[0].contains(":4: old: base_url"), "{w:?}");
     }
 
     #[test]

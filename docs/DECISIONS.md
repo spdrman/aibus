@@ -520,3 +520,13 @@ Gated calls, taken at the recommended default:
 
 **Why.** One decision function with one error and one clock keeps the loop change small, and a message plus a meta field is how the rest of the graph hears about a run's account.
 
+
+## D-F10: The capability matrix is a test that writes a page, and the loose ends of the docs pass (#118)
+
+**Context.** Issue #118 asks for a generated `docs/CAPABILITIES.md`, a rewrite of `docs/PROVIDERS.md`, a migration page, security rows, a doctor row per provider and a warning for a plain-http base URL. It leaves some details open and I took the recommended default for each.
+
+**Decision.** The matrix is a pure function, `capability_matrix::render`, in `aibus-testkit` with a golden page under `fixtures/capability-matrix/`, and one test builds a row per preset through the real adapters (so tools, thinking, images and the rest are what the adapter reports) and compares the result with the committed page. `AIBUS_WRITE_CAPABILITIES=1` makes that test write the page instead of failing, so there is no second binary and the check that it is current is the same code that writes it. The model list and token counting columns come from the api (Bedrock and Vertex have neither endpoint here, the OpenAI wires have no counting endpoint), the auth column from the preset's methods and its api. `aibus doctor` has one `provider` row per provider with a `warning:` row (which does not fail the check) for a `[[provider]]` no enabled account uses. The doctor tests assert the exact row text instead of using a stored snapshot. The plain-http check is a warning with the file and line, not an error, and a host name other than `localhost` counts as public. The 0.1.0 changelog entry is history and I left it alone; the 0.2.0 entry says the two things it called not usable now work, and carries the Known issues that are still open.
+
+**Alternatives.** A `tools/capability-matrix` binary (rejected: a second way to write the file that nothing checks). Facts typed into the generator for each preset (rejected: that is the drift the page exists to prevent). Making the plain-http check an error (rejected: a lab VPN is legitimate, and the issue says warns).
+
+**Why.** The page can only say what the code says, and the same test that keeps it honest is the one that writes it.

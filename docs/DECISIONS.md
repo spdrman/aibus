@@ -586,3 +586,23 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Copying the plain rows into the Bedrock and Vertex files (rejected: the model list would then offer ids Bedrock cannot serve, and `catalog-sync` would have to keep two copies in step). Rounding the temperature in the tests (rejected: the wire was what looked wrong). Boxing the whole `ProviderError` (rejected: it touches every `Result` in the workspace for no extra gain). An `allow` for the lint (rejected: the size was real).
 
 **Why.** Each fix sits where the wrong behaviour was, and the tests stay as the contract they were written as.
+
+## MCP over HTTP: the product is right, the test client was behind the spec (2026-11-11)
+
+**Context.** Four `mcp_http` tests got `400` with `-32020 missing required Mcp-Method header` where they expected `200`, and the audit file had no line with the client address (the rejected requests never reached the audit).
+
+**Decision.** The server stays as it is. Protocol `2026-07-28` moves the method (and a call's tool name) into the `Mcp-Method` and `Mcp-Name` headers as well as the body, and rmcp enforces it; `2025-11-25` has neither, and the legacy handshake test still passes without them. The test client now sends both on every `2026-07-28` request. The audit address check passes once the requests are accepted.
+
+**Alternatives.** Drop the check in the transport so old-style requests pass on the new version (rejected: it would make aibus the lenient one in a spec that added the headers so gateways can route without parsing the body).
+
+**Why.** A server that accepts less than it should is a bug in the server, but a client that sends less than the version asks for is a bug in the client, and here it was the client.
+
+## Golden MCP transcripts re-recorded (2026-11-11)
+
+**Context.** Eleven scenarios under `fixtures/mcp-server/`; only `list.jsonl` existed, and it listed one tool.
+
+**Decision.** I recorded all of them with `AIBUS_UPDATE_TRANSCRIPTS=1` after the mcp crate fixes landed, twice in separate runs (byte-identical), then once more in compare mode (both protocols against the one file). I read each for secrets, host paths and addresses: the only hit for the author's name is the public schema URL in `$id`. The run scenarios carry the default fake script's text (`Done.`), so a change to `fixtures/scripts/explore.ron` means re-recording `run_status_cancel` and `run_resources`.
+
+**Alternatives.** Hand-write the goldens (rejected: they would encode what I expected, not what the server says).
+
+**Why.** The goldens are what a client author reads to see the wire, so they are checked by eye once and by diff every time after.

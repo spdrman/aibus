@@ -7,6 +7,9 @@
 //! * neither may regress over 20 % against `benches/baselines/<runner class>/`.
 //!
 //! `AIBUS_BENCH_GATE=1` makes a miss fail, see `benches/gate.rs` for the rest.
+//!
+//! With `--features flow-diagram` the same three measurements run on the rataflow path under
+//! the name `render_dashboard_flow`, so the two paths never share a baseline.
 
 use std::time::Instant;
 
@@ -59,8 +62,9 @@ fn measure(gate: &mut gate::Gate, name: &str, mut app: App<MiniGraph>, size: (u1
             })
             .collect()
     });
-    gate.judge(&format!("render_dashboard-{name}-render"), &render, RENDER_BUDGET_US);
-    gate.judge(&format!("render_dashboard-{name}-resize"), &resize, RESIZE_BUDGET_US);
+    let bench = if cfg!(feature = "flow-diagram") { "render_dashboard_flow" } else { "render_dashboard" };
+    gate.judge(&format!("{bench}-{name}-render"), &render, RENDER_BUDGET_US);
+    gate.judge(&format!("{bench}-{name}-resize"), &resize, RESIZE_BUDGET_US);
 }
 
 fn main() {

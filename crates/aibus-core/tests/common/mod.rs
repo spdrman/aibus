@@ -16,7 +16,7 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 30] = [
+pub const ALL_NAMES: [&str; 31] = [
     "Key",
     "Mouse",
     "Ui",

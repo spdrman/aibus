@@ -132,10 +132,36 @@ The integration suite is not backend-generic, see above.
 
 ## Provider cassettes
 
-Each provider crate replays recorded responses from `tests/cassettes/<name>.http` through a local
-mock server (`wiremock`), and asserts the mapping to `ProviderError`. To record one from a real
-account, run the live suite with `AIBUS_LIVE_ACCOUNT=<name>`, the account's key in
-`AIBUS_LIVE_KEY_<NAME>` and `AIBUS_RECORD=1`:
+Every provider adapter runs the same suite, `aibus_testkit::conformance::run(provider, server,
+fixtures)`. It starts a scripted fake server on a loopback port (no network, no keychain, no real
+provider), builds the adapter with the server's `base_url`, and plays one fixture per case. The
+cases are fixed: text, tool use, parallel tool calls, the stop reasons, every error status
+(400 invalid, 400 context, 401, 403, 404, 413, 429 with and without `retry-after`, 500, 503, 529),
+an error event inside a 200 stream, a malformed SSE line, a stream that ends early, a cancel while
+the server is still sending (must come back `Cancelled` within 100 ms), the model list, `verify`
+and `count_tokens`. A fixture set that leaves one out fails, unless the case is listed in
+`Fixtures::skipped` with a reason. Every case also checks that the fake key only travels in the
+adapter's one auth header, never in a URL, a body or a log line, and the suite checks that the
+redactor leaves every fixture unchanged.
+
+A fixture comes in two forms and the kit reads both:
+
+* `tests/cassettes/<name>.http`, the recorded form: `HTTP <status>`, header lines, a blank line,
+  the body. The redaction test in `aibus-core` walks these too.
+* `tests/fixtures/<name>.json`, the scripted form, for what a recording cannot say. It names the
+  `status`, `headers`, an optional `delay_ms`, and either a `body` or a list of `steps`
+  (`{"event": "..", "data": {..}, "delay_ms": 20}`, or `{"raw": ".."}` for a deliberately broken
+  frame), then `"end": "close" | "drop" | "hang"`. `drop` ends the connection with no final
+  chunk (a real broken stream) and `hang` holds it open until the client leaves, which is what the
+  cancel case uses (`Fixture::hang_after(n)` turns a recording into one).
+
+`crates/aibus-testkit/tests/conformance_broken.rs` keeps the suite honest: a wrapper that drops
+`ToolUseEnd`, swallows cancel, or logs the key must turn it red. Each adapter has one conformance
+test (`tests/conformance.rs` in its crate); what is specific to a provider (cache breakpoints,
+thinking signatures, effort headers, Kimi's reasoning round trip) stays in its `cassettes.rs`.
+
+To record a case from a real account, run the live suite with `AIBUS_LIVE_ACCOUNT=<name>`, the
+account's key in `AIBUS_LIVE_KEY_<NAME>` and `AIBUS_RECORD=1`:
 
 ```
 AIBUS_RECORD=1 AIBUS_LIVE_ACCOUNT=work AIBUS_LIVE_KEY_WORK=... \
@@ -143,7 +169,8 @@ AIBUS_RECORD=1 AIBUS_LIVE_ACCOUNT=work AIBUS_LIVE_KEY_WORK=... \
 ```
 
 The answers land in `tests/cassettes/live/<case>.http` with the key and the account's ids
-stripped. Read them, then move the ones you want up into `tests/cassettes/`.
+stripped. Read them, then move the ones you want up into `tests/cassettes/` and add a `Case` for
+them in the crate's `tests/conformance.rs`.
 
 ## Frame snapshots
 

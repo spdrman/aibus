@@ -1,0 +1,53 @@
+{
+ "status": 200,
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "x-request-id": "req_6f1d0c7a4b8e49c2a1d3e5f7a9b2c4d6"
+ },
+ "steps": [
+  {
+   "event": "response.created",
+   "data": {
+    "sequence_number": 0,
+    "response": {
+     "id": "resp_68a1b2c3d4e5",
+     "object": "response",
+     "status": "in_progress",
+     "model": "gpt-5-2025-08-07"
+    },
+    "type": "response.created"
+   }
+  },
+  {
+   "event": "response.output_text.delta",
+   "data": {
+    "sequence_number": 1,
+    "item_id": "msg_1",
+    "output_index": 0,
+    "content_index": 0,
+    "delta": "x",
+    "type": "response.output_text.delta"
+   }
+  },
+  {
+   "event": "response.incomplete",
+   "data": {
+    "sequence_number": 2,
+    "response": {
+     "id": "resp_68a1b2c3d4e5",
+     "object": "response",
+     "status": "incomplete",
+     "model": "gpt-5-2025-08-07",
+     "incomplete_details": {
+      "reason": "content_filter"
+     },
+     "usage": {
+      "input_tokens": 5,
+      "output_tokens": 1
+     }
+    },
+    "type": "response.incomplete"
+   }
+  }
+ ]
+}

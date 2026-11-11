@@ -105,7 +105,7 @@ impl Http {
             self.authed().into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
         // 2026-07-28 makes the method (and, for a call, the tool) a header as well as part of
         // the body, so a gateway can route without parsing JSON. rmcp refuses the request
-        // without them (-32020), and that is the spec, so the client sends them (D-MCP-HTTP).
+        // without them (-32020), and that is the spec, so the client sends them (docs/DECISIONS.md, "MCP over HTTP").
         headers.push(("Mcp-Method".to_owned(), method.to_owned()));
         if let Some(name) = request["params"]["name"].as_str() {
             headers.push(("Mcp-Name".to_owned(), name.to_owned()));

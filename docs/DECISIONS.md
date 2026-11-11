@@ -331,7 +331,7 @@ Gated calls, taken at the recommended default:
 **Why.** The picker stays a pure function of the graph, nothing asks the network, and the only code that knows about accounts is still the launcher.
 
 **Snapshots.** The four frames of the screen are written by the tests and generated on the release PR with the other stale ones.
-=======
+
 ## E11 (2026-11-11): Streamable HTTP is built, on loopback with a token (#106)
 
 **Context.** #106 sat behind owner decision 6 on epic #95. The owner wants zero open issues and the recommended default for decision 6 was to do it, with elicitation first. The order does not matter for the code, so I did the HTTP one first, as the issues are numbered.
@@ -341,4 +341,3 @@ Gated calls, taken at the recommended default:
 **Alternatives.** `axum` as the host (rejected: a router for one path, and one more big dependency). A unix socket instead of TCP (rejected for now: the clients this is for speak HTTP to a port; the SSH tunnel recipe covers the remote case). Wildcard ports for `Origin` (rejected: `http://localhost:*` accepts any local web page, which is the attack). A comparison with plain `==` (rejected: the token is the only thing between a web page and the user's workflows).
 
 **Why.** It meets the spec's MUSTs (Origin 403, loopback bind, authenticate) with rmcp doing the protocol and about 150 lines of ours doing the policy, and it leaves `aibus-mcp` transport-free so the closure test keeps meaning something. Tests are written and unrun, as the lane's rule says; they run on the release PR.
->>>>>>> origin/cut/0.2.0

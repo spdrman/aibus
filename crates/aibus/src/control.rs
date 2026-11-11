@@ -119,6 +119,25 @@ mod tests {
         }
     }
 
+    /// A slash line is not a control message: the channel has two types, and `SendMessage` hands
+    /// the text to a run as the words of a user turn. Nothing on it can name a command.
+    #[test]
+    fn a_slash_line_on_the_headless_control_channel_is_rejected() {
+        let run = RunId::new();
+        let lines = ["/login anthropic", "/cancel @lead", "/model haiku", "/workflow save x --force"];
+        for line in lines {
+            assert!(parse(line).is_err(), "{line}");
+            for kind in ["Command", "SubmitPrompt", "SetModel", "Cancel", "Login", "Workflow"] {
+                let v = serde_json::json!({"type": kind, "text": line, "line": line, "run": run.to_string()});
+                let why = parse(&v.to_string()).expect_err(kind);
+                assert!(why.contains("unknown type"), "{kind}: {why}");
+            }
+            // As the text of a message it is only ever text, and parsed back it is unchanged.
+            let v = serde_json::json!({"type": "SendMessage", "run": run.to_string(), "text": line});
+            assert_eq!(parse(&v.to_string()), Ok(Control::SendMessage { run, text: line.into() }));
+        }
+    }
+
     #[test]
     fn the_reader_skips_blank_lines_and_ends_with_eof() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

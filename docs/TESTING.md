@@ -22,7 +22,8 @@ the same command, started by hand.
 | Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini` (cassettes) | every push |
 | Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |
 | Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
-| Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
+| Security | `cargo test --locked -p aibus-core --test security`, `-p aibus-tui --test security_commands` and `-p aibus --test mcp_security` (the rows of `docs/SECURITY.md`; `security/commands.rs` and `security_commands.rs` are the cross-cutting rules for the registry's commands) | every push |
+| Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` (`commands_send` included, seeded with every documented command) | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
 
 The conformance row says "both backends when available": the `causl-differential` job in
 `.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and

@@ -1,0 +1,10 @@
+{
+ "flag": "no_developer_role",
+ "api": "openai-responses",
+ "with": {
+  "/input/1/role": "system"
+ },
+ "without": {
+  "/input/1/role": "developer"
+ }
+}

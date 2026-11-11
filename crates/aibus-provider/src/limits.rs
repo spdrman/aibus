@@ -204,6 +204,10 @@ impl Provider for Gated {
         self.inner.capabilities()
     }
 
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        self.inner.capabilities_for(model)
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         self.inner.models()
     }

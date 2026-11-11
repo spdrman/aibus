@@ -597,4 +597,26 @@ mod tests {
         }
         assert!(toml::from_str::<Tools>("sandbox = \"docker\"").is_err());
     }
+
+    #[test]
+    fn a_provider_table_takes_the_closed_compat_list_and_default_capabilities() {
+        use aibus_provider::presets::{CompatFlag, MaxTokensField};
+        let c: Config = toml::from_str(
+            r#"
+[[provider]]
+id = "gw"
+api = "openai-chat"
+base_url = "http://10.0.0.5:8000/v1"
+compat = ["no_store", { max_tokens_field = "max_completion_tokens" }]
+default_capabilities = { logprobs = false, max_tools = 16 }
+"#,
+        )
+        .unwrap();
+        let d = &c.providers[0];
+        assert_eq!(d.compat, Some(vec![CompatFlag::NoStore, CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)]));
+        assert_eq!((d.default_capabilities.logprobs, d.default_capabilities.max_tools), (Some(false), Some(16)));
+        assert!(c.problems().is_empty());
+        // A flag nobody named is a parse error, so a typo cannot pass for a quirk.
+        assert!(toml::from_str::<Config>("[[provider]]\nid = \"gw\"\ncompat = [\"no_such_quirk\"]\n").is_err());
+    }
 }

@@ -12,10 +12,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::{ConfigError, ProviderError, RateLimitInfo};
 use crate::secret::{AuthMethodKind, Credential};
-use crate::presets::ProviderDef;
+use crate::presets::{CompatFlag, ProviderDef};
 use crate::types::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SystemRole {
     /// The API has a separate system field.
     Separate,
@@ -37,6 +38,78 @@ pub struct Capabilities {
     pub images: bool,
     pub system_role: SystemRole,
     pub max_tools: Option<u32>,
+}
+
+/// The capabilities a model entry or a provider definition names. Each field is optional, so
+/// an entry overrides only what it says and the rest stays what the layer below had.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CapabilityOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tools: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_role: Option<SystemRole>,
+}
+
+impl CapabilityOverrides {
+    /// `self` with every field `top` names replaced by `top`'s.
+    pub fn over(self, top: &Self) -> Self {
+        Self {
+            tools: top.tools.or(self.tools),
+            parallel_tool_calls: top.parallel_tool_calls.or(self.parallel_tool_calls),
+            thinking: top.thinking.or(self.thinking),
+            effort: top.effort.or(self.effort),
+            images: top.images.or(self.images),
+            prompt_cache: top.prompt_cache.or(self.prompt_cache),
+            logprobs: top.logprobs.or(self.logprobs),
+            max_tools: top.max_tools.or(self.max_tools),
+            system_role: top.system_role.or(self.system_role),
+        }
+    }
+}
+
+impl Capabilities {
+    /// These capabilities with every field `o` names replaced.
+    pub fn with(mut self, o: &CapabilityOverrides) -> Self {
+        self.tools = o.tools.unwrap_or(self.tools);
+        self.parallel_tool_calls = o.parallel_tool_calls.unwrap_or(self.parallel_tool_calls);
+        self.thinking = o.thinking.unwrap_or(self.thinking);
+        self.effort = o.effort.unwrap_or(self.effort);
+        self.images = o.images.unwrap_or(self.images);
+        self.prompt_cache = o.prompt_cache.unwrap_or(self.prompt_cache);
+        self.logprobs = o.logprobs.unwrap_or(self.logprobs);
+        self.system_role = o.system_role.unwrap_or(self.system_role);
+        self.max_tools = o.max_tools.or(self.max_tools);
+        self
+    }
+
+    /// The flags that are capabilities seen from the wire: a server with no system role, or
+    /// one that cannot take a picture. They apply after the model layers, since a quirk of the
+    /// server holds whatever a model entry claims. The other flags only shape the body.
+    pub fn with_compat(mut self, flags: &[CompatFlag]) -> Self {
+        for f in flags {
+            match f {
+                CompatFlag::NoSystemRole => self.system_role = SystemRole::FirstMessage,
+                CompatFlag::StripImages => self.images = false,
+                _ => {}
+            }
+        }
+        self
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -155,6 +228,12 @@ pub trait Provider: Send + Sync + 'static {
 
     /// What this provider can do, so core can degrade instead of guessing.
     fn capabilities(&self) -> Capabilities;
+
+    /// What this provider can do with `model`: the provider's capabilities with the model's
+    /// own entry laid over them. A provider with no per-model data answers like `capabilities`.
+    fn capabilities_for(&self, _model: &ModelId) -> Capabilities {
+        self.capabilities()
+    }
 
     /// Known models for alias resolution and context sizes. May be a static table
     /// refreshed by `refresh_models` when the API supports listing.

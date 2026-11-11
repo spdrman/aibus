@@ -1,0 +1,18 @@
+{
+ "flag": {
+  "reasoning_field": "reasoning"
+ },
+ "api": "openai-chat",
+ "with": {
+  "/reasoning/effort": "low",
+  "/reasoning_effort": "<absent>"
+ },
+ "without": {
+  "/reasoning_effort": "low",
+  "/reasoning": "<absent>"
+ },
+ "model": "o3-mini",
+ "capabilities": {
+  "effort": true
+ }
+}

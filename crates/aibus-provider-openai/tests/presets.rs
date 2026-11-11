@@ -64,7 +64,7 @@ async fn every_preset_sends_the_key_in_its_header_to_its_path() {
         def.base_url = Some(format!("{}{path}", server.uri()));
 
         let provider = Factory::openai().build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap();
-        let (header, prefix) = match p.compat().auth_header {
+        let (header, prefix) = match p.auth_header.clone() {
             Some(h) => (Box::leak(h.into_boxed_str()) as &str, ""),
             None => ("authorization", "Bearer "),
         };

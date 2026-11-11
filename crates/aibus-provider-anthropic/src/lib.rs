@@ -18,7 +18,7 @@ use std::time::SystemTime;
 
 use aibus_provider::models::ModelTable;
 use aibus_provider::{
-    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse,
+    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, CompatFlag,
     ConfigError, Credential, ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig,
     ProviderDef, ProviderError, ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk,
     SystemRole,
@@ -62,6 +62,9 @@ pub struct Anthropic {
     id: &'static str,
     /// From the definition: sent on every request.
     extra_headers: HeaderMap,
+    /// The provider's capabilities from its definition, before any model's entry.
+    base_caps: Capabilities,
+    compat: Vec<CompatFlag>,
     /// No trailing slash, no `/v1`.
     base: String,
     table: Mutex<ModelTable>,
@@ -111,6 +114,20 @@ impl Anthropic {
         Ok(Self {
             id,
             extra_headers,
+            base_caps: Capabilities {
+                tools: true,
+                parallel_tool_calls: true,
+                streaming: true,
+                thinking: true,
+                prompt_cache: true,
+                logprobs: false,
+                effort: true,
+                images: true,
+                system_role: SystemRole::Separate,
+                max_tools: None,
+            }
+            .with(&def.default_capabilities),
+            compat: def.compat_flags().to_vec(),
             base: base.to_owned(),
             table: Mutex::new(ModelTable::load(id, aibus_provider::catalog::table("anthropic").unwrap_or_default(), cfg, prefixes, false)?),
             cache_dir: cfg.cache_dir.clone(),
@@ -169,18 +186,11 @@ impl Provider for Anthropic {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            tools: true,
-            parallel_tool_calls: true,
-            streaming: true,
-            thinking: true,
-            prompt_cache: true,
-            logprobs: false,
-            effort: true,
-            images: true,
-            system_role: SystemRole::Separate,
-            max_tools: None,
-        }
+        self.base_caps.clone().with_compat(&self.compat)
+    }
+
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        self.table().capabilities_for(self.base_caps.clone(), model).with_compat(&self.compat)
     }
 
     fn models(&self) -> Vec<ModelInfo> {
@@ -223,12 +233,12 @@ impl Provider for Anthropic {
         out: mpsc::Sender<StreamChunk>,
         cancel: CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let req = self.capabilities().degrade(req);
+        let req = self.capabilities_for(&req.model).degrade(req);
         let (price, effort_ok) = {
             let t = self.table();
             (t.price(&req.model), t.entry(&req.model).is_some_and(|e| e.effort))
         };
-        let body = wire::messages_body(&req, effort_ok);
+        let body = wire::messages_body(&req, effort_ok, &self.compat);
         let beta = req.effort.is_some() && effort_ok;
         tracing::debug!(account = %creds.account, model = %req.model, "anthropic: stream");
 
@@ -276,7 +286,7 @@ impl Provider for Anthropic {
         if !matches!(self.transport, Transport::Direct) {
             return None;
         }
-        let body = wire::count_body(&self.capabilities().degrade(req.clone()));
+        let body = wire::count_body(&self.capabilities_for(&req.model).degrade(req.clone()));
         let url = format!("{}/v1/messages/count_tokens", self.base);
         let result = async {
             let headers = self.headers(creds)?;

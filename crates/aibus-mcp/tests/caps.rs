@@ -21,9 +21,7 @@ fn the_tool_list_follows_the_flags_and_the_fixed_order() {
     let (plain, _home) = common::server(Caps::default(), Redactor::new());
     let reading: Vec<String> = plain.tools().iter().map(|t| t.name.to_string()).collect();
     assert_eq!(reading[0], "workflow_list");
-    for gated in ["workflow_create", "workflow_update", "workflow_run", "run_status", "run_cancel"] {
-        assert!(!reading.iter().any(|n| n == gated), "{gated} is listed with no flag");
-    }
+    assert!(!reading.iter().any(|n| n.starts_with("workflow_c") || n == "workflow_update" || n.contains("run")));
     for (write, gates, run) in [
         (false, false, false),
         (true, false, false),
@@ -36,6 +34,9 @@ fn the_tool_list_follows_the_flags_and_the_fixed_order() {
         let mut want: Vec<&str> = reading.iter().map(String::as_str).collect();
         if write {
             want.extend(["workflow_create", "workflow_update"]);
+        }
+        if run {
+            want.extend(["workflow_run", "run_status", "run_cancel"]);
         }
         assert_eq!(names, want, "write={write} gates={gates} run={run}");
         // What is not listed cannot be called, with or without the flag.
@@ -63,7 +64,7 @@ fn every_listed_tool_says_what_it_does_to_the_world() {
 }
 
 #[test]
-fn the_write_tools_say_what_they_do() {
+fn the_write_and_run_tools_say_what_they_do() {
     let caps = Caps::new(true, true, true, vec![]).unwrap();
     let (server, _home) = common::server(caps, Redactor::new());
     let hints = |name: &str| {
@@ -73,4 +74,7 @@ fn the_write_tools_say_what_they_do() {
     };
     assert_eq!(hints("workflow_create"), (Some(false), Some(false), Some(true)));
     assert_eq!(hints("workflow_update"), (Some(false), Some(true), Some(true)));
+    assert_eq!(hints("workflow_run"), (Some(false), Some(false), Some(false)));
+    assert_eq!(hints("run_status"), (Some(true), Some(false), Some(true)));
+    assert_eq!(hints("run_cancel"), (Some(false), Some(true), Some(true)));
 }

@@ -217,13 +217,13 @@ pub struct McpArgs {
     /// Accept this Origin as well as the loopback ones (repeatable, needs --http)
     #[arg(long, value_name = "ORIGIN", action = ArgAction::Append, requires = "http")]
     pub origin: Vec<String>,
-    /// Runs one process may start (not available yet)
+    /// Runs one process may start (default 10; needs --allow run)
     #[arg(long, value_name = "N")]
     pub max_runs: Option<u32>,
-    /// Runs that may be live at once (not available yet)
+    /// Runs that may be live at once (default 1; needs --allow run)
     #[arg(long, value_name = "N")]
     pub max_concurrent_runs: Option<u32>,
-    /// Cost cap for one run (not available yet)
+    /// What the runs of this process may cost in total (default limits.max_cost_usd; needs --allow run)
     #[arg(long, value_name = "USD")]
     pub max_cost_usd: Option<f64>,
     /// Do not put the "written through aibus mcp" line at the top of written workflows

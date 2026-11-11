@@ -78,7 +78,20 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 
 ## What is not in this release
 
-Writing workflows (`--allow write`), running them (`--allow run`) and the run resources, prompts that need a run, and elicitation. The README and this page will say so when that changes.
+Writing workflows (`--allow write`), running them (`--allow run`) and the run resources, and prompts that need a run. The README and this page will say so when that changes.
+
+## Confirmation before a write or a run (`--confirm`)
+
+The flags decide what a client may do. On top of that, when the client declared the `elicitation` capability (form mode), the server asks the user once before `workflow_create`, `workflow_update` and `workflow_run`: a form with `name`, the workflow name to type again, and for a run `max_cost_usd`, a number whose `maximum` is the process cost cap (the field is left out until the run tools set a cap). `accept` with the right name goes on. `decline`, `cancel`, a different name or a cost over the cap is an `isError` result that says which, and nothing is written or started. A client that did not declare `elicitation` is never asked and keeps the behaviour the flags give, and so does `--confirm never` (the default is `--confirm elicit`), for scripted use.
+
+How the question travels depends on the protocol revision:
+
+* `2025-11-25`: one `elicitation/create` request from the server in the middle of the call.
+* `2026-07-28`: server-initiated requests no longer exist, so the call answers `resultType: "input_required"` with `inputRequests.confirm` (the same form) and a `requestState`. The client retries the same call with `inputResponses.confirm` and the state untouched. The state is an HMAC-SHA256 seal made with a key generated per process and never stored, over a nonce and bound to the tool, the exact arguments (key order does not matter) and the client's `clientInfo`, good for 10 minutes and for one use. An edited, expired, replayed or foreign state, or one from before a restart, gets one answer for all of those, an `isError` result saying nothing was written or started.
+
+The form asks for no credential and nothing shaped like one, and the schema has no `pattern` keyword (rmcp's form types do not carry it), so the exact name is checked on the answer, not by the client.
+
+Relaying a run's permission prompts to the client is not built. See E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
 
 ## Streamable HTTP (`--http`)
 

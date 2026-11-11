@@ -1,0 +1,9 @@
+# A 0.1.0 config: an Anthropic account behind a gateway, key in the keychain.
+[[account]]
+name = "work"
+provider = "anthropic"
+label = "Work (org acme)"
+base_url = "https://gw.example.com"
+auth = { keyring = true }
+aliases = { sonnet = "claude-sonnet-4-5" }
+tags = ["eu"]

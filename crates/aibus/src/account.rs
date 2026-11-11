@@ -25,6 +25,7 @@ use zeroize::Zeroize;
 
 use crate::cli::{AccountAdd, AccountCmd};
 use crate::providers::provider_configs;
+use aibus_provider::presets::resolve;
 
 /// Everything the commands reach outside the process for, so a test can stand in for each.
 pub struct Io<'a> {
@@ -84,7 +85,8 @@ fn verify(
     account: &Account,
     cred: &Credential,
 ) -> Result<(AccountInfo, Duration), AibusError> {
-    let configs = provider_configs(std::slice::from_ref(account), &io.paths)?;
+    let defs = config::load(&io.paths.config_file(), None)?.config.providers;
+    let configs = provider_configs(std::slice::from_ref(account), &defs, &io.paths)?;
     let provider = ProviderRegistry::new(&io.factories, &configs)?.get(&account.provider)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -211,6 +213,19 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         // Before asking for a key that has nowhere to go.
         if let StoreHealth::Unavailable(why) = store.probe() {
             return Err(CredentialError::NoKeychain(why).into());
+        }
+        // A preset knows what the vendor's key is usually called: offer the environment as the
+        // alternative to typing it in, since an env account keeps it out of the keychain.
+        let defs = config::load(file, None)?.config.providers;
+        let def = resolve(&account.provider, defs.iter().find(|d| d.id == account.provider));
+        if let (Ok(Some(def)), false) = (def, a.key_stdin) {
+            if let Some(var) = def.env_vars.first() {
+                writeln!(
+                    io.out,
+                    "Enter the {} key. To read it from the environment instead, run: aibus account add {} --provider {} --env {var}",
+                    account.provider, a.name, account.provider
+                )?;
+            }
         }
         let key = read_key(a.key_stdin, io)?;
         io.redactor.register(&name, key.expose());

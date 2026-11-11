@@ -490,7 +490,7 @@ impl Step for LoadAccounts {
             vec![Box::new(Scripted(Arc::new(FakeProvider::new(script))))];
         factories.extend(builtin_factories().into_iter().filter(|f| f.id().0 != "fake"));
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
-        let configs = provider_configs(&cfg.accounts, paths)?;
+        let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
         let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
         let store = Arc::new(CredentialStore::new(
             Arc::new(OsKeychain),

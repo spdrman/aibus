@@ -105,7 +105,7 @@ impl Anthropic {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         match &self.transport {
             Transport::Direct => {
-                headers.extend(Self::headers(creds)?);
+                headers.extend(self.headers(creds)?);
                 headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
                 if beta {
                     headers.insert("anthropic-beta", HeaderValue::from_static(EFFORT_BETA));

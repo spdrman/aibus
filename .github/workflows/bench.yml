@@ -33,7 +33,5 @@ jobs:
         run: cargo bench --locked -p aibus-core --bench hydrate_snapshot
       - name: render_dashboard
         run: cargo bench --locked -p aibus-tui --bench render_dashboard
-      - name: render_dashboard on the rataflow path
-        run: cargo bench --locked -p aibus-tui --features flow-diagram --bench render_dashboard
       - name: soft gates, logged
         run: cargo test --locked --release -p aibus-testkit --test startup_time --test streaming_cpu -- --nocapture

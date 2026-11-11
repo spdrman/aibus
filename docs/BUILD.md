@@ -97,7 +97,7 @@ Crates in that set that run code at build time:
 
 ## rataflow (D-12)
 
-`rataflow` 0.1 draws the dashboard's centre column. It is an optional dependency of `aibus-tui` (`default-features = false, features = ["crossterm"]`, so no `rust-sugiyama`, `petgraph`, `serde` or `log`), switched on by the `flow-diagram` feature, which `aibus-tui` and `aibus` both enable by default. Only `crates/aibus-tui/src/diagram.rs` names it. The workspace dependency on `aibus-tui` is `default-features = false`, so `cargo build -p aibus --no-default-features` really builds the hand-drawn connectors, and `cargo test -p aibus-testkit` on its own does too; `--workspace`, `-p aibus-tui` and `-p aibus` build the rataflow path. The build adds one crate to the lock, +0.6 % to the release binary, and `cargo deny check` passes with it. The numbers are in `docs/spikes/D1.1-rataflow.md`.
+`rataflow` 0.1 draws the dashboard's centre column. It is a plain dependency of `aibus-tui` only (`default-features = false, features = ["crossterm"]`, so no `rust-sugiyama`, `petgraph`, `serde` or `log`), and only `crates/aibus-tui/src/diagram.rs` names it; `crates/aibus-testkit/tests/workspace.rs` and `source_rules.rs` check both. The build adds one crate to the lock, +0.6 % to the release binary, and `cargo deny check` passes with it. The numbers are in `docs/spikes/D1.1-rataflow.md`. There is no feature flag and no hand-drawn fallback any more (#93).
 
 ## CI
 

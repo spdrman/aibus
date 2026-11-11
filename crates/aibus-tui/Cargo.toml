@@ -7,13 +7,6 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[features]
-# The centre column drawn through rataflow (docs/spikes/D1.1-rataflow.md). On by default since
-# 0.2.0; `--no-default-features` is the way back to the hand-drawn connectors for a build from
-# source. `sugiyama` stays out: positions come from our row budget.
-default = ["flow-diagram"]
-flow-diagram = ["dep:rataflow"]
-
 [dependencies]
 aibus-core.workspace = true
 aibus-graph.workspace = true
@@ -21,7 +14,8 @@ aibus-provider.workspace = true
 arboard = { version = "3", default-features = false }
 crossterm = "0.29"
 ratatui = "0.30"
-rataflow = { version = "0.1", optional = true, default-features = false, features = ["crossterm"] }
+# The centre column (docs/spikes/D1.1-rataflow.md). `sugiyama` stays out: positions come from our row budget.
+rataflow = { version = "0.1", default-features = false, features = ["crossterm"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 toml = "0.8"

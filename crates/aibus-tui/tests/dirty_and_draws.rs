@@ -114,9 +114,8 @@ fn a_dirty_widget_draws_once_and_a_resize_draws() {
     assert_eq!(ui.draws, 4);
 }
 
-/// The flag that keeps the 30 Hz ticker going is the same whichever way the column is drawn: it
-/// is up while a card runs, and down once the last one has stopped (run with and without
-/// `--features flow-diagram`).
+/// The flag that keeps the 30 Hz ticker going is up while a card runs, and down once the last one
+/// has stopped.
 #[test]
 fn animating_clears_when_the_last_run_stops() {
     let mut app = replay_app();

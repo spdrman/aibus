@@ -566,3 +566,14 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Give `Login` test-only timeout knobs, or drop `start_paused` and wait the real 5 s device interval (rejected: product code bent for a harness, or a 20 s test).
 
 **Why.** The bug was in the harness, so the harness changed.
+
+
+## D-R1: Provider fixes from the first full gate on cut/0.2.0 (#172)
+
+**Context.** The first full gate on cut/0.2.0 was red in the provider crates and the testkit catalog tests. I read each failure to see whether the product or the test was wrong.
+
+**Decision.** `price_of` is a pointer into the plain Anthropic table: the Bedrock and Vertex files only hold pointers (D-F5) and the catalog test says the target must be an anthropic row, so `price_at` now looks the target up in its own table first and then in the built-in anthropic one (the product was wrong, the tests were right). The gemini wire sent `0.20000000298023224` for a temperature of 0.2 because the `f32` was widened to `f64`; `ChatRequest::temperature_f64` goes through the shortest decimal the `f32` prints as, and the anthropic and openai wires use it too, since all four callers had the same bug (the test was right). The four OpenAI conformance sets named the content-filter case `content_filter` while the kit requires `refusal` (the anthropic and gemini sets already use it), so I renamed the cases and left the kit alone (the test data was wrong). The 95 `result_large_err` warnings came from `ProviderError` being 152 bytes, 64 of them the rate-limit windows, so `rate_limit` is now `Option<Box<RateLimitInfo>>` (96 bytes), which only the quota test in `aibus-core` and one line of `accounts.rs` had to follow.
+
+**Alternatives.** Copying the plain rows into the Bedrock and Vertex files (rejected: the model list would then offer ids Bedrock cannot serve, and `catalog-sync` would have to keep two copies in step). Rounding the temperature in the tests (rejected: the wire was what looked wrong). Boxing the whole `ProviderError` (rejected: it touches every `Result` in the workspace for no extra gain). An `allow` for the lint (rejected: the size was real).
+
+**Why.** Each fix sits where the wrong behaviour was, and the tests stay as the contract they were written as.

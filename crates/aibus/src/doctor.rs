@@ -79,9 +79,9 @@ fn author_check(cfg: Option<&Config>) -> Check {
     if let Some(own) = cfg.and_then(|c| c.mcp.get("aibus")) {
         return check("workflow author", true, format!("your [mcp.aibus]: {} {}", own.command, own.args.join(" ")));
     }
-    match std::env::current_exe().and_then(std::fs::canonicalize) {
-        Ok(exe) => check("workflow author", true, format!("{} mcp (read-only, over stdio)", exe.display())),
-        Err(e) => check("workflow author", false, format!("this program's own path does not resolve: {e}")),
+    match crate::author::server(false) {
+        Ok(own) => check("workflow author", true, format!("{} mcp (read-only, over stdio)", own.command)),
+        Err(e) => check("workflow author", false, e),
     }
 }
 

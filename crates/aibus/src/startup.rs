@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
-use aibus_core::config::{self, Loaded, McpServer};
+use aibus_core::config::{self, Loaded};
 use aibus_core::persist::fs::create_private_dir;
 use aibus_core::persist::index::Index;
 use aibus_core::persist::paths::{project_dir, Paths};
@@ -817,15 +817,11 @@ impl Step for EnterLoop {
         let wants_author = ctx.interactive || ctx.global.agent.as_deref() == Some("workflow-author");
         let author = if wants_author && !cfg.mcp.contains_key("aibus") {
             let rt = ctx.rt.as_ref().ok_or_else(|| not_ready("runtime"))?;
-            let server = std::env::current_exe().and_then(std::fs::canonicalize).map(|exe| McpServer {
-                command: exe.to_string_lossy().into_owned(),
-                args: vec!["mcp".into()],
-                ..McpServer::default()
-            });
+            let server = crate::author::server(false);
             let env: Vec<(String, String)> = std::env::vars().collect();
             let connected = match server {
                 Ok(server) => rt.block_on(aibus_core::mcp::Client::connect("aibus", &server, &env, &ctx.cwd, &session.id.to_string())),
-                Err(e) => Err(format!("this program's own path does not resolve: {e}")),
+                Err(e) => Err(e),
             };
             match connected {
                 Ok((client, listed)) => {
@@ -895,6 +891,7 @@ impl Step for EnterLoop {
             assist: Default::default(),
             workflow_dirs: workflow_dirs.clone(),
             author_server: author.is_some(),
+            author_write: Default::default(),
         });
         // A `prompt` hook asks the session's own model; the account is only touched when some hook
         // wants it, so a session with none never reads a key for this.

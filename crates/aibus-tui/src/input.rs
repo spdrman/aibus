@@ -76,6 +76,8 @@ pub struct Context {
     pub lead_run: Option<RunId>,
     pub permission: Option<PermissionId>,
     pub permission_summary: String,
+    /// The permission modal offers "always" for this tool (a workflow write does not).
+    pub permission_always: bool,
     /// The run of each card, in the order the cards are drawn.
     pub cards: Vec<Option<RunId>>,
     /// The run each log line belongs to, if any.
@@ -241,6 +243,7 @@ impl Context {
             })
             .collect();
         let any_runs = !g.read_key(RUNS_ORDER).map_or(&[][..], as_list).is_empty();
+        let permission_always = view(PERMISSION).and_then(|p| get(p, "always")).is_none_or(|a| matches!(a, Value::Bool(true)));
         let permission_summary = view(PERMISSION).and_then(|p| get(p, "summary")).and_then(as_str).unwrap_or("").to_owned();
         Self {
             chrome,
@@ -248,6 +251,7 @@ impl Context {
             lead_run,
             permission,
             permission_summary,
+            permission_always,
             cards,
             log_runs,
             menu,
@@ -1619,6 +1623,8 @@ impl Input {
                 }
             }
             JumpPermission => out.msgs.push(ui(UiIntent::ShowPermission)),
+            // "Always" is not offered for a workflow write, so the key does nothing there.
+            AllowAlways if !cx.permission_always => {}
             Allow | Deny | AllowAlways => {
                 if let Some(id) = cx.permission {
                     let decision = match action {

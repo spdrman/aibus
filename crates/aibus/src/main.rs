@@ -4,6 +4,7 @@
 mod account;
 mod agent_cmd;
 mod agent_watch;
+mod author;
 mod cli;
 mod commands;
 mod completions;

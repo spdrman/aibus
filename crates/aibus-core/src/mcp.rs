@@ -328,6 +328,20 @@ fn wire_name(server: &str, tool: &str) -> String {
     name
 }
 
+/// The server name the on-demand write child of `/workflow new --write` registers under.
+pub const WRITE_SERVER: &str = "aibus-write";
+
+/// Whether `tool` (as the model calls it) writes a workflow through the write child. Such a call
+/// asks the owner every time: a pre-approved pattern does not cover it and "always" is not
+/// offered, so a write never happens because a model decided it should. The executor and the
+/// permission modal both read this.
+pub fn asks_every_time(tool: &str) -> bool {
+    matches!(
+        &*allow_name(tool),
+        "mcp:aibus-write:workflow_create" | "mcp:aibus-write:workflow_update"
+    )
+}
+
 /// `mcp__server__tool` as an allow-list spells it, `mcp:server:tool`; anything else as it is.
 pub fn allow_name(name: &str) -> std::borrow::Cow<'_, str> {
     match name.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {

@@ -29,13 +29,14 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 | Flag | Adds | In this release |
 |---|---|---|
 | none | the read tools, resources and prompts below | yes, the default |
-| `--allow write` | create and update workflows | not yet (the flag parses) |
-| `--allow gates` | a written workflow may carry `gate` commands; needs `write` (exit 2 otherwise) | not yet |
+| `--allow write` | `workflow_create` and `workflow_update` | yes |
+| `--allow gates` | a written workflow may carry `gate` commands; needs `write` (exit 2 otherwise) | yes |
 | `--allow run` | start, watch and cancel runs | not yet (the flag parses) |
 | `--allow-tool <pattern>` | pre-approves a tool for runs | not yet |
+| `--no-provenance` | leave the `# written through aibus mcp` line out of written files | yes |
 | `--http <ip:port>` | the same server over Streamable HTTP on loopback, see below | yes |
 
-## Tools
+## Read tools
 
 All six are read-only (`readOnlyHint`), never destructive and never open-world. Each has an `outputSchema`, and the result is in `structuredContent`. The text block holds the same JSON under a one-line header saying it is data, with aibus's own markers escaped and a "cut at" note past 32 KiB. `structuredContent` is never cut.
 
@@ -49,6 +50,23 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 | `agent_list` | the agents a step can name, as `aibus agent list --json` |
 
 `scope` is `project` or `user`; left out, the project's file wins. Budgets in `workflow_dry_run` are the built-in defaults, because the server does not read `config.toml`. Likewise, `agents.extra_dirs` is not on the roster.
+
+## Write tools (`--allow write`)
+
+| Tool | What it does |
+|---|---|
+| `workflow_create {name, scope, toml}` | writes a new workflow file. `{name, scope, path, revision, warnings}` |
+| `workflow_update {name, scope, toml, expected_revision}` | replaces one. The file's current SHA-256 (what `workflow_get` calls `revision`) has to equal `expected_revision`, or nothing is written and the error carries the current one |
+
+`create` is idempotent and not destructive; `update` is destructive. What a write has to pass, in this order, with nothing on the disk until the last step:
+
+* The name matches `^[a-z0-9][a-z0-9_-]{0,63}$`. It is a name, never a path: `../x`, `/etc/x`, `~x`, `X` and 65 characters are refused.
+* The text is at most 64 KiB and 32 steps, and `workflow_validate`'s checks pass with no errors (warnings come back in the result). Text a redactor would change, a credential, is refused and never echoed.
+* A step with a `gate` is refused unless the server was started with `--allow gates`. A gate is a shell command aibus runs as you when the chain reaches that step, so a remote author writing one is writing code that runs later. `workflow_validate` and `workflow_dry_run` always show the command text.
+* The directory is the scope's `workflows` directory, resolved through symlinks, and it has to land exactly where it should: a symlink out of it is refused, and so is a workflow file that is itself a link. The user directory is created when missing; the project scope needs `.aibus/` to exist already.
+* The file is written with the atomic write (temp file, fsync, rename), mode 0600, and starts with `# written through aibus mcp, <time>`. An update keeps the line the file already had instead of adding another.
+
+At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.toml` or `config.toml`: the name rule and the directory check leave no path to them.
 
 ## Resources
 
@@ -71,25 +89,14 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 
 ## Limits and the audit log
 
-* At most 60 tool calls a minute per process. Past that the call is an `isError` result saying how many seconds to wait. A call that is refused does not spend a call.
+* At most 60 tool calls a minute per process, and within that 10 writes. Past that the call is an `isError` result saying how many seconds to wait. A call that is refused does not spend a call.
 * Arguments are capped at 256 KiB. Resource reads and prompt gets are audited but do not use the tool-call budget.
 * Every call leaves one line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (one file per process, mode 0600): `{t, client:{name, version}, method, tool, args, ok, ms}`. The first line is `server/start` with the flags. Arguments are redacted and cut at 4 KiB. A resource read has `method: "resources/read"` and the uri as its argument, a prompt `method: "prompts/get"`.
 * Nothing that came out of a file, an agent definition or an argument reaches a client, the audit file or stderr without going through the redactor. stdout carries JSON-RPC and nothing else.
 
 ## What is not in this release
 
-Writing workflows (`--allow write`), running them (`--allow run`) and the run resources, and prompts that need a run. The README and this page will say so when that changes.
-
-## Confirmation before a write or a run (`--confirm`)
-
-The flags decide what a client may do. On top of that, when the client declared the `elicitation` capability (form mode), the server asks the user once before `workflow_create`, `workflow_update` and `workflow_run`: a form with `name`, the workflow name to type again, and for a run `max_cost_usd`, a number whose `maximum` is the process cost cap (the field is left out until the run tools set a cap). `accept` with the right name goes on. `decline`, `cancel`, a different name or a cost over the cap is an `isError` result that says which, and nothing is written or started. A client that did not declare `elicitation` is never asked and keeps the behaviour the flags give, and so does `--confirm never` (the default is `--confirm elicit`), for scripted use.
-
-How the question travels depends on the protocol revision:
-
-* `2025-11-25`: one `elicitation/create` request from the server in the middle of the call.
-* `2026-07-28`: server-initiated requests no longer exist, so the call answers `resultType: "input_required"` with `inputRequests.confirm` (the same form) and a `requestState`. The client retries the same call with `inputResponses.confirm` and the state untouched. The state is an HMAC-SHA256 seal made with a key generated per process and never stored, over a nonce and bound to the tool, the exact arguments (key order does not matter) and the client's `clientInfo`, good for 10 minutes and for one use. An edited, expired, replayed or foreign state, or one from before a restart, gets one answer for all of those, an `isError` result saying nothing was written or started.
-
-The form asks for no credential and nothing shaped like one, and the schema has no `pattern` keyword (rmcp's form types do not carry it), so the exact name is checked on the answer, not by the client.
+Running workflows (`--allow run`) and the run resources, and prompts that need a run.
 
 Relaying a run's permission prompts to the client is not built. See E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
 

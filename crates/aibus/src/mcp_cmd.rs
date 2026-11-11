@@ -21,8 +21,9 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
         ));
     }
     let has = |cap: &str| args.allow.iter().any(|a| a == cap);
-    let caps = Caps::new(has("write"), has("gates"), has("run"), args.allow_tool.clone())
+    let mut caps = Caps::new(has("write"), has("gates"), has("run"), args.allow_tool.clone())
         .map_err(AibusError::Usage)?;
+    caps.no_provenance = args.no_provenance;
 
     // The address and the token are settled before anything is created: a refused address leaves
     // no audit file and no socket behind.

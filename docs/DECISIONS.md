@@ -342,6 +342,22 @@ Gated calls, taken at the recommended default:
 
 **Why.** It meets the spec's MUSTs (Origin 403, loopback bind, authenticate) with rmcp doing the protocol and about 150 lines of ours doing the policy, and it leaves `aibus-mcp` transport-free so the closure test keeps meaning something. Tests are written and unrun, as the lane's rule says; they run on the release PR.
 
+## D-15: the write tools of `aibus mcp` (E8, #103, 2026-11-11)
+
+**Context.** The issue left several calls open, and the owner's rule is to take the recommended default and write it down.
+
+**Decision.**
+
+1. The revision is the SHA-256 of the file bytes in lower-case hex, the same value `workflow_get` returns. A write holds a process-wide lock from the revision check to the rename; two processes writing the same file are not covered.
+2. The roster the write tools validate against is what agent discovery finds for the project and the user, without `agents.extra_dirs` or `--agents`, as for `workflow_validate`.
+3. `--no-provenance` is the switch for the provenance option (the epic's decision 5 made it default on). Written files are 0600 in both scopes, because the atomic write has no other mode.
+4. Text a redactor would change (a credential) is refused and never echoed, on top of the checks in the issue.
+5. The security tests are in `crates/aibus/tests/mcp_security.rs` and `crates/aibus-mcp/tests/write_tools.rs`, not `aibus-core/tests/security/`, for the same reason as E4 item 7. The golden transcript (`create_update_conflict`) is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run, since nothing was run for this PR.
+
+**Alternatives.** A fixed mode for the project scope that follows the umask (rejected: it needs a second atomic write for one mode bit). Locking the file across processes (rejected for now: an exclusive lock on a file that is replaced by rename does not hold).
+
+**Why.** The safety model in the issue (names not paths, validate first, a revision check, no gate without its flag) holds with one writer, and a second writer is the user's editor, which the revision check already catches.
+
 ## E12 (2026-11-11): confirmation through elicitation and MRTR is built, the permission relay is not (#107)
 
 **Context.** #107 sat behind owner decisions 6 and 7 on epic #95. Decision 6 (do #106 and #107, elicitation first) has the recommended default of yes. Decision 7 (relay a run's `bash` prompts through the client) has the recommended default of non-goal: the epic says "I lean non-goal until a client I use supports elicitation", and I have no such client. The owner wants zero open issues, so I took both defaults.

@@ -136,3 +136,22 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Keep a long-lived `Flow` and forward only pan events (rejected for now: state that can drift from the graph, and a locked flow turns the wheel into zoom). Put `palette` in `theme.rs` behind the feature (rejected: a second file naming the crate). Draw the overflow by hand in `widgets.rs` (not tried: the epic's point is to find out if the canvas earns its place).
 
 **Why.** It keeps the default build exactly as it was, keeps the cost of backing out to one file, and keeps the graph as the only place state lives.
+
+## E2 (2026-11-11): what `workflow validate` warns about, and what the schema leaves out
+
+**Context.** #97 adds the workflow JSON Schema, `workflow::validate` and the two CLI commands. A few calls were open when I wrote it.
+
+**Decision.** The last step's summary never counts as unread, since it is the workflow's result. A `steps.<agent>.summary` only counts as read when no step of the same name sits between the writer and the reader, because the later one replaces the earlier. `on_fail` on the first step is not warned about (a retry of the first step has no predecessor to re-run, which `execute` already handles). The schema checks shape only and says so; `prompt` and `gate` use the pattern `\S` so a whitespace-only value fails the way `parse` fails it. Template errors and unknown agents live in a fourth fixture directory, `fixtures/workflows/semantic/`, because the schema passes them and the issue's `invalid/` directory has to fail the schema. `validate` reports every step's roster problem even when `parse` stopped earlier, and the CLI adds `path` to each problem in `--json` (the core type has no path, the file is the CLI's business). `$id` is the only keyword added to the schema checker's `KNOWN` list.
+
+**Alternatives.** Warn on the last step too (rejected: every workflow would carry one). Put `semantic` cases in `invalid/` and drop the schema-fails requirement for them (rejected: it weakens the acceptance check).
+
+**Why.** Each choice keeps warnings to things an author can act on and keeps the schema honest about what it can express.
+## G1 (2026-11-11): the command registry and the help screen
+
+**Context.** The registry (`crates/aibus-tui/src/commands.rs`) is now the one place a command is declared. The issue asks for the help screen's command section to come from it, and also for no snapshot file to change. Those two cannot both hold: `shell_help_80x24.txt` and `shell_help_98x46.txt` draw the key map only, so a command section changes them.
+
+**Decision.** The registry gives the help screen its lines (`commands::help_lines()`, with a test), but I did not draw them yet. The two help snapshots stay as they are, and the section lands with the regenerated snapshots on the release PR, where the suites run and I can see the frames. Two smaller calls went the same way: a `needs` miss on a `/fix`-style shorthand now says `/build is not available: no workflow named build` (it used to say `no command /build (try /help)`), and the argument shape check stays inside each entry's `run`, because the existing notices (`/ledger needs a section and text`) are worded per command and the issue says to keep them.
+
+**Alternatives.** Draw the section now and update the two snapshots by hand (rejected: I cannot run the suites on this lane, and a hand-edited frame is a guess). Derive the shape check from the `args` hint (rejected: `/x needs <section> <text>` is a different notice from the current one).
+
+**Why.** Behaviour first, frames with the suites.

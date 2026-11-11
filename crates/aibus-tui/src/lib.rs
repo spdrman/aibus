@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod commands;
 pub mod demo;
 #[cfg(feature = "flow-diagram")]
 pub mod diagram;

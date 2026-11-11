@@ -17,20 +17,6 @@ pub const AGENTS: &str = "view:agents";
 pub const ACCOUNTS_VIEW: &str = "view:accounts";
 pub const TRANSCRIPT: &str = "view:transcript";
 
-/// The commands the palette lists besides agents, workflows and runs: `(id, label, hint)`.
-pub const PALETTE_COMMANDS: [(&str, &str, &str); 10] = [
-    ("agents", "agents screen", "A"),
-    ("accounts", "accounts screen", "K"),
-    ("help", "help: the key map", "?"),
-    ("lead", "lead transcript", "t"),
-    ("permission", "oldest permission prompt", "p"),
-    ("handoff", "write a handoff", "/handoff"),
-    ("clear", "clear the session log", "/clear"),
-    ("rail", "advisor rail", "a"),
-    ("compact", "compact the lead", "/compact"),
-    ("quit", "quit", "q"),
-];
-
 /// The palette's fuzzy match: every character of `needle` in `hay`, in order. A run of
 /// consecutive characters and a match at the start of a word score higher. `None` is no match.
 pub fn fuzzy(needle: &str, hay: &str) -> Option<i64> {
@@ -100,7 +86,7 @@ pub fn palette(t: &mut Tracker) -> Value {
     }
     let text = t.get_key(PALETTE_TEXT).and_then(as_str).unwrap_or("").to_owned();
     let mut all: Vec<Entry> = Vec::new();
-    for (id, label, hint) in PALETTE_COMMANDS {
+    for (id, label, hint) in crate::commands::palette_rows() {
         all.push((format!("cmd:{id}"), "command", label.to_owned(), hint.to_owned()));
     }
     for d in t.get_key(AGENTS_DEFS).map(as_list).unwrap_or_default() {

@@ -1,0 +1,5 @@
+HTTP 400
+content-type: application/json
+x-request-id: req_oa_400
+
+{"error":{"message":"Invalid value: 'tool'. Supported values are: 'system', 'assistant', 'user', and 'function'.","type":"invalid_request_error","param":"messages[0].role","code":"invalid_value"}}

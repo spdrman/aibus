@@ -13,7 +13,7 @@ const POSITIONAL: [(&str, &[&str], &str); 4] = [
     ("agent", &["show"], "agent"),
     ("account", &["show", "test", "remove", "enable", "disable"], "account"),
     ("session", &["show", "resume", "export", "log", "replay"], "session"),
-    ("workflow", &["run"], "workflow"),
+    ("workflow", &["run", "show", "validate"], "workflow"),
 ];
 
 /// Global flags whose value is a name.

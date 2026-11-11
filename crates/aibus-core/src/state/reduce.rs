@@ -16,7 +16,7 @@ use super::*;
 use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{PermissionId, RunId};
-use crate::msg::{AccountView, Command, Decision, Msg, Pane, Screen, Selection, TrOp, UiIntent};
+use crate::msg::{AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
 
@@ -818,6 +818,23 @@ impl R<'_> {
                 }
             }
             Command::Compact { run } => self.set_status(run, RunStatus::Compacting),
+            Command::SetModel { target, model } => {
+                let model = model.trim();
+                if model.is_empty() {
+                    self.log("warn", "model: needs a model");
+                } else if model == "off" && matches!(target, ModelTarget::Lead | ModelTarget::Run(_)) {
+                    let who = if *target == ModelTarget::Lead { "the lead".to_owned() } else { target.label() };
+                    self.log("warn", &format!("model: {who} cannot be turned off"));
+                } else {
+                    // The reducer has no accounts to resolve an alias with: the request waits in
+                    // the graph for the executor, which answers with `Msg::ModelSwitched`.
+                    let id = as_i64(&self.now(MSG_SEQ)).unwrap_or(0);
+                    let req = map([("id", n(id)), ("target", s(&target.label())), ("model", s(model))]);
+                    let assist = self.now(SESSION_ASSIST);
+                    let queue = pushed(get(&assist, "pending").unwrap_or(&NULL), req);
+                    self.put(SESSION_ASSIST, with(&assist, "pending", queue));
+                }
+            }
             Command::LogFilter(text) => {
                 self.put(LOG_FILTER, s(text));
                 self.put(scroll_key("log"), n(0));
@@ -862,6 +879,21 @@ pub fn tool_summary(name: &str, input: &serde_json::Value) -> String {
     }
     .map_or_else(|| input.to_string(), str::to_owned);
     line.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect()
+}
+
+/// `/model <ref>`, `/advisor <ref>` and `/router <ref>` as text: a line that reaches the reducer
+/// as a prompt (a headless caller, an old recording) still switches the model and never goes to
+/// the lead as words.
+fn slash_model(text: &str) -> Option<Command> {
+    let (word, rest) = text.trim().split_once(char::is_whitespace)?;
+    let target = match word {
+        "/model" => ModelTarget::Lead,
+        "/advisor" => ModelTarget::Advisor,
+        "/router" => ModelTarget::Router,
+        _ => return None,
+    };
+    let model = rest.trim();
+    (!model.is_empty()).then(|| Command::SetModel { target, model: model.to_owned() })
 }
 
 /// `/compact` and `/fork <task>` typed while a lead runs: the command, aimed at the lead.
@@ -1004,7 +1036,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.put(TICKS_DROPPED, n(r.env.ticks_dropped));
         }
         Msg::SubmitPrompt { text } => {
-            if as_list(r.cur(RUNS_ORDER)).is_empty() {
+            if let Some(c) = slash_model(text) {
+                r.command(&c);
+            } else if as_list(r.cur(RUNS_ORDER)).is_empty() {
                 r.queue_run(Queue {
                     role: Some(Role::Lead),
                     ..Queue::new("lead", text, false, Isolation::None, None)
@@ -1413,6 +1447,55 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.log("error", &format!("io error in {context}"))
         }
         Msg::Shutdown { reason } => r.put(SHUTDOWN, s(reason.as_str())),
+        Msg::ModelSwitched { id, target, to } => {
+            let assist = r.now(SESSION_ASSIST);
+            let rest: Vec<Value> = as_list(get(&assist, "pending").unwrap_or(&NULL))
+                .iter()
+                .filter(|p| get(p, "id").and_then(as_i64) != i64::try_from(*id).ok())
+                .cloned()
+                .collect();
+            let mut assist = with(&assist, "pending", list(rest));
+            match to {
+                Err(why) => r.log("warn", &format!("model: {why}")),
+                Ok(chosen) => {
+                    let who = target.label();
+                    match (target, chosen) {
+                        (ModelTarget::Advisor | ModelTarget::Router, chosen) => {
+                            let key = if *target == ModelTarget::Advisor { "advisor" } else { "router" };
+                            let seat = get(&assist, key).cloned().unwrap_or(Value::Null);
+                            let mut seat = with(&seat, "enabled", Value::Bool(chosen.is_some()));
+                            // The advisor's label is its model; the router's is a name from config.
+                            if let (ModelTarget::Advisor, Some((m, _))) = (target, chosen) {
+                                seat = with(&seat, "label", s(&m.0));
+                            }
+                            assist = with(&assist, key, seat);
+                        }
+                        (_, None) => r.log("warn", &format!("model: {who} cannot be turned off")),
+                        (_, Some(_)) => {}
+                    }
+                    if let Some((m, account)) = chosen {
+                        let run = match target {
+                            ModelTarget::Run(run) => Some(run.to_string()),
+                            ModelTarget::Lead => as_list(r.cur(RUNS_ORDER))
+                                .iter()
+                                .filter_map(as_str)
+                                .find(|id| get(r.cur(&run_key(id, "meta")), "role").and_then(as_str) == Some("lead"))
+                                .map(str::to_owned),
+                            _ => None,
+                        };
+                        if let Some(run) = run {
+                            let meta = r.cur(&run_key(&run, "meta")).clone();
+                            let meta = with(&with(&meta, "model", s(&m.0)), "account", s(&account.0));
+                            r.put(run_key(&run, "meta"), meta);
+                        }
+                        r.log("info", &format!("model: {who} -> {} ({})", m.0, account.0));
+                    } else if matches!(target, ModelTarget::Advisor | ModelTarget::Router) {
+                        r.log("info", &format!("model: {who} -> off"));
+                    }
+                }
+            }
+            r.put(SESSION_ASSIST, assist);
+        }
     }
     Ok(())
 }

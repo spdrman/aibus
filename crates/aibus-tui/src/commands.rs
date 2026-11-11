@@ -236,25 +236,51 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "model",
-        args: "<alias>",
-        help: "change the lead's model",
+        args: "[@target] <ref>",
+        help: "change the model of the lead, a run or a seat",
         label: "",
         hint: "",
-        scope: Scope::Global,
+        scope: Scope::Run,
         needs: 0,
         surfaces: at(7, 0, 0),
-        run: |c, out| if c.args.is_empty() { need(c, "an alias") } else { prompt_line(c, out) },
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a model");
+            }
+            command(out, Command::SetModel { target: c.target.unwrap_or(ModelTarget::Lead), model: c.args.to_owned() })
+        },
     },
     Spec {
         name: "advisor",
-        args: "<alias>",
-        help: "change the advisor's model",
+        args: "<ref|off>",
+        help: "change the advisor's model, or turn it off",
         label: "",
         hint: "",
         scope: Scope::Global,
         needs: 0,
         surfaces: at(8, 0, 0),
-        run: |c, out| if c.args.is_empty() { need(c, "an alias") } else { prompt_line(c, out) },
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a model or off");
+            }
+            command(out, Command::SetModel { target: ModelTarget::Advisor, model: c.args.to_owned() })
+        },
+    },
+    Spec {
+        name: "router",
+        args: "<ref|off>",
+        help: "change the router's model, or turn it off",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(9, 0, 0),
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a model or off");
+            }
+            command(out, Command::SetModel { target: ModelTarget::Router, model: c.args.to_owned() })
+        },
     },
     Spec {
         name: "workflow",
@@ -264,7 +290,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: 0,
-        surfaces: at(9, 0, 0),
+        surfaces: at(10, 0, 0),
         run: |c, out| match c.args.split_once(char::is_whitespace) {
             Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
             None if !c.args.is_empty() => {
@@ -281,7 +307,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "A",
         scope: Scope::Screen,
         needs: 0,
-        surfaces: at(10, 1, 0),
+        surfaces: at(11, 1, 0),
         run: |_, out| command(out, Command::OpenScreen(Screen::Agents)),
     },
     Spec {
@@ -292,7 +318,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "K",
         scope: Scope::Screen,
         needs: 0,
-        surfaces: at(11, 2, 0),
+        surfaces: at(12, 2, 0),
         run: |_, out| command(out, Command::OpenScreen(Screen::Accounts)),
     },
     Spec {
@@ -303,7 +329,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "?",
         scope: Scope::Screen,
         needs: 0,
-        surfaces: at(12, 3, 0),
+        surfaces: at(13, 3, 0),
         run: |_, out| command(out, Command::OpenHelp),
     },
     Spec {
@@ -314,7 +340,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(13, 0, 0),
+        surfaces: at(14, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -325,7 +351,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(14, 0, 0),
+        surfaces: at(15, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -336,7 +362,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(15, 0, 0),
+        surfaces: at(16, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -347,7 +373,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(16, 0, 0),
+        surfaces: at(17, 0, 0),
         run: shorthand,
     },
     Spec {

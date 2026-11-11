@@ -423,6 +423,37 @@ pub enum Screen {
     ConfirmClear,
 }
 
+/// What `Command::SetModel` changes: the lead's model, a seat's, or one run's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ModelTarget {
+    Lead,
+    Advisor,
+    Router,
+    Run(RunId),
+}
+
+impl ModelTarget {
+    /// The word the graph and the log use for it (`lead`, `advisor`, `router`, `run <id>`).
+    pub fn label(self) -> String {
+        match self {
+            ModelTarget::Lead => "lead".into(),
+            ModelTarget::Advisor => "advisor".into(),
+            ModelTarget::Router => "router".into(),
+            ModelTarget::Run(r) => format!("run {r}"),
+        }
+    }
+
+    /// The inverse of `label`, for what the graph holds.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "lead" => Some(ModelTarget::Lead),
+            "advisor" => Some(ModelTarget::Advisor),
+            "router" => Some(ModelTarget::Router),
+            _ => s.strip_prefix("run ")?.parse().ok().map(ModelTarget::Run),
+        }
+    }
+}
+
 /// The user-facing verb set the TUI and CLI both produce.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
@@ -501,6 +532,13 @@ pub enum Command {
     Clear,
     Quit {
         force: bool,
+    },
+    /// Changes the model of `target` from its next request on. `model` is an alias or a full id,
+    /// or `off` for a seat. The reducer cannot resolve it (it has no accounts), so it queues the
+    /// request and the executor answers with `Msg::ModelSwitched`.
+    SetModel {
+        target: ModelTarget,
+        model: String,
     },
 }
 
@@ -608,6 +646,13 @@ pub enum Msg {
     Shutdown {
         reason: ShutdownReason,
     },
+    /// The executor's answer to a queued `Command::SetModel` (`id` is the request's). `Ok(None)`
+    /// is a seat turned off; `Err` is why nothing changed.
+    ModelSwitched {
+        id: u64,
+        target: ModelTarget,
+        to: Result<Option<(ModelId, AccountName)>, String>,
+    },
     /// The persist effect finished a snapshot. Not in 02 section 3.1: something has to reset
     /// `model:persist:due`, and only a commit can do it.
     Persisted,
@@ -643,6 +688,7 @@ impl Msg {
             Msg::AccountsReloaded { .. } => "AccountsReloaded",
             Msg::IoError { .. } => "IoError",
             Msg::Shutdown { .. } => "Shutdown",
+            Msg::ModelSwitched { .. } => "ModelSwitched",
             Msg::Persisted => "Persisted",
         }
     }
@@ -777,6 +823,7 @@ impl Msg {
                 ("error_len", len(error)),
             ]),
             Msg::Shutdown { reason } => map([("msg", name), ("reason", s(reason.as_str()))]),
+            Msg::ModelSwitched { id, to, .. } => map([("msg", name), ("id", n(*id)), ("ok", Value::Bool(to.is_ok()))]),
         }
     }
 }
@@ -808,5 +855,6 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::LogFilter(_) => "log_filter",
         Command::Clear => "clear",
         Command::Quit { .. } => "quit",
+        Command::SetModel { .. } => "set_model",
     }
 }

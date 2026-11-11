@@ -16,10 +16,10 @@ use crate::agent::{roster, AgentDef, Isolation, Role, Scope};
 use crate::config;
 use crate::effects::SpawnSpec;
 use crate::error::AibusError;
-use crate::ids::{AgentName, RunId};
-use crate::msg::{Command, Msg};
+use crate::ids::{AccountName, AgentName, ModelId, RunId};
+use crate::msg::{Command, ModelTarget, Msg};
 use crate::run::{
-    result, RunConfig, RunDeps, RunError, RunErrorKind, RunMail, RunResult,
+    result, ModelSwitch, RunConfig, RunDeps, RunError, RunErrorKind, RunMail, RunResult,
     RunStatus, Start,
 };
 use crate::state::store::Store;
@@ -164,6 +164,14 @@ pub trait Launcher: Send + Sync {
         prompt: String,
         tx: mpsc::Sender<Msg>,
     ) -> Result<(RunConfig, RunDeps), String>;
+
+    /// `/model`: the provider, credential, model and account for `model` on `target`, picked
+    /// the way a launch picks them. `target` is a seat or a run (the lead arrives as its run
+    /// id). A seat is switched here as well, and `Ok(None)` means it is now off. `Err` is why
+    /// nothing changed.
+    fn switch_model(&self, _target: &ModelTarget, _model: &str) -> Result<Option<ModelSwitch>, String> {
+        Err("this session cannot change models".into())
+    }
 }
 
 #[derive(Default)]
@@ -377,6 +385,29 @@ impl Orchestrator {
         if let Some(w) = lock(&self.inner).waiting.remove(&run) {
             let _ = w.send(Waited::Detached);
         }
+    }
+
+    /// `/model`: asks `launcher` to pick `model` for `target`, hands a run its new model through
+    /// its mailbox (it applies from the next request), and answers the reducer with
+    /// `Msg::ModelSwitched` either way.
+    pub fn switch_model(&self, launcher: &Arc<dyn Launcher>, id: u64, target: ModelTarget, model: &str) {
+        let to = (|| {
+            let run = match target {
+                ModelTarget::Lead => Some(self.lead().ok_or("no lead is running yet")?),
+                ModelTarget::Run(run) => Some(run),
+                ModelTarget::Advisor | ModelTarget::Router => None,
+            };
+            let picked = launcher.switch_model(&run.map_or(target, ModelTarget::Run), model)?;
+            let Some(run) = run else {
+                return Ok(picked.map(|p| (p.model, p.account)));
+            };
+            let picked = picked.ok_or("a run cannot be turned off")?;
+            let mailbox = self.mailbox(run).ok_or_else(|| format!("run {run} is not running"))?;
+            let (m, a): (ModelId, AccountName) = (picked.model.clone(), picked.account.clone());
+            mailbox.try_send(RunMail::Model(picked)).map_err(|_| format!("run {run} did not take the switch"))?;
+            Ok(Some((m, a)))
+        })();
+        self.send_later(Msg::ModelSwitched { id, target, to });
     }
 
     /// `/compact`: the run compacts at its next turn boundary.

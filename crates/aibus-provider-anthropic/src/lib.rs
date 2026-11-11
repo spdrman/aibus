@@ -112,7 +112,7 @@ impl Anthropic {
             id,
             extra_headers,
             base: base.to_owned(),
-            table: Mutex::new(ModelTable::load(id, include_str!("models.json"), cfg, prefixes, false)?),
+            table: Mutex::new(ModelTable::load(id, aibus_provider::catalog::table("anthropic").unwrap_or_default(), cfg, prefixes, false)?),
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
             transport,

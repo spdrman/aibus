@@ -104,17 +104,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "llama-3.3-70b-versatile",
-      "context_window": 131072,
-      "max_output": 32768,
-      "family": "llama",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "groq",
    "prefixes": [
     "llama-",
     "meta-llama/",
@@ -139,17 +129,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "mistral-large-latest",
-      "context_window": 128000,
-      "max_output": 8192,
-      "family": "mistral",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "mistral",
    "prefixes": [
     "mistral-",
     "codestral-",
@@ -174,24 +154,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "deepseek-chat",
-      "context_window": 128000,
-      "max_output": 8192,
-      "family": "deepseek",
-      "deprecated": false
-     },
-     {
-      "id": "deepseek-reasoner",
-      "context_window": 128000,
-      "max_output": 65536,
-      "family": "deepseek",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "deepseek",
    "prefixes": [
     "deepseek-"
    ],
@@ -211,17 +174,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "grok-3",
-      "context_window": 131072,
-      "max_output": 8192,
-      "family": "grok",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "xai",
    "prefixes": [
     "grok-"
    ],
@@ -241,17 +194,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-      "context_window": 131072,
-      "max_output": 8192,
-      "family": "llama",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "together",
    "prefixes": [
     "meta-llama/",
     "Qwen/",
@@ -274,17 +217,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "accounts/fireworks/models/llama-v3p3-70b-instruct",
-      "context_window": 131072,
-      "max_output": 8192,
-      "family": "llama",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "fireworks",
    "prefixes": [
     "accounts/fireworks/"
    ],
@@ -304,17 +237,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "llama-3.3-70b",
-      "context_window": 65536,
-      "max_output": 8192,
-      "family": "llama",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "cerebras",
    "prefixes": [
     "llama",
     "qwen-",
@@ -336,17 +259,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-      "context_window": 131072,
-      "max_output": 8192,
-      "family": "llama",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "deepinfra",
    "prefixes": [
     "meta-llama/",
     "Qwen/",
@@ -369,24 +282,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "sonar",
-      "context_window": 127072,
-      "max_output": 8192,
-      "family": "sonar",
-      "deprecated": false
-     },
-     {
-      "id": "sonar-pro",
-      "context_window": 200000,
-      "max_output": 8192,
-      "family": "sonar",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "perplexity",
    "prefixes": [
     "sonar"
    ],
@@ -406,17 +302,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "openai/gpt-4.1",
-      "context_window": 1047576,
-      "max_output": 32768,
-      "family": "gpt",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "openrouter",
    "prefixes": [
     "openai/",
     "anthropic/",
@@ -565,24 +451,7 @@
     "bearer",
     "env"
    ],
-   "model_table": {
-    "models": [
-     {
-      "id": "gemini-2.5-flash",
-      "context_window": 1048576,
-      "max_output": 65536,
-      "family": "gemini",
-      "deprecated": false
-     },
-     {
-      "id": "gemini-2.5-pro",
-      "context_window": 1048576,
-      "max_output": 65536,
-      "family": "gemini",
-      "deprecated": false
-     }
-    ]
-   },
+   "model_table": "gemini-openai",
    "prefixes": [
     "gemini-"
    ],

@@ -1,0 +1,7 @@
+{
+  "models": [
+    {"id": "deepseek-chat", "context_window": 128000, "max_output": 8192, "family": "deepseek", "deprecated": false},
+    {"id": "deepseek-reasoner", "context_window": 128000, "max_output": 65536, "family": "deepseek", "deprecated": false}
+  ],
+  "families": {}
+}

@@ -342,6 +342,24 @@ Gated calls, taken at the recommended default:
 
 **Why.** It meets the spec's MUSTs (Origin 403, loopback bind, authenticate) with rmcp doing the protocol and about 150 lines of ours doing the policy, and it leaves `aibus-mcp` transport-free so the closure test keeps meaning something. Tests are written and unrun, as the lane's rule says; they run on the release PR.
 
+## G4 (2026-11-11): /login, /logout, the secret entry, and what a reload swaps
+
+**Context.** #123 is a bug (the verify blocks the loop, the key is a plain `String`, the registry is only built at startup) and a feature (`/login`, `/logout`, a provider list). A few things in it were open or turned out bigger than they read.
+
+**Decision.**
+
+1. The key is a `Secret<String>` from the first keystroke. `Entry` holds it in `key` and shows one dot per character in `text`; every edit builds the next `Secret` into a buffer sized to never regrow, so the old one is zeroised on drop. `Entry::clone` (used to hand the frame its copy) leaves the key out on purpose. `AccountOp` and `Job` lose `Clone`; `AccountOp` compares keys by their text, by hand, because `Secret` has no `PartialEq`.
+2. The verify runs on a thread of the account hook's own. The hook returns the line to show (`verifying <name>...`) and the thread sends `Msg::AccountsReloaded` and then `Msg::AccountOpDone { op, account, ok, text }` through the loop's channel. The graph logs the outcome (`account add work: done`), never `text`, since a provider's words can echo a key; `Input::observe` is what puts `text` under the Accounts rows. `run_job` and `AccountHook` take the sender for this.
+3. `/login` with anything after the provider is refused with the provider and `[redacted]`. The line is also kept out of the prompt history (`Prompt::take` asks `commands::carries_key`), so the up arrow does not bring a pasted key back. The same name entry serves `/login <provider>`, a pick in the list and `a` on the Accounts screen (which now opens the list; the free-text provider step is gone).
+4. The provider list is the presets (`aibus_provider::presets`). A user `[[provider]]` is not listed; `aibus account add` still takes it.
+5. `/logout` asks first through `confirm:logout:<name>`, which needs `Screen` to carry an account name, so `Screen` is no longer `Copy`.
+6. Reload without restart swaps the launcher's registry (`ChildLauncher::set_accounts`, behind an `RwLock`); the seats and a run already started keep what they resolved. It is only done for a session that started with accounts. A session that started on the built-in fake (no account configured) keeps the fake, because its default model and its credential path are the fake's, and swapping the registry under them would send the fake key to a real provider; the line says `restart to run on it`. Making `session_default` and the model defaults swappable is the follow-up.
+7. The OAuth modal of the issue (authorization URL, device code, `o` to open the browser, `Esc` to cancel) is split out of this PR as a follow-up issue: the key path works for every provider that takes a key, including OpenRouter, and the modal is a screen and a flow of its own.
+
+**Alternatives.** Keep `String` in the job and zeroise after (rejected: it is in the loop's state for the length of the verify). A `Secret` newtype with `Clone` for the entry (rejected: a clone is exactly how it would end up in a frame). Swap `session_default` as well in this PR (rejected: it touches the defaults every launch reads and the issue says to split rather than widen).
+
+**Why.** The key never exists outside a `Secret`, nothing waits on the network, and the part of the reload that would have been a second PR is named instead of half done.
+
 ## D-15: the write tools of `aibus mcp` (E8, #103, 2026-11-11)
 
 **Context.** The issue left several calls open, and the owner's rule is to take the recommended default and write it down.
@@ -440,3 +458,13 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Link `aibus-mcp` into the TUI over a channel (rejected for now, as the issue says: a new transport and no process boundary around the server). Connect lazily on the first `/workflow new` by making the registry mutable (rejected: a larger change to the executor for one idle process). Put the server's prompt into the system prompt by launching the author with a rendered definition (rejected: it needs an async fetch inside the synchronous launcher).
 
 **Why.** The author gets the least capability that works (a server with no write or run tool at all, and nothing else of it offered to any other agent), and every piece reuses what exists: the validator, the MCP client, the child-result wrapping and the permission modal.
+
+## D-F3: Capabilities per model, a closed compat enum, and the leftover provider fields
+
+**Context.** Issue #111. `Capabilities` was per provider, which is wrong for a preset table where one model reasons and its neighbour does not, and `ProviderDef.compat` was a struct that mixed capabilities (`logprobs`, `effort`, ...) with wire quirks and with three things that are neither (`user`, `open_aliases`, `responses`, `auth_header`).
+
+**Decision.** `ModelEntry` gains `capabilities` (a `CapabilityOverrides`, every field optional) and `reasoning`. `ProviderDef` gains `default_capabilities`, and `compat` becomes a list over the closed `CompatFlag` enum from the issue (twelve names, two of them carrying a value). `Provider::capabilities_for(&ModelId)` has a default that answers like `capabilities()`, so providers without per-model data need nothing. The compat flags that are capabilities seen from the wire (`no_system_role`, `strip_images`) apply last, after the model layers. Layers of a model entry merge field by field instead of replacing the whole entry, so a 0.1.0 override file that only names sizes keeps the built-in capabilities. `user`, `open_aliases`, `responses` and `auth_header` are not wire quirks in the issue's list and not capabilities, so they moved up to plain optional fields on `ProviderDef` instead of being invented as flags. `reasoning` is `Option<bool>` on the entry (the issue says `bool`) so that "the file did not say" survives a layer merge; in a file it reads the same.
+
+**Alternatives.** Keeping `Compat` as a struct next to the new list (rejected: two things called compat). Replacing a model entry whole per layer (rejected: a size-only override would drop its capabilities). Adding `user` and friends to the enum (rejected: the issue says anything not named goes on the "Later" list).
+
+**Why.** One place says what a model can do, one small closed set says how the server deviates, and `degrade` stays a pure function of resolved capabilities.

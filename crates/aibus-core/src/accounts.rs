@@ -268,14 +268,14 @@ impl AccountRegistry {
             .iter()
             .position(|(a, _)| a.tags.iter().any(|t| hints.prefer_tags.contains(t)))
             .or_else(|| {
-                let has = |a: &config::Account| {
+                let has = |(a, id): &(&config::Account, ModelId)| {
                     hints.logprobs
                         && self
                             .providers
                             .get(&a.provider)
-                            .is_ok_and(|p| p.capabilities().logprobs)
+                            .is_ok_and(|p| p.capabilities_for(id).logprobs)
                 };
-                found.iter().position(|(a, _)| has(a))
+                found.iter().position(has)
             })
             .unwrap_or(0);
         if found.is_empty() {

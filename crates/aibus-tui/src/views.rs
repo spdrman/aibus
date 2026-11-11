@@ -20,6 +20,7 @@ pub const TRANSCRIPT: &str = "view:transcript";
 pub const RUN_STATUS: &str = "view:run_status";
 pub const COST: &str = "view:cost";
 pub const MODELS: &str = "view:models";
+pub const PROVIDERS: &str = "view:providers";
 pub const WORKFLOWS_VIEW: &str = "view:workflows";
 
 /// The palette's fuzzy match: every character of `needle` in `hay`, in order. A run of
@@ -311,6 +312,26 @@ pub fn models(t: &mut Tracker) -> Value {
     ])
 }
 
+
+/// `view:providers`: the providers an account can be added for, one row each. They are the
+/// built-in presets (`aibus_provider::presets`), so a new vendor is a line of data there.
+pub fn providers(t: &mut Tracker) -> Value {
+    if t.get_key(MODAL).and_then(as_str) != Some("providers") {
+        return Value::Null;
+    }
+    let all = aibus_provider::presets::presets();
+    let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, all.len().saturating_sub(1) as i64);
+    let rows = all.iter().map(|p| {
+        let keyless = p.auth_methods.iter().all(|m| m == "none");
+        map([
+            ("id", s(&p.id)),
+            ("api", s(p.api.map_or("", |a| a.as_str()))),
+            ("url", s(p.base_url.as_deref().unwrap_or("your own"))),
+            ("auth", s(if keyless { "none" } else { "key" })),
+        ])
+    });
+    map([("rows", list(rows.collect())), ("sel", n(sel))])
+}
 
 fn row_value(row: &Row, selected: Option<i64>) -> Value {
     match row {

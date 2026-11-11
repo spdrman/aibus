@@ -41,6 +41,7 @@ pub const ALL_NAMES: [&str; 29] = [
     "HandoffWritten",
     "AgentsReloaded",
     "AccountsReloaded",
+    "AccountOpDone",
     "IoError",
     "Shutdown",
     "ModelSwitched",
@@ -604,6 +605,12 @@ pub fn cases() -> Vec<Case> {
                 }],
             },
             expect: vec!["model:accounts", "model:log"],
+        },
+        Case {
+            name: "AccountOpDone",
+            setup: none,
+            msg: Msg::AccountOpDone { op: "add".into(), account: "work".into(), ok: true, text: t.clone() },
+            expect: vec!["model:log"],
         },
         Case {
             name: "IoError",

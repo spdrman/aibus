@@ -1,0 +1,10 @@
+{
+ "flag": "strip_images",
+ "api": "anthropic-messages",
+ "with": {
+  "/messages/0/content/1/text": "[image omitted]"
+ },
+ "without": {
+  "/messages/0/content/1/type": "image"
+ }
+}

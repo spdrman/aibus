@@ -103,7 +103,7 @@ impl Gemini {
             id,
             base: base.to_owned(),
             extra_headers,
-            table: Mutex::new(ModelTable::load(id, &builtin, cfg, &prefixes, def.compat().open_aliases)?),
+            table: Mutex::new(ModelTable::load(id, &builtin, cfg, &prefixes, def.open_aliases.unwrap_or(false))?),
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
         })

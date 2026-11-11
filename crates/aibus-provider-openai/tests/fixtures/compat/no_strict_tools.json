@@ -1,0 +1,10 @@
+{
+ "flag": "no_strict_tools",
+ "api": "openai-responses",
+ "with": {
+  "/tools/0/strict": "<absent>"
+ },
+ "without": {
+  "/tools/0/strict": false
+ }
+}

@@ -8,7 +8,7 @@
 //! (B1.3) at 7 and 9, the TUI at 8.
 
 use std::io::{IsTerminal, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -459,8 +459,26 @@ impl Step for DiscoverAgents {
 
 struct LoadAccounts;
 
+/// The accounts of the config files as they are now: a registry over freshly built providers, and
+/// what the graph may know about each. A login or a logout in the terminal calls this after the
+/// config changed, so the new account is selectable without a restart.
+pub(crate) fn reload_accounts(
+    paths: &Paths,
+    project_settings: &Path,
+    factories: &[Box<dyn ProviderFactory>],
+) -> Result<(Arc<AccountRegistry>, Vec<AccountView>), AibusError> {
+    let cfg = config::load(&paths.config_file(), Some(project_settings))?.config;
+    let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
+    let providers = Arc::new(ProviderRegistry::new(factories, &configs)?);
+    let registry = Arc::new(AccountRegistry::new(&cfg, providers));
+    let views = account_views(&cfg, &registry);
+    Ok((registry, views))
+}
+
 #[cfg(test)]
 mod model_rows;
+#[cfg(test)]
+mod reload;
 
 /// What the graph may know about each enabled account, with the models its provider's tables
 /// list. Used at startup and by a reload after an account was added or removed.
@@ -854,7 +872,7 @@ impl Step for EnterLoop {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect(),
             ),
-            registry: acc.registry.clone(),
+            registry: std::sync::RwLock::new(acc.registry.clone()),
             store: acc.store.clone(),
             builtin: acc.builtin,
             redactor: ctx.redactor.clone(),

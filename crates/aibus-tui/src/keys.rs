@@ -95,6 +95,7 @@ pub enum Ctx {
     Agents,
     Accounts,
     Models,
+    Providers,
     /// `/workflow list`.
     Workflows,
     Outcome,
@@ -523,6 +524,7 @@ fn ctx_name(c: Ctx) -> &'static str {
         Ctx::Agents => "agents",
         Ctx::Accounts => "accounts",
         Ctx::Models => "models",
+        Ctx::Providers => "providers",
         Ctx::Workflows => "workflows",
         Ctx::Outcome => "outcome",
         Ctx::Confirm => "confirm",

@@ -18,6 +18,11 @@ uses as the release notes, so every release needs its entry before it is merged 
 * `aibus mcp --allow run` adds the run resources (E10, #105): `aibus://runs/{run}` is the `run_status` body without the tail and `aibus://runs/{run}/log` the run's output, redacted, wrapped as data and cut at the result cap. Only runs the server started are readable; the `explain_run` prompt points at them.
 * A built-in `workflow-author` agent and `/workflow new <goal>` (G6, #125). The agent is read-only (`read`, `glob`, `grep` and `mcp:aibus:*`) and talks to this program's own `aibus mcp` over stdio, which the binary adds as `[mcp.aibus]` when you have none (no `--allow`, so no write or run tool exists for it; only the author is offered those tools). `/workflow new` makes the lead delegate the goal to it in the foreground, so the report comes back as data and the card shows the author like any worker. Its last fenced `toml` block that validates against your agents is kept as the draft `/workflow save` writes. It has a cost cap of a quarter of `limits.max_cost_usd` unless its definition names one, and `aibus doctor` has a `workflow author` row. See `docs/MCP.md`.
 
+### Accounts and models in the terminal
+
+* `/model` with no reference opens a picker of what the connected accounts serve, with context window, prices (`n/a` when the table has none) and capabilities; it filters by the target's role and sets the lead, a run or a seat (G3, #122).
+* `/login [provider]`, `/logout <account>` and `/accounts`: pick a provider, name the account, type the key into a masked field (a `Secret` from the first keystroke). The verify runs off the UI loop, and the new account is usable at once for a session that started with accounts (G4, #123).
+
 ### Providers
 
 * Gemini has a native adapter, `aibus-provider-gemini`, behind a new `gemini` preset (`api = "gemini-generate-content"`, key in `x-goog-api-key`, `GEMINI_API_KEY`). It keeps thought signatures across tool turns, streams thought summaries, reports reasoning and cached tokens, counts tokens through `countTokens`, and has a priced model table. `gemini-openai` (the OpenAI shim) is unchanged. See `docs/PROVIDERS.md` and D-14.

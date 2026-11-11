@@ -981,6 +981,7 @@ mod tests {
                 [Msg::Command(Command::SetModel { target, model })] => Ok((*target, model.clone())),
                 other => panic!("{other:?}"),
             },
+            Sent::Login(..) => panic!("/model never logs in"),
             Sent::Bad(why) => Err(why),
         };
         assert_eq!(line(&env, "/model @grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));

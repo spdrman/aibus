@@ -170,6 +170,35 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 
 **Why.** Behaviour first, frames with the suites.
 
+## G5 (2026-11-11): the per-agent commands
+
+**Context.** #124 adds `/status`, `/cost`, `/log`, `/cancel`, `/retry`, `/message`, `/resume` and `/background` to the registry, two menu items and two keys. A few things the issue left open had to be picked.
+
+**Decision.**
+
+1. The state rules (`/retry` on a failed or partial run, `/resume` on a finished one) are two more `needs` bits, `RETRYABLE` and `FINISHED`, judged against the run the `@target` resolved to, after the target is parsed. The popup judges them against the focused card, else the lead. A miss says `/retry is not available: the run is running`.
+2. `/cost` is not a `Run` row. With no target it is the session table, and the focused-card fallback would have turned it into a status. `/cost @t` opens the same modal as `/status @t`. The menu's Cost item opens the table.
+3. `/status @advisor` and `/status @router` get their own screens (`AdvisorStatus`, `RouterStatus`) rather than a `RunId`, since a seat has no run. The advisor shows its checkpoints so far, the router its answers so far.
+4. `/resume @t` with no text sends `continue`, the same as `R` and the menu. `/cancel` asks only when typed against the lead; the menu and `x` still cancel at once, as before.
+5. The status bar has no cost segment drawn yet, so I added a `cost` field to `view:status_bar` computed by the same `session_cost` the cost table uses. The two cannot disagree, and the acceptance test compares them. Drawing it is not part of this issue.
+6. `i` (status) is bound in cards and transcript, `$` (cost) in the dashboard and transcript, not the prompt, where it is typing.
+
+**Alternatives.** A `Screen::RunStatus` for seats too, with a fake id (rejected: it lies about what the id is). Making `/cost` a `Run` row and using a `--all` flag for the table (rejected: the issue says no target means the table). Waiting for a drawn cost segment before adding the field (rejected: the acceptance check needs a number to compare).
+
+**Why.** Each choice keeps the rule in the registry, where the popup, the slash line and the menu already read it.
+
+**Snapshots.** The menu is two rows taller and the help screen lists two more keys, so `state_menu_*`, `shell_help_*` and the menu crops change. I cannot run the suites on this lane, so they regenerate on the release PR, as with G1.
+
+## D-13: the card row pans a card at a time, and the flow gets no mouse events (#89)
+
+**Context.** #89 asks for pan on the rataflow canvas, with `cards_x` "now a world offset" and `ViewportChanged` read back from the flow. But `ctrl:scroll:cards:x` is already the index of the first card in the window, the reducer already moves it when the selection leaves the window, and a locked flow turns the wheel into zoom and a left press into a pan without any hit test (D1.1, item 7).
+
+**Decision.** `cards:x` stays a card index. A drag from empty canvas (`Drag::Pan` in `input.rs`) and Shift plus the wheel both change it through the existing `UiIntent::Scroll { sideways: true }`, one card and its gap (20 cells) per step, so the position persists and replays like before. The reducer clamps it to the last window when there are more than three cards (it keeps accepting anything for three or fewer, which the older `ui_intent` test relies on). On the flow path the cards beside the window are nodes at the same 20-cell stride, so a card the window reaches is exactly where the classic row would draw it, and the neighbours show at the column's edges. The flow is rebuilt every frame and never sees a mouse event, so zoom, node drag, connect and box select are unreachable, not just switched off.
+
+**Alternatives.** A cell-granular world offset in the graph (rejected: it forks the reducer's selection logic and the replay fixtures for a smoother drag). Forward pan gestures to a long-lived `Flow` and read `ViewportChanged` (rejected: two sources of truth for one offset).
+
+**Why.** It meets the behaviour the issue wants (more than three cards reachable by mouse and key, clamped, selection stays in view) without a second copy of the pan state.
+
 ## D-13: The MCP server uses `rmcp` 3.9 in a new `aibus-mcp` crate (E1, 2026-11-11)
 
 **Context.** Epic #95 adds `aibus mcp`, a stdio MCP server. The spike (`docs/spikes/E1-mcp-server.md`) built a throwaway crate with `rmcp` 3.9.0 (`server`, `macros`, `transport-io`, no defaults) in docker on MARS.

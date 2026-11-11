@@ -202,6 +202,16 @@ pub struct McpArgs {
     /// Pre-approve a tool for runs started through MCP (repeatable)
     #[arg(long, value_name = "PATTERN", action = ArgAction::Append)]
     pub allow_tool: Vec<String>,
+    /// Serve Streamable HTTP on this loopback address instead of stdio (a non-loopback address
+    /// is exit 2)
+    ///
+    /// The bearer token comes from AIBUS_MCP_TOKEN, or one is generated and printed once to
+    /// stderr.
+    #[arg(long, value_name = "IP:PORT")]
+    pub http: Option<String>,
+    /// Accept this Origin as well as the loopback ones (repeatable, needs --http)
+    #[arg(long, value_name = "ORIGIN", action = ArgAction::Append, requires = "http")]
+    pub origin: Vec<String>,
     /// Runs one process may start (not available yet)
     #[arg(long, value_name = "N")]
     pub max_runs: Option<u32>,

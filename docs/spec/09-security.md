@@ -76,7 +76,7 @@ Workflows can carry `gate` commands; same rule.
 
 ## 8. Network
 
-Only provider crates open sockets, plus `web_fetch` when enabled and `http` hooks in M5. TLS via `rustls` (no OpenSSL). Proxies from `HTTPS_PROXY` honoured. Every request carries `User-Agent: aibus/<version>` and a `RequestMetadata` with session and run ids for provider-side tracing, never usernames or paths. There is no telemetry; `aibus` does not phone home.
+Only provider crates open sockets, plus `web_fetch` when enabled and `http` hooks in M5, and one listener: `aibus mcp --http` (E11, off unless the flag is given), which binds a loopback address only, wants a bearer token on every request and checks `Origin` and `Host`; it lives in the `aibus` binary, not in `aibus-core` or `aibus-mcp`. TLS via `rustls` (no OpenSSL). Proxies from `HTTPS_PROXY` honoured. Every request carries `User-Agent: aibus/<version>` and a `RequestMetadata` with session and run ids for provider-side tracing, never usernames or paths. There is no telemetry; `aibus` does not phone home.
 
 ## 9. Supply chain
 

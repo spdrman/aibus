@@ -19,6 +19,7 @@ mod launch;
 mod logfile;
 mod logging;
 mod mcp_cmd;
+mod mcp_http;
 mod net;
 mod oauth;
 mod plain;

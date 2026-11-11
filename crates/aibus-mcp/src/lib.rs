@@ -4,37 +4,63 @@
 #![forbid(unsafe_code)]
 
 mod audit;
+mod confirm;
 mod limits;
+pub mod prompts;
+mod read;
+pub mod resources;
+mod write;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use aibus_core::persist::paths::Paths;
-use aibus_core::{workflow, Redactor};
+use aibus_core::{workflow, AgentName, Redactor};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
-    ToolAnnotations,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, Implementation, JsonObject, ListPromptsResult, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+    ReadResourceResponse, ReadResourceResult, ResourceContents, ServerCapabilities, ServerConfig,
+    Tool, ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler, ServiceExt};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use audit::AuditLog;
-pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES};
+pub use confirm::ConfirmConfig;
+use confirm::Confirm;
+pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES, WRITES_PER_MINUTE};
 use limits::RateLimiter;
 
 /// Tools per `tools/list` page.
 const PAGE: usize = 50;
 
-const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
+pub(crate) const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
+
+/// The peer address of an HTTP request. The HTTP host in the binary puts one in the request's
+/// extensions and `call_tool` reads it back from there (rmcp hands the request parts to the
+/// handler), so the audit line can say who called. Stdio has none.
+#[derive(Clone, Copy, Debug)]
+pub struct ClientAddr(pub SocketAddr);
+
+/// Who sent the request, for the audit line: the address an HTTP host stored in the request's
+/// extensions, or nothing on stdio.
+fn peer(context: &RequestContext<RoleServer>) -> Option<SocketAddr> {
+    context
+        .extensions
+        .get::<http::request::Parts>()
+        .and_then(|p| p.extensions.get::<ClientAddr>())
+        .map(|a| a.0)
+}
 
 /// What the process was started to allow (the epic's capability table). The surface is fixed at
 /// start and the model cannot raise it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Caps {
-    /// `--allow write`: create and update workflows (no tool for it yet).
+    /// `--allow write`: `workflow_create` and `workflow_update`.
     pub write: bool,
     /// `--allow gates`: a written workflow may carry `gate` commands.
     pub gates: bool,
@@ -42,6 +68,8 @@ pub struct Caps {
     pub run: bool,
     /// `--allow-tool`: pre-approvals for runs.
     pub allow_tools: Vec<String>,
+    /// `--no-provenance`: do not put the `# written through aibus mcp` line in written files.
+    pub no_provenance: bool,
 }
 
 impl Caps {
@@ -51,7 +79,7 @@ impl Caps {
         if gates && !write {
             return Err("--allow gates needs --allow write: a gate is part of a written workflow".into());
         }
-        Ok(Self { write, gates, run, allow_tools })
+        Ok(Self { write, gates, run, allow_tools, no_provenance: false })
     }
 }
 
@@ -62,7 +90,12 @@ pub struct Server {
     home: Option<PathBuf>,
     audit: AuditLog,
     limiter: Mutex<RateLimiter>,
+    write_limiter: Mutex<RateLimiter>,
+    /// Held from the revision check to the rename, so two writes in this process cannot both
+    /// pass the check.
+    write_lock: Mutex<()>,
     redactor: Redactor,
+    confirm: Confirm,
 }
 
 impl Server {
@@ -78,6 +111,7 @@ impl Server {
     ) -> std::io::Result<Self> {
         let audit = AuditLog::create(&paths.state.join("logs").join("mcp"), redactor.clone())?;
         audit.record(
+            None,
             None,
             "server/start",
             None,
@@ -96,9 +130,33 @@ impl Server {
             config: paths.config.clone(),
             home,
             audit,
-            limiter: Mutex::new(RateLimiter::new(Instant::now())),
+            limiter: Mutex::new(RateLimiter::new(CALLS_PER_MINUTE, Instant::now())),
+            write_limiter: Mutex::new(RateLimiter::new(WRITES_PER_MINUTE, Instant::now())),
+            write_lock: Mutex::new(()),
             redactor,
+            confirm: Confirm::new(ConfirmConfig::default()),
         })
+    }
+
+    /// An `isError` result: the sentence a caller can act on, through the redactor.
+    fn fail(&self, message: impl AsRef<str>) -> CallToolResult {
+        let text = self.redactor.redact(message.as_ref()).into_owned();
+        CallToolResult::error(vec![ContentBlock::text(text)])
+    }
+
+    /// A structured result, through the redactor.
+    fn done(&self, mut body: Value) -> CallToolResult {
+        self.redactor.redact_json(&mut body);
+        CallToolResult::structured(body)
+    }
+
+    /// The agents a workflow may name: whatever discovery finds for this project and the user.
+    /// `agents.extra_dirs` from the config are not read here.
+    fn roster(&self) -> Result<Vec<AgentName>, String> {
+        let user = self.config.join("agents");
+        aibus_core::agent::discover::discover(None, &self.project, Some(&user), &[], &[])
+            .map(|found| found.agents.into_keys().collect())
+            .map_err(|e| format!("agent discovery failed: {e}"))
     }
 
     pub fn caps(&self) -> &Caps {
@@ -107,9 +165,6 @@ impl Server {
 
     /// The tools the flags enable, in the epic's table order. A tool that is off is not listed.
     pub fn tools(&self) -> Vec<Tool> {
-        let schema = |v: Value| -> Arc<JsonObject> {
-            Arc::new(v.as_object().expect("a schema is an object").clone())
-        };
         let item = json!({
             "type": "object",
             "properties": {
@@ -123,7 +178,7 @@ impl Server {
             "required": ["name", "scope", "path", "description", "ok"],
             "additionalProperties": false,
         });
-        vec![Tool::new(
+        let mut tools = vec![Tool::new(
             "workflow_list",
             "List the workflows of this project and of the user, with the parse error of any file that is broken.",
             schema(json!({
@@ -142,7 +197,12 @@ impl Server {
         })))
         .with_annotations(
             ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false),
-        )]
+        )];
+        tools.extend(read::tools());
+        if self.caps.write {
+            tools.extend(write::tools());
+        }
+        tools
     }
 
     /// One `tools/call`, the only way in. It holds what a caller must not be able to skip: the
@@ -160,11 +220,23 @@ impl Server {
         args: Option<JsonObject>,
         now: Instant,
     ) -> Result<CallToolResult, ErrorData> {
+        self.call_from(client, None, name, args, now)
+    }
+
+    /// `call` for a request that came from a socket: `addr` goes on the audit line.
+    pub fn call_from(
+        &self,
+        client: Option<&Implementation>,
+        addr: Option<SocketAddr>,
+        name: &str,
+        args: Option<JsonObject>,
+        now: Instant,
+    ) -> Result<CallToolResult, ErrorData> {
         let started = Instant::now();
         let args = args.map_or(Value::Null, Value::Object);
         let result = self.dispatch(name, &args, now);
         let ok = result.as_ref().is_ok_and(|r| r.is_error != Some(true));
-        self.audit.record(client, "tools/call", Some(name), &args, ok, started.elapsed());
+        self.audit.record(client, addr, "tools/call", Some(name), &args, ok, started.elapsed());
         result
     }
 
@@ -188,26 +260,27 @@ impl Server {
                 "rate limit: at most {CALLS_PER_MINUTE} tool calls a minute, try again in {secs} s"
             ))]));
         }
-        // `workflow_list` is the only tool, and takes nothing.
-        if args.as_object().is_some_and(|a| !a.is_empty()) {
-            return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));
+        match name {
+            "workflow_list" => {
+                if args.as_object().is_some_and(|a| !a.is_empty()) {
+                    return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));
+                }
+                let mut found = self.list_workflows();
+                self.redactor.redact_json(&mut found);
+                Ok(CallToolResult::structured(found))
+            }
+            "workflow_create" => self.workflow_write(false, args, now),
+            "workflow_update" => self.workflow_write(true, args, now),
+            // The read tools; it answers `-32602` for a name it does not know either.
+            other => self.read_tool(other, args),
         }
-        let mut found = self.list_workflows();
-        self.redactor.redact_json(&mut found);
-        Ok(CallToolResult::structured(found))
     }
 
     /// `{workflows:[{name, scope, path, description, ok, error?}]}`, paths relative to the
     /// project or to `~`.
     fn list_workflows(&self) -> Value {
         let dirs = workflow::dirs(&self.project, Some(&self.config));
-        let shorten = |text: &str| -> String {
-            let mut out = text.replace(&format!("{}/", self.project.display()), "");
-            if let Some(home) = &self.home {
-                out = out.replace(&home.display().to_string(), "~");
-            }
-            out
-        };
+        let shorten = |text: &str| self.shorten(text);
         let rows: Vec<Value> = workflow::list(&dirs)
             .into_iter()
             .map(|(name, path, parsed)| {
@@ -232,10 +305,10 @@ impl Server {
 
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().enable_prompts().build())
             .with_server_info(Implementation::new("aibus", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "aibus workflows. Start with workflow_list. This server is read-only unless it was started with --allow flags.",
+                "aibus workflows. Start with workflow_list; workflow_validate checks a draft before anything is written. This server is read-only unless it was started with --allow flags.",
             )
     }
 
@@ -265,8 +338,78 @@ impl ServerHandler for Server {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let client = context.client_info();
-        self.call(client.as_ref(), &request.name, request.arguments, Instant::now())
+        let addr = peer(&context);
+        if let Some(stop) = self.confirm(&request, &context, client.as_ref(), addr).await {
+            return Ok(stop);
+        }
+        self.call_from(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
             .map(CallToolResponse::from)
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(ListResourcesResult::with_all_items(resources::list()))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        Ok(ListResourceTemplatesResult::with_all_items(resources::templates()))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let started = Instant::now();
+        let read = self.read_resource_text(&request.uri);
+        let uri = self.redactor.redact(&request.uri).into_owned();
+        self.audit.record(
+            context.client_info().as_ref(),
+            peer(&context),
+            "resources/read",
+            None,
+            &json!({ "uri": uri }),
+            read.is_ok(),
+            started.elapsed(),
+        );
+        let (mime, text) = read?;
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(text, uri).with_mime_type(mime)]).into())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(prompts::list()))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let started = Instant::now();
+        let args = request.arguments.unwrap_or_default();
+        let got = self.get_prompt_text(&request.name, &args);
+        let name = self.redactor.redact(&request.name).into_owned();
+        self.audit.record(
+            context.client_info().as_ref(),
+            peer(&context),
+            "prompts/get",
+            Some(&name),
+            &Value::Object(args),
+            got.is_ok(),
+            started.elapsed(),
+        );
+        got.map(GetPromptResponse::from)
     }
 }
 
@@ -283,3 +426,40 @@ pub fn serve_stdio(server: Server) -> Result<(), String> {
         running.waiting().await.map(|_| ()).map_err(|e| e.to_string())
     })
 }
+
+/// The shared schema object of a tool.
+pub(crate) fn schema(v: Value) -> Arc<JsonObject> {
+    Arc::new(v.as_object().expect("a schema is an object").clone())
+}
+
+/// The arguments of `tool` as an object that has every key of `required` and no key outside
+/// `required` and `optional`; anything else is a call the schema forbids (`-32602`).
+pub(crate) fn arguments<'a>(
+    tool: &str,
+    args: &'a Value,
+    required: &[&str],
+    optional: &[&str],
+) -> Result<&'a Map<String, Value>, ErrorData> {
+    static EMPTY: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
+    let map = match args {
+        Value::Object(m) => m,
+        Value::Null => EMPTY.get_or_init(Map::new),
+        _ => return Err(ErrorData::invalid_params(format!("{tool} takes an object"), None)),
+    };
+    if let Some(k) = required.iter().find(|k| !map.contains_key(**k)) {
+        return Err(ErrorData::invalid_params(format!("{tool} needs {k}"), None));
+    }
+    if let Some(k) = map.keys().find(|k| !required.contains(&k.as_str()) && !optional.contains(&k.as_str())) {
+        return Err(ErrorData::invalid_params(format!("{tool} has no argument {k:.40}"), None));
+    }
+    Ok(map)
+}
+
+/// The string at `key`, which `arguments` has already said is there if it is required.
+pub(crate) fn text<'a>(tool: &str, map: &'a Map<String, Value>, key: &str) -> Result<&'a str, ErrorData> {
+    match map.get(key) {
+        Some(Value::String(s)) => Ok(s),
+        _ => Err(ErrorData::invalid_params(format!("{tool}: {key} must be a string"), None)),
+    }
+}
+

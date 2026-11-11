@@ -46,3 +46,74 @@ fn no_secret_leaves_over_stdio() {
     }
     assert!(seen >= 2, "the audit log did not record the redacted arguments ({seen})");
 }
+
+const FLOW: &str = "[[step]]\nagent = \"explore\"\nprompt = \"Look: {{input}}\"\n";
+
+/// Every path below `dir`.
+fn files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        out.push(e.path());
+        out.extend(files(&e.path()));
+    }
+    out.sort();
+    out
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_workflows_dir_cannot_be_used_to_write_outside_it() {
+    for p in Protocol::BOTH {
+        let home = xdg_temp();
+        let outside = home.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(home.path().join("proj/.aibus")).unwrap();
+        std::os::unix::fs::symlink(&outside, home.path().join("proj/.aibus/workflows")).unwrap();
+        let mut c = McpClient::start(home.path(), p, &["--allow", "write"]);
+        let r = c
+            .call("workflow_create", json!({ "name": "ship", "scope": "project", "toml": FLOW }))
+            .expect("a tool error");
+        assert_eq!(r["isError"], true, "{p:?}: {r}");
+        assert_eq!(files(&outside), Vec::<std::path::PathBuf>::new(), "{p:?}");
+    }
+}
+
+#[test]
+fn no_write_tool_can_reach_settings_or_the_user_config() {
+    let home = xdg_temp();
+    std::fs::create_dir_all(home.path().join("proj/.aibus")).unwrap();
+    std::fs::create_dir_all(home.path().join(".config/aibus")).unwrap();
+    let settings = home.path().join("proj/.aibus/settings.toml");
+    let config = home.path().join(".config/aibus/config.toml");
+    std::fs::write(&settings, "# mine\n").unwrap();
+    std::fs::write(&config, "# mine\n").unwrap();
+    let mut c = McpClient::start(home.path(), Protocol::V2026_07_28, &["--allow", "write", "--allow", "gates"]);
+    for (scope, name) in [
+        ("project", "../settings"),
+        ("project", "../settings.toml"),
+        ("user", "../config"),
+        ("user", "../config.toml"),
+        ("user", "../../../../.config/aibus/config"),
+        ("project", "/etc/passwd"),
+        ("project", "~/.config/aibus/config"),
+    ] {
+        let r = c.call("workflow_create", json!({ "name": name, "scope": scope, "toml": FLOW })).expect("a tool error");
+        assert_eq!(r["isError"], true, "{scope} {name}: {r}");
+        let u = c
+            .call(
+                "workflow_update",
+                json!({ "name": name, "scope": scope, "toml": FLOW, "expected_revision": "0".repeat(64) }),
+            )
+            .expect("a tool error");
+        assert_eq!(u["isError"], true, "{scope} {name}: {u}");
+    }
+    // The names that are valid land in the workflows directory and nowhere else.
+    for (scope, name) in [("project", "settings"), ("user", "config")] {
+        let r = c.call("workflow_create", json!({ "name": name, "scope": scope, "toml": FLOW })).expect("create");
+        assert_ne!(r["isError"], true, "{r}");
+    }
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), "# mine\n");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "# mine\n");
+    assert!(home.path().join("proj/.aibus/workflows/settings.toml").is_file());
+    assert!(home.path().join(".config/aibus/workflows/config.toml").is_file());
+}

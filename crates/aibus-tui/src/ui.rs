@@ -29,7 +29,7 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, PALETTE, PERMISSION, RUN_STATUS, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, RUN_STATUS, TRANSCRIPT};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -52,6 +52,7 @@ pub struct Views<'a> {
     palette: &'a Value,
     agents: &'a Value,
     accounts: &'a Value,
+    models: &'a Value,
     transcript: &'a Value,
     run_status: &'a Value,
     cost: &'a Value,
@@ -76,6 +77,7 @@ impl<'a> Views<'a> {
             palette: at(PALETTE),
             agents: at(AGENTS),
             accounts: at(ACCOUNTS_VIEW),
+            models: at(MODELS),
             transcript: at(TRANSCRIPT),
             run_status: at(RUN_STATUS),
             cost: at(COST),
@@ -687,6 +689,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             "palette" => screens::palette(buf, full, v.palette, th, &sc.pointer),
             "agents" => screens::agents(buf, full, v.agents, th, &sc.pointer, sc.entry, sc.note),
             "accounts" => screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note),
+            m if m.starts_with("models:") => screens::models(buf, full, v.models, th, &sc.pointer, sc.entry, sc.note),
             "outcome" => screens::outcome(buf, full, th, &sc.pointer),
             "confirm:clear" => screens::confirm(buf, full, th, &sc.pointer, "clear", "Clear the session log?", ("clear_yes", "Clear")),
             c if c.starts_with("confirm:cancel:") => {

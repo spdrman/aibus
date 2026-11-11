@@ -1,13 +1,15 @@
 //! The audit log: `<state>/logs/mcp/<ulid>.jsonl`, one process per file, one redacted line per
 //! tool call (and one for the start, which records the flags).
 //!
-//! `{t, client:{name, version}, method, tool, args, ok, ms, run?}`. The arguments are the
+//! `{t, client:{name, version}, addr?, method, tool, args, ok, ms, run?}`. `addr` is the peer
+//! address of an HTTP request and absent over stdio. The arguments are the
 //! caller's own text, so they are redacted before they are measured and capped at 4 KiB; the
 //! whole line goes through the redactor once more before it is written, since a client name is
 //! text from outside too.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -46,6 +48,7 @@ impl AuditLog {
     pub fn record(
         &self,
         client: Option<&Implementation>,
+        addr: Option<SocketAddr>,
         method: &str,
         tool: Option<&str>,
         args: &Value,
@@ -65,6 +68,7 @@ impl AuditLog {
         let line = json!({
             "t": rfc3339(SystemTime::now()),
             "client": client.map(|c| json!({ "name": c.name, "version": c.version })),
+            "addr": addr.map(|a| a.to_string()),
             "method": method,
             "tool": tool,
             "args": args,

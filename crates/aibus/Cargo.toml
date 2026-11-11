@@ -30,6 +30,15 @@ clap_complete = "4.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
 notify = "8"
 rand = "0.9"
+# `aibus mcp --http` (E11): the listener lives here and nowhere else; `aibus-mcp` stays
+# transport-free. `server` + the Streamable HTTP service, no client and no reqwest.
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-streamable-http-server"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+subtle = "2"
 rpassword = "7"
 serde_json = "1"
 sha2 = "0.10"

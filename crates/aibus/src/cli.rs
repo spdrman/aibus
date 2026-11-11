@@ -202,6 +202,21 @@ pub struct McpArgs {
     /// Pre-approve a tool for runs started through MCP (repeatable)
     #[arg(long, value_name = "PATTERN", action = ArgAction::Append)]
     pub allow_tool: Vec<String>,
+    /// Ask the user before a write or a run when the client can ask (elicit), or never
+    ///
+    /// `never` keeps the flags as the only gate, for scripted use.
+    #[arg(long, value_enum, default_value_t = ConfirmMode::Elicit)]
+    pub confirm: ConfirmMode,
+    /// Serve Streamable HTTP on this loopback address instead of stdio (a non-loopback address
+    /// is exit 2)
+    ///
+    /// The bearer token comes from AIBUS_MCP_TOKEN, or one is generated and printed once to
+    /// stderr.
+    #[arg(long, value_name = "IP:PORT")]
+    pub http: Option<String>,
+    /// Accept this Origin as well as the loopback ones (repeatable, needs --http)
+    #[arg(long, value_name = "ORIGIN", action = ArgAction::Append, requires = "http")]
+    pub origin: Vec<String>,
     /// Runs one process may start (not available yet)
     #[arg(long, value_name = "N")]
     pub max_runs: Option<u32>,
@@ -211,6 +226,16 @@ pub struct McpArgs {
     /// Cost cap for one run (not available yet)
     #[arg(long, value_name = "USD")]
     pub max_cost_usd: Option<f64>,
+    /// Do not put the "written through aibus mcp" line at the top of written workflows
+    #[arg(long)]
+    pub no_provenance: bool,
+}
+
+/// `aibus mcp --confirm`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmMode {
+    Elicit,
+    Never,
 }
 
 #[derive(Args, Debug, Default)]

@@ -9,10 +9,14 @@ publish.workspace = true
 
 [dependencies]
 aibus-core.workspace = true
-# D-13: the three features and nothing else. `client`, `auth*`, `reqwest` and the HTTP transports
+# D-13: the three features, plus `elicitation` and `request-state` for E12 (the form types, and the
+# HMAC seal for `requestState`; neither pulls a transport) and nothing else. `client`, `auth*`, `reqwest` and the HTTP transports
 # would bring a second `reqwest`, which `deny.toml` bans.
-rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-io"] }
+rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-io", "elicitation", "request-state"] }
+http = "1"
+rand = "0.9"
 serde_json = "1"
+sha2 = "0.10"
 tokio = { version = "1", features = ["rt", "time", "io-std"] }
 tracing = "0.1"
 ulid = "1"

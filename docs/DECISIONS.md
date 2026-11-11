@@ -262,6 +262,27 @@ Gated calls, taken at the recommended default:
 
 **Why.** Each keeps the first PR to what its acceptance criteria name and leaves the next PR a place to put the write and run tools.
 
+## E5 (2026-11-11): the read tools, resources and prompts of `aibus mcp`, and where I bent the issue (#100)
+
+**Context.** #100 adds five read tools, the `aibus://` resources and three prompts to `aibus-mcp`. A few details in the issue could not be followed to the letter.
+
+**Decision.**
+
+1. `workflow_dry_run` returns `agent` as an object (`{name, role, model, tools, permission_mode}`) per step, because the issue's shape has two `agent` keys in one object. `scope` is optional on `get`, `explain`, `dry_run` and `validate`: left out, the project's file wins, as in `workflow list`.
+2. A tool that reads files puts the redacted value in `structuredContent` and a pretty-printed copy in the text block, under the one-line data header, with aibus markers escaped and a "cut at" note past `limits.result_max_bytes` (the default, 32 KiB: the server does not read config). `structuredContent` is never cut. `workflow_list` and its golden transcript are untouched. The conformance test that compared the text block to `structuredContent` now skips that header line.
+3. Budgets in `workflow_dry_run` are the built-in `Limits::default()`. The server does not read `config.toml`, so a user's own limits do not show; `docs/MCP.md` says so.
+4. The agent roster is the CLI's discovery without `agents.extra_dirs` (that setting lives in config, which the server does not read).
+5. `aibus-mcp` has no provider dependency, and `read_tools.rs` checks the manifest. That is the proof that a dry run cannot call a model, in place of a provider that panics: there is no seat to put one in.
+6. Resources are an allow-list in `resources.rs`: any `aibus://` uri not matching one of the four is `-32602`, and so is a workflow that does not exist. Names are `[A-Za-z0-9_-]{1,64}`, so `..` and `%2e%2e` never reach the file system, and a symlink or a file over 1 MiB is refused. The workflow resource returns the file redacted but not wrapped, since the mime type promises TOML.
+7. Resource reads and prompt gets are audited like tool calls (`resources/read` with the uri, `prompts/get` with the name). They do not spend rate-limit tokens: the limit in the epic is for tool calls.
+8. `aibus-core/tests/security/mcp_server.rs` cannot name `aibus-mcp` (core is below it), so the redaction tests live in `crates/aibus-mcp/tests/read_tools.rs` and `resources.rs`, as the E4 decision did for the stdio test.
+9. `workflow::reads` and `workflow::preview` are new public functions in `aibus-core`, because only that module knows the `{{...}}` syntax.
+10. The golden transcripts are written by `AIBUS_UPDATE_TRANSCRIPTS=1` on the release PR run; this PR has the tests and not the files, since the suites do not run before then.
+
+**Alternatives.** Wrap `structuredContent` strings too (rejected: it is data for a program, and the schema says string). Read `config.toml` for budgets and extra agent dirs (rejected: breaks "never reads config"). A provider that panics (rejected, 5).
+
+**Why.** Each keeps the surface small and the secret boundary where the epic put it.
+
 ## D-14: Gemini gets a native adapter crate, and the OpenAI shim stays as a preset (#114)
 
 **Context.** The epic's open decision 3 asked whether Google's OpenAI shim (`gemini-openai`, F2) is enough. The shim covers chat with tools. It does not carry thought signatures (Gemini 3 rejects a function-calling turn that lacks the signature of the previous call), does not show thought summaries, has no context cache, no `countTokens`, and answers `store` with a 400. Gemini is also the one widely used family that is neither Anthropic nor OpenAI shaped, and the owner wants no open decisions left on the epic.
@@ -291,6 +312,63 @@ Gated calls, taken at the recommended default:
 
 **Why.** It keeps the reducer pure and puts the choice where the accounts are. The cost is one extra message per switch, which is also what lets the log say which account answered.
 
+## G3 (2026-11-11): the /model picker, where its rows come from and how a row is named
+
+**Context.** #122 asks for a screen of `(account, model)` rows with prices and capabilities, filtered by the target's role, that sends `SetModel`. The reducer has no providers and the TUI draws from graph nodes only, and `SetModel` carries a model string with no room for an account. #111 (per-model capabilities) is in flight.
+
+**Decision.**
+
+1. The rows ride on `AccountsReloaded`: `AccountView` gains `models: Vec<ModelView>` (id, alias, context window, prices as `Option`, five capability flags), built by `AccountRegistry::model_views` from the provider's `models()`, `price()` and `capabilities()`, deprecated models skipped. The `model` key is only written to the account's graph node when the list is not empty, and serialised only when not empty, so a graph without models keeps its shape. `view:models` is a new widget (the dirty list and `WIDGETS` grow by one), `view:models` reads `PALETTE_TEXT` for the filter, as the palette does.
+2. Capabilities are read in one line of `model_views` (`provider.capabilities()`); #111 replaces it with `capabilities_for(&id)`.
+3. A row is sent as `account/model`. `ChildLauncher::switch_model` treats a prefix that names an account as `SelectHints::explicit`, so the picked account is the one used when several serve a model. I chose the string over a new field on `Command::SetModel` because the command, its effect and the executor would all change shape and the typed form (`/model work/sonnet`) comes free.
+4. The filter is entered with `/`, not by typing, because `a`, `r` and `s` are keys of the screen. While it is open the keys are text and every change is mirrored into the graph, so the rows narrow as you type. `Enter` or `Esc` ends it and keeps the text.
+5. `s` on a picker opened for the lead says so in a note instead of guessing which card the user meant.
+6. The screen needs `Screen::Models(ModelTarget)`; the modal is named `models:<target label>`.
+7. The palette and the card menu get no new row (their order is pinned by tests); `/model` is the way in.
+
+**Alternatives.** A `SetModel { account }` field (rejected, above). Typing to filter with `a`/`r`/`s` on `Ctrl` (rejected: the keys are named on the buttons like every other screen). Reading the providers from the TUI through a hook (rejected: the frame would not be a function of the graph).
+
+**Why.** The picker stays a pure function of the graph, nothing asks the network, and the only code that knows about accounts is still the launcher.
+
+**Snapshots.** The four frames of the screen are written by the tests and generated on the release PR with the other stale ones.
+
+## E11 (2026-11-11): Streamable HTTP is built, on loopback with a token (#106)
+
+**Context.** #106 sat behind owner decision 6 on epic #95. The owner wants zero open issues and the recommended default for decision 6 was to do it, with elicitation first. The order does not matter for the code, so I did the HTTP one first, as the issues are numbered.
+
+**Decision.** Build it, in the `aibus` binary and not in `aibus-mcp`. rmcp 3.9's `transport-streamable-http-server` is a Tower service with `Host` and `Origin` validation and the `MCP-Protocol-Version` check built in, so `mcp_http.rs` is a small hyper host that adds the bearer token (SHA-256 digests compared with `subtle`, 401 plus `WWW-Authenticate: Bearer` before anything else), the one `/mcp` path and the peer address. The listener is bound to a loopback address or `aibus mcp` exits 2 before the audit file exists. Allowed hosts and origins are the exact `127.0.0.1`, `localhost` and `[::1]` forms with the bound port, never a wildcard, plus `--origin`. `legacy_session_mode` stays on so a `2025-11-25` client gets a session (and, with E12, a server-to-client request); `2026-07-28` requests are stateless whatever that says. The token is `AIBUS_MCP_TOKEN` (at least 16 visible ASCII characters) or 32 random bytes shown once on stderr; it is a `Secret`, it is registered with the redactor, and it is never written anywhere. The audit line gains `addr`. New direct dependencies of `aibus` are `rmcp` (the same crate and version `aibus-mcp` already uses, with the server transport feature), `hyper`, `hyper-util`, `http`, `http-body-util`, `bytes` and `subtle`, all already in the lock except `sse-stream` and `tokio-stream` (rmcp's); `aibus-mcp` gets `http` for the `ClientAddr` request extension. No `reqwest`.
+
+**Alternatives.** `axum` as the host (rejected: a router for one path, and one more big dependency). A unix socket instead of TCP (rejected for now: the clients this is for speak HTTP to a port; the SSH tunnel recipe covers the remote case). Wildcard ports for `Origin` (rejected: `http://localhost:*` accepts any local web page, which is the attack). A comparison with plain `==` (rejected: the token is the only thing between a web page and the user's workflows).
+
+**Why.** It meets the spec's MUSTs (Origin 403, loopback bind, authenticate) with rmcp doing the protocol and about 150 lines of ours doing the policy, and it leaves `aibus-mcp` transport-free so the closure test keeps meaning something. Tests are written and unrun, as the lane's rule says; they run on the release PR.
+
+## D-15: the write tools of `aibus mcp` (E8, #103, 2026-11-11)
+
+**Context.** The issue left several calls open, and the owner's rule is to take the recommended default and write it down.
+
+**Decision.**
+
+1. The revision is the SHA-256 of the file bytes in lower-case hex, the same value `workflow_get` returns. A write holds a process-wide lock from the revision check to the rename; two processes writing the same file are not covered.
+2. The roster the write tools validate against is what agent discovery finds for the project and the user, without `agents.extra_dirs` or `--agents`, as for `workflow_validate`.
+3. `--no-provenance` is the switch for the provenance option (the epic's decision 5 made it default on). Written files are 0600 in both scopes, because the atomic write has no other mode.
+4. Text a redactor would change (a credential) is refused and never echoed, on top of the checks in the issue.
+5. The security tests are in `crates/aibus/tests/mcp_security.rs` and `crates/aibus-mcp/tests/write_tools.rs`, not `aibus-core/tests/security/`, for the same reason as E4 item 7. The golden transcript (`create_update_conflict`) is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run, since nothing was run for this PR.
+
+**Alternatives.** A fixed mode for the project scope that follows the umask (rejected: it needs a second atomic write for one mode bit). Locking the file across processes (rejected for now: an exclusive lock on a file that is replaced by rename does not hold).
+
+**Why.** The safety model in the issue (names not paths, validate first, a revision check, no gate without its flag) holds with one writer, and a second writer is the user's editor, which the revision check already catches.
+
+## E12 (2026-11-11): confirmation through elicitation and MRTR is built, the permission relay is not (#107)
+
+**Context.** #107 sat behind owner decisions 6 and 7 on epic #95. Decision 6 (do #106 and #107, elicitation first) has the recommended default of yes. Decision 7 (relay a run's `bash` prompts through the client) has the recommended default of non-goal: the epic says "I lean non-goal until a client I use supports elicitation", and I have no such client. The owner wants zero open issues, so I took both defaults.
+
+**Decision.** Build the confirmation, in `crates/aibus-mcp/src/confirm.rs`. The step sits in `call_tool` before `Server::call`, so the argument cap, rate limit, redaction and audit stay in one place; refusals and asks add `confirm/ask` and `confirm/refused` audit lines. It applies to the three tools the issue names, only when they are listed (flags on) and only when the request's capabilities include `elicitation` in form mode (rmcp's rule: a bare `elicitation: {}` counts as form). The form is `name` (a string whose `minLength` and `maxLength` are the name's length) and, for `workflow_run` under a cap, `max_cost_usd` (`maximum` is the cap). rmcp's `StringSchema` has no `pattern` keyword, so the issue's `pattern` set to the exact name is not expressible; the answer is compared with the name on the server, which is the check that counts anyway. `requestState` uses rmcp's own `request-state` feature (`RequestStateCodec`, HMAC-SHA256, 32 random bytes per process): the sealed payload is a ULID nonce, the associated data is the tool, the arguments with sorted keys and `clientInfo` (so the digest the issue asks for is in the tag and not stored), the ttl is 10 minutes, and a consumed-nonce set makes it single use. Every failure to open is one message, as the codec's docs ask. `--confirm elicit` is the default; `--confirm never` skips it. `ConfirmConfig { elicit, run_cap_usd, ttl }` is how the run tools set the cap later and how the tests shorten the ttl. The write and run tools are other PRs, so the wire scenarios in `crates/aibus/tests/mcp_confirm.rs` use `workflow_create` and go green when #103 is on the branch; the decisions are tested directly in `crates/aibus-mcp/tests/confirm.rs`.
+
+**The permission relay is a recorded no-go.** Evidence: decision 7's recommended default is non-goal; the run tools it would relay from (#104: `PermissionNeeded`, the run mailbox, `dont_ask`) are not on `cut/0.2.0`; and #104's acceptance criteria say a call that would ask "is denied, not queued", which is the behaviour the relay would change, so building the relay first would make the run lane build against a moving rule. Nothing upstream blocks it (rmcp has the form and MRTR types), so the no-go is a choice and not a limit. I did not add a dead `--permission-relay` flag. If a client I use gains elicitation and decision 7 flips, the relay is a new issue on top of #104, not a rewrite of this.
+
+**Alternatives.** Put the question inside `Server::call` (rejected: it is sync and the legacy path has to await the client). A hand-rolled HMAC (rejected: rmcp's codec has the ttl and associated data, and a second implementation is a second place to get constant-time wrong). Keep a table of pending confirmations instead of a sealed state (rejected: it is state to expire and leak, and the spec's stateless direction points the other way). Ask for any tool that writes, whatever its name (rejected: the issue names three).
+
+**Why.** It adds the server's own question for the clients that can show one and changes nothing for the rest, and it keeps the unknown (run tools, a relay) out of this PR.
 ## D-12 addendum (2026-11-11): flow-diagram on by default for 0.2.0, ahead of the written exit criteria (#92)
 
 **Context.** #92 lists exit criteria before the default flips: two weeks of main without a fix to `diagram.rs`, a clean terminal checklist on iTerm2, Terminal.app and kitty, and no old unanswered issue on rataflow's tracker. None of that can be met inside this wave: `diagram.rs` changed in #89 two days ago, and I have no real terminals here. The owner's goal for the wave is zero open issues. The measurements that were the hard gate did come back clean (#91): p99 render and resize at most 0.33 ms against 3 ms and 10 ms, one hash over 200 renders at three sizes, 100 of 100 demo frames byte-identical with the classic ones, a +0.6 % binary and a clean `cargo deny`.

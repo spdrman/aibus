@@ -44,10 +44,13 @@ window, then go through the list. Unix terminals on macOS and Linux, Windows Ter
       Note any the terminal eats (kitty and WezTerm bind some `Ctrl-Shift` chords).
 * [ ] Mouse: click selects a card, the wheel scrolls the focused pane, the right click opens the
       card menu, and a drag selects text without breaking the layout.
-* [ ] Cards (with more than three runs, and once with `--features flow-diagram`): the wheel over the
-      cards scrolls, Shift plus the wheel pans the row sideways, and a drag from empty space pans it.
-* [ ] Resize while a run streams: the layout reflows with no tearing, and the 80x24 collapsed rail
-      comes and goes at the width the spec says.
+* [ ] Cards (with more than three runs): the wheel over the cards scrolls, Shift plus the wheel pans
+      the row sideways, and a drag from empty space pans it. The cards canvas pans with eight runs.
+      The centre column is drawn by rataflow in the release build; if this line fails, the way back
+      is a build with `--no-default-features`.
+* [ ] Resize while a run streams, once with eight runs so the cards canvas is wider than the column:
+      the layout reflows with no tearing, and the 80x24 collapsed rail comes and goes at the width
+      the spec says.
 * [ ] Paste of several lines into the prompt arrives as one paste (bracketed paste), not as
       submitted lines.
 * [ ] Unicode: a streamed line with accents, CJK and an emoji keeps its alignment.

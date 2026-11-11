@@ -22,5 +22,5 @@ aibus-provider-anthropic = { path = "crates/aibus-provider-anthropic" }
 aibus-provider-gemini = { path = "crates/aibus-provider-gemini" }
 aibus-provider-http = { path = "crates/aibus-provider-http" }
 aibus-provider-openai = { path = "crates/aibus-provider-openai" }
-aibus-tui = { path = "crates/aibus-tui" }
+aibus-tui = { path = "crates/aibus-tui", default-features = false }
 aibus-testkit = { path = "crates/aibus-testkit" }

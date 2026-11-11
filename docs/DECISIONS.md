@@ -290,3 +290,13 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Resolve in the reducer by copying the alias tables into the graph (rejected: a second copy of config that drifts). Add a `model:defaults:<role>` node (rejected: a node nothing reads, and it changes the snapshot fixtures).
 
 **Why.** It keeps the reducer pure and puts the choice where the accounts are. The cost is one extra message per switch, which is also what lets the log say which account answered.
+
+## D-12 addendum (2026-11-11): flow-diagram on by default for 0.2.0, ahead of the written exit criteria (#92)
+
+**Context.** #92 lists exit criteria before the default flips: two weeks of main without a fix to `diagram.rs`, a clean terminal checklist on iTerm2, Terminal.app and kitty, and no old unanswered issue on rataflow's tracker. None of that can be met inside this wave: `diagram.rs` changed in #89 two days ago, and I have no real terminals here. The owner's goal for the wave is zero open issues. The measurements that were the hard gate did come back clean (#91): p99 render and resize at most 0.33 ms against 3 ms and 10 ms, one hash over 200 renders at three sizes, 100 of 100 demo frames byte-identical with the classic ones, a +0.6 % binary and a clean `cargo deny`.
+
+**Decision.** I flip the default now. The time-based and terminal-based criteria are not waived, they move: the `docs/RELEASE.md` terminal checklist already has the cards line, and it has to be ticked on the release PR before the tag, so a failure there still stops 0.2.0 and the way back is one flag (`--no-default-features`, or reverting the two `default = [...]` lines). The root manifest now says `default-features = false` for `aibus-tui`, so that flag really drops rataflow from a build of `aibus`; `aibus-tui` and `aibus` each default to the feature. Running `-p aibus-testkit` on its own therefore builds the hand-drawn path, while `--workspace`, `-p aibus-tui` and `-p aibus` run the rataflow one. One snapshot, `w_cards_five_scrolled`, cannot be the same in both (the fourth card's edge is on the canvas), so the test picks `w_cards_five_scrolled_flow` on the new default and the classic file stays untouched for the rollback build.
+
+**Alternatives.** Wait out the two weeks (rejected: it leaves #92 and #93 open past the wave for a risk the release checklist covers anyway). Regenerate `w_cards_five_scrolled` in place (rejected: it breaks the rollback build and the issue says no snapshot is regenerated). Force the feature on in `aibus-testkit` (rejected: the metadata test then cannot see a build without it).
+
+**Why.** The numbers the flip was waiting for are in, and the cost of being wrong is one flag until #93 removes it.

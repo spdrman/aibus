@@ -773,7 +773,9 @@ fn per_widget_snapshots_at_98x46() {
     worker(&mut five, 5, "lint", "checks style", Some(0.1), "running");
     worker(&mut five, 6, "docs", "writes docs", Some(0.2), "running");
     five.step(Msg::Ui(UiIntent::Select(Pane::Cards, Selection::Index(4)))).unwrap();
-    snap("w_cards_five_scrolled", five, 3, &cards, false);
+    // With the rataflow path the fourth card's edge is on the canvas beside the window (#89), so it
+    // has a snapshot of its own; the classic one stays for `--no-default-features`.
+    snap(if cfg!(feature = "flow-diagram") { "w_cards_five_scrolled_flow" } else { "w_cards_five_scrolled" }, five, 3, &cards, false);
     snap("w_cards_zero", session(), 3, &cards, false);
 
     // The rail in the states of f01, f04 and f09, and collapsed.
@@ -880,7 +882,7 @@ fn a_new_run_of_the_same_agent_replaces_a_finished_card() {
 }
 
 /// The card rects, and with them the hit map, come from `widgets::card_rects` whichever way the
-/// column is drawn, so a run with `--features flow-diagram` and one without agree on them.
+/// column is drawn, so a run with the feature and one without agree on them.
 #[test]
 fn the_card_hit_rects_are_the_ones_the_window_gives_for_1_3_and_8_cards() {
     for size in [(98, 46), (98, 29)] {
@@ -898,7 +900,10 @@ fn the_card_hit_rects_are_the_ones_the_window_gives_for_1_3_and_8_cards() {
                 assert_eq!((got.x, got.width), (w.x, w.width), "{size:?} {n} cards, card {i}");
                 assert_eq!(got.height, 7, "{size:?} {n} cards, card {i}");
             }
-            assert!(r.ui.drawn.hits.find(HitId::Card(3)).is_none(), "only three are in the window");
+            // Classic draws only the window's three. On the rataflow path the fourth card's left
+            // edge is on the canvas beside the window and is hit-testable too (#89).
+            let beside = cfg!(feature = "flow-diagram") && n > 3;
+            assert_eq!(r.ui.drawn.hits.find(HitId::Card(3)).is_some(), beside, "{size:?} {n} cards, card 3");
         }
     }
 }

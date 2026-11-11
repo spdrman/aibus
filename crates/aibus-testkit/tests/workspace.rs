@@ -191,11 +191,22 @@ fn tui_is_on_ratatui_030_and_crossterm_029() {
 }
 
 const FLOW: [&str; 2] = ["--features", "aibus-tui/flow-diagram"];
+const NO_DEFAULTS: [&str; 1] = ["--no-default-features"];
+
+#[test]
+fn rataflow_is_in_the_default_build() {
+    for krate in ["aibus", "aibus-tui"] {
+        assert!(closure(krate).contains("rataflow"), "{krate} lacks rataflow in the default build");
+    }
+    for krate in ["aibus-core", "aibus-graph", "aibus-provider"] {
+        assert!(!closure(krate).contains("rataflow"), "{krate} sees rataflow");
+    }
+}
 
 #[test]
 fn rataflow_is_optional_and_only_the_tui_sees_it() {
     for krate in ["aibus", "aibus-tui", "aibus-core", "aibus-graph", "aibus-provider"] {
-        assert!(!closure(krate).contains("rataflow"), "{krate} sees rataflow by default");
+        assert!(!closure_with(krate, &NO_DEFAULTS).contains("rataflow"), "{krate} sees rataflow with the defaults off");
     }
     for krate in ["aibus-core", "aibus-graph", "aibus-provider"] {
         assert!(!closure_with(krate, &FLOW).contains("rataflow"), "{krate} sees rataflow");

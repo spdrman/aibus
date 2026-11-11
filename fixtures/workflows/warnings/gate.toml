@@ -1,0 +1,8 @@
+[[step]]
+agent = "explore"
+prompt = "Look: {{input}}"
+gate = "test -s /dev/stdin"
+
+[[step]]
+agent = "general"
+prompt = "Go on: {{prev.summary}}"

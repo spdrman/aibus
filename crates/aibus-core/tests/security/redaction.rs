@@ -16,6 +16,15 @@ fn root() -> PathBuf {
 #[derive(Deserialize)]
 struct Cases {
     case: Vec<Case>,
+    #[serde(default)]
+    intact: Vec<Intact>,
+}
+
+/// A body with no secret in it: the redactor must not touch a word of it.
+#[derive(Deserialize)]
+struct Intact {
+    name: String,
+    body: String,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +71,17 @@ fn echoed_credentials_are_gone_from_every_provider_error_shape() {
             assert!(!out.contains(secret.as_str()), "{}: {secret} survived in {out}", c.name);
         }
         assert!(out.contains("[redacted:"), "{}: nothing was marked in {out}", c.name);
+    }
+}
+
+#[test]
+fn quota_and_content_filter_bodies_come_through_untouched() {
+    let file = root().join("fixtures/redact/provider-errors.toml");
+    let cases: Cases = toml::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert!(cases.intact.len() >= 4);
+    let r = Redactor::new();
+    for c in cases.intact {
+        assert_eq!(r.redact(&c.body), c.body, "{} changed", c.name);
     }
 }
 

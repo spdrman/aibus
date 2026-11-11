@@ -1,0 +1,7 @@
+{
+  "bad_agent_name.toml": {"ok": false, "errors": [{"step": 2, "field": null, "message": "invalid agent name \"Bad Name\": want [a-z0-9][a-z0-9_-]{0,63}"}], "warnings": []},
+  "bad_on_fail.toml": {"ok": false, "errors": [{"step": 2, "field": null, "message": "on_fail \"retry:9\": want retry:N with N from 1 to 5"}], "warnings": []},
+  "empty_gate.toml": {"ok": false, "errors": [{"step": 2, "field": null, "message": "the gate is empty"}], "warnings": []},
+  "empty_prompt.toml": {"ok": false, "errors": [{"step": 1, "field": null, "message": "the prompt is empty"}], "warnings": []},
+  "no_steps.toml": {"ok": false, "errors": [{"step": null, "field": null, "message": "a workflow needs at least one [[step]]"}], "warnings": []}
+}

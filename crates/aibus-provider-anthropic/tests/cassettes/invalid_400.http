@@ -1,0 +1,5 @@
+HTTP 400
+content-type: application/json
+request-id: req_011CTx2nR5JeZb6Dx9Mu3WqH
+
+{"type":"error","error":{"type":"invalid_request_error","message":"messages.0.content: Input should be a valid list"}}

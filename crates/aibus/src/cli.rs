@@ -360,6 +360,13 @@ pub enum WorkflowCmd {
         #[arg(long, hide = true)]
         names: bool,
     },
+    /// Check a workflow (a name or a .toml path), or every workflow when none is given
+    Validate {
+        /// A workflow name or the path of a .toml file
+        target: Option<String>,
+    },
+    /// Print a workflow: its steps, prompts, gates and retries
+    Show { name: String },
     Run {
         name: String,
         input: String,
@@ -429,6 +436,8 @@ mod tests {
         "memory add",
         "memory index",
         "workflow list",
+        "workflow validate",
+        "workflow show",
         "workflow run",
         "init",
         "config path",

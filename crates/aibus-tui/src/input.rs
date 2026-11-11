@@ -339,6 +339,13 @@ pub enum AccountOp {
     Disable(String),
     /// `/logout`: deletes the keychain entry when it is ours and the account from the config.
     Remove(String),
+    /// The browser login of a provider whose definition carries a flow. What the flow says comes
+    /// back as `Msg::AccountPrompt`, the end as `Msg::AccountOpDone`.
+    AddOauth { name: String, provider: String },
+    /// `o` in the login modal: the address, which the worker starts the platform opener on.
+    OpenUrl(String),
+    /// `Esc` in the login modal: cancels the flow's token.
+    CancelOauth,
 }
 
 // `Secret` is not `PartialEq` on purpose; two ops are equal when their keys expose the same text.
@@ -348,7 +355,12 @@ impl PartialEq for AccountOp {
             (AccountOp::Add { name: a, provider: p, key: k }, AccountOp::Add { name: b, provider: q, key: l }) => {
                 a == b && p == q && k.expose() == l.expose()
             }
-            (AccountOp::Test(a), AccountOp::Test(b)) | (AccountOp::Disable(a), AccountOp::Disable(b)) | (AccountOp::Remove(a), AccountOp::Remove(b)) => a == b,
+            (AccountOp::Test(a), AccountOp::Test(b))
+            | (AccountOp::Disable(a), AccountOp::Disable(b))
+            | (AccountOp::Remove(a), AccountOp::Remove(b))
+            | (AccountOp::OpenUrl(a), AccountOp::OpenUrl(b)) => a == b,
+            (AccountOp::AddOauth { name: a, provider: p }, AccountOp::AddOauth { name: b, provider: q }) => a == b && p == q,
+            (AccountOp::CancelOauth, AccountOp::CancelOauth) => true,
             _ => false,
         }
     }
@@ -364,6 +376,9 @@ impl std::fmt::Debug for AccountOp {
             AccountOp::Test(n) => write!(f, "Test {n}"),
             AccountOp::Disable(n) => write!(f, "Disable {n}"),
             AccountOp::Remove(n) => write!(f, "Remove {n}"),
+            AccountOp::AddOauth { name, provider } => write!(f, "AddOauth {name} {provider}"),
+            AccountOp::OpenUrl(_) => write!(f, "OpenUrl"),
+            AccountOp::CancelOauth => write!(f, "CancelOauth"),
         }
     }
 }
@@ -466,6 +481,9 @@ pub struct Input {
     pub entry: Option<Entry>,
     /// What the last action on the agents or accounts screen said.
     pub note: String,
+    /// The providers whose definition carries a browser login: `/login` shows the modal for them
+    /// where it would ask for a key.
+    pub oauth_providers: Vec<String>,
     /// Transcript text under the mouse: anchor and head as (row, col) in the body.
     sel: Option<((u16, u16), (u16, u16))>,
     pub copied: bool,
@@ -1367,6 +1385,23 @@ impl Input {
     /// Keys typed into an open text field.
     fn entry_key(&mut self, ev: KeyEvent, cx: &Context, prompt: &mut Prompt, out: &mut Out) {
         let Some(e) = &mut self.entry else { return };
+        if matches!(e.kind, EntryKind::Oauth(..)) {
+            // The login modal has no text to edit: `o` opens the address, `Esc` gives up.
+            match ev.code {
+                KeyCode::Esc => {
+                    self.entry = None;
+                    self.note = "login cancelled".into();
+                    out.jobs.push(Job::Account(AccountOp::CancelOauth));
+                }
+                KeyCode::Char('o') if !ev.ctrl && !ev.alt => {
+                    if let Some(url) = e.text.split_whitespace().find(|w| w.starts_with("https://") || w.starts_with("http://")) {
+                        out.jobs.push(Job::Account(AccountOp::OpenUrl(url.to_owned())));
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         match ev.code {
             KeyCode::Esc => self.entry = None,
             KeyCode::Enter => self.finish_entry(cx, prompt, out),
@@ -1409,6 +1444,12 @@ impl Input {
             EntryKind::Resume(run) if !text.is_empty() => out.msgs.push(cmd(Command::Resume { run, message: text, parent: None })),
             EntryKind::ModelFilter => {}
             EntryKind::AgentName if !text.is_empty() => out.jobs.push(Job::NewAgent(text)),
+            EntryKind::AccountName(provider) if !text.is_empty() && self.oauth_providers.contains(&provider) => {
+                // The provider has a browser login: it replaces the key step.
+                self.note.clear();
+                self.entry = Some(Entry::plain(EntryKind::Oauth(text.clone()), &format!("log in to {provider}"), ""));
+                out.jobs.push(Job::Account(AccountOp::AddOauth { name: text, provider }));
+            }
             EntryKind::AccountName(provider) if !text.is_empty() => {
                 let label = format!("{provider} key");
                 self.entry = Some(Entry::secret(EntryKind::AccountKey(text, provider), &label));
@@ -1439,8 +1480,23 @@ impl Input {
     /// What the loop tells the input about a message that came from outside the keyboard. The end
     /// of an account operation is the line the Accounts screen shows under its rows.
     pub fn observe(&mut self, m: &Msg) {
-        if let Msg::AccountOpDone { text, .. } = m {
-            self.note = text.clone();
+        match m {
+            Msg::AccountOpDone { text, .. } => {
+                self.note = text.clone();
+                if matches!(self.entry, Some(Entry { kind: EntryKind::Oauth(..), .. })) {
+                    self.entry = None;
+                }
+            }
+            // What the flow says goes under the modal's title, a line at a time.
+            Msg::AccountPrompt { line, .. } => {
+                if let Some(Entry { kind: EntryKind::Oauth(..), text, .. }) = &mut self.entry {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(line);
+                }
+            }
+            _ => {}
         }
     }
 

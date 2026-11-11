@@ -42,6 +42,7 @@ pub const ALL_NAMES: [&str; 29] = [
     "AgentsReloaded",
     "AccountsReloaded",
     "AccountOpDone",
+    "AccountPrompt",
     "IoError",
     "Shutdown",
     "ModelSwitched",
@@ -610,6 +611,12 @@ pub fn cases() -> Vec<Case> {
             setup: none,
             msg: Msg::AccountOpDone { op: "add".into(), account: "work".into(), ok: true, text: t.clone() },
             expect: vec!["model:log"],
+        },
+        Case {
+            name: "AccountPrompt",
+            setup: none,
+            msg: Msg::AccountPrompt { account: "work".into(), line: t.clone() },
+            expect: vec![],
         },
         Case {
             name: "IoError",

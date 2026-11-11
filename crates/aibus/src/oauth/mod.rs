@@ -6,6 +6,7 @@
 
 mod device;
 mod pkce;
+pub(crate) use pkce::open;
 #[cfg(test)]
 mod tests;
 

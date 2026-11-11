@@ -40,6 +40,7 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
             }
             _ => None,
         },
+        cancel: None,
         stdin: &mut input,
         prompt: std::io::stdin().is_terminal().then_some(&ask),
         out: &mut stdout,

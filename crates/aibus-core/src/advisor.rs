@@ -213,7 +213,7 @@ impl RunLog {
                     self.push(seq, Kind::Text(text));
                 }
                 for b in &msg.blocks {
-                    if let ContentBlock::ToolUse { id, name, input } = b {
+                    if let ContentBlock::ToolUse { id, name, input, .. } = b {
                         let args = head(&input.to_string(), ARGS_HEAD);
                         let call = Kind::Call { id: *id, name: name.clone(), args, result: None };
                         self.push(seq, call);

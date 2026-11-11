@@ -19,7 +19,7 @@ the same command, started by hand.
 | TUI snapshots | `cargo test --locked -p aibus-tui` | every push |
 | CLI | `cargo test --locked -p aibus --tests` | every push |
 | Replay | `cargo test --locked -p aibus-testkit --test replay --test session` and `-p aibus-core --test replay` | every push |
-| Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai` (cassettes) | every push |
+| Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini` (cassettes) | every push |
 | Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |
 | Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
 | Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |

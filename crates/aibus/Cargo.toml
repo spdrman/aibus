@@ -17,6 +17,7 @@ aibus-graph.workspace = true
 aibus-mcp.workspace = true
 aibus-provider.workspace = true
 aibus-provider-anthropic.workspace = true
+aibus-provider-gemini.workspace = true
 aibus-provider-http.workspace = true
 aibus-provider-openai.workspace = true
 aibus-tui.workspace = true

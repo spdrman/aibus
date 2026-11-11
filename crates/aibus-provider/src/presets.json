@@ -458,6 +458,23 @@
    "compat": {
     "responses": false
    }
+  },
+  {
+   "id": "gemini",
+   "api": "gemini-generate-content",
+   "base_url": "https://generativelanguage.googleapis.com",
+   "env_vars": [
+    "GEMINI_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "gemini",
+   "prefixes": [
+    "gemini-"
+   ]
   }
  ]
 }

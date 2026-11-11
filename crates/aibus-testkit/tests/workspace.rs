@@ -66,7 +66,7 @@ fn closure_with(name: &str, extra: &[&str]) -> BTreeSet<String> {
 #[test]
 fn core_never_sees_ratatui_or_a_concrete_provider() {
     let deps = closure("aibus-core");
-    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http", "reqwest"] {
+    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http", "reqwest"] {
         assert!(!deps.contains(banned), "aibus-core depends on {banned}");
     }
     let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
@@ -86,7 +86,7 @@ fn provider_crate_has_no_network_crates() {
 #[test]
 fn tui_never_sees_reqwest_or_a_provider_crate() {
     let deps = closure("aibus-tui");
-    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http"] {
+    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
         assert!(!deps.contains(banned), "aibus-tui depends on {banned}");
     }
 }
@@ -96,7 +96,7 @@ fn tui_never_sees_reqwest_or_a_provider_crate() {
 /// certificates through them; they do no TLS.
 #[test]
 fn provider_crates_use_rustls_and_never_openssl() {
-    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http"] {
+    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
         let deps = closure(krate);
         assert!(deps.contains("rustls") && deps.contains("reqwest"), "{krate} lost its TLS stack");
         for banned in ["openssl", "openssl-sys", "openssl-src", "native-tls", "hyper-tls"] {

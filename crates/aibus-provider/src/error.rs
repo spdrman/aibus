@@ -169,6 +169,8 @@ impl ProviderError {
             "token limit",
             "prompt is too long",
             "input is too long",
+            // Gemini: "The input token count (N) exceeds the maximum number of tokens allowed (M)".
+            "exceeds the maximum number of tokens",
         ]
         .iter()
         .any(|p| lower.contains(p));
@@ -176,6 +178,8 @@ impl ProviderError {
             _ if quota => Quota,
             _ if filtered => ContentFilter,
             400 | 422 if context => ContextTooLong,
+            // Google answers a bad key with a 400, not a 401.
+            400 if lower.contains("api key not valid") => Auth,
             400 | 422 => InvalidRequest,
             401 | 403 => Auth,
             404 => ModelNotFound,
@@ -243,6 +247,7 @@ mod tests {
             "prompt is too long: 213482 tokens > 200000 maximum",
             "This model's maximum context length is 128000 tokens",
             "Your request exceeded model token limit: 8192",
+            "The input token count (1196742) exceeds the maximum number of tokens allowed (1048575).",
             "context_length_exceeded",
         ] {
             assert_eq!(kind(400, m), (ProviderErrorKind::ContextTooLong, false), "{m}");

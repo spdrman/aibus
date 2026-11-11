@@ -262,6 +262,16 @@ Gated calls, taken at the recommended default:
 
 **Why.** Each keeps the first PR to what its acceptance criteria name and leaves the next PR a place to put the write and run tools.
 
+## D-14: Gemini gets a native adapter crate, and the OpenAI shim stays as a preset (#114)
+
+**Context.** The epic's open decision 3 asked whether Google's OpenAI shim (`gemini-openai`, F2) is enough. The shim covers chat with tools. It does not carry thought signatures (Gemini 3 rejects a function-calling turn that lacks the signature of the previous call), does not show thought summaries, has no context cache, no `countTokens`, and answers `store` with a 400. Gemini is also the one widely used family that is neither Anthropic nor OpenAI shaped, and the owner wants no open decisions left on the epic.
+
+**Decision.** Build it. `aibus-provider-gemini` serves a fourth wire, `gemini-generate-content`, behind a `gemini` preset (`https://generativelanguage.googleapis.com`, `x-goog-api-key`, `GEMINI_API_KEY`). It depends on `aibus-provider` and `aibus-provider-http` only, so no new dependency and `deny.toml` is unchanged. `ContentBlock::ToolUse` gets an optional `signature` for the thought signature. `gemini-openai` stays for anyone who wants the shim. Vertex for Gemini stays under "Later" (it needs the gcloud token source and a different URL).
+
+**Alternatives.** Ship the shim preset only (rejected: it loses the signature on the second turn of any tool loop against Gemini 3, and the thinking and usage detail with it). Put the Gemini wire in `aibus-provider-openai` (rejected: it shares nothing with Chat Completions beyond SSE framing, and the crate boundary is how `cargo-deny` and the workspace tests reason about each wire).
+
+**Why.** The shim cannot do the part of Gemini that matters for an agent, and the adapter is about 400 lines on plumbing that already exists. Two small shared changes came with it: `Http::send` reads Google's `retryDelay` from the error body, and `ProviderError::from_http` knows Google's "input token count exceeds" and "API key not valid" messages. The prices in the table are list prices I wrote from Google's public pricing page without a live call, so they are the first thing the F8 sync should confirm.
+
 ## F7 (2026-11-11): how `account add --oauth` is built
 
 **Context.** #115 asks for two login flows, an async `OAuthFlow` and a refresh that does not race, with OpenRouter first. A few calls were open, and the owner's rule is to take the recommended default.
@@ -271,3 +281,12 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Make `CredentialSource` async (rejected: it ripples through every provider crate other lanes are editing). The `oauth2` crate (rejected: a second HTTP abstraction for two flows). Put the definition on `ProviderFactory` now (rejected: collides with #110).
 
 **Why.** It fixes the race and the blocking trait without touching what other lanes own, and OpenRouter proves the whole flow with nothing to refresh.
+## G2 (2026-11-11): where /model is resolved, and what the reducer keeps
+
+**Context.** The issue has the reducer validate a model reference through `AccountRegistry` and write `model:defaults:<role>`. The reducer is a pure function of the graph and has no accounts, and no `model:defaults:*` node exists; the lead's model lives in its run's `meta.model`, which the header already reads.
+
+**Decision.** `Command::SetModel` only queues the request in `model:session:assist.pending` (no new node, so the snapshot fixtures keep their shape). The effects executor hands it to the launcher, which picks the provider, credential, model and account the way a launch does, and answers with `Msg::ModelSwitched { id, target, to }`. That answer is what writes `meta.model` and `meta.account` (so the header and the card follow) and the log line `model: lead -> <id> (<account>)`; an `Err` is one `model: <why>` line and nothing else. A run takes the switch through its mailbox (`RunMail::Model`) and applies it at the next turn boundary, so the request in flight finishes on the old model. A seat is switched in `Assist` and read at its next consultation. With no lead running, `/model` is a logged `no lead is running yet`; a session that started without a seat cannot switch it on later, because it has no definition to speak from.
+
+**Alternatives.** Resolve in the reducer by copying the alias tables into the graph (rejected: a second copy of config that drifts). Add a `model:defaults:<role>` node (rejected: a node nothing reads, and it changes the snapshot fixtures).
+
+**Why.** It keeps the reducer pure and puts the choice where the accounts are. The cost is one extra message per switch, which is also what lets the log say which account answered.

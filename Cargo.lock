@@ -31,6 +31,7 @@ dependencies = [
  "aibus-mcp",
  "aibus-provider",
  "aibus-provider-anthropic",
+ "aibus-provider-gemini",
  "aibus-provider-http",
  "aibus-provider-openai",
  "aibus-testkit",
@@ -46,7 +47,11 @@ dependencies = [
  "rpassword",
  "rustix 1.1.6",
  "serde_json",
+<<<<<<< HEAD
  "sha2 0.10.9",
+=======
+ "sha2",
+>>>>>>> origin/cut/0.2.0
  "signal-hook",
  "tempfile",
  "tokio",
@@ -154,6 +159,27 @@ dependencies = [
  "hmac",
  "serde_json",
  "sha2 0.10.9",
+ "smol_str",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ulid",
+ "wiremock",
+ "zeroize",
+]
+
+[[package]]
+name = "aibus-provider-gemini"
+version = "0.1.0"
+dependencies = [
+ "aibus-provider",
+ "aibus-provider-http",
+ "aibus-testkit",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "serde_json",
  "smol_str",
  "tempfile",
  "tokio",

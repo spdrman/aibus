@@ -127,7 +127,7 @@ fn every_preset_has_a_catalog_file_that_parses_and_prices_are_complete() {
 
 #[test]
 fn only_aibus_provider_includes_tables_and_only_from_catalog_so_no_crate_keeps_a_copy() {
-    for krate in ["aibus-provider", "aibus-provider-anthropic", "aibus-provider-openai"] {
+    for krate in ["aibus-provider", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini"] {
         let src = root().join("crates").join(krate).join("src");
         for e in std::fs::read_dir(&src).unwrap() {
             let p = e.unwrap().path();

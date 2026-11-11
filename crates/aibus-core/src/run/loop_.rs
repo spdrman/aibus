@@ -73,6 +73,26 @@ pub enum RunMail {
     /// A fork is starting from this run (01 section 5.2): at the next turn boundary the run
     /// answers with a copy of its conversation.
     Fork { reply: oneshot::Sender<Conversation> },
+    /// `/model`: from the next request on, the run talks to this model. A request already in
+    /// flight finishes on the old one.
+    Model(ModelSwitch),
+}
+
+/// Where a run's requests go: the provider, the credential, the model and the account. A run
+/// starts with the one in its `RunConfig` and `RunDeps`; `RunMail::Model` replaces it. The four
+/// change together, because a model only means something on its own provider.
+#[derive(Clone)]
+pub struct ModelSwitch {
+    pub provider: Arc<dyn Provider>,
+    pub creds: Arc<dyn CredentialSource>,
+    pub model: ModelId,
+    pub account: AccountName,
+}
+
+impl std::fmt::Debug for ModelSwitch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ModelSwitch({} on {})", self.model.0, self.account.0)
+    }
 }
 
 pub struct RunHandle {
@@ -196,6 +216,8 @@ struct Task<'a> {
     transcript: Mutex<Option<Transcript>>,
     /// A tool the router chose for the next request (`tool_choice`), taken by `request`.
     hint: Mutex<Option<smol_str::SmolStr>>,
+    /// Where the next request goes; `RunMail::Model` replaces it at a turn boundary.
+    now: Mutex<ModelSwitch>,
 }
 
 async fn task(
@@ -211,6 +233,12 @@ async fn task(
         cancel: &cancel,
         transcript: Mutex::new(None),
         hint: Mutex::new(None),
+        now: Mutex::new(ModelSwitch {
+            provider: deps.provider.clone(),
+            creds: deps.creds.clone(),
+            model: cfg.model.clone(),
+            account: cfg.account.clone(),
+        }),
     };
     t.send(Msg::RunStarted {
         run: cfg.run,
@@ -520,6 +548,7 @@ impl Task<'_> {
                     });
                 }
                 RunMail::Compact => compact = true,
+                RunMail::Model(to) => *self.now.lock().unwrap_or_else(PoisonError::into_inner) = to,
                 RunMail::Call { tool, input } => call = Some((tool, input)),
                 RunMail::ChildFinished(report) => {
                     conv.messages.push(Message::text(MessageRole::User, &report));
@@ -604,7 +633,7 @@ impl Task<'_> {
     ) -> ChatRequest {
         let cfg = self.cfg;
         ChatRequest {
-            model: cfg.model.clone(),
+            model: self.now.lock().unwrap_or_else(PoisonError::into_inner).model.clone(),
             system: conv.system.clone(),
             messages: conv.messages.clone(),
             tools: specs.to_vec(),
@@ -658,7 +687,9 @@ impl Task<'_> {
                 self.note_waiting("").await;
                 waiting = false;
             }
-            let e = match stream_turn(self.deps, cfg.run, req, self.cancel).await {
+            // Taken now: a switch that lands while this request runs applies to the next one.
+            let to = self.now.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let e = match stream_turn(self.deps, &to, cfg.run, req, self.cancel).await {
                 Ok(resp) => return Ok(resp),
                 Err(e) => e,
             };
@@ -667,7 +698,7 @@ impl Task<'_> {
             }
             match e.kind {
                 ProviderErrorKind::Auth => {
-                    let who = &cfg.account;
+                    let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
                     let what = if e.message.is_empty() {
                         "authentication failed"
                     } else {
@@ -793,7 +824,7 @@ impl Task<'_> {
                         self.send(decided(decision, None)).await;
                         return decision;
                     }
-                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::Call { .. } | RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
+                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::Call { .. } | RunMail::ChildFinished(_) | RunMail::Fork { .. } | RunMail::Model(_))) => queued.push(m),
                     Some(RunMail::Permission { .. }) => {}
                     None => return Decision::Deny,
                 },
@@ -888,6 +919,7 @@ fn opening_call(name: &str, input: serde_json::Value) -> ChatResponse {
                 id: aibus_provider::ToolCallId(ulid::Ulid::new()),
                 name: name.into(),
                 input,
+                signature: None,
             }],
             at: SystemTime::UNIX_EPOCH,
         },
@@ -929,13 +961,6 @@ async fn drive(
         max_tokens_total: cfg.def.max_tokens_total.unwrap_or(cfg.budgets.max_tokens_total),
         max_cost_usd: cfg.def.max_cost_usd.unwrap_or(cfg.budgets.max_cost_usd),
     };
-    let max_output = deps
-        .provider
-        .models()
-        .iter()
-        .find(|m| m.id == cfg.model)
-        .map_or(8_192, |m| m.max_output);
-    let price = deps.provider.price(&cfg.model);
     let specs = deps.tools.specs(eff);
     // The directory the `memory_*` tools are rooted at, found the way the run's first message
     // finds `MEMORY.md`.
@@ -952,18 +977,6 @@ async fn drive(
     // Input tokens of the latest request: what a compaction started now would be shrinking.
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
-    let window = deps
-        .provider
-        .models()
-        .iter()
-        .find(|m| m.id == cfg.model)
-        .map(|m| u64::from(m.context_window));
-    let auto_limit = cfg
-        .def
-        .auto_compact_at
-        .map(u64::from)
-        .or(window.map(|w| w / 10 * 8))
-        .filter(|_| deps.compactor.is_some());
     let mut lead = LeadAssist::new(t);
 
     loop {
@@ -973,6 +986,21 @@ async fn drive(
         if let Some(call) = t.boundary(mail, &mut queued, conv, mode, pre_tokens).await {
             forced = Some(call);
         }
+        // What the model this turn talks to allows and costs: read again every turn, because
+        // `/model` may have changed it at the boundary just now.
+        let (max_output, price, auto_limit) = {
+            let at = t.now.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let known = at.provider.models();
+            let info = known.iter().find(|m| m.id == at.model);
+            let window = info.map(|m| u64::from(m.context_window));
+            let limit = cfg
+                .def
+                .auto_compact_at
+                .map(u64::from)
+                .or(window.map(|w| w / 10 * 8))
+                .filter(|_| deps.compactor.is_some());
+            (info.map_or(8_192, |m| m.max_output), at.provider.price(&at.model), limit)
+        };
         // `auto_compact_at`, else 80 % of the window (01 section 5.5). The count is what the
         // last response said the request was; before there is one, the heuristic's estimate
         // (which already carries a 10 % margin).
@@ -1050,7 +1078,7 @@ async fn drive(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input } => {
+                ContentBlock::ToolUse { id, name, input, .. } => {
                     Some((*id, name.clone(), input.clone()))
                 }
                 _ => None,
@@ -1360,13 +1388,14 @@ async fn drive(
 /// One provider request. Chunks are coalesced into `Msg::Stream` as they arrive.
 async fn stream_turn(
     deps: &RunDeps,
+    to: &ModelSwitch,
     run: RunId,
     req: ChatRequest,
     cancel: &CancellationToken,
 ) -> Result<ChatResponse, ProviderError> {
     let (out, mut chunks) = mpsc::channel::<StreamChunk>(STREAM_CAPACITY);
     // Resolved for every request, so a rotated key is picked up within the store's cache time.
-    let creds = deps
+    let creds = to
         .creds
         .credential()
         .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
@@ -1378,7 +1407,7 @@ async fn stream_turn(
     );
     let began = Instant::now();
     let mut first = span.is_disabled();
-    let call = deps.provider.stream(&creds, req, out, cancel.clone());
+    let call = to.provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
 
     let mut co = Coalescer::default();

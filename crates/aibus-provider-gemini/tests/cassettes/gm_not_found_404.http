@@ -1,0 +1,11 @@
+HTTP 404
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "error": {
+    "code": 404,
+    "message": "models/gemini-9-ultra is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.",
+    "status": "NOT_FOUND"
+  }
+}

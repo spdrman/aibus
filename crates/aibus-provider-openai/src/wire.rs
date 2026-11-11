@@ -100,7 +100,7 @@ fn chat_assistant(m: &Message, o: Opts) -> Option<Value> {
         match b {
             ContentBlock::Text(t) => text.push_str(t),
             ContentBlock::Thinking { text, redacted: false, .. } => thinking.push_str(text),
-            ContentBlock::ToolUse { id, name, input } => calls.push(json!({
+            ContentBlock::ToolUse { id, name, input, .. } => calls.push(json!({
                 "id": wire_id(*id),
                 "type": "function",
                 "function": {"name": name, "arguments": input.to_string()},
@@ -179,7 +179,7 @@ pub fn responses_body(req: &ChatRequest, o: Opts) -> Value {
                 for b in &m.blocks {
                     match b {
                         ContentBlock::Text(t) => text.push_str(t),
-                        ContentBlock::ToolUse { id, name, input: args } => {
+                        ContentBlock::ToolUse { id, name, input: args, .. } => {
                             if !text.is_empty() {
                                 input.push(json!({"role": "assistant", "content": [{"type": "output_text", "text": std::mem::take(&mut text)}]}));
                             }
@@ -285,7 +285,7 @@ mod tests {
             blocks: vec![
                 ContentBlock::Thinking { text: "hmm".into(), redacted: false, signature: None },
                 ContentBlock::Text("looking".into()),
-                ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}) },
+                ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}), signature: None },
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
@@ -353,7 +353,7 @@ mod tests {
         let mut r = req();
         r.messages.push(Message {
             role: MessageRole::Assistant,
-            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({}) }],
+            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({}), signature: None }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         r.messages.push(Message::text(MessageRole::Assistant, ""));

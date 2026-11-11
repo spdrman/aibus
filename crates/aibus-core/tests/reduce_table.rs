@@ -38,7 +38,7 @@ fn every_variant_and_every_command_has_a_case() {
             _ => None,
         })
         .collect();
-    assert_eq!(verbs.len(), 23);
+    assert_eq!(verbs.len(), 24);
 }
 
 #[test]

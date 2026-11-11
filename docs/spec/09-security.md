@@ -59,7 +59,7 @@ A `redact` layer sits in front of every writer: tracing, transcript JSONL, `msgs
 
 A worker's summary is data, not instructions (01 section 5.3): wrapped with a fixed header, markers escaped, capped. Hook stdout on `user_prompt_submit` and `session_start` is also data and is labelled `[hook <name>]`. Project rules files are trusted by definition (they are in the repo the user chose to run in), but `agents.extra_dirs` definitions are not: their hooks are stripped unless the directory is trusted, and their `permission_mode` is clamped to `default`.
 
-Web content (`web_fetch`, M5) is wrapped the same way and never merged into a system prompt.
+Web content (`web_fetch`, M5) is wrapped the same way and never merged into a system prompt. MCP results are data in both directions: what `aibus mcp` returns from a file or an agent definition is wrapped and redacted before a client sees it, and what an MCP server answers to a tool call of ours is wrapped before the lead sees it.
 
 ## 6. Hooks and definitions as code
 
@@ -76,7 +76,7 @@ Workflows can carry `gate` commands; same rule.
 
 ## 8. Network
 
-Only provider crates open sockets, plus `web_fetch` when enabled and `http` hooks in M5, and one listener: `aibus mcp --http` (E11, off unless the flag is given), which binds a loopback address only, wants a bearer token on every request and checks `Origin` and `Host`; it lives in the `aibus` binary, not in `aibus-core` or `aibus-mcp`. TLS via `rustls` (no OpenSSL). Proxies from `HTTPS_PROXY` honoured. Every request carries `User-Agent: aibus/<version>` and a `RequestMetadata` with session and run ids for provider-side tracing, never usernames or paths. There is no telemetry; `aibus` does not phone home.
+Only provider crates open sockets, plus `web_fetch` when enabled and `http` hooks in M5, and one listener: `aibus mcp --http` (E11, off unless the flag is given; `aibus mcp` on stdio opens no socket), which binds a loopback address only, wants a bearer token on every request and checks `Origin` and `Host`; it lives in the `aibus` binary, not in `aibus-core` or `aibus-mcp`. TLS via `rustls` (no OpenSSL). Proxies from `HTTPS_PROXY` honoured. Every request carries `User-Agent: aibus/<version>` and a `RequestMetadata` with session and run ids for provider-side tracing, never usernames or paths. There is no telemetry; `aibus` does not phone home.
 
 ## 9. Supply chain
 

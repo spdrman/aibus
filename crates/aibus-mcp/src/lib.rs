@@ -42,6 +42,16 @@ const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 #[derive(Clone, Copy, Debug)]
 pub struct ClientAddr(pub SocketAddr);
 
+/// Who sent the request, for the audit line: the address an HTTP host stored in the request's
+/// extensions, or nothing on stdio.
+fn peer(context: &RequestContext<RoleServer>) -> Option<SocketAddr> {
+    context
+        .extensions
+        .get::<http::request::Parts>()
+        .and_then(|p| p.extensions.get::<ClientAddr>())
+        .map(|a| a.0)
+}
+
 /// What the process was started to allow (the epic's capability table). The surface is fixed at
 /// start and the model cannot raise it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -288,12 +298,7 @@ impl ServerHandler for Server {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let client = context.client_info();
-        let addr = context
-            .extensions
-            .get::<http::request::Parts>()
-            .and_then(|p| p.extensions.get::<ClientAddr>())
-            .map(|a| a.0);
-        self.call_from(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
+        self.call_from(client.as_ref(), peer(&context), &request.name, request.arguments, Instant::now())
             .map(CallToolResponse::from)
     }
 
@@ -323,6 +328,7 @@ impl ServerHandler for Server {
         let uri = self.redactor.redact(&request.uri).into_owned();
         self.audit.record(
             context.client_info().as_ref(),
+            peer(&context),
             "resources/read",
             None,
             &json!({ "uri": uri }),
@@ -352,6 +358,7 @@ impl ServerHandler for Server {
         let name = self.redactor.redact(&request.name).into_owned();
         self.audit.record(
             context.client_info().as_ref(),
+            peer(&context),
             "prompts/get",
             Some(&name),
             &Value::Object(args),

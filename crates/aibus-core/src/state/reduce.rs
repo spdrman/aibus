@@ -1502,6 +1502,8 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let level = if *ok { "info" } else { "warn" };
             r.log(level, &format!("account {op} {account}: {}", if *ok { "done" } else { "failed" }));
         }
+        // Shown by the modal that asked for it, which reads the message itself.
+        Msg::AccountPrompt { .. } => {}
         Msg::IoError { context, .. } => {
             // A compaction that failed leaves the run running again (`Compact` set `compacting`).
             if let Some(run) = context.strip_prefix("compacting ") {

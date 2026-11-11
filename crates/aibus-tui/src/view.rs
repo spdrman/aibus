@@ -27,7 +27,7 @@ pub const MENU_VIEW: &str = "view:menu";
 pub const DIRTY: &str = "view:dirty";
 
 /// Widget name and the one `view:` node it draws. `view:dirty` lists the names.
-pub const WIDGETS: [(&str, &str); 20] = [
+pub const WIDGETS: [(&str, &str); 21] = [
     ("header", HEADER),
     ("rail", RAIL),
     ("lead_box", LEAD_BOX),

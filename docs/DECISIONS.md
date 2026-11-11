@@ -444,6 +444,22 @@ Gated calls, taken at the recommended default:
 
 **Why.** One drawing path means every change to the centre column is made and tested once.
 
+## G4b (2026-11-11): the OAuth modal of /login, and swapping a session off the built-in fake
+
+**Context.** #161 is what G4 left out on purpose: the browser login inside the terminal, and a session that started with no account, which kept the fake and said `restart to run on it`. A few calls were open and the owner's rule is to take the recommended default.
+
+**Decision.**
+
+1. The modal is an `Entry` of a new kind (`EntryKind::Oauth(name)`) on the Accounts screen, so it follows the same Esc and redraw paths as the other fields. It replaces the key step for a provider in `Input::oauth_providers`, which the binary fills from the presets whose id has an `oauth::definition` (today OpenRouter). It shows the lines the flow wrote, as they came (the address, or the device code line), and the screen wraps them over the rows they need. `o` opens the first `https://` or `http://` word in them through `oauth::open`, the platform opener with the address as one argv element; `Esc` cancels the flow's `CancellationToken` and closes the modal.
+2. The flow runs on the same worker thread as every account op (`AccountOp::AddOauth`). Its output goes through a small `Write` (`Lines`) that sends each finished line as `Msg::AccountPrompt` (a `try_send`, because the flow writes from inside its runtime). The message is redacted, is for the modal only, and the graph and the log keep nothing of it (the summary has its length). `Io` gains `cancel`, which `account add --oauth` uses in place of its own token; a command line leaves it `None`.
+3. The browser is not started by itself in the terminal (`open_browser` and `paste` stay off: there is no stdin to paste on). `o` is the one way, so the opener never starts without a key press.
+4. The launcher's registry, `builtin` flag, `ModelDefaults` and `session_default` are one `Live` behind one `RwLock`, and a pick reads all four from a single snapshot, so it cannot pair the new registry with the fake's credential or the fake's default model. `set_accounts(registry, views, defaults)` replaces them. Between real accounts only the registry changes, as in G4. Leaving the fake rebuilds the defaults from `defaults.model`, else the first account's default model, else the first model it lists, with `advisor_model`, `router_model` and `swarm_model` from the config (`off` is none) or the new default. If there is nothing to default to, nothing is swapped and the fake stays whole, and the line says why.
+5. A run that is already going keeps what it resolved, and a fork or resume of a run pinned to the fake account fails to pick (the account is gone) and never reaches a real provider. The advisor and the router are not started by the swap; they need a restart, as before.
+
+**Alternatives.** Keep the key field for OpenRouter as well, behind a key press (rejected: the issue says the flow replaces it, and `aibus account add --key-stdin` still takes a key). A new graph node for the prompt lines (rejected: the lines carry a one-off address and are not state worth snapshotting). Swap `builtin`, `defaults` and `session_default` as three atomics or locks (rejected: a pick between two of them could mix the fake with the new registry).
+
+**Why.** A login now ends in a usable account in one session, and the fake key can only ever meet the fake provider.
+
 ## D-F3: Capabilities per model, a closed compat enum, and the leftover provider fields
 
 **Context.** Issue #111. `Capabilities` was per provider, which is wrong for a preset table where one model reasons and its neighbour does not, and `ProviderDef.compat` was a struct that mixed capabilities (`logprobs`, `effort`, ...) with wire quirks and with three things that are neither (`user`, `open_aliases`, `responses`, `auth_header`).

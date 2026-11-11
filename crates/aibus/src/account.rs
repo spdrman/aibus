@@ -37,6 +37,9 @@ pub struct Io<'a> {
     pub redactor: Redactor,
     /// The login and refresh exchange for `--oauth`. `None` when no provider has one.
     pub oauth: Option<Arc<dyn OAuthFlow>>,
+    /// Ends the `--oauth` login from outside (`Esc` in the terminal's login modal). `None` for a
+    /// command line, where Ctrl-C ends the process.
+    pub cancel: Option<tokio_util::sync::CancellationToken>,
     pub stdin: &'a mut dyn Read,
     /// Asks for a key with the echo off. `None` when there is no terminal to ask on.
     pub prompt: Option<&'a dyn Fn() -> std::io::Result<String>>,
@@ -172,7 +175,7 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         // here, as they arrive, because `io.out` is not `Send`.
         let (lines, mut shown) = tokio::sync::mpsc::unbounded_channel::<String>();
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel = io.cancel.clone().unwrap_or_default();
         let tokens = rt.block_on(async {
             let notify = move |line: &str| {
                 let _ = lines.send(line.to_owned());

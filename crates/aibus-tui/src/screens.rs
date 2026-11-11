@@ -91,6 +91,8 @@ pub enum EntryKind {
     Message(RunId),
     /// `R` on a partial run.
     Resume(RunId),
+    /// The browser login of an account (its name): the modal shows what the flow says.
+    Oauth(String),
     /// The two steps of adding an account: its name (for the provider that was picked), its key.
     AccountName(String),
     AccountKey(String, String),
@@ -169,6 +171,30 @@ pub fn entry_line(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
     let tail: String = shown.chars().skip(skip).collect();
     let x = put(buf, area, x, y, &tail, Style::new().fg(th.fg));
     put(buf, area, x, y, th.g("▌"), Style::new().fg(th.router));
+}
+
+/// The browser login: its title, what the flow said (the address wraps over the rows it needs, a
+/// device code is a line of its own) and the two keys. Before the flow has said anything it waits.
+pub fn oauth_modal(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
+    put(buf, area, 0, y, &e.label, Style::new().fg(th.router).add_modifier(Modifier::BOLD));
+    let width = usize::from(area.width).max(1);
+    let mut row = y + 1;
+    let last = area.height.saturating_sub(2);
+    if e.text.is_empty() {
+        put(buf, area, 0, row, "waiting for the authorization address...", Style::new().fg(th.dim_text));
+        row += 1;
+    }
+    for line in e.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let cs: Vec<char> = line.chars().collect();
+        for chunk in cs.chunks(width) {
+            if row >= last {
+                break;
+            }
+            put(buf, area, 0, row, &chunk.iter().collect::<String>(), Style::new().fg(th.fg));
+            row += 1;
+        }
+    }
+    put(buf, area, 0, area.height.saturating_sub(1), "[o] open in the browser   [Esc] cancel", Style::new().fg(th.dim_text));
 }
 
 /// The permission modal (05 section 5): 60 columns, yellow, the tool, what it would do, who asked
@@ -373,7 +399,9 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
     column(buf, head, 32, 28, "default model", dim);
     column(buf, head, 61, 10, "key", dim);
     column(buf, head, 72, 10, "status", dim);
-    let shown = usize::from(inner.height.saturating_sub(5)).max(1);
+    let login = entry.filter(|e| matches!(e.kind, EntryKind::Oauth(_)));
+    let rows_below: u16 = if login.is_some() { 9 } else { 3 };
+    let shown = usize::from(inner.height.saturating_sub(rows_below + 2)).max(1);
     let first = sel.saturating_sub(shown.saturating_sub(1));
     let mut hits = Vec::new();
     if rows.is_empty() {
@@ -404,9 +432,11 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
         column(buf, r, 72, 10, text(row, "status"), Style::new().fg(if ready { th.ok } else { th.warn }));
         hits.push((hit, r));
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(3), height: 3, ..inner };
+    let bottom = Rect { y: inner.bottom().saturating_sub(rows_below), height: rows_below, ..inner };
     put(buf, bottom, 0, 0, &clip(note, usize::from(bottom.width)), dim);
-    if let Some(e) = entry {
+    if let Some(e) = login {
+        oauth_modal(buf, bottom, 1, e, th);
+    } else if let Some(e) = entry {
         entry_line(buf, bottom, 1, e, th);
     } else {
         let (b, _) = buttons(

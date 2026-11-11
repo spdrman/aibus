@@ -444,6 +444,21 @@ Gated calls, taken at the recommended default:
 
 **Why.** One drawing path means every change to the centre column is made and tested once.
 
+## G6 (2026-11-11): the workflow author is a built-in over the binary's own `aibus mcp` (#125)
+
+**Context.** #125 connects the built-in author to `aibus mcp` over stdio, read-only, and adds `/workflow new <goal>`. Three of its details do not fit the code as it stands, and the epic's open question is whether to link the server in-process instead of spawning it.
+
+**Decision.** I keep the spawn (the issue's default). Four calls follow from reading the code:
+
+1. The connection is made when a terminal session starts (or when `--agent workflow-author` is used), not when the author is first about to run. The tool registry is built once and shared, and an MCP client lists its tools at connect time, so there is no later point to add tools to it. The cost is one idle child process per terminal session, which exits with it. Every other agent gets a deny for `mcp:aibus:*`, and `ToolRegistry::specs` now hides a tool that a bare MCP deny covers, so the lead is not offered six tools it could not call. A user's own `[mcp.aibus]` is left alone and not denied to anybody.
+2. The server's `author_workflow` prompt travels as the delegated task, not as the system prompt. The prompt takes the goal as an argument and is rendered per call, and a definition's body is fixed text, so the definition carries a short local prompt (the fallback) and `/workflow new` fetches the server's with `prompts/get` and hands it to the author as its task. A server without the prompt leaves the local one and a one-line task.
+3. `workflow_dry_run` takes a saved workflow's name, not a draft, so the author validates drafts with `workflow_validate` only and is told to dry-run a similar saved workflow if it wants to see prompts rendered. The acceptance line that has it dry-run the draft cannot be met without a server change, and I did not make one.
+4. `/workflow new` is not a forced foreground `Delegate` command. A command from the user has no one waiting for the child's result, whereas a `delegate` tool call made by the lead (`RunMail::Call`, already in the run loop) returns the wrapped report to the lead as a tool result, which is what the issue asks for. The draft is kept by the reducer when a `workflow-author` run finishes: the last fenced `toml` block, only if it validates against the agents in the graph.
+
+**Alternatives.** Link `aibus-mcp` into the TUI over a channel (rejected for now, as the issue says: a new transport and no process boundary around the server). Connect lazily on the first `/workflow new` by making the registry mutable (rejected: a larger change to the executor for one idle process). Put the server's prompt into the system prompt by launching the author with a rendered definition (rejected: it needs an async fetch inside the synchronous launcher).
+
+**Why.** The author gets the least capability that works (a server with no write or run tool at all, and nothing else of it offered to any other agent), and every piece reuses what exists: the validator, the MCP client, the child-result wrapping and the permission modal.
+
 ## G4b (2026-11-11): the OAuth modal of /login, and swapping a session off the built-in fake
 
 **Context.** #161 is what G4 left out on purpose: the browser login inside the terminal, and a session that started with no account, which kept the fake and said `restart to run on it`. A few calls were open and the owner's rule is to take the recommended default.

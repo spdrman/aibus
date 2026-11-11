@@ -33,7 +33,7 @@ fn write(path: &Path, text: &str) {
 }
 
 #[test]
-fn list_shows_the_nine_built_ins_with_the_json_shape() {
+fn list_shows_the_ten_built_ins_with_the_json_shape() {
     let home = xdg_temp();
     let out = aibus(home.path(), &["agent", "list", "--json"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
@@ -42,7 +42,7 @@ fn list_shows_the_nine_built_ins_with_the_json_shape() {
     let names: Vec<_> = rows.iter().map(|r| r["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit"]
+        ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit", "workflow-author"]
     );
     let explore = &rows[1];
     assert_eq!(

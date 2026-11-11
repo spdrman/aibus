@@ -1,5 +1,5 @@
 //! Agent definitions (01 section 1): the types here, `def` parses one file, `discover` walks the
-//! scopes, `builtin` holds the compiled-in nine.
+//! scopes, `builtin` holds the compiled-in ten.
 
 pub mod builtin;
 pub mod def;

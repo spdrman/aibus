@@ -72,6 +72,19 @@ fn sandbox_check(cfg: Option<&Config>) -> Check {
     check("shell sandbox", true, format!("{name}{net}"))
 }
 
+/// The workflow author's connection to this program's own `aibus mcp`: the user's `[mcp.aibus]`
+/// when there is one, else `<this program> mcp` (no `--allow`, so read-only). It fails when the
+/// program's own path does not resolve, since the author could not start it.
+fn author_check(cfg: Option<&Config>) -> Check {
+    if let Some(own) = cfg.and_then(|c| c.mcp.get("aibus")) {
+        return check("workflow author", true, format!("your [mcp.aibus]: {} {}", own.command, own.args.join(" ")));
+    }
+    match std::env::current_exe().and_then(std::fs::canonicalize) {
+        Ok(exe) => check("workflow author", true, format!("{} mcp (read-only, over stdio)", exe.display())),
+        Err(e) => check("workflow author", false, format!("this program's own path does not resolve: {e}")),
+    }
+}
+
 /// `keyring (<backend>)` or `unavailable, env/file only`. It only fails when an account is
 /// configured to use a keychain that is not there.
 fn store_check(keychain: &dyn Keychain, cfg: Option<&Config>) -> Check {
@@ -274,6 +287,7 @@ pub fn doctor(
         providers_check(cfg.as_ref()),
         store_check(keychain, cfg.as_ref()),
         sandbox_check(cfg.as_ref()),
+        author_check(cfg.as_ref()),
         worktree_check(&paths),
         index_check(&paths),
         dirs_check(&paths),

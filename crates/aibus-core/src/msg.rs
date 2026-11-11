@@ -587,6 +587,12 @@ pub enum Command {
     /// the terminal loop does the step (it owns the directories) and answers with
     /// `Msg::WorkflowsLoaded`.
     WorkflowFile(WorkflowFile),
+    /// `/workflow new <goal>`: the lead delegates `goal` to the `workflow-author` in the
+    /// foreground. The reducer does nothing with it; the binary sends the lead the call, because
+    /// it holds the connection to the server the author talks to.
+    WorkflowAuthor {
+        goal: String,
+    },
 }
 
 /// What `Command::WorkflowFile` asks the loop to do with the workflow files.
@@ -952,5 +958,6 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::Quit { .. } => "quit",
         Command::SetModel { .. } => "set_model",
         Command::WorkflowFile(_) => "workflow_file",
+        Command::WorkflowAuthor { .. } => "workflow_author",
     }
 }

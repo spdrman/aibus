@@ -130,6 +130,14 @@ There are no subscriptions. A client that wants to follow a run polls `run_statu
 
 Relaying a run's permission prompts to the client is not built. See E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
 
+## aibus as its own client: the workflow author
+
+The TUI's `/workflow new <goal>` has the built-in `workflow-author` agent draft a workflow for the goal, and it does that through `aibus mcp` over stdio. When a terminal session starts (or `--agent workflow-author` is used) and your config has no `[mcp.aibus]` table, the binary adds one in memory: `command` is this program's own path (`std::env::current_exe()`, resolved through symlinks), `args = ["mcp"]`, no `--allow`, and the usual scrubbed environment. So the child is the read-only server of this page: the author can list and read workflows, list the agents, validate a draft against them and dry-run a saved workflow, and it cannot write or run anything. Its tool list has no `workflow_create`, and the audit file of the child shows `write`, `gates` and `run` all false at `server/start`.
+
+Only the author is offered those tools: every other agent gets a deny for `mcp:aibus:*`, so the lead does not see them. The usual client rules apply, which means every call asks in the permission modal and `a` (always, for this tool) makes the author quiet after the first. What the server answers is wrapped as data. If you have your own `[mcp.aibus]` table it is used as it is and the binary adds nothing; `aibus doctor` shows which one the author will use, and whether the binary's own path resolves.
+
+The author's result is a fenced `toml` block. The lead gets it as data like any child's report, and the last block that validates against your agents is kept as the draft that `/workflow save <name>` writes.
+
 ## Streamable HTTP (`--http`)
 
 Stdio is the default and needs nothing. Some clients cannot spawn a process, and for those `aibus mcp --http 127.0.0.1:<port>` serves the same tools over Streamable HTTP, on one endpoint, `/mcp` (POST and GET). It is opt-in by flag and it is loopback only: any address that is not in `127.0.0.0/8` or `::1` is a usage error (exit 2) before a socket or the audit file is created, and there is no flag to override that. Port `0` asks the system for one, and the bound address is the first line on stdout:

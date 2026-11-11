@@ -195,6 +195,8 @@ impl ToolRegistry {
         self.tools
             .iter()
             .filter(|(name, _)| eff.allow.iter().any(|p| names_tool(&p.tool, name)))
+            // A bare deny of an MCP tool (`mcp:aibus:*`) keeps it out of the list too.
+            .filter(|(name, _)| !eff.deny.iter().any(|d| d.spec.is_none() && d.tool.starts_with("mcp:") && names_tool(&d.tool, name)))
             .map(|(_, t)| t.spec())
             .collect()
     }

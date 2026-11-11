@@ -990,6 +990,7 @@ mod tests {
         let with_lead = Env { lead: Some(lead_run()), ..bare };
         let said = |env: &Env, line: &str| match send(line, env) {
             Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         };
         assert_eq!(said(&bare, "/workflow new review a pull request"), "BAD /workflow new is not available: no lead is running");

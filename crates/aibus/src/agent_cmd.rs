@@ -254,7 +254,7 @@ fn check(env: &Env, path: &Path) -> Result<Report, AibusError> {
 
     // "Resolves on some account": the fake account and every enabled one. A provider this
     // build does not have cannot be asked, so its accounts give the benefit of the doubt.
-    let configs = provider_configs(&cfg.accounts, &env.paths)?;
+    let configs = provider_configs(&cfg.accounts, &cfg.providers, &env.paths)?;
     let registry = ProviderRegistry::new(&builtin_factories(), &configs)?;
     let mut ids = vec!["fake"];
     ids.extend(

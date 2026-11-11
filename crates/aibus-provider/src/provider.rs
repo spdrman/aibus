@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::{ConfigError, ProviderError};
 use crate::secret::{AuthMethodKind, Credential};
+use crate::presets::ProviderDef;
 use crate::types::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -205,6 +206,10 @@ pub struct ProviderConfig {
     pub cache_dir: Option<PathBuf>,
     /// `~/.config/aibus/providers`: `<provider>/models.json` overrides the built-in table.
     pub overrides_dir: Option<PathBuf>,
+    /// The resolved definition this instance is built from (a preset, a `[[provider]]` table or
+    /// both). When it is set it wins over `base_url` and `api` above, which are the old
+    /// account-level settings a factory falls back to when it is built without one.
+    pub def: Option<ProviderDef>,
 }
 
 pub trait ProviderFactory: Send + Sync {
@@ -212,6 +217,11 @@ pub trait ProviderFactory: Send + Sync {
     fn build(&self, cfg: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError>;
     /// Which `auth` values this provider accepts.
     fn auth_methods(&self) -> &'static [AuthMethodKind];
+    /// The wire dialects (`Api::as_str`) this factory can build an instance of from a
+    /// definition. A factory that serves none is only built as itself, from its own id.
+    fn apis(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// Built providers by id. Constructed from the binary's explicit factory list.
@@ -220,25 +230,51 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    /// Builds every factory with its entry in `configs` (keyed by provider id), or the
-    /// default config when it has none. Two factories with one id is a config error.
+    /// Builds one instance per definition in `configs` (an entry with `def` set, keyed by
+    /// provider id) with the factory that serves its `api`, then every factory as itself with
+    /// its entry in `configs`, or the default config when it has none. An instance from a
+    /// definition wins over a factory's own of the same id; a definition no factory serves is
+    /// left to the factory of the same id. Two factories with one id is a config error.
     pub fn new(
         factories: &[Box<dyn ProviderFactory>],
         configs: &BTreeMap<String, ProviderConfig>,
     ) -> Result<Self, ConfigError> {
         let mut providers = BTreeMap::new();
+        let mut unserved = std::collections::BTreeSet::new();
+        for (id, cfg) in configs {
+            let Some(def) = &cfg.def else { continue };
+            let api = def
+                .api
+                .ok_or_else(|| ConfigError::Invalid(id.clone(), "the definition has no api".into()))?
+                .as_str();
+            // No adapter for this api (a test registry of stand-ins): the factory of the same
+            // id, if there is one, builds from the config as it did before definitions.
+            match factories.iter().find(|f| f.apis().contains(&api)) {
+                Some(factory) => {
+                    providers.insert(def.static_id(), factory.build(cfg)?);
+                }
+                None => {
+                    unserved.insert(id.as_str());
+                }
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
         for f in factories {
             let id = f.id().0;
-            let cfg = configs.get(id).cloned();
+            if !seen.insert(id) {
+                return Err(ConfigError::DuplicateProvider(id.to_owned()));
+            }
+            if providers.contains_key(id) {
+                continue;
+            }
+            let cfg = configs.get(id).filter(|c| c.def.is_none() || unserved.contains(id)).cloned();
             // A provider that needs settings (`openai-compatible` needs a base URL) is left out
             // while no account uses it, instead of failing everyone else's startup.
             let built = match f.build(&cfg.clone().unwrap_or_default()) {
                 Err(ConfigError::NotConfigured(..)) if cfg.is_none() => continue,
                 built => built?,
             };
-            if providers.insert(id, built).is_some() {
-                return Err(ConfigError::DuplicateProvider(id.to_owned()));
-            }
+            providers.insert(id, built);
         }
         Ok(Self { providers })
     }

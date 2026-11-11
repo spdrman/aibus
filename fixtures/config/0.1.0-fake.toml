@@ -1,0 +1,6 @@
+# A 0.1.0 config with the scripted fake account (tests and demos).
+[[account]]
+name = "fake"
+provider = "fake"
+label = "Scripted"
+auth = { none = true }

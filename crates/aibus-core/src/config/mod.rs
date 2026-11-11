@@ -22,6 +22,10 @@ pub struct Config {
     pub models: AliasTable,
     #[serde(rename = "account")]
     pub accounts: Vec<Account>,
+    /// `[[provider]]`: a server the presets do not know, or a preset's fields overridden. User
+    /// file only, like `[[account]]`: a project must not be able to redirect a key.
+    #[serde(rename = "provider")]
+    pub providers: Vec<aibus_provider::ProviderDef>,
     pub agents: Agents,
     pub limits: Limits,
     pub router: Router,
@@ -519,6 +523,14 @@ impl Config {
         }
         if self.ui.tick_hz == 0 {
             bad("ui.tick_hz", "must be at least 1".into());
+        }
+        let mut defined = std::collections::BTreeSet::new();
+        for d in &self.providers {
+            if !defined.insert(d.id.as_str()) {
+                bad("provider.id", format!("provider {} is defined twice", d.id));
+            } else if let Err(why) = aibus_provider::presets::resolve(&d.id, Some(d)) {
+                bad(if why.contains(": headers:") { "provider.headers" } else { "provider" }, why);
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         for a in &self.accounts {

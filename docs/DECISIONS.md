@@ -136,3 +136,21 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Draw the section now and update the two snapshots by hand (rejected: I cannot run the suites on this lane, and a hand-edited frame is a guess). Derive the shape check from the `args` hint (rejected: `/x needs <section> <text>` is a different notice from the current one).
 
 **Why.** Behaviour first, frames with the suites.
+
+## F2 (2026-11-11): providers are definitions, instances are per id
+
+**Context.** Five provider ids were code (`providers.rs` listed five factories, `kimi` was a flavour inside the OpenAI crate), so a new vendor meant a new factory and two local servers could not coexist: `provider_configs` refused two accounts of one id with different URLs.
+
+**Decision.** A provider is a `ProviderDef` (api, base URL, env vars, auth methods, model table, prefixes, compat flags, headers). Presets live in `presets.json` in `aibus-provider`; a `[[provider]]` table overrides a preset field by field or defines a new id. The registry builds one instance per id with the factory that serves the definition's `api`. The factories keep their ids (`anthropic`, `openai`) and now also report which apis they serve (`ProviderFactory::apis`), so the binary registers one adapter per wire and `Factory::kimi()` and `compatible()` stay only as constructors for the presets of those names. Provider ids became leaked `&'static str` (one leak per distinct id, at startup), because `ProviderId` holds a `&'static str` and user ids are not known at compile time.
+
+Gated calls, taken at the recommended default:
+
+* The old conflict error stays for the old form only (two accounts of one id with different `base_url` or `api` on the accounts). With `[[provider]]` ids the situation cannot arise, and keeping the error for the old form is safer than guessing which URL gets which key. The message now points at `[[provider]]`.
+* `[[provider]]` is user-file only, like `[[account]]`, since it decides where a key is sent.
+* A user-supplied `compat` replaces the preset's whole instead of merging per flag, to keep the merge rule one sentence long.
+* Model tables for the new cloud presets list one or two models without prices; an unknown price is `n/a`, never a guess.
+
+**Alternatives.** One factory per vendor (rejected: it is exactly the code-per-vendor this removes). Resolving the instance per account instead of per id (rejected: `registry.get(&account.provider)` is used in four places in core and the id is the cleaner key). Merging `compat` flag by flag (rejected for now: needs an `Option` per flag).
+
+**Why.** The vendor is data and the wire is code, so adding Groq is a review of a JSON entry.
+

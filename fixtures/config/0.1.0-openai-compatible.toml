@@ -1,0 +1,6 @@
+# A 0.1.0 config: a local Ollama server through the generic id, no key.
+[[account]]
+name = "local"
+provider = "openai-compatible"
+base_url = "http://127.0.0.1:11434/v1"
+auth = { none = true }

@@ -157,7 +157,7 @@ impl ProviderDef {
         static IDS: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
         let mut ids = IDS.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(known) = ids.get(self.id.as_str()) {
-            return *known;
+            return known;
         }
         let leaked: &'static str = Box::leak(self.id.clone().into_boxed_str());
         ids.insert(leaked);

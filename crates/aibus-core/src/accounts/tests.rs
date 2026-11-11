@@ -421,7 +421,7 @@ aliases = { judge = "fake-large" }
 
 fn quota(resets_in: Option<Duration>) -> aibus_provider::ProviderError {
     let mut e = aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Quota, "spent");
-    e.rate_limit = Some(aibus_provider::RateLimitInfo { resets_in, ..Default::default() });
+    e.rate_limit = Some(Box::new(aibus_provider::RateLimitInfo { resets_in, ..Default::default() }));
     e
 }
 

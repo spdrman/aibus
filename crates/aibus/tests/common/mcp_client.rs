@@ -77,7 +77,7 @@ pub struct McpClient {
     pub capabilities: Value,
     /// Answers a server-to-client `elicitation/create` (2025-11-25) with the `result` to send. With
     /// none set, the client cancels.
-    pub answer_elicitation: Option<Box<dyn FnMut(&Value) -> Value>>,
+    pub answer_elicitation: Option<Answer>,
     /// The `params` of every `elicitation/create` the server sent.
     pub elicitations: Vec<Value>,
     /// Every line the server wrote to stdout, in order.
@@ -85,6 +85,9 @@ pub struct McpClient {
     /// The exchanges so far, for `assert_matches`.
     pub transcript: Transcript,
 }
+
+/// What answers a server-to-client `elicitation/create`: the `params` in, the `result` out.
+pub type Answer = Box<dyn FnMut(&Value) -> Value>;
 
 /// `aibus mcp <args>` in the throwaway home, the way every other integration test starts it.
 pub fn mcp_command(home: &Path, args: &[&str]) -> Command {

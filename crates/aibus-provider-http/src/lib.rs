@@ -233,7 +233,7 @@ impl Http {
         // Google sends the wait in the body (`error.details[].retryDelay`, "33s"), not a header.
         let retry_after = info.and_then(|i| i.retry_after).or_else(|| retry_delay(&body));
         let mut e = ProviderError::from_http(status, &message, retry_after, id, &code);
-        e.rate_limit = info;
+        e.rate_limit = info.map(Box::new);
         Err(e)
     }
 }

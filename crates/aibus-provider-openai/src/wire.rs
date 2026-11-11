@@ -170,7 +170,7 @@ pub fn chat_body(req: &ChatRequest, o: Opts<'_>) -> Value {
                 false => body.insert("reasoning_effort".into(), json!(effort(e))),
             };
         }
-    } else if let (Some(t), false) = (req.temperature, o.has(CompatFlag::NoSamplingParams)) {
+    } else if let (Some(t), false) = (req.temperature_f64(), o.has(CompatFlag::NoSamplingParams)) {
         body.insert("temperature".into(), json!(t));
     }
     if !req.tools.is_empty() {
@@ -259,7 +259,7 @@ pub fn responses_body(req: &ChatRequest, o: Opts<'_>) -> Value {
         if let Some(e) = req.effort {
             body.insert("reasoning".into(), json!({"effort": effort(e)}));
         }
-    } else if let (Some(t), false) = (req.temperature, o.has(CompatFlag::NoSamplingParams)) {
+    } else if let (Some(t), false) = (req.temperature_f64(), o.has(CompatFlag::NoSamplingParams)) {
         body.insert("temperature".into(), json!(t));
     }
     if !req.tools.is_empty() {

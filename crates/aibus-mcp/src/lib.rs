@@ -23,7 +23,7 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
     GetPromptResponse, Implementation, JsonObject, ListPromptsResult, ListResourceTemplatesResult,
     ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResponse, ReadResourceResult, ResourceContents, ServerCapabilities, ServerConfig,
+    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig,
     Tool, ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
@@ -424,7 +424,15 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        Ok(ListResourcesResult::with_all_items(resources::list()))
+        let mut all = resources::list();
+        if let Some(runs) = self.runs.as_ref().filter(|_| self.caps.run) {
+            all.extend(runs.ids().into_iter().map(|id| {
+                Resource::new(format!("aibus://runs/{id}"), id)
+                    .with_description("A run this server started: its status.")
+                    .with_mime_type("application/json")
+            }));
+        }
+        Ok(ListResourcesResult::with_all_items(all))
     }
 
     async fn list_resource_templates(
@@ -432,7 +440,11 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        Ok(ListResourceTemplatesResult::with_all_items(resources::templates()))
+        let mut all = resources::templates();
+        if self.caps.run {
+            all.extend(resources::run_templates());
+        }
+        Ok(ListResourceTemplatesResult::with_all_items(all))
     }
 
     async fn read_resource(
@@ -448,7 +460,7 @@ impl ServerHandler for Server {
             peer(&context),
             "resources/read",
             None,
-            None,
+            request.uri.strip_prefix("aibus://runs/").and_then(|r| r.split('/').next()).filter(|r| r.starts_with("run-") && r.len() <= 40),
             &json!({ "uri": uri }),
             read.is_ok(),
             started.elapsed(),

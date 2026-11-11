@@ -144,6 +144,11 @@ fn no_credential_reaches_stdout_or_the_audit_log_during_a_run() {
                 break;
             }
         }
+        // The run resources carry the same promise: the key as the input must not come back.
+        let log = c.read_resource(&format!("aibus://runs/{run}/log")).expect("the log resource");
+        let status = c.read_resource(&format!("aibus://runs/{run}")).expect("the status resource");
+        assert!(!format!("{log}{status}").contains(KEY), "{p:?}: the key came back in a run resource");
+        assert!(c.read_resource(&format!("aibus://runs/run-{KEY}")).is_err(), "{p:?}");
         let unknown = c.call("run_status", json!({ "run": format!("run-{KEY}") })).expect("a tool error");
         assert_eq!(unknown["isError"], true);
         let (done, lines) = c.finish();

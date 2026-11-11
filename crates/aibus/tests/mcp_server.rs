@@ -370,3 +370,38 @@ fn the_run_status_cancel_scenario_matches_its_golden_transcript() {
         c.transcript.assert_matches("run_status_cancel");
     }
 }
+
+#[test]
+fn the_run_resources_scenario_matches_its_golden_transcript() {
+    for p in Protocol::BOTH {
+        let home = xdg_temp();
+        let dir = home.path().join("proj/.aibus/workflows");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("ship.toml"), SHIP).unwrap();
+        let mut c = client(home.path(), p, &["--allow", "run"]);
+        c.list_tools();
+        let started = c
+            .call("workflow_run", json!({ "name": "ship", "scope": "project", "input": "the repo" }))
+            .expect("workflow_run");
+        let run = started["structuredContent"]["run"].as_str().unwrap().to_owned();
+        let done = finished(&mut c, &run);
+        assert_eq!(done["status"], "completed", "{p:?}: {done}");
+
+        // The golden file starts after the polling, which depends on timing.
+        c.transcript = common::transcript::Transcript::new(home.path());
+        c.request("resources/templates/list", json!({})).expect("resources/templates/list");
+        c.request("resources/list", json!({})).expect("resources/list");
+        c.read_resource(&format!("aibus://runs/{run}")).expect("the status resource");
+        c.read_resource(&format!("aibus://runs/{run}/log")).expect("the log resource");
+        let foreign = c.read_resource("aibus://runs/run-00000000000000000000000000").expect_err("a foreign handle");
+        assert_eq!(foreign.code, -32602, "{p:?}");
+        c.transcript.assert_matches("run_resources");
+    }
+
+    // Without the flag the same uris do not exist.
+    let home = xdg_temp();
+    let mut c = client(home.path(), Protocol::V2026_07_28, &[]);
+    let r = c.request("resources/templates/list", json!({})).expect("resources/templates/list");
+    assert!(!r.to_string().contains("aibus://runs"), "{r}");
+    assert_eq!(c.read_resource("aibus://runs/run-x").expect_err("off").code, -32602);
+}

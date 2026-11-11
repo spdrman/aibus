@@ -52,6 +52,33 @@ pub struct Defaults {
     pub swarm_model: Option<String>,
     pub permission_mode: String,
     pub effort: String,
+    /// Which failures move a run to the next account of `[[account]] fallback` (F9). `rate_limit`
+    /// is not in the default, because waiting usually wins.
+    pub fallback_on: Vec<FallbackKind>,
+}
+
+/// The failures an account fallback can answer to (04 section 4.3). Only these four kinds can
+/// move a run; every other `ProviderErrorKind` ends it or retries in place as before.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackKind {
+    Quota,
+    Auth,
+    Overloaded,
+    RateLimit,
+}
+
+impl FallbackKind {
+    pub fn of(kind: aibus_provider::ProviderErrorKind) -> Option<Self> {
+        use aibus_provider::ProviderErrorKind as K;
+        match kind {
+            K::Quota => Some(Self::Quota),
+            K::Auth => Some(Self::Auth),
+            K::Overloaded => Some(Self::Overloaded),
+            K::RateLimit => Some(Self::RateLimit),
+            _ => None,
+        }
+    }
 }
 
 impl Default for Defaults {
@@ -64,6 +91,7 @@ impl Default for Defaults {
             swarm_model: None,
             permission_mode: "default".into(),
             effort: "high".into(),
+            fallback_on: vec![FallbackKind::Quota, FallbackKind::Auth, FallbackKind::Overloaded],
         }
     }
 }
@@ -91,6 +119,9 @@ pub struct Account {
     pub region: Option<String>,
     /// The Google Cloud project of a Vertex account; the `[[provider]]`'s is the default.
     pub project: Option<String>,
+    /// The accounts to try, in order, when this one fails before the first token of a turn and
+    /// the failure is in `defaults.fallback_on`. Empty means the run stays put.
+    pub fallback: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -445,6 +476,7 @@ impl Default for Account {
             auth: Auth::default(),
             region: None,
             project: None,
+            fallback: Vec::new(),
         }
     }
 }
@@ -556,7 +588,15 @@ impl Config {
             }
         }
         let mut seen = std::collections::BTreeSet::new();
-        for a in &self.accounts {
+        for (i, a) in self.accounts.iter().enumerate() {
+            for to in &a.fallback {
+                let path = format!("account.{i}.fallback");
+                if *to == a.name {
+                    bad(&path, format!("account {} lists itself as its own fallback", a.name));
+                } else if !self.accounts.iter().any(|b| b.name == *to) {
+                    bad(&path, format!("account {}: fallback names {to}, which is not an account", a.name));
+                }
+            }
             if a.name.is_empty() || a.provider.is_empty() {
                 bad("account.name", "every account needs a name and a provider".into());
             } else if !seen.insert(a.name.as_str()) {

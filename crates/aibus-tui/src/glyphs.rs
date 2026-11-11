@@ -34,8 +34,10 @@ pub const GLYPHS: [(&str, &str); 19] = [
 
 /// Drawing characters outside the glyph set that a frame also contains: borders, the partial
 /// blocks of a bar, the legend square.
-const DRAWING: [(&str, &str); 23] = [
+const DRAWING: [(&str, &str); 24] = [
     ("…", "."),
+    // The fallback marker on a run's title (F9).
+    ("↷", ">"),
     ("─", "-"),
     ("│", "|"),
     ("┌", "+"),

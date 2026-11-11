@@ -140,6 +140,7 @@ impl Rig {
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
                 assist: None,
+                fallback: None,
             },
         );
         let mut msgs = Vec::new();

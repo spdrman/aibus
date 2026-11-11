@@ -138,6 +138,7 @@ impl Launcher for TestLauncher {
                     handoff: None,
                 })),
                 assist: None,
+                fallback: None,
             },
         ))
     }
@@ -282,6 +283,7 @@ impl Rig {
                 run: self.lead,
                 def: AgentDef {
                     auto_compact_at: self.auto_compact_at,
+                    fallback: None,
                     ..defs()[&"lead".parse::<AgentName>().unwrap()].clone()
                 },
                 prompt: prompt.into(),
@@ -318,6 +320,7 @@ impl Rig {
                     }),
                 })),
                 assist: None,
+                fallback: None,
             },
         );
         self.orch

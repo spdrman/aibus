@@ -133,6 +133,7 @@ impl Launcher for TestLauncher {
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
                 assist: None,
+                fallback: None,
             },
         ))
     }
@@ -289,6 +290,7 @@ impl Rig {
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
                 assist: None,
+                fallback: None,
             },
         );
         self.orch

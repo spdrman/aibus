@@ -9,7 +9,7 @@ use std::time::{Instant, SystemTime};
 
 use aibus_core::config::{Config, Defaults};
 use aibus_core::{
-    expand, AccountCredential, AccountName, AccountRegistry, AdvisorSeat, AgentDef, AgentName,
+    expand, AccountCredential, AccountName, AccountRegistry, AdvisorSeat, AgentDef, AgentName, Fallback,
     AccountView, AibusError, Assist, Budgets, CredentialSource, CredentialStore, HookRunner, Isolation,
     Launcher, ModelCompactor, ModelDefaults, ModelId, ModelSwitch, ModelTarget, Redactor, RouterSeat, RunConfig, RunDeps,
     RunId, Seat, SelectHints, SpawnSpec, Start, ToolExecutor, ToolLimits, ToolPattern,
@@ -182,15 +182,19 @@ impl ChildLauncher {
             ..SelectHints::default()
         };
         match self.pick(&target, &hints) {
-            Ok(p) => Some((
+            Ok(p) => {
+                let fallback = self.fallback_for(&p.account, &target, def.fallback.as_deref());
+                Some((
                 Seat {
                     provider: p.provider,
                     creds: p.creds,
                     model: p.model,
                     account: p.account,
+                    fallback,
                 },
                 def,
-            )),
+            ))
+            }
             Err(e) => note(&e.to_string()),
         }
     }
@@ -275,6 +279,29 @@ impl ChildLauncher {
         })
     }
 
+    /// The accounts a run on `from` moves to when it fails before its first token (F9): the
+    /// definition's `fallback` over the account's, each one picked for `model` like any other
+    /// account, so a key that is missing or a model that does not resolve there leaves it out
+    /// with a log line. `None` when nothing is left to move to.
+    pub fn fallback_for(&self, from: &AccountName, model: &ModelRef, pinned: Option<&[AccountName]>) -> Option<Arc<Fallback>> {
+        let registry = self.registry();
+        let chain: Vec<ModelSwitch> = registry
+            .fallback_names(from, pinned)
+            .into_iter()
+            .filter_map(|name| {
+                let hints = SelectHints { explicit: Some(name.clone()), ..SelectHints::default() };
+                match self.pick(model, &hints) {
+                    Ok(p) => Some(ModelSwitch { provider: p.provider, creds: p.creds, model: p.model, account: p.account }),
+                    Err(e) => {
+                        tracing::info!("fallback account {name} skipped: {e}");
+                        None
+                    }
+                }
+            })
+            .collect();
+        (!chain.is_empty()).then(|| Arc::new(Fallback { chain, on: registry.fallback_on().to_vec(), accounts: registry }))
+    }
+
     /// `/workflow <name> <input>` or `/<name> <input>` for a workflow that exists: the `workflow`
     /// call a lead opens with in place of its first request (01 section 8.4).
     pub fn slash_workflow(&self, prompt: &str) -> Option<(String, serde_json::Value)> {
@@ -351,6 +378,7 @@ impl Launcher for ChildLauncher {
                     creds: switch.creds.clone(),
                     model: switch.model.clone(),
                     account: switch.account.clone(),
+                    fallback: self.fallback_for(&switch.account, &reference, def.fallback.as_deref()),
                 }),
             ),
         }
@@ -436,6 +464,7 @@ impl Launcher for ChildLauncher {
         };
         let picked = self.pick(&target, &hints).map_err(|e| e.to_string())?;
         self.remember(spec.run, &picked.account, &picked.model, &def);
+        let fallback = self.fallback_for(&picked.account, &target, def.fallback.as_deref());
 
         // `isolation: worktree` from the call or the definition (09 section 7). A resumed run
         // finds its kept checkout where it left it.
@@ -489,6 +518,7 @@ impl Launcher for ChildLauncher {
                 hooks: self.hooks.clone(),
                 compactor: Some(compactor),
                 assist: self.assist.get().cloned(),
+                fallback,
             },
         ))
     }

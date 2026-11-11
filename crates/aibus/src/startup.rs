@@ -908,6 +908,7 @@ impl Step for EnterLoop {
                         creds: p.creds,
                         model: p.model,
                         account: p.account,
+                        fallback: None,
                     });
                 }
                 Err(e) => eprintln!("aibus: warning: prompt hooks have no model to ask: {e}"),
@@ -956,6 +957,7 @@ impl Step for EnterLoop {
         };
         // A missing key fails here, with exit 4, rather than on the first request.
         let picked = launcher.pick(&target, &hints)?;
+        let fallback = launcher.fallback_for(&picked.account, &target, def.fallback.as_deref());
         let run = resume.as_ref().map_or_else(aibus_core::RunId::new, |(run, _)| *run);
         launcher.remember(run, &picked.account, &picked.model, &def);
         // A resumed run that worked in a worktree goes back to the one it kept (09 section 7).
@@ -1010,6 +1012,7 @@ impl Step for EnterLoop {
             hooks: hooks.clone(),
             compactor: Some(compactor as Arc<dyn Compactor>),
             assist,
+            fallback,
         };
         Some((run_cfg, deps, extractor))
         };

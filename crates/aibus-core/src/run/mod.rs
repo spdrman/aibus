@@ -2,6 +2,7 @@
 
 mod budget;
 mod coalesce;
+mod fallback;
 mod loop_;
 mod model;
 pub mod result;
@@ -11,6 +12,7 @@ mod compact;
 
 pub use budget::Budgets;
 pub use compact::{AutoHandoff, ModelCompactor};
+pub use fallback::Fallback;
 pub use loop_::{
     spawn, Compactor, ModelSwitch, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
     STREAM_CAPACITY,

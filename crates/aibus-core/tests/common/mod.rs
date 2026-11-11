@@ -16,7 +16,7 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 31] = [
+pub const ALL_NAMES: [&str; 32] = [
     "Key",
     "Mouse",
     "Ui",
@@ -46,6 +46,7 @@ pub const ALL_NAMES: [&str; 31] = [
     "IoError",
     "Shutdown",
     "ModelSwitched",
+    "RunSwitched",
     "WorkflowsLoaded",
     "Persisted",
 ];
@@ -233,6 +234,7 @@ fn def() -> AgentDef {
         router: None,
         initial_prompt: None,
         auto_compact_at: None,
+        fallback: None,
         system_prompt: SENTINEL.into(),
         source: DefSource {
             path: None,
@@ -645,6 +647,17 @@ pub fn cases() -> Vec<Case> {
                 to: Ok(Some((ModelId("m2".into()), AccountName("acct".into())))),
             },
             expect: vec!["model:log", "model:run:<id>:meta", "model:session:assist"],
+        },
+        Case {
+            name: "RunSwitched",
+            setup: running,
+            msg: Msg::RunSwitched {
+                run: R(),
+                from: AccountName("acct".into()),
+                to: AccountName("backup".into()),
+                model: ModelId("m2".into()),
+            },
+            expect: vec!["model:log", "model:run:<id>:meta"],
         },
         Case {
             name: "WorkflowsLoaded",

@@ -49,6 +49,9 @@ pub enum Line {
     /// message (the new text joins it rather than following it).
     Extend { blocks: Vec<ContentBlock> },
     CompactBoundary { pre_tokens: u64, messages: Vec<Message> },
+    /// A fallback moved the run to another account before the first token of a turn (F9). The
+    /// `start` line names the account the run began on; a reader of the file sees both.
+    Switch { account: AccountName, model: ModelId },
 }
 
 /// What a transcript holds: the conversation as the run would send it now, and the latest
@@ -81,6 +84,8 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
                     last.blocks.extend(blocks);
                 }
             }
+            // A record of where the run went; a resume starts again from its own `start` line.
+            Line::Switch { .. } => {}
             Line::CompactBoundary { messages, .. } => {
                 conv.messages = messages;
                 conv.compact_boundary = Some(0);

@@ -193,6 +193,25 @@ fn split_key(k: &str) -> Vec<String> {
 /// (array indexes are skipped). A header that names the path, or a table below it, counts, and
 /// so does the line of an inline table that holds the last part.
 pub fn find_line(text: &str, dotted: &str) -> Option<usize> {
+    // An index after an array of tables (`account.1.fallback`) picks that table's block, so the
+    // line is the second `[[account]]`'s and not the first one that has the key.
+    let segs: Vec<&str> = dotted.split('.').collect();
+    if let Some(at) = segs.iter().position(|s| s.parse::<usize>().is_ok()).filter(|at| *at > 0) {
+        let (head, n) = (segs[..at].join("."), segs[at].parse::<usize>().unwrap_or(0));
+        let header = format!("[[{head}]]");
+        let lines: Vec<&str> = text.lines().collect();
+        let starts: Vec<usize> = (0..lines.len()).filter(|i| lines[*i].trim() == header).collect();
+        if let Some(&from) = starts.get(n) {
+            let to = starts.get(n + 1).copied().unwrap_or(lines.len());
+            let block = lines[from..to].join("\n");
+            let rest = std::iter::once(head.as_str()).chain(segs[at + 1..].iter().copied()).collect::<Vec<_>>().join(".");
+            return find_line_flat(&block, &rest).map(|l| from + l);
+        }
+    }
+    find_line_flat(text, dotted)
+}
+
+fn find_line_flat(text: &str, dotted: &str) -> Option<usize> {
     let want: Vec<String> = dotted
         .split('.')
         .filter(|s| s.parse::<usize>().is_err())
@@ -388,6 +407,38 @@ mod tests {
         assert_eq!(find_line(text, "acct.0.auth.keyring"), Some(5));
         assert_eq!(find_line(text, "w.q.r"), Some(7));
         assert_eq!(find_line(text, "nope"), None);
+    }
+
+    #[test]
+    fn an_index_picks_the_nth_table_of_an_array() {
+        let text = "[[account]]\nname = \"a\"\nfallback = [\"b\"]\n[[account]]\nname = \"b\"\nfallback = [\"zz\"]\n";
+        assert_eq!(find_line(text, "account.0.fallback"), Some(3));
+        assert_eq!(find_line(text, "account.1.fallback"), Some(6));
+    }
+
+    fn fallback_config(second: &str) -> String {
+        format!("[[account]]\nname = \"a\"\nprovider = \"fake\"\nfallback = [\"b\"]\n[[account]]\nname = \"b\"\nprovider = \"fake\"\n{second}\n")
+    }
+
+    #[test]
+    fn fallback_and_fallback_on_parse_with_their_defaults() {
+        use super::super::FallbackKind::*;
+        let c = load_text(&fallback_config("")).unwrap().config;
+        assert_eq!(c.accounts[0].fallback, ["b"]);
+        assert!(c.accounts[1].fallback.is_empty());
+        assert_eq!(c.defaults.fallback_on, [Quota, Auth, Overloaded]);
+        let c = load_text("[defaults]\nfallback_on = [\"quota\", \"rate_limit\"]\n").unwrap().config;
+        assert_eq!(c.defaults.fallback_on, [Quota, RateLimit]);
+    }
+
+    #[test]
+    fn a_fallback_that_names_no_account_or_itself_is_a_config_error_with_its_line() {
+        let e = load_text(&fallback_config("fallback = [\"nope\"]")).unwrap_err();
+        assert_eq!(e.line, Some(8));
+        assert!(e.message.contains("nope"), "{}", e.message);
+        let e = load_text(&fallback_config("fallback = [\"b\"]")).unwrap_err();
+        assert_eq!(e.line, Some(8));
+        assert!(e.message.contains("itself"), "{}", e.message);
     }
 
     #[test]

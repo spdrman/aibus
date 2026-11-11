@@ -410,7 +410,8 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut writer = opts.writer.take();
     let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
     let workflows = opts.workflows.take();
-    let mut input = Input { oauth_providers: std::mem::take(&mut opts.oauth_providers), ..Input::default() };
+    let mut input = Input::default();
+    input.oauth_providers = std::mem::take(&mut opts.oauth_providers);
     let mut ctrl_c = CtrlC::default();
     let supported = input::mouse_supported(opts.term.as_deref());
     let mut mode = MouseMode::Off;

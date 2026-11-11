@@ -6,6 +6,7 @@ mod common;
 
 use aibus_core::state::value::as_str;
 use aibus_core::*;
+use aibus_graph::Graph;
 use aibus_tui::app::{run_job, AccountHook};
 use aibus_tui::input::{AccountOp, Job};
 use aibus_tui::Theme;

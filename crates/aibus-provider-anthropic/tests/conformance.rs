@@ -54,6 +54,8 @@ async fn anthropic_passes_the_conformance_suite() {
             case("http_413", cassette("too_large_413"), fail(ContextTooLong, false, None)),
             case("http_429_retry_after", cassette("rate_limit_429"), fail(RateLimit, true, Some(12))),
             case("http_429", cassette("rate_limit_429_no_retry_after"), fail(RateLimit, true, None)),
+            case("http_402_billing", cassette("billing_402"), fail(Quota, false, None)),
+            case("http_400_credit_balance", cassette("credit_balance_400"), fail(Quota, false, None)),
             case("http_500", cassette("server_500"), fail(Server, true, None)),
             case("http_503", cassette("overloaded_503"), fail(Overloaded, true, None)),
             case("http_529", cassette("overloaded_529"), fail(Overloaded, true, None)),

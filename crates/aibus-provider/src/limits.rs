@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio::time::{sleep_until, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{ProviderError, ProviderErrorKind};
+use crate::error::{ProviderError, ProviderErrorKind, RateLimitInfo};
 use crate::provider::*;
 use crate::secret::Credential;
 use crate::types::*;
@@ -160,6 +160,21 @@ impl Limiter {
         self.changed.notify_waiters();
     }
 
+    /// What a response said about the windows: zero requests or tokens remaining blocks until
+    /// the reset, the same way a 429 does, but without halving the limits (nothing went wrong).
+    /// A response that says anything else teaches the bucket nothing.
+    pub fn observe(&self, info: &RateLimitInfo) {
+        let exhausted = info.requests_remaining == Some(0) || info.tokens_remaining == Some(0);
+        let Some(reset) = info.resets_in.filter(|_| exhausted) else {
+            return;
+        };
+        let until = Instant::now() + reset;
+        let mut st = self.lock();
+        st.blocked_until = Some(st.blocked_until.map_or(until, |t| t.max(until)));
+        drop(st);
+        self.changed.notify_waiters();
+    }
+
     /// Counts tokens against `tokens_per_minute` once a response says what it cost.
     pub fn spend(&self, tokens: u64) {
         self.lock().spent.push_back((Instant::now(), tokens));
@@ -228,13 +243,22 @@ impl Provider for Gated {
         }
         let result = self.inner.stream(creds, req, out.clone(), cancel).await;
         match &result {
-            Err(e) if e.kind == ProviderErrorKind::RateLimit => {
-                if let Some(d) = e.retry_after {
-                    self.limiter.tighten(d);
+            Err(e) => {
+                if let Some(info) = &e.rate_limit {
+                    self.limiter.observe(info);
+                }
+                if e.kind == ProviderErrorKind::RateLimit {
+                    if let Some(d) = e.retry_after {
+                        self.limiter.tighten(d);
+                    }
                 }
             }
-            Ok(r) => self.limiter.spend(r.usage.input_tokens + r.usage.output_tokens),
-            Err(_) => {}
+            Ok(r) => {
+                if let Some(info) = &r.rate_limit {
+                    self.limiter.observe(info);
+                }
+                self.limiter.spend(r.usage.input_tokens + r.usage.output_tokens);
+            }
         }
         drop(permit);
         result
@@ -353,6 +377,75 @@ mod tests {
         lim.spend(1500);
         drop(lim.acquire(|_| {}).await);
         assert_eq!(Instant::now() - t0, MINUTE);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn zero_requests_remaining_blocks_until_the_reset_without_tightening() {
+        let lim = Limiter::new(acct("work"), limits(4));
+        let t0 = Instant::now();
+        lim.observe(&RateLimitInfo {
+            requests_remaining: Some(0),
+            resets_in: Some(Duration::from_secs(12)),
+            ..RateLimitInfo::default()
+        });
+        drop(lim.acquire(|_| {}).await);
+        assert_eq!(Instant::now() - t0, Duration::from_secs(12));
+        // Not a 429: all four slots are there again straight away.
+        let mut held = Vec::new();
+        for _ in 0..3 {
+            held.push(ready(lim.acquire(|_| {})).await.expect("full limit, not halved"));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn zero_tokens_remaining_blocks_too_and_a_later_reset_wins() {
+        let lim = Limiter::new(acct("work"), limits(4));
+        let t0 = Instant::now();
+        lim.observe(&RateLimitInfo {
+            tokens_remaining: Some(0),
+            resets_in: Some(Duration::from_secs(30)),
+            ..RateLimitInfo::default()
+        });
+        lim.observe(&RateLimitInfo {
+            requests_remaining: Some(0),
+            resets_in: Some(Duration::from_secs(5)),
+            ..RateLimitInfo::default()
+        });
+        drop(lim.acquire(|_| {}).await);
+        assert_eq!(Instant::now() - t0, Duration::from_secs(30), "the shorter reset does not shorten the block");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn headers_with_room_left_or_no_reset_block_nothing() {
+        let lim = Limiter::new(acct("work"), limits(1));
+        lim.observe(&RateLimitInfo {
+            requests_remaining: Some(7),
+            tokens_remaining: Some(900),
+            resets_in: Some(Duration::from_secs(60)),
+            ..RateLimitInfo::default()
+        });
+        lim.observe(&RateLimitInfo {
+            requests_remaining: Some(0),
+            ..RateLimitInfo::default()
+        });
+        ready(lim.acquire(|_| {})).await.expect("nothing blocks");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_gate_blocks_on_the_window_headers_of_an_error() {
+        let mut err = ProviderError::new(ProviderErrorKind::Server, "boom");
+        err.rate_limit = Some(RateLimitInfo {
+            requests_remaining: Some(0),
+            resets_in: Some(Duration::from_secs(20)),
+            ..RateLimitInfo::default()
+        });
+        let limiter = Limiter::new(acct("work"), limits(4));
+        let gated = Gated::new(Arc::new(FakeProvider::new(Script::new().then(Step::Error(err)))), limiter.clone());
+        let (tx, _rx) = mpsc::channel(8);
+        let t0 = Instant::now();
+        gated.stream(&creds(), request(), tx, CancellationToken::new()).await.unwrap_err();
+        drop(limiter.acquire(|_| {}).await);
+        assert_eq!(Instant::now() - t0, Duration::from_secs(20));
     }
 
     fn creds() -> Credential {

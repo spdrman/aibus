@@ -10,7 +10,7 @@ use smol_str::SmolStr;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{ConfigError, ProviderError};
+use crate::error::{ConfigError, ProviderError, RateLimitInfo};
 use crate::secret::{AuthMethodKind, Credential};
 use crate::types::*;
 
@@ -132,6 +132,8 @@ pub enum StopReason {
     ToolUse,
     MaxTokens,
     Refusal,
+    /// A 200 stream the provider's content filter cut short (`finish_reason = content_filter`).
+    ContentFilter,
     Other(SmolStr),
 }
 
@@ -141,6 +143,8 @@ pub struct ChatResponse {
     pub usage: Usage,
     pub stop: StopReason,
     pub request_id: Option<String>,
+    /// The window headers of the answer, `None` when the provider sent none.
+    pub rate_limit: Option<RateLimitInfo>,
 }
 
 #[async_trait]

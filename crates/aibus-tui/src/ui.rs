@@ -29,7 +29,7 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, RUN_STATUS, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, RUN_STATUS, TRANSCRIPT, WORKFLOWS_VIEW};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -56,6 +56,7 @@ pub struct Views<'a> {
     transcript: &'a Value,
     run_status: &'a Value,
     cost: &'a Value,
+    workflows: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -81,6 +82,7 @@ impl<'a> Views<'a> {
             transcript: at(TRANSCRIPT),
             run_status: at(RUN_STATUS),
             cost: at(COST),
+            workflows: at(WORKFLOWS_VIEW),
         }
     }
 }
@@ -592,6 +594,8 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             }
             t if t.starts_with("status:") => screens::run_status(buf, full, v.run_status, th, &sc.pointer),
             "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
+            "workflows" => screens::workflows(buf, full, v.workflows, th, &sc.pointer),
+            "workflow_show" => screens::workflow_show(buf, full, v.workflows, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
                 let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
                 for (id, r, kind) in &g.hits {

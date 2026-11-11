@@ -30,6 +30,12 @@ pub const AGENTS_DEFS: &str = "model:agents:defs";
 pub const AGENTS_WARNINGS: &str = "model:agents:warnings";
 /// `{name, provider, label, default_model, key_ref}`, no secrets.
 pub const ACCOUNTS: &str = "model:accounts";
+/// The workflow files as `/workflow list` shows them (and the prompt's `/fix` family reads).
+pub const WORKFLOWS: &str = "model:workflows";
+/// The text `/workflow show` opens: `{name, text, summary}`.
+pub const WORKFLOW_SHOWN: &str = "model:workflow:shown";
+/// The latest workflow the author drafted: `{toml, summary}`, or null. `/workflow save` writes it.
+pub const WORKFLOW_DRAFT: &str = "model:workflow:draft";
 pub const RUNS_ORDER: &str = "model:runs:order";
 pub const TOOLS_PENDING: &str = "model:tools:pending";
 pub const PERMISSIONS_OPEN: &str = "model:permissions:open";
@@ -192,6 +198,9 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         (AGENTS_DEFS, list(vec![])),
         (AGENTS_WARNINGS, list(vec![])),
         (ACCOUNTS, list(vec![])),
+        (WORKFLOWS, list(vec![])),
+        (WORKFLOW_SHOWN, Value::Null),
+        (WORKFLOW_DRAFT, Value::Null),
         (RUNS_ORDER, list(vec![])),
         (TOOLS_PENDING, list(vec![])),
         (PERMISSIONS_OPEN, list(vec![])),

@@ -474,6 +474,8 @@ on_fail = "retry:2"          # re-run kraken then arbiter, twice max
 
 `/fix <text>` in the TUI or `aibus run --workflow fix "<text>"` executes the chain under the lead. Each step is an ordinary run; the lead sees each result and can stop the chain. The built-in workflows shipped as examples are `fix`, `build`, `review`, `explore`, copied from the Continuous-Claude chains with the agents renamed to aibus built-ins where no definition exists.
 
+A workflow becomes a file and comes back later through four subcommands in the TUI. `/workflow list` and `/workflow show <name>` open a modal (the rows, or the file as text with the validator's summary under it). `/workflow save <name> [--user] [--force]` takes the latest drafted workflow (`model:workflow:draft`), runs the validator over it against the real roster, refuses on errors (and shows them), and writes `.aibus/workflows/<name>.toml` (or `~/.config/aibus/workflows/` with `--user`, mode 0600) atomically. The file starts with two comment lines, `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`, which `Workflow::parse` ignores like any TOML comment. The name has to match `^[a-z0-9][a-z0-9_-]{0,63}$` and is checked before the disk is touched; the path is the directory plus that name, never the argument. An existing file is refused unless `--force`. `/workflow run <name> <input>` is `/workflow <name> <input>` under a second name.
+
 ## 9. Tools
 
 The tool set workers can be granted. Names are lower-case; specifiers in parentheses restrict arguments with a glob.

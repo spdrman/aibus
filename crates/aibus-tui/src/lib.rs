@@ -18,6 +18,7 @@ pub mod ui;
 pub mod view;
 pub mod views;
 pub mod widgets;
+pub mod workflows;
 
 pub use layout::{areas, Areas, Layout};
 pub use theme::Theme;

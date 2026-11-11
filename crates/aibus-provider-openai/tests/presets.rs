@@ -47,14 +47,14 @@ fn every_preset_has_its_url_its_key_variable_and_a_model_table() {
     for id in ["anthropic", "openai-compatible"] {
         assert!(preset(id).is_some(), "{id}");
     }
-    let openai_shaped = presets().iter().filter(|p| !matches!(p.api, Some(Api::AnthropicMessages | Api::GeminiGenerateContent))).count();
+    let openai_shaped = presets().iter().filter(|p| !matches!(p.api, Some(Api::AnthropicMessages | Api::GeminiGenerateContent | Api::AnthropicBedrock | Api::AnthropicVertex))).count();
     assert_eq!(openai_shaped, EXPECTED.len() + 1, "a preset the table above does not know");
 }
 
 #[tokio::test]
 async fn every_preset_sends_the_key_in_its_header_to_its_path() {
     let text = Fixture::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/oa_stream_text.http"));
-    for p in presets().iter().filter(|p| !matches!(p.api, Some(Api::AnthropicMessages | Api::GeminiGenerateContent))) {
+    for p in presets().iter().filter(|p| !matches!(p.api, Some(Api::AnthropicMessages | Api::GeminiGenerateContent | Api::AnthropicBedrock | Api::AnthropicVertex))) {
         let server = FakeServer::start().await;
         // The vendor's own path prefix (`/openai/v1`, `/inference/v1`) is kept; only the host
         // changes. Azure has no default host: its deployment URL is the user's to give.

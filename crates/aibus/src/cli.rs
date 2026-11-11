@@ -313,6 +313,12 @@ pub struct AccountAdd {
     pub base_url: Option<String>,
     #[arg(long, value_name = "TEXT")]
     pub label: Option<String>,
+    /// The cloud region of a Bedrock or Vertex account
+    #[arg(long, value_name = "REGION")]
+    pub region: Option<String>,
+    /// The Google Cloud project of a Vertex account
+    #[arg(long, value_name = "PROJECT")]
+    pub project: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]

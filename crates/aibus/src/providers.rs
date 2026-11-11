@@ -9,20 +9,33 @@ use aibus_core::config::Account;
 use aibus_core::persist::paths::Paths;
 use aibus_core::CredentialStore;
 use aibus_provider::models::cache_is_stale;
+use crate::gcloud::{run_gcloud, GcloudTokens};
 use aibus_provider::presets::resolve;
 use aibus_provider::{
     Api, ConfigError, ProviderConfig, ProviderDef, ProviderFactory, ProviderRegistry,
 };
 
-/// Fake, plus one adapter per wire: the Messages API, the two OpenAI ones and Gemini's. Which vendors use
-/// them is data (`aibus_provider::presets`, `[[provider]]`), not another line here.
-pub fn builtin_factories() -> Vec<Box<dyn ProviderFactory>> {
+/// Fake, plus one adapter per wire: the Messages API (direct, and on Bedrock and Vertex), the two
+/// OpenAI ones and Gemini's. Which vendors use them is data (`aibus_provider::presets`,
+/// `[[provider]]`), not another line here. `store` is where Vertex's access token is cached.
+pub fn builtin_factories(store: Arc<CredentialStore>) -> Vec<Box<dyn ProviderFactory>> {
+    let gcloud = GcloudTokens::new(
+        store,
+        Arc::new(|v| std::env::var(v).ok()),
+        Arc::new(|| run_gcloud("gcloud", Duration::from_secs(10))),
+    );
     vec![
         Box::new(aibus_provider::fake::Factory),
         Box::new(aibus_provider_anthropic::Factory),
+        Box::new(aibus_provider_anthropic::CloudFactory { tokens: Arc::new(gcloud) }),
         Box::new(aibus_provider_openai::Factory::openai()),
         Box::new(aibus_provider_gemini::Factory),
     ]
+}
+
+/// The built-in factories with the real keychain behind Vertex's token cache.
+pub fn os_factories(redactor: &aibus_core::Redactor) -> Vec<Box<dyn ProviderFactory>> {
+    builtin_factories(Arc::new(CredentialStore::new(Arc::new(crate::keychain::OsKeychain), redactor.clone())))
 }
 
 /// What each provider id is built from: its definition (the preset of that id, the user's
@@ -50,6 +63,9 @@ pub fn provider_configs(
                 if let Some(url) = &a.base_url {
                     def.base_url = Some(url.clone());
                 }
+                // The account's region and project win over the provider's.
+                def.region = a.region.clone().or(def.region.take());
+                def.project = a.project.clone().or(def.project.take());
                 // `api = "responses"` on an account is `api = "openai-responses"` on its provider.
                 if matches!(def.api, Some(Api::OpenaiChat | Api::OpenaiResponses)) {
                     match a.api.as_deref() {
@@ -71,7 +87,7 @@ pub fn provider_configs(
                 return Err(ConfigError::Invalid(
                     a.provider.clone(),
                     format!(
-                        "accounts {by} and {} set a different base_url or api; define one [[provider]] id per server",
+                        "accounts {by} and {} set a different base_url, api, region or project; define one [[provider]] id per server",
                         a.name
                     ),
                 ));
@@ -131,6 +147,13 @@ pub fn refresh_stale_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn builtin() -> Vec<Box<dyn ProviderFactory>> {
+        builtin_factories(Arc::new(CredentialStore::new(
+            Arc::new(aibus_core::MemoryKeychain::default()),
+            aibus_core::Redactor::new(),
+        )))
+    }
 
     fn account(name: &str, provider: &str, base_url: Option<&str>) -> Account {
         Account {
@@ -223,7 +246,7 @@ mod tests {
         let defs = [local("ollama-home", "http://10.0.0.5:11434/v1"), local("ollama-work", "http://10.0.0.6:11434/v1")];
         let accounts = [account("home", "ollama-home", None), account("work", "ollama-work", None)];
         let configs = provider_configs(&accounts, &defs, &paths()).unwrap();
-        let registry = ProviderRegistry::new(&builtin_factories(), &configs).unwrap();
+        let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
         for id in ["ollama-home", "ollama-work"] {
             assert_eq!(registry.get(id).unwrap().id().0, id);
         }
@@ -236,7 +259,7 @@ mod tests {
         let def = configs["groq"].def.as_ref().unwrap();
         assert_eq!(def.base_url.as_deref(), Some("https://gw.example/openai/v1"));
         assert_eq!(def.env_vars, ["GROQ_API_KEY"]);
-        assert!(ProviderRegistry::new(&builtin_factories(), &configs).unwrap().get("groq").is_ok());
+        assert!(ProviderRegistry::new(&builtin(), &configs).unwrap().get("groq").is_ok());
     }
 
     #[test]
@@ -245,7 +268,7 @@ mod tests {
         let configs = provider_configs(&accounts, &[], &paths()).unwrap();
         assert_eq!(configs["groq"].def.as_ref().unwrap().base_url.as_deref(), Some("https://api.groq.com/openai/v1"));
         assert!(configs["nobody"].def.is_none());
-        let registry = ProviderRegistry::new(&builtin_factories(), &configs).unwrap();
+        let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
         assert!(registry.get("ollama").is_ok() && registry.get("nobody").is_err());
     }
 
@@ -281,7 +304,7 @@ mod tests {
             assert!(a.enabled, "{id}");
 
             let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths()).unwrap();
-            let registry = ProviderRegistry::new(&builtin_factories(), &configs).unwrap();
+            let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
             assert_eq!(registry.get(id).unwrap().id().0, id, "{id}");
         }
     }
@@ -304,13 +327,13 @@ mod tests {
 
     #[test]
     fn lists_the_fake_and_one_adapter_per_wire_and_every_old_id_is_a_preset() {
-        let mut ids: Vec<_> = builtin_factories().iter().map(|f| f.id().0).collect();
+        let mut ids: Vec<_> = builtin().iter().map(|f| f.id().0).collect();
         for id in ["fake", "anthropic", "openai"] {
             assert!(ids.contains(&id), "{id}");
         }
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), builtin_factories().len());
+        assert_eq!(ids.len(), builtin().len());
         for id in ["anthropic", "openai", "kimi", "openai-compatible"] {
             assert!(aibus_provider::presets::preset(id).is_some(), "{id}");
         }

@@ -275,7 +275,7 @@ impl Provider for Gemini {
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
         let models = self.list_models(creds).await?.into_iter().map(|(id, _)| id).collect();
-        Ok(AccountInfo { label: creds.account.to_string(), org: None, models })
+        Ok(AccountInfo { label: creds.account.to_string(), org: None, models, cost_usd: None })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

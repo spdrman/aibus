@@ -218,3 +218,26 @@ fn a_dated_price_starts_on_its_second_and_not_before() {
     assert_eq!(t.price_at(&id, at(from + 1)).unwrap().cache_write_per_mtok, Some(1.1));
     assert_eq!(t.models().iter().filter(|m| m.id == id).count(), 1);
 }
+
+#[test]
+fn the_bedrock_and_vertex_tables_price_every_row_through_price_of_to_a_plain_claude_row() {
+    let files = catalog_files();
+    let anthropic: Value = serde_json::from_str(&files["anthropic"]).unwrap();
+    let plain: Vec<&str> = anthropic["models"].as_array().unwrap().iter().filter_map(|r| r["id"].as_str()).collect();
+    for name in ["bedrock", "vertex"] {
+        let table: Value = serde_json::from_str(&files[name]).unwrap_or_else(|e| panic!("catalog/{name}.json: {e}"));
+        let rows = table["models"].as_array().unwrap();
+        assert!(rows.len() >= 4, "{name}: a few current models");
+        for row in rows {
+            let id = row["id"].as_str().unwrap();
+            let target = row["price_of"].as_str().unwrap_or_else(|| panic!("{name}: {id} has no price_of"));
+            assert!(plain.contains(&target), "{name}: {id} is priced like {target}, which the anthropic table does not have");
+            let t = ModelTable::load(name, &files[name], &ProviderConfig::default(), &[], false).unwrap();
+            let own = t.price(&aibus_provider::ModelId(id.into()));
+            let plain_price = ModelTable::load("anthropic", &files["anthropic"], &ProviderConfig::default(), &[], false)
+                .unwrap()
+                .price(&aibus_provider::ModelId(target.into()));
+            assert!(own.is_some() && own == plain_price, "{name}: {id}");
+        }
+    }
+}

@@ -146,7 +146,7 @@ async fn each_flag_changes_the_request_the_way_its_fixture_records() {
 #[tokio::test]
 async fn a_preset_that_claims_a_flag_sends_the_recorded_shape() {
     let mut claimed = 0;
-    for p in presets().iter().filter(|p| p.api != Some(Api::AnthropicMessages)) {
+    for p in presets().iter().filter(|p| matches!(p.api, Some(Api::OpenaiChat | Api::OpenaiResponses))) {
         for flag in p.compat.as_deref().unwrap_or_default() {
             let name = flag_name(flag);
             let fx = shape(&name);

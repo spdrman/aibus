@@ -67,6 +67,27 @@ The panel (agentic AI, API design, Rust, architecture, performance, CLI, UI, sec
 | C2.4 | #31 | causl backend, differential test and the default gate | M2, M6 | A1.5, B2.4, C2.2, the crate |
 | C2.5 | #32 | Release pipeline, distribution, OAuth and Bedrock/Vertex | M6 | B1.5, C2.1, C2.2, C2.3, C2.4 |
 
+### 3.1 EPIC G (#119), added for 0.2.0
+
+In-app commands, cut after v1. Two phases of five tasks, plus G4b which G4 left out on purpose. All of them are merged into `cut/0.2.0`; G10 is the one that writes this down.
+
+| Id | Issue | Title |
+|---|---|---|
+| **EPIC G** | #119 | In-app commands: /login and /model on connected accounts, per-agent commands, and a workflow author on the aibus MCP server |
+| G1 | #120 | Command registry: one table for slash, palette, card menu, completion and help, with @target parsing |
+| G2 | #121 | `/model` and `/advisor` do nothing: `Command::SetModel` for the lead, the seats and one run |
+| G3 | #122 | `/model` picker: models of the connected accounts with prices and capabilities, session and per-run choice |
+| G4 | #123 | `/login`, `/logout`, `/accounts`: provider picker, key as `Secret`, verify off the UI thread, reload without restart |
+| G4b | #161 | OAuth modal and swappable session defaults for `/login` |
+| G5 | #124 | Per-agent commands: `/status`, `/cost`, `/log`, `/cancel`, `/retry`, `/message`, `/resume`, `/background`, and the card menu |
+| G6 | #125 | Built-in `workflow-author` agent on the aibus MCP server over stdio, and `/workflow new <goal>` |
+| G7 | #126 | `/workflow list`, `show`, `save` and `run`: owner-side save with validation and provenance, load by running |
+| G8 | #127 | Agent-driven save and edit behind `--write`: `workflow_create` and `workflow_update` through the permission modal |
+| G9 | #128 | Security tests for commands: dispatch only from input, no secret in any artefact, child flags, parser fuzz |
+| G10 | #129 | Docs and README generated from the registry, spec updates, SECURITY rows, CHANGELOG |
+
+The decisions of each task are in `DECISIONS.md` under its id (G2, G3, G4, G4b, G6, G8, G9 and G10).
+
 ## 4. Milestones to tasks
 
 | Milestone | Exit criterion from 11 | Tasks |

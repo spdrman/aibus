@@ -12,6 +12,7 @@ use crate::agent::{AgentDef, Isolation, Role};
 use crate::ids::{AccountName, AgentName, ForkId, ModelId, PermissionId, RunId, ToolCallId};
 use crate::run::{Progress, RunError, RunResult, Usage};
 use crate::tool::Artifact;
+use crate::workflow::WorkflowRow;
 use crate::state::value::{map, n, s};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -454,6 +455,11 @@ pub enum Screen {
     RouterStatus,
     /// `/cost` with no target: the per-run table and the session total.
     Cost,
+    /// `/workflow list`: the workflows of the project and the user, from `model:workflows`.
+    Workflows,
+    /// `/workflow show <name>` and a refused `/workflow save`: one text and its summary line,
+    /// from `model:workflow:shown`.
+    WorkflowShow,
 }
 
 /// What `Command::SetModel` changes: the lead's model, a seat's, or one run's.
@@ -573,6 +579,27 @@ pub enum Command {
         target: ModelTarget,
         model: String,
     },
+    /// A filesystem step of `/workflow list`, `show` or `save`. The reducer does nothing with it:
+    /// the terminal loop does the step (it owns the directories) and answers with
+    /// `Msg::WorkflowsLoaded`.
+    WorkflowFile(WorkflowFile),
+}
+
+/// What `Command::WorkflowFile` asks the loop to do with the workflow files.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum WorkflowFile {
+    List,
+    Show(String),
+    /// Writes `model:workflow:draft` as `name`, in the user's directory with `user`.
+    Save { name: String, user: bool, force: bool },
+}
+
+/// The text `/workflow show` opens: the file (or the validator's findings), and one line under it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct WorkflowShown {
+    pub name: String,
+    pub text: String,
+    pub summary: String,
 }
 
 #[derive(Clone, Debug)]
@@ -686,6 +713,14 @@ pub enum Msg {
         target: ModelTarget,
         to: Result<Option<(ModelId, AccountName)>, String>,
     },
+    /// The workflow files as the loop found them, after a list, a show or a save. `rows` replaces
+    /// `model:workflows` (the prompt's `/fix` family reads the names), `shown` replaces
+    /// `model:workflow:shown` when there is one, and `said` goes to the session log.
+    WorkflowsLoaded {
+        rows: Vec<WorkflowRow>,
+        shown: Option<WorkflowShown>,
+        said: Option<String>,
+    },
     /// The persist effect finished a snapshot. Not in 02 section 3.1: something has to reset
     /// `model:persist:due`, and only a commit can do it.
     Persisted,
@@ -722,6 +757,7 @@ impl Msg {
             Msg::IoError { .. } => "IoError",
             Msg::Shutdown { .. } => "Shutdown",
             Msg::ModelSwitched { .. } => "ModelSwitched",
+            Msg::WorkflowsLoaded { .. } => "WorkflowsLoaded",
             Msg::Persisted => "Persisted",
         }
     }
@@ -857,6 +893,9 @@ impl Msg {
             ]),
             Msg::Shutdown { reason } => map([("msg", name), ("reason", s(reason.as_str()))]),
             Msg::ModelSwitched { id, to, .. } => map([("msg", name), ("id", n(*id)), ("ok", Value::Bool(to.is_ok()))]),
+            Msg::WorkflowsLoaded { rows, shown, .. } => {
+                map([("msg", name), ("rows", n(rows.len())), ("shown", Value::Bool(shown.is_some()))])
+            }
         }
     }
 }
@@ -889,5 +928,6 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::Clear => "clear",
         Command::Quit { .. } => "quit",
         Command::SetModel { .. } => "set_model",
+        Command::WorkflowFile(_) => "workflow_file",
     }
 }

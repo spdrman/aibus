@@ -25,7 +25,6 @@ use serde_json::{json, Value};
 use tokio::sync::watch;
 
 use crate::limits::RUNS_PER_MINUTE;
-use crate::write::valid_name;
 use crate::{arguments, schema, text, Server, DRAFT_2020_12};
 
 /// The last bytes of the report or transcript `run_status` shows.
@@ -577,7 +576,7 @@ impl Server {
                 "rate limit: at most {RUNS_PER_MINUTE} runs a minute, try again in {secs} s"
             )));
         }
-        if !valid_name(name) {
+        if !workflow::valid_name(name) {
             return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$"));
         }
         if input.trim().is_empty() {

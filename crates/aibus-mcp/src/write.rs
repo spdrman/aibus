@@ -32,15 +32,6 @@ const MAX_STEPS: usize = 32;
 /// The first line of a file written through the server.
 const PROVENANCE: &str = "# written through aibus mcp, ";
 
-/// `^[a-z0-9][a-z0-9_-]{0,63}$`. A name is the file stem, so this is also what keeps a path
-/// separator, a dot, `~` and a leading dash out of a path (and of the `aibus run` command line).
-pub(crate) fn valid_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && name.len() <= 64
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-}
-
 /// SHA-256 of the file's bytes as lower-case hex: the revision a writer must name to overwrite.
 pub(crate) fn revision(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -137,7 +128,7 @@ impl Server {
         }
 
         // Everything up to the directory is decided from the arguments alone.
-        if !valid_name(name) {
+        if !workflow::valid_name(name) {
             return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$ (a name, not a path)"));
         }
         if body.len() > MAX_BYTES {

@@ -1,0 +1,12 @@
+# schema: aibus://schema/workflow v1
+# written through aibus, 2023-11-14T22:13:20.000Z
+name = "review"
+description = "Find what changed, then review it"
+
+[[step]]
+agent = "explore"
+prompt = "Find the code that changed for this and the code around it (callers, tests): {{input}}"
+
+[[step]]
+agent = "plan"
+prompt = "Review this change for bugs, missing tests and risks. Quote file paths and lines. Context: {{prev.summary}}"

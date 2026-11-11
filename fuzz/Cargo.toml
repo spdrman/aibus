@@ -14,6 +14,7 @@ cargo-fuzz = true
 
 [dependencies]
 aibus-core = { path = "../crates/aibus-core" }
+aibus-tui = { path = "../crates/aibus-tui" }
 base64 = "0.22"
 libfuzzer-sys = "0.4"
 
@@ -41,6 +42,13 @@ bench = false
 [[bin]]
 name = "tool_pattern"
 path = "fuzz_targets/tool_pattern.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "commands_send"
+path = "fuzz_targets/commands_send.rs"
 test = false
 doc = false
 bench = false

@@ -24,7 +24,7 @@ dependencies = [
 
 [[package]]
 name = "aibus"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-core",
  "aibus-graph",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-graph",
  "aibus-provider",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-graph"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "indexmap",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-core",
  "aibus-testkit",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-provider"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-provider-anthropic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-provider-gemini"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-provider-http"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-provider",
  "reqwest",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-provider-openai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-testkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-core",
  "aibus-graph",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aibus-core",
  "aibus-graph",

@@ -133,7 +133,7 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool, compat: &[CompatFlag]) 
         .filter(|b| *b >= 1024);
     if let Some(budget) = thinking {
         body.insert("thinking".into(), json!({"type": "enabled", "budget_tokens": budget}));
-    } else if let (Some(t), false) = (req.temperature, compat.contains(&CompatFlag::NoSamplingParams)) {
+    } else if let (Some(t), false) = (req.temperature_f64(), compat.contains(&CompatFlag::NoSamplingParams)) {
         body.insert("temperature".into(), json!(t));
     }
     if !req.tools.is_empty() && !compat.contains(&CompatFlag::NoToolChoice) {

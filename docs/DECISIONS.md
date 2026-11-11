@@ -546,3 +546,23 @@ Gated calls, taken at the recommended default:
 **Alternatives.** A `tools/capability-matrix` binary (rejected: a second way to write the file that nothing checks). Facts typed into the generator for each preset (rejected: that is the drift the page exists to prevent). Making the plain-http check an error (rejected: a lab VPN is legitimate, and the issue says warns).
 
 **Why.** The page can only say what the code says, and the same test that keeps it honest is the one that writes it.
+
+## F7 follow-up (2026-11-11): the unused half of the login framework stays, and says so
+
+**Context.** The first full gate on `cut/0.2.0` built with `-D warnings` failed on `Kind::DeviceCode` and `Outcome::Tokens` in `oauth/mod.rs`: the only `Def` in the binary is OpenRouter's (PKCE, returns a key), so nothing outside the tests builds either variant.
+
+**Decision.** I kept both and marked them `#[cfg_attr(not(test), expect(dead_code, ...))]`. The device flow, the token refresh and the tokens branch of `Login::tokens` are exercised by the tests and are the half of #115 that a second vendor needs. The `expect` (not `allow`) turns into a build error the day a `Def` uses the variant, which is the moment to delete the attribute.
+
+**Alternatives.** Wire them up now (rejected: a `Def` exists only for a vendor that documents a login for third-party applications, SECURITY.md "Identity", and I know of none). Remove the device flow and the tokens branch (rejected: that is a shipped, tested RFC 8628 implementation and the refresh path, to be written again later).
+
+**Why.** The release needs a clean `-D warnings` build; deleting working, tested code to get it would be the wrong trade.
+
+## Gate fixes in the aibus crate (2026-11-11)
+
+**Context.** Triage of the first full gate on `cut/0.2.0`.
+
+**Decision.** `FakeAuthServer` (testkit) is served by a task on the test's own runtime instead of wiremock's thread. The oauth tests use a paused clock; tokio advances a paused clock whenever the runtime has nothing ready, and a reply that has to come from another thread is never ready at that moment, so reqwest's 30 s timeout fired before every answer. The product's timeouts are right and stay. Smaller test fixes: the reload test stored its key under `work` where the credential store reads `account:work`; the gcloud test checked the log capture after dropping it; the agent roster count is measured instead of written down (the built-ins are ten now).
+
+**Alternatives.** Give `Login` test-only timeout knobs, or drop `start_paused` and wait the real 5 s device interval (rejected: product code bent for a harness, or a 20 s test).
+
+**Why.** The bug was in the harness, so the harness changed.

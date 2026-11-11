@@ -23,6 +23,9 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     PkceLoopback,
+    // No vendor publishes a device-code login for third parties yet, so no `Def` in the binary
+    // uses this; the tests do (docs/DECISIONS.md, "F7 follow-up").
+    #[cfg_attr(not(test), expect(dead_code, reason = "kept for the first vendor that documents a device login"))]
     DeviceCode,
 }
 
@@ -37,6 +40,7 @@ pub enum StateMode {
 /// What the login hands back: OAuth tokens to refresh, or one durable API key.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Outcome {
+    #[cfg_attr(not(test), expect(dead_code, reason = "kept for the first vendor whose login returns tokens to refresh"))]
     Tokens,
     ApiKey,
 }

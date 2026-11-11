@@ -103,6 +103,13 @@ impl Http {
         let request = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
         let mut headers: Vec<(String, String)> =
             self.authed().into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+        // 2026-07-28 makes the method (and, for a call, the tool) a header as well as part of
+        // the body, so a gateway can route without parsing JSON. rmcp refuses the request
+        // without them (-32020), and that is the spec, so the client sends them (D-MCP-HTTP).
+        headers.push(("Mcp-Method".to_owned(), method.to_owned()));
+        if let Some(name) = request["params"]["name"].as_str() {
+            headers.push(("Mcp-Name".to_owned(), name.to_owned()));
+        }
         for (k, v) in extra {
             headers.retain(|(h, _)| !h.eq_ignore_ascii_case(k));
             headers.push(((*k).to_owned(), (*v).to_owned()));
@@ -285,9 +292,10 @@ fn the_http_token_is_never_on_disk_or_in_any_output() {
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {} });
     let _ = server.post(&[("Authorization", &auth)], &body);
     // A call that fails with the token in an argument, to feed the audit log and the log.
-    let bad = server.post(&[("Authorization", &auth), ("MCP-Protocol-Version", "2026-07-28")], &json!({
+    let bad_name = format!("tool-{token}");
+    let bad = server.post(&[("Authorization", &auth), ("MCP-Protocol-Version", "2026-07-28"), ("Mcp-Method", "tools/call"), ("Mcp-Name", &bad_name)], &json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": { "name": format!("tool-{token}"), "arguments": { "t": token },
+        "params": { "name": bad_name, "arguments": { "t": token },
                     "_meta": { "io.modelcontextprotocol/protocolVersion": "2026-07-28",
                                "io.modelcontextprotocol/clientCapabilities": {},
                                "io.modelcontextprotocol/clientInfo": { "name": "http-test", "version": "1" } } },

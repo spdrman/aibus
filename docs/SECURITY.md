@@ -40,6 +40,12 @@ docker run --rm -v "$PWD":/work -w /work rust:1.89 sh tools/fuzz.sh 60
 
 The local run on MARS is the real gate. `.github/workflows/fuzz.yml` is the same thing, manual only (120 seconds per target, crash artifacts uploaded).
 
+## Identity and logins
+
+aibus never sends another product's client id, user agent, fingerprint, attestation or billing header, and never claims to be a first-party client. A vendor login lands in aibus only when the vendor documents a flow for third-party applications. A subscription plan that is only reachable by posing as the vendor's own CLI is out, whatever the demand. Every request aibus makes says `aibus/<version>`.
+
+The two login flows (`crates/aibus/src/oauth/`) keep to the same rules as a key. The PKCE verifier, the state, the authorization code and every token live in memory only: tokens are `Secret`, the verifier is never printed or put in a URL, and an error from the token endpoint names the status and the server's `error` code and nothing else from the body. The loopback listener binds 127.0.0.1 only, accepts one exact path, requires a loopback `Host` header and (when the server echoes it) the matching `state`, closes after the first good request and gives up after five minutes. Tests: `crates/aibus/src/oauth/tests.rs` (listener, state, path, Host, timeout, device responses), `crates/aibus/src/account/tests.rs` (the keychain and file grep for the key and both tokens), `crates/aibus-core/tests/oauth_single_flight.rs`.
+
 ## The optional shell sandbox
 
 Off by default, and never the default in v1. Turn it on in `config.toml` or `.aibus/settings.toml`:

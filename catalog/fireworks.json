@@ -1,0 +1,6 @@
+{
+  "models": [
+    {"id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "context_window": 131072, "max_output": 8192, "family": "llama", "deprecated": false}
+  ],
+  "families": {}
+}

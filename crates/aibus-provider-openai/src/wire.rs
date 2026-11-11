@@ -17,6 +17,8 @@ pub struct Opts {
     pub keep_reasoning: bool,
     /// Ask for token logprobs.
     pub logprobs: bool,
+    /// Ask the gateway to report what the request cost (`usage: {include: true}`, OpenRouter).
+    pub include_cost: bool,
 }
 
 /// The id the API sees for a call, derived from ours so a result finds its call.
@@ -135,6 +137,9 @@ pub fn chat_body(req: &ChatRequest, o: Opts) -> Value {
     body.insert("messages".into(), Value::Array(chat_messages(req, o)));
     body.insert("stream".into(), json!(true));
     body.insert("stream_options".into(), json!({"include_usage": true}));
+    if o.include_cost {
+        body.insert("usage".into(), json!({"include": true}));
+    }
     let key = if o.completion_tokens { "max_completion_tokens" } else { "max_tokens" };
     body.insert(key.into(), json!(req.max_output_tokens));
     if o.reasoning {
@@ -253,7 +258,7 @@ mod tests {
     use aibus_provider::{CacheHint, ModelId, RequestMetadata, ToolSpec};
     use ulid::Ulid;
 
-    const PLAIN: Opts = Opts { completion_tokens: false, reasoning: false, user: false, keep_reasoning: false, logprobs: false };
+    const PLAIN: Opts = Opts { completion_tokens: false, reasoning: false, user: false, keep_reasoning: false, logprobs: false, include_cost: false };
 
     fn req() -> ChatRequest {
         ChatRequest {
@@ -376,6 +381,13 @@ mod tests {
         assert_eq!(chat_body(&r, PLAIN)["tool_choice"], "required");
         r.tools.clear();
         assert!(chat_body(&r, PLAIN).get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn the_cost_is_only_asked_for_when_the_gateway_reports_it() {
+        assert!(chat_body(&req(), PLAIN).get("usage").is_none());
+        let o = Opts { include_cost: true, ..PLAIN };
+        assert_eq!(chat_body(&req(), o)["usage"], json!({"include": true}));
     }
 
     #[test]

@@ -16,7 +16,11 @@ use crate::providers::builtin_factories;
 /// The account commands against the real keychain, environment, terminal and providers.
 pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
     let stdin = std::io::stdin();
-    let mut input = stdin.lock();
+    // `--oauth` never reads the key from stdin, and its paste fallback reads a line itself, so
+    // the lock stays free for it.
+    let oauth_add = matches!(cmd, AccountCmd::Add(a) if a.oauth);
+    let mut input: Box<dyn std::io::Read> =
+        if oauth_add { Box::new(std::io::empty()) } else { Box::new(stdin.lock()) };
     let mut stdout = std::io::stdout().lock();
     let ask = || rpassword::prompt_password("key (input hidden): ");
     let mut io = Io {
@@ -25,8 +29,17 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
         factories: builtin_factories(),
         env: Arc::new(|v| std::env::var(v).ok()),
         redactor: redactor.clone(),
-        // No provider ships an OAuth flow yet: `--oauth` says so (C2.5a).
-        oauth: None,
+        oauth: match cmd {
+            AccountCmd::Add(a) if a.oauth => {
+                crate::oauth::definition(&a.provider, a.base_url.as_deref()).map(|def| {
+                    let tty = std::io::stdin().is_terminal();
+                    let mut login = crate::oauth::Login::new(def);
+                    (login.open_browser, login.paste) = (tty, tty);
+                    Arc::new(login) as Arc<dyn aibus_core::OAuthFlow>
+                })
+            }
+            _ => None,
+        },
         stdin: &mut input,
         prompt: std::io::stdin().is_terminal().then_some(&ask),
         out: &mut stdout,

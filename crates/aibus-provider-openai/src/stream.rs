@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use aibus_provider::{
     ChatResponse, ContentBlock, Message, MessageRole, Price, ProviderError, ProviderErrorKind,
-    StopReason, StreamChunk, ToolCallId, Usage,
+    CostSource, StopReason, StreamChunk, ToolCallId, Usage,
 };
 use serde_json::Value;
 use smol_str::SmolStr;
@@ -22,6 +22,8 @@ struct Tool {
 
 pub struct Turn {
     price: Option<Price>,
+    /// Read `usage.cost`; when the response has it, it replaces the table's estimate.
+    reported_cost: bool,
     text: String,
     thinking: String,
     tools: Vec<Tool>,
@@ -59,9 +61,10 @@ fn stream_error(e: &Value) -> ProviderError {
 }
 
 impl Turn {
-    pub fn new(price: Option<Price>) -> Self {
+    pub fn new(price: Option<Price>, reported_cost: bool) -> Self {
         Self {
             price,
+            reported_cost,
             text: String::new(),
             thinking: String::new(),
             tools: Vec::new(),
@@ -88,6 +91,10 @@ impl Turn {
         // Chat says `completion_tokens_details`, Responses says `output_tokens_details`.
         self.usage.reasoning_tokens = n(&u["completion_tokens_details"]["reasoning_tokens"])
             .or(n(&u["output_tokens_details"]["reasoning_tokens"]));
+        if let (true, Some(c)) = (self.reported_cost, u["cost"].as_f64().filter(|c| c.is_finite() && *c >= 0.0)) {
+            self.usage.cost_usd = c;
+            self.usage.cost_source = CostSource::Provider;
+        }
     }
 
     fn start_tool(&mut self, key: String, name: &str, out: &mut Vec<StreamChunk>) -> ToolCallId {
@@ -246,7 +253,9 @@ impl Turn {
         // Some servers say "stop" for a reply that called tools.
         let stop = if stop == StopReason::EndTurn && !self.tools.is_empty() { StopReason::ToolUse } else { stop };
         self.stop = Some(stop.clone());
-        self.usage.cost_usd = self.price.and_then(|p| p.cost_usd(&self.usage)).unwrap_or(0.0);
+        if self.usage.cost_source != CostSource::Provider {
+            self.usage.cost_usd = self.price.and_then(|p| p.cost_usd(&self.usage)).unwrap_or(0.0);
+        }
         out.push(StreamChunk::Usage(self.usage));
         out.push(StreamChunk::Done(stop));
         Ok(out)
@@ -285,23 +294,50 @@ mod tests {
 
     #[test]
     fn reasoning_tokens_come_from_either_dialect_and_stay_none_when_unsaid() {
-        let mut t = Turn::new(None);
+        let mut t = Turn::new(None, false);
         t.take_usage(&serde_json::json!({
             "prompt_tokens": 10, "completion_tokens": 50,
             "completion_tokens_details": {"reasoning_tokens": 32}
         }));
         assert_eq!((t.usage.output_tokens, t.usage.reasoning_tokens), (50, Some(32)));
 
-        let mut t = Turn::new(None);
+        let mut t = Turn::new(None, false);
         t.take_usage(&serde_json::json!({
             "input_tokens": 10, "output_tokens": 40,
             "output_tokens_details": {"reasoning_tokens": 7}
         }));
         assert_eq!(t.usage.reasoning_tokens, Some(7));
 
-        let mut t = Turn::new(None);
+        let mut t = Turn::new(None, false);
         t.take_usage(&serde_json::json!({"prompt_tokens": 10, "completion_tokens": 5}));
         assert_eq!(t.usage.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn a_reported_cost_replaces_the_estimate_and_says_so() {
+        let price = Price { input_per_mtok: 1.0, output_per_mtok: 1.0, cache_read_per_mtok: None, cache_write_per_mtok: None };
+        let chunk = r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1000,"cost":0.0123}}"#;
+        let usage = |t: &mut Turn| {
+            t.chat_event(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}"#).unwrap();
+            t.chat_event(chunk).unwrap();
+            t.chat_event("[DONE]").unwrap();
+            let out = t.close().unwrap();
+            out.into_iter().find_map(|c| if let StreamChunk::Usage(u) = c { Some(u) } else { None }).unwrap()
+        };
+        let u = usage(&mut Turn::new(Some(price), true));
+        assert_eq!((u.cost_usd, u.cost_source), (0.0123, CostSource::Provider));
+
+        // Without `usage.cost` in the response the table's estimate stands.
+        let mut t = Turn::new(Some(price), true);
+        t.chat_event(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}"#).unwrap();
+        t.chat_event(r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1000}}"#).unwrap();
+        t.chat_event("[DONE]").unwrap();
+        let u = t.close().unwrap().into_iter().find_map(|c| if let StreamChunk::Usage(u) = c { Some(u) } else { None }).unwrap();
+        assert_eq!((u.cost_usd, u.cost_source), (0.002, CostSource::Table));
+
+        // A server that is not a reporting gateway is not trusted for a cost.
+        let u = usage(&mut Turn::new(Some(price), false));
+        assert_eq!((u.cost_usd, u.cost_source), (0.002, CostSource::Table));
     }
 
     #[test]
@@ -309,7 +345,7 @@ mod tests {
         let e = stream_error(&serde_json::json!({"code": "insufficient_quota", "message": "spent"}));
         assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Quota, false));
 
-        let mut t = Turn::new(None);
+        let mut t = Turn::new(None, false);
         t.responses_event(r#"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}"#)
             .unwrap();
         assert_eq!(t.stop, Some(StopReason::ContentFilter));

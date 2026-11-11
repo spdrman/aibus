@@ -93,10 +93,10 @@ impl Gemini {
         }
         let builtin = match &def.model_table {
             Some(ModelTableSpec::Inline(v)) => v.to_string(),
-            Some(ModelTableSpec::Named(n)) if n == "gemini" => include_str!("models.json").to_owned(),
-            Some(ModelTableSpec::Named(n)) if n == "empty" => r#"{"models": []}"#.to_owned(),
-            Some(ModelTableSpec::Named(n)) => return Err(bad("model_table", format!("no built-in table called {n}"))),
-            None => include_str!("models.json").to_owned(),
+            Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
+                .ok_or_else(|| bad("model_table", format!("no built-in table called {n}")))?
+                .to_owned(),
+            None => aibus_provider::catalog::table("empty").unwrap_or_default().to_owned(),
         };
         let prefixes: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
         Ok(Self {

@@ -91,6 +91,10 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Workflow(WorkflowCmd::List { names })) => {
             commands::workflow_list(&cli.global, names)
         }
+        Some(Command::Workflow(WorkflowCmd::Validate { target })) => {
+            commands::workflow_validate(&cli.global, target.as_deref())
+        }
+        Some(Command::Workflow(WorkflowCmd::Show { name })) => commands::workflow_show(&cli.global, &name),
         Some(Command::Workflow(WorkflowCmd::Run { name, input, script })) => {
             // The same session as `aibus run --workflow <name> <input>`.
             let args = RunArgs {

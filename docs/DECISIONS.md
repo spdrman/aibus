@@ -126,3 +126,13 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Flip now because the numbers are fine (rejected: causl is 1.4x to 2.4x mini at p50 on `commit_stream` and far under the 4 ms p99 budget, so speed is not the blocker, the supply chain is). Drop the second backend (rejected: it is cheap to keep and the differential keeps `mini` honest).
 
 **Why.** Flipping would make the default build depend on a source nobody but the owner can fetch. The gate is re-evaluated at each release (Q12): flip once the crate is public or vendored under a confirmed licence and the differential has been green across a release.
+
+## E2 (2026-11-11): what `workflow validate` warns about, and what the schema leaves out
+
+**Context.** #97 adds the workflow JSON Schema, `workflow::validate` and the two CLI commands. A few calls were open when I wrote it.
+
+**Decision.** The last step's summary never counts as unread, since it is the workflow's result. A `steps.<agent>.summary` only counts as read when no step of the same name sits between the writer and the reader, because the later one replaces the earlier. `on_fail` on the first step is not warned about (a retry of the first step has no predecessor to re-run, which `execute` already handles). The schema checks shape only and says so; `prompt` and `gate` use the pattern `\S` so a whitespace-only value fails the way `parse` fails it. Template errors and unknown agents live in a fourth fixture directory, `fixtures/workflows/semantic/`, because the schema passes them and the issue's `invalid/` directory has to fail the schema. `validate` reports every step's roster problem even when `parse` stopped earlier, and the CLI adds `path` to each problem in `--json` (the core type has no path, the file is the CLI's business). `$id` is the only keyword added to the schema checker's `KNOWN` list.
+
+**Alternatives.** Warn on the last step too (rejected: every workflow would carry one). Put `semantic` cases in `invalid/` and drop the schema-fails requirement for them (rejected: it weakens the acceptance check).
+
+**Why.** Each choice keeps warnings to things an author can act on and keeps the schema honest about what it can express.

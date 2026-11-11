@@ -5,19 +5,10 @@
 //! `run` writes into the same `Out` the key handling fills, so a slash line, a palette row and a
 //! menu item are three ways into one function and cannot drift apart.
 
-use aibus_core::{AgentName, Command, Isolation, Msg, Pane, RunId, Screen, UiIntent};
+use aibus_core::{AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, Screen, UiIntent};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
-
-/// Who a command applies to (the `@target` of a `Run` command).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Lead,
-    Advisor,
-    Router,
-    Run(RunId),
-}
 
 /// What a command takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,7 +78,7 @@ pub struct Call<'a> {
     /// What follows the command word (and the `@target`, for a `Run` command).
     pub args: &'a str,
     /// Set for a `Run` command, and by the menu for the run it was opened on.
-    pub target: Option<Target>,
+    pub target: Option<ModelTarget>,
     pub env: &'a Env<'a>,
 }
 
@@ -117,7 +108,7 @@ fn need(c: &Call, what: &str) -> Result<(), String> {
 
 fn menu_run(c: &Call) -> Option<RunId> {
     match c.target {
-        Some(Target::Run(r)) => Some(r),
+        Some(ModelTarget::Run(r)) => Some(r),
         _ => None,
     }
 }
@@ -550,7 +541,7 @@ pub fn help_lines() -> Vec<(String, &'static str)> {
 /// the menu. Unknown names do nothing.
 pub fn pick(name: &str, via: Via, run: Option<RunId>, env: &Env, out: &mut Out) {
     let Some(spec) = find(name) else { return };
-    let call = Call { name: spec.name, via, line: "", args: "", target: run.map(Target::Run), env };
+    let call = Call { name: spec.name, via, line: "", args: "", target: run.map(ModelTarget::Run), env };
     // A pick has no way to show a notice, and none of the picked commands has a bad shape.
     let _ = (spec.run)(&call, out);
 }
@@ -587,25 +578,25 @@ pub fn send(line: &str, env: &Env) -> Sent {
 /// The `@target` that starts `args`, and the rest. `@lead`, `@advisor` and `@router` are the
 /// seats; otherwise the word is an agent (its newest run) or a unique prefix of a run id. No
 /// target means the focused card, else the lead. `@agent-<name>` is a mention, not a target.
-pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(Target, &'a str), String> {
+pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(ModelTarget, &'a str), String> {
     let args = args.trim_start();
-    let fallback = env.focused.map_or(Target::Lead, Target::Run);
+    let fallback = env.focused.map_or(ModelTarget::Lead, ModelTarget::Run);
     let Some(word) = args.split_whitespace().next().filter(|w| w.starts_with('@') && !w.starts_with("@agent-")) else {
         return Ok((fallback, args));
     };
     let rest = args[word.len()..].trim_start();
     let name = &word[1..];
     let target = match name {
-        "lead" => Target::Lead,
-        "advisor" => Target::Advisor,
-        "router" => Target::Router,
+        "lead" => ModelTarget::Lead,
+        "advisor" => ModelTarget::Advisor,
+        "router" => ModelTarget::Router,
         _ => match env.runs.iter().rev().find(|(_, agent)| agent == name) {
-            Some((run, _)) => Target::Run(*run),
+            Some((run, _)) => ModelTarget::Run(*run),
             None => {
                 let up = name.to_uppercase();
                 let hits: Vec<&RunId> = env.runs.iter().map(|(r, _)| r).filter(|r| r.to_string().starts_with(&up)).collect();
                 match hits[..] {
-                    [one] => Target::Run(*one),
+                    [one] => ModelTarget::Run(*one),
                     [] => return Err(format!("no agent or run matches @{name}")),
                     _ => {
                         let list: Vec<String> = hits.iter().map(|r| r.to_string()).collect();
@@ -697,9 +688,13 @@ mod tests {
         assert_eq!(m("/handoff"), "Command(CreateHandoff { outcome: None })");
         assert!(m("/ledger now ship it").contains("LedgerUpdate { section: \"now\", text: \"ship it\" }"));
         assert!(m("/ledger now").starts_with("BAD"));
-        assert!(m("/model opus").contains("/model opus"));
-        assert_eq!(m("/model"), "BAD /model needs an alias");
-        assert!(m("/advisor opus").contains("/advisor opus"));
+        assert_eq!(m("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
+        assert_eq!(m("/model"), "BAD /model needs a model");
+        assert_eq!(m("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
+        assert_eq!(m("/advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
+        assert_eq!(m("/router fast"), "Command(SetModel { target: Router, model: \"fast\" })");
+        assert_eq!(m("/advisor"), "BAD /advisor needs a model or off");
+        assert_eq!(m("/model @advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
         assert!(m("/workflow review the diff").contains("Workflow { name: \"review\", input: \"the diff\" }"));
         assert!(m("/fix the bug").contains("Workflow { name: \"fix\", input: \"the bug\" }"));
         assert_eq!(m("/build x"), "BAD /build is not available: no workflow named build");
@@ -722,19 +717,39 @@ mod tests {
         let mut env = Env { runs: &rs, lead: Some(lead), ..Env::bare(&[], &[]) };
         let t = |env: &Env, s: &str| parse_target(s, env).map(|(t, rest)| (t, rest.to_owned()));
         // The newest run of the agent.
-        assert_eq!(t(&env, "@grep haiku"), Ok((Target::Run(rs[2].0), "haiku".into())));
-        assert_eq!(t(&env, "@search haiku"), Ok((Target::Run(rs[1].0), "haiku".into())));
+        assert_eq!(t(&env, "@grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));
+        assert_eq!(t(&env, "@search haiku"), Ok((ModelTarget::Run(rs[1].0), "haiku".into())));
         // A run id prefix.
         let id = rs[0].0.to_string();
-        assert_eq!(t(&env, &format!("@{} x", &id[..20])), Ok((Target::Run(rs[0].0), "x".into())));
-        assert_eq!(t(&env, "@lead x"), Ok((Target::Lead, "x".into())));
-        assert_eq!(t(&env, "@advisor off"), Ok((Target::Advisor, "off".into())));
-        assert_eq!(t(&env, "@router fast"), Ok((Target::Router, "fast".into())));
+        assert_eq!(t(&env, &format!("@{} x", &id[..20])), Ok((ModelTarget::Run(rs[0].0), "x".into())));
+        assert_eq!(t(&env, "@lead x"), Ok((ModelTarget::Lead, "x".into())));
+        assert_eq!(t(&env, "@advisor off"), Ok((ModelTarget::Advisor, "off".into())));
+        assert_eq!(t(&env, "@router fast"), Ok((ModelTarget::Router, "fast".into())));
         // No target: the lead, or the focused card.
-        assert_eq!(t(&env, "opus"), Ok((Target::Lead, "opus".into())));
+        assert_eq!(t(&env, "opus"), Ok((ModelTarget::Lead, "opus".into())));
         env.focused = Some(card);
-        assert_eq!(t(&env, "opus"), Ok((Target::Run(card), "opus".into())));
+        assert_eq!(t(&env, "opus"), Ok((ModelTarget::Run(card), "opus".into())));
         assert!(t(&env, "@nobody x").is_err());
+    }
+
+    #[test]
+    fn model_at_agent_changes_that_run_and_a_focused_card_is_the_default() {
+        let rs = runs();
+        let card = rs[1].0;
+        let mut env = Env { runs: &rs, ..Env::bare(&[], &[]) };
+        let line = |env: &Env, l: &str| match send(l, env) {
+            Sent::Msgs(m) => match &m[..] {
+                [Msg::Command(Command::SetModel { target, model })] => Ok((*target, model.clone())),
+                other => panic!("{other:?}"),
+            },
+            Sent::Bad(why) => Err(why),
+        };
+        assert_eq!(line(&env, "/model @grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));
+        assert_eq!(line(&env, "/model @lead haiku"), Ok((ModelTarget::Lead, "haiku".into())));
+        assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Lead, "haiku".into())));
+        env.focused = Some(card);
+        assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Run(card), "haiku".into())));
+        assert_eq!(line(&env, "/model @grep"), Err("/model needs a model".into()));
     }
 
     #[test]
@@ -753,7 +768,7 @@ mod tests {
         let agents = vec!["grep".to_owned()];
         assert_eq!(msgs("@agent-grep find it", &agents, &[]), "SubmitPrompt { text: \"@agent-grep find it\" }");
         let env = Env::bare(&agents, &[]);
-        assert_eq!(parse_target("@agent-grep x", &env), Ok((Target::Lead, "@agent-grep x")));
+        assert_eq!(parse_target("@agent-grep x", &env), Ok((ModelTarget::Lead, "@agent-grep x")));
     }
 
     #[test]
@@ -762,7 +777,7 @@ mod tests {
         assert!(slash_offered(&env).iter().all(|(n, _)| n != "/fix"));
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 12);
+        assert_eq!(slash_offered(&env).len(), 13);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec).as_deref(), Some("no run yet"));
     }

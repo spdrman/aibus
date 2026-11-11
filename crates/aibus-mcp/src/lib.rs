@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod audit;
+mod confirm;
 mod limits;
 pub mod prompts;
 mod read;
@@ -28,6 +29,8 @@ use rmcp::{ErrorData, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 
 use audit::AuditLog;
+pub use confirm::ConfirmConfig;
+use confirm::Confirm;
 pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES};
 use limits::RateLimiter;
 
@@ -85,6 +88,7 @@ pub struct Server {
     audit: AuditLog,
     limiter: Mutex<RateLimiter>,
     redactor: Redactor,
+    confirm: Confirm,
 }
 
 impl Server {
@@ -121,6 +125,7 @@ impl Server {
             audit,
             limiter: Mutex::new(RateLimiter::new(Instant::now())),
             redactor,
+            confirm: Confirm::new(ConfirmConfig::default()),
         })
     }
 
@@ -298,7 +303,11 @@ impl ServerHandler for Server {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let client = context.client_info();
-        self.call_from(client.as_ref(), peer(&context), &request.name, request.arguments, Instant::now())
+        let addr = peer(&context);
+        if let Some(stop) = self.confirm(&request, &context, client.as_ref(), addr).await {
+            return Ok(stop);
+        }
+        self.call_from(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
             .map(CallToolResponse::from)
     }
 

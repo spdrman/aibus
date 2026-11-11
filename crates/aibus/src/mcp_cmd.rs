@@ -3,12 +3,12 @@
 //! give (warnings by default).
 
 use aibus_core::{AccountName, AibusError, Redactor};
-use aibus_mcp::{Caps, Server};
+use aibus_mcp::{Caps, ConfirmConfig, Server};
 use aibus_provider::Secret;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
-use crate::cli::{Global, McpArgs};
+use crate::cli::{ConfirmMode, Global, McpArgs};
 use crate::logging;
 use crate::mcp_http;
 
@@ -44,7 +44,8 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
         &g.paths()?,
         std::env::var_os("HOME").map(Into::into),
         redactor.clone(),
-    )?;
+    )?
+    .with_confirm(ConfirmConfig { elicit: args.confirm == ConfirmMode::Elicit, ..ConfirmConfig::default() });
     match http {
         Some((bind, token)) => mcp_http::serve(server, bind, args.origin.clone(), token),
         None => aibus_mcp::serve_stdio(server),

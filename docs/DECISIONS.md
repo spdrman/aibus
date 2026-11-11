@@ -397,3 +397,13 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Wait out the two weeks (rejected: it leaves #92 and #93 open past the wave for a risk the release checklist covers anyway). Regenerate `w_cards_five_scrolled` in place (rejected: it breaks the rollback build and the issue says no snapshot is regenerated). Force the feature on in `aibus-testkit` (rejected: the metadata test then cannot see a build without it).
 
 **Why.** The numbers the flip was waiting for are in, and the cost of being wrong is one flag until #93 removes it.
+
+## D-12 addendum 2 (2026-11-11): the hand-drawn connectors and the flag go in the same wave (#93)
+
+**Context.** #93 is labelled "later" and says it starts only after a release with the flag on has shipped and the terminal checklist has been run on it. Neither can happen inside this wave, and the owner's goal for the wave is zero open issues.
+
+**Decision.** I remove the classic `centre`, `widgets::cards` (its only caller was the classic path), the `flow-diagram` feature and the feature-gated tests now. `rataflow` is a plain dependency of `aibus-tui`; the workspace dependency on `aibus-tui` is back to plain. `dotted` stays: `advisor_link` still draws the rail-to-box link with it. The way back is no longer a flag, it is reverting this merge, which is why the release PR's checklist line about the cards canvas matters more than it did. `frames.classic.txt` and its test go as the issue says. With one drawing path left, the bench is `render_dashboard` again and the MARS baselines I recorded for the `_flow` names (#91) moved onto those names (the hand-drawn baselines measured code that no longer exists), and `w_cards_five_scrolled.txt` now holds the frame with the fourth card's edge on the canvas, the only snapshot whose content changes.
+
+**Alternatives.** Leave #93 open until after the release (rejected: it is the last open issue of the epic's tail, and the revert path is one merge). Keep `dotted` out of `ui.rs` by moving it into `diagram.rs` (rejected: `advisor_link` is not part of the flow, and the issue says it stays).
+
+**Why.** One drawing path means every change to the centre column is made and tested once.

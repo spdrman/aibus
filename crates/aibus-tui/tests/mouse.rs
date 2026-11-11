@@ -367,7 +367,7 @@ fn every_mouse_action_has_a_keyboard_equivalent_with_the_same_message() {
 // ---- #89: mouse ownership and overflow on the card canvas ------------------------------------
 //
 // The hit map resolves first on both paths, the flow is never handed an event, and the row pans a
-// card at a time through `ctrl:scroll:cards:x`. Run with and without `--features flow-diagram`.
+// card at a time through `ctrl:scroll:cards:x`. 
 
 fn eight(size: (u16, u16)) -> Rig {
     let mut app = session();

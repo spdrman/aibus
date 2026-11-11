@@ -1,2 +1,0 @@
-p99_us 125.3
-calibration_us 1585.9

@@ -46,8 +46,7 @@ window, then go through the list. Unix terminals on macOS and Linux, Windows Ter
       card menu, and a drag selects text without breaking the layout.
 * [ ] Cards (with more than three runs): the wheel over the cards scrolls, Shift plus the wheel pans
       the row sideways, and a drag from empty space pans it. The cards canvas pans with eight runs.
-      The centre column is drawn by rataflow in the release build; if this line fails, the way back
-      is a build with `--no-default-features`.
+      The centre column is drawn by rataflow in every build.
 * [ ] Resize while a run streams, once with eight runs so the cards canvas is wider than the column:
       the layout reflows with no tearing, and the 80x24 collapsed rail comes and goes at the width
       the spec says.

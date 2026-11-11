@@ -7,12 +7,6 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[features]
-# Forwarded to the TUI. On by default since 0.2.0, so release.yml (which builds defaults) ships the
-# rataflow path; `--no-default-features` builds the hand-drawn one.
-default = ["flow-diagram"]
-flow-diagram = ["aibus-tui/flow-diagram"]
-
 [dependencies]
 aibus-core.workspace = true
 aibus-graph.workspace = true

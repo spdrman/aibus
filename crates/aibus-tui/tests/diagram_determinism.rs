@@ -1,6 +1,5 @@
 //! rataflow keeps id lookups in `HashMap`s and renders edges through one; this checks that the
-//! order of a map never reaches the buffer. Run with `--features flow-diagram`.
-#![cfg(feature = "flow-diagram")]
+//! order of a map never reaches the buffer.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

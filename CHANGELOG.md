@@ -30,8 +30,8 @@ uses as the release notes, so every release needs its entry before it is merged 
 ### Build
 
 * The TUI is on ratatui 0.30 and crossterm 0.29, and `deny.toml` has no ignored advisories any more: `paste` (RUSTSEC-2024-0436) left the tree with ratatui 0.29. `crossterm` joins `ratatui` in the one-version-only ban list.
-* The dashboard's centre column (lead box, fork layer, connectors, cards, return box) is drawn with rataflow 0.1 now. It is the `flow-diagram` feature of `aibus-tui` and `aibus`, and it is on by default, so every release binary has it; it adds one crate to the lock (+0.6 % binary size). To build the hand-drawn connectors from source, use `--no-default-features`. See `docs/spikes/D1.1-rataflow.md`.
-* The frames are the ones the hand-drawn path drew, cell for cell: the same boxes, the same dotted connectors with their travelling dots and pulsing arrow head, the same card hit rects. The 100 frames of the README demo are byte-identical.
+* The dashboard's centre column (lead box, fork layer, connectors, cards, return box) is drawn with rataflow 0.1 now. It is a plain dependency of `aibus-tui` and adds one crate to the lock (+0.6 % binary size). The hand-drawn connectors are gone, and so is the `flow-diagram` feature, so a build from source has no way to turn rataflow off. See `docs/spikes/D1.1-rataflow.md`.
+* The frames are the ones the hand-drawn path drew, cell for cell: the same boxes, the same dotted connectors with their travelling dots and pulsing arrow head, the same card hit rects. The 100 frames of the README demo were byte-identical between the two paths when the hand-drawn one was removed.
 * With more than three cards the row pans: a drag from empty space in the centre column moves it a card at a time, Shift plus the wheel still does, and the row stops at the first and the last card. The cards beside the window are on the canvas too (their edge and connector show) and come in as it pans.
 
 ## [0.1.0] - 2026-11-09

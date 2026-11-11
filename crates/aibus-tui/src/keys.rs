@@ -473,11 +473,7 @@ impl Keymap {
             && !ev.alt;
         self.bindings
             .iter()
-            .find(|b| {
-                b.key == ev
-                    && b.covers(ctx)
-                    && !(typing && !b.scopes.contains(&Scope::Prompt))
-            })
+            .find(|b| b.key == ev && b.covers(ctx) && (!typing || b.scopes.contains(&Scope::Prompt)))
             .map(|b| b.action)
     }
 

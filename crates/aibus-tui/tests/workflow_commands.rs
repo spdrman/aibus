@@ -137,6 +137,8 @@ fn list_and_show_render_and_enter_fills_the_prompt() {
     r.key(K::Enter);
     assert_eq!(modal(&r), None);
     assert_eq!(r.ui.prompt.text, "/workflow run review ");
+    // `line` types, so the filled prompt has to be cleared first.
+    r.ui.prompt.set("");
     line(&mut r, &files, "/workflow show review");
     assert_eq!(modal(&r).as_deref(), Some("workflow_show"));
     assert!(r.text().contains("valid, 2 steps"));

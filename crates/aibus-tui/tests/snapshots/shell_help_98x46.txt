@@ -9,30 +9,30 @@
  │ ◆ before a plan    │·                 └──────────────────────────────────────┘
  │ │ reads the whole  │                                      ●
  │ │ session, every   │                                      ·
- │ │ tool c┌ help · key map ──────────────────────────────────────────────────────────┐
- │ │ every │Tab         next pane                 p           oldest permission       │
- │ │ last a│Shift+Tab   previous pane             y           allow this call         │
- │ │ » plan│Enter       send the prompt           n           deny this call          │
- │ │ calls │Enter       open run transcript       a           always allow this tool  │
- │ │ tokens│Up k        up / scroll               e           edit input, then allow  │
- │ │ silent│Down j      down / scroll             :           command palette         │
- │ │ routin│Left h      previous card             /           filter / search         │
- │ ◇ same e│Right l     next card                 f           follow newest           │
- │ │ never │x           stop or dismiss run       [           step time back          │──┐
- │ │ code i│r           retry failed run          ]           step time forward       │  │
- │ │ Sonnet│M m         message the run           A           agents screen           │% │
- │ │ the ad│m           context menu              K           accounts screen         │  │
- │ ◇ before│Space       show tooltip              ?           this help               │  │
- │         │Enter       pick menu item            Ctrl+c      cancel run, twice quits │  │
- │         │R           resume partial run        q           quit                    │──┘
- │         │b           background / foreground   Esc q       close                   │
- │         │Ctrl+b      wait in background        Esc         clear the prompt        │
- │         │t           lead transcript           Tab         next tool call          │
- │         │a           advisor rail              Shift+Tab   previous tool call      │
- │         │Enter       show last advice          c           compact the run         │
- │         │                                                                          │
- │         │any key closes                                                            │
- └─────────└──────────────────────────────────────────────────────────────────────────┘
+ │ │ tool c┌ help · key map · any key closes ─────────────────────────────────────────┐
+ │ │ every │Tab         next pane                 y           allow this call         │
+ │ │ last a│Shift+Tab   previous pane             n           deny this call          │
+ │ │ » plan│Enter       send the prompt           a           always allow this tool  │
+ │ │ calls │Enter       open run transcript       e           edit input, then allow  │
+ │ │ tokens│Up k        up / scroll               :           command palette         │
+ │ │ silent│Down j      down / scroll             /           filter / search         │
+ │ │ routin│Left h      previous card             f           follow newest           │
+ │ ◇ same e│Right l     next card                 [           step time back          │
+ │ │ never │x           stop or dismiss run       ]           step time forward       │──┐
+ │ │ code i│r           retry failed run          A           agents screen           │  │
+ │ │ Sonnet│M m         message the run           K           accounts screen         │% │
+ │ │ the ad│m           context menu              i           run status              │  │
+ │ ◇ before│Space       show tooltip              $           session cost            │  │
+ │         │Enter       pick menu item            ?           this help               │  │
+ │         │R           resume partial run        Ctrl+c      cancel run, twice quits │──┘
+ │         │b           background / foreground   q           quit                    │
+ │         │Ctrl+b      wait in background        Esc q       close                   │
+ │         │t           lead transcript           Esc         clear the prompt        │
+ │         │a           advisor rail              Tab         next tool call          │
+ │         │Enter       show last advice          Shift+Tab   previous tool call      │
+ │         │p           oldest permission         c           compact the run         │
+ │         └──────────────────────────────────────────────────────────────────────────┘
+ └────────────────────┘
 
 ┌ session log ───────────────────────────────────────────────────────────────────────────────────┐
 │ 22:13:20  router     which tool →                                        p=0.94  sharp → code  │

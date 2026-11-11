@@ -547,6 +547,23 @@ Gated calls, taken at the recommended default:
 
 **Why.** The page can only say what the code says, and the same test that keeps it honest is the one that writes it.
 
+## D-0.2.0-C: The dashboard stabilisation, what I changed in the code and what in the tests (#172)
+
+**Context.** The first full gate on `cut/0.2.0` was red for 17 tests, 2 clippy lints, 1 test-module lint and 1 rustc warning in `aibus-tui`. For each one I read the issue that introduced the behaviour and decided which side was wrong.
+
+**Decision.** Tests that were stale, and now follow the code: the popup and `/`-completion counts (15 commands offered once `/login` and `/logout` exist), `/model opus` and `/advisor opus` (they are `SetModel` since G2, not prompt lines), the legend text (`<model> · lead`, as 05-ui section 3 says, not `lead · <model>`), `header.rs` (it never registered the dashboard's views, so there was no `view:header` to draw), the `$` key in `cost_table_total_equals_the_status_bar` (it is a dashboard key, so it types while the prompt has focus; the test now leaves the prompt first) and `workflow_commands` (`line` types, so the prompt that Enter filled has to be cleared first). The status bar's `cost` node was never missing: the failing assertion was the `$` key.
+
+Code that was wrong, and is now fixed. The `?` screen could not show its closing line at 80x24 any more (`i` and `$` made 42 key rows, so two columns of 21 plus the border and a footer row are 25 rows high): "any key closes" is now in the title and the box is two rows shorter. And a key typed on a `/login <provider> <key>` line was drawn in the prompt until Enter refused it, which `docs/SECURITY.md` says never happens ("never echoed"): everything after the provider on a `/login` line is now drawn as dots (`widgets::prompt`; the text, the cursor and the history are untouched). That one was a real leak of the typed text into a frame, not a false positive of the guard.
+
+Lints: the two `nonminimal_bool` in `Keymap::lookup` are rewritten, the test module of `views.rs` moves to the end of the file, and `demo.rs` takes `Terminal::new` with `let Ok(..)` because its error is `Infallible` (the nightly fuzz build flagged the `?` as unreachable). `result_large_err` on three functions in `app.rs` comes from `AibusError` in `aibus-core`, so it is not fixed here.
+
+Snapshots: regenerated with `AIBUS_UPDATE_SNAPSHOTS=1` on arm64 (MERCURY) after the logic was right, then checked on x86_64 (MARS), and diffed by eye. The context menu now has Status and Cost (G5), the help frames have the two new keys and the new title, and six frames that had never been written exist now (`workflow_show` too: the test failed before it got to it). No colour changed, so there are no contrast numbers to report.
+
+**Alternatives.** Drawing the commands on the help screen (left alone, as D-G9 item 3 says: it does not fit 80x24 and I did not want to change every help frame twice). Masking only the argument that looks like a key (rejected: anything after the provider is refused anyway, so there is nothing legitimate to show). Boxing `AibusError` (core's call, not the dashboard's).
+
+**Why.** A red gate is only useful if each failure is traced to the side that moved, and a snapshot is only evidence once the logic it photographs is right.
+
+
 ## D-F11: The MCP rate limits count calls that can change something, and a run's exit code waits for the process (0.2.0 stabilisation, #172)
 
 **Context.** The first full gate on `cut/0.2.0` had eight red tests in `aibus-mcp`. Four of them were stale fixtures (a roster that grew, a `workflow_dry_run` tool whose name contains "run", a fifth toml block in the author prompt, an agent named `build` that was never in the roster). Two said "a secret reached" a file, and three hit the write and run limits. The last two (`a_tool_that_would_ask_is_denied_not_queued` and the cost cap one) saw `running` next to an exit code.

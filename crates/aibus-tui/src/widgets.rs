@@ -556,6 +556,12 @@ pub fn prompt(buf: &mut Buffer, area: Rect, th: &Theme, p: &Prompt, focused: boo
     let first = (cursor_line + 1).saturating_sub(rows).min(lines.len().saturating_sub(rows));
     let on = focused && Prompt::blink_on(tick);
     let sel = p.selection();
+    // `/login <provider> <anything>` is refused on Enter (the key belongs in the masked field),
+    // but until then what follows the provider could be a key, so it is drawn as dots.
+    let secret_from = p.text.strip_prefix("/login").filter(|r| r.starts_with(char::is_whitespace)).and_then(|r| {
+        let rest = r.trim_start().trim_start_matches(|c: char| !c.is_whitespace()).trim_start();
+        (!rest.is_empty()).then(|| p.text.chars().count() - rest.chars().count())
+    });
     let mut out = Vec::new();
     let mut start = 0;
     for (i, line) in lines.iter().enumerate() {
@@ -573,7 +579,13 @@ pub fn prompt(buf: &mut Buffer, area: Rect, th: &Theme, p: &Prompt, focused: boo
             if p.shows_placeholder() {
                 put(buf, area, indent, y, &format!("{} ", p.placeholder), Style::new().fg(th.dim_text));
             } else {
-                let shown: String = line.chars().skip(skip).take(room).collect();
+                let shown: String = line
+                    .chars()
+                    .enumerate()
+                    .skip(skip)
+                    .take(room)
+                    .map(|(k, c)| if secret_from.is_some_and(|from| start + k >= from) { '•' } else { c })
+                    .collect();
                 put(buf, area, indent, y, &shown, Style::new().fg(th.fg));
                 if let Some((a, b)) = sel {
                     for k in 0..shown.chars().count() {

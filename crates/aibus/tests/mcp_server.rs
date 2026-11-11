@@ -154,7 +154,9 @@ fn every_tool_schema_is_valid_2020_12_and_every_result_matches_its_output_schema
             let structured = &result["structuredContent"];
             assert_eq!(schema::check_against(output, structured), Vec::<String>::new(), "{p:?}: {name}: {structured}");
             let text = result["content"][0]["text"].as_str().expect("a text block");
-            assert_eq!(&serde_json::from_str::<Value>(text).unwrap(), structured, "{p:?}: {name}");
+            // A tool that returns text from files puts a one-line data header above the JSON.
+            let body = if text.starts_with("The following is") { text.split_once('\n').map_or("", |x| x.1) } else { text };
+            assert_eq!(&serde_json::from_str::<Value>(body).unwrap(), structured, "{p:?}: {name}");
         }
     }
 }
@@ -205,5 +207,47 @@ fn the_list_scenario_matches_its_golden_transcript() {
         let r = c.call("workflow_list", json!({})).expect("workflow_list");
         assert_eq!(r["structuredContent"]["workflows"][0]["name"], "ship", "{p:?}: {r}");
         c.transcript.assert_matches("list");
+    }
+}
+
+#[test]
+fn the_read_scenarios_match_their_golden_transcripts() {
+    for (scenario, tool, args) in [
+        ("get", "workflow_get", json!({ "name": "fix" })),
+        ("explain", "workflow_explain", json!({ "name": "fix" })),
+        ("validate-good", "workflow_validate", json!({ "toml": "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n" })),
+        ("validate-bad", "workflow_validate", json!({ "toml": "[[step]]\nagent = \"nobody\"\nprompt = \"{{input}}\"\n" })),
+        ("dry-run", "workflow_dry_run", json!({ "name": "fix", "input": "login fails" })),
+        ("agents", "agent_list", json!({})),
+    ] {
+        for p in Protocol::BOTH {
+            let home = xdg_temp();
+            let dir = home.path().join("proj/.aibus/workflows");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("fix.toml"), include_str!("../../../examples/workflows/fix.toml")).unwrap();
+            let mut c = client(home.path(), p, &[]);
+            let r = c.call(tool, args.clone()).unwrap_or_else(|e| panic!("{p:?}: {tool}: {e:?}"));
+            assert_ne!(r["isError"], true, "{p:?}: {tool}: {r}");
+            c.transcript.assert_matches(scenario);
+        }
+    }
+}
+
+#[test]
+fn the_resource_and_prompt_scenarios_match_their_golden_transcripts() {
+    for p in Protocol::BOTH {
+        let home = xdg_temp();
+        let dir = home.path().join("proj/.aibus/workflows");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("fix.toml"), include_str!("../../../examples/workflows/fix.toml")).unwrap();
+        let mut c = client(home.path(), p, &[]);
+        c.request("resources/list", json!({})).expect("resources/list");
+        c.request("resources/templates/list", json!({})).expect("resources/templates/list");
+        c.read_resource("aibus://workflows/project/fix").expect("a workflow resource");
+        c.read_resource("aibus://schema/workflow").expect("the schema resource");
+        assert_eq!(c.read_resource("aibus://workflows/project/%2e%2e").expect_err("a path-shaped name").code, -32602);
+        c.list_prompts().expect("prompts/list");
+        c.get_prompt("review_workflow", json!({ "name": "fix" })).expect("review_workflow");
+        c.transcript.assert_matches("resources-prompts");
     }
 }

@@ -368,4 +368,46 @@ mod tests {
         assert!(preset("kimi").unwrap().compat.as_deref().unwrap().contains(&CompatFlag::ReasoningContentReplay));
         assert_eq!(preset("azure-openai").unwrap().auth_header.as_deref(), Some("api-key"));
     }
+
+    #[test]
+    fn bedrock_and_vertex_are_presets_of_two_more_anthropic_apis() {
+        assert_eq!(Api::AnthropicBedrock.as_str(), "anthropic-bedrock");
+        assert_eq!(Api::AnthropicVertex.as_str(), "anthropic-vertex");
+        let (b, v) = (preset("bedrock").unwrap(), preset("vertex").unwrap());
+        assert_eq!((b.api, v.api), (Some(Api::AnthropicBedrock), Some(Api::AnthropicVertex)));
+        assert!(b.env_vars.contains(&"AWS_BEARER_TOKEN_BEDROCK".to_owned()));
+        // The host depends on the region, so a preset has no base_url of its own.
+        assert!(b.base_url.is_none() && v.base_url.is_none());
+        assert!(b.prefixes.iter().any(|p| p == "us.anthropic.") && v.prefixes.iter().any(|p| p == "claude-"));
+    }
+
+    #[test]
+    fn a_new_bedrock_id_starts_from_the_bedrock_preset_and_region_and_project_merge() {
+        let user = ProviderDef {
+            id: "bedrock-eu".into(),
+            api: Some(Api::AnthropicBedrock),
+            region: Some("eu-west-1".into()),
+            ..ProviderDef::default()
+        };
+        let def = resolve("bedrock-eu", Some(&user)).unwrap().unwrap();
+        assert_eq!(def.region.as_deref(), Some("eu-west-1"));
+        assert!(def.prefixes.iter().any(|p| p == "eu.anthropic."));
+
+        let over = ProviderDef { id: "vertex".into(), project: Some("my-project".into()), region: Some("us-east5".into()), ..ProviderDef::default() };
+        let def = resolve("vertex", Some(&over)).unwrap().unwrap();
+        assert_eq!((def.project.as_deref(), def.region.as_deref()), (Some("my-project"), Some("us-east5")));
+    }
+
+    #[test]
+    fn a_region_or_project_that_cannot_land_in_a_host_or_a_path_is_refused() {
+        for (region, project) in [("us-east-1.evil.example", None), ("US East", None), ("", None), ("us-east5", Some("p/../x"))] {
+            let user = ProviderDef {
+                id: "vertex".into(),
+                region: Some(region.into()),
+                project: project.map(Into::into),
+                ..ProviderDef::default()
+            };
+            assert!(resolve("vertex", Some(&user)).is_err(), "{region} {project:?}");
+        }
+    }
 }

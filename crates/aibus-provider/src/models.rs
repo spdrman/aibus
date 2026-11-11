@@ -625,4 +625,45 @@ mod tests {
         let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
         assert!(!t.capabilities_for(base_caps(), &id("caps-20250929")).logprobs);
     }
+
+    const PRICED: &str = r#"{"models": [
+      {"id": "claude-sonnet-4-5", "context_window": 1, "max_output": 1, "family": "sonnet", "deprecated": false,
+       "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0, "cache_read_per_mtok": 0.3, "cache_write_per_mtok": 3.75}},
+      {"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 1, "max_output": 1, "family": "sonnet",
+       "deprecated": false, "price_of": "claude-sonnet-4-5"},
+      {"id": "orphan", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "price_of": "nobody"}
+    ]}"#;
+
+    #[test]
+    fn price_of_gives_an_inference_profile_the_plain_models_price() {
+        let t = ModelTable::load("p", PRICED, &ProviderConfig::default(), &[], false).unwrap();
+        let profile = id("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+        assert_eq!(t.price(&profile), t.price(&id("claude-sonnet-4-5")));
+        assert_eq!(t.price(&profile).unwrap().output_per_mtok, 15.0);
+        // A pointer at nothing is "n/a", never a guess.
+        assert_eq!(t.price(&id("orphan")), None);
+    }
+
+    #[test]
+    fn a_price_a_row_has_itself_wins_over_its_price_of() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 1, "max_output": 1, "family": "sonnet",
+               "deprecated": false, "price_of": "claude-sonnet-4-5",
+               "price": {"input_per_mtok": 1.0, "output_per_mtok": 2.0, "cache_read_per_mtok": null, "cache_write_per_mtok": null}}]}"#,
+        )
+        .unwrap();
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", PRICED, &cfg, &[], false).unwrap();
+        assert_eq!(t.price(&id("us.anthropic.claude-sonnet-4-5-20250929-v1:0")).unwrap().output_per_mtok, 2.0);
+    }
+
+    #[test]
+    fn a_vertex_snapshot_with_an_at_sign_shares_its_models_entry() {
+        let t = ModelTable::load("p", PRICED, &ProviderConfig::default(), &[], false).unwrap();
+        assert_eq!(t.price(&id("claude-sonnet-4-5@20250929")).unwrap().input_per_mtok, 3.0);
+        assert_eq!(t.price(&id("claude-other@20250929")), None);
+    }
 }

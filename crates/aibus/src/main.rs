@@ -13,6 +13,7 @@ mod control;
 mod doctor;
 mod env;
 mod events;
+mod gcloud;
 mod headless;
 mod keychain;
 mod launch;

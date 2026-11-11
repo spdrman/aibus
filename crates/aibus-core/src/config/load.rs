@@ -452,4 +452,102 @@ mod tests {
         assert!(l.config.providers.is_empty());
         assert!(l.warnings[0].contains("[[provider]] is user-only"), "{:?}", l.warnings);
     }
+
+    fn load_text(text: &str) -> Result<Loaded, ConfigFileError> {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.toml");
+        std::fs::write(&file, text).unwrap();
+        load(&file, None)
+    }
+
+    #[test]
+    fn the_bedrock_and_vertex_forms_load_with_region_and_project() {
+        let text = r#"
+[[account]]
+name = "bedrock"
+provider = "bedrock"
+auth = { sigv4 = true }
+region = "us-east-1"
+
+[[account]]
+name = "vertex"
+provider = "vertex"
+auth = { gcloud = true }
+project = "my-project"
+region = "us-east5"
+
+[[account]]
+name = "bedrock-env"
+provider = "bedrock"
+auth = { aws_env = true }
+region = "eu-west-1"
+
+[[account]]
+name = "bedrock-profile"
+provider = "bedrock"
+auth = { aws_profile = "work" }
+region = "us-west-2"
+"#;
+        let c = load_text(text).unwrap().config;
+        let [b, v, e, p] = &c.accounts[..] else { panic!("four accounts") };
+        assert!(b.auth.sigv4 && b.region.as_deref() == Some("us-east-1"));
+        assert!(v.auth.gcloud && v.project.as_deref() == Some("my-project") && v.region.as_deref() == Some("us-east5"));
+        assert!(e.auth.aws_env && p.auth.aws_profile.as_deref() == Some("work"));
+    }
+
+    #[test]
+    fn the_wrong_auth_for_an_api_is_a_config_error_that_names_the_line() {
+        let cases = [
+            ("anthropic", "auth = { sigv4 = true }", "sigv4", "anthropic-bedrock"),
+            ("vertex", "auth = { sigv4 = true }", "sigv4", "anthropic-bedrock"),
+            ("bedrock", "auth = { gcloud = true }", "gcloud", "anthropic-vertex"),
+            ("openai", "auth = { gcloud = true }", "gcloud", "anthropic-vertex"),
+            ("vertex", "auth = { aws_env = true }", "aws_env", "anthropic-bedrock"),
+            ("anthropic", "auth = { aws_profile = \"work\" }", "aws_profile", "anthropic-bedrock"),
+        ];
+        for (provider, auth, key, api) in cases {
+            let text = format!("[[account]]\nname = \"x\"\nprovider = \"{provider}\"\n{auth}\n");
+            let e = load_text(&text).unwrap_err();
+            assert_eq!(e.line, Some(4), "{provider} {auth}: {e}");
+            assert!(e.message.contains(key) && e.message.contains(api), "{provider} {auth}: {}", e.message);
+        }
+    }
+
+    #[test]
+    fn two_credential_sources_on_one_cloud_account_are_refused() {
+        let text = "[[account]]\nname = \"x\"\nprovider = \"bedrock\"\nauth = { sigv4 = true, aws_env = true }\nregion = \"us-east-1\"\n";
+        let e = load_text(text).unwrap_err();
+        assert!(e.message.contains("pick one"), "{}", e.message);
+    }
+
+    #[test]
+    fn a_region_or_project_on_the_provider_table_is_the_default_and_the_account_wins() {
+        let text = r#"
+[[provider]]
+id = "bedrock"
+region = "eu-central-1"
+
+[[account]]
+name = "a"
+provider = "bedrock"
+auth = { sigv4 = true }
+
+[[account]]
+name = "b"
+provider = "bedrock"
+auth = { sigv4 = true }
+region = "us-east-1"
+"#;
+        let c = load_text(text).unwrap().config;
+        assert_eq!(c.providers[0].region.as_deref(), Some("eu-central-1"));
+        assert_eq!(c.accounts[1].region.as_deref(), Some("us-east-1"));
+    }
+
+    #[test]
+    fn a_cloud_account_needs_its_region_and_vertex_its_project() {
+        let bedrock = "[[account]]\nname = \"x\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\n";
+        assert!(load_text(bedrock).unwrap_err().message.contains("region"));
+        let vertex = "[[account]]\nname = \"x\"\nprovider = \"vertex\"\nauth = { gcloud = true }\nregion = \"us-east5\"\n";
+        assert!(load_text(vertex).unwrap_err().message.contains("project"));
+    }
 }

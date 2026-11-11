@@ -520,4 +520,159 @@ mod tests {
         };
         assert!(!format!("{c:?}").contains("sk-secret-value"));
     }
+
+    fn env_of(pairs: &[(&str, &str)]) -> Arc<Mutex<BTreeMap<String, String>>> {
+        Arc::new(Mutex::new(pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()))
+    }
+
+    fn store_with(env: &Arc<Mutex<BTreeMap<String, String>>>, redactor: &Redactor) -> CredentialStore {
+        let env = env.clone();
+        CredentialStore::new(Arc::new(MemoryKeychain::default()), redactor.clone())
+            .with_env(move |v| env.lock().unwrap().get(v).cloned())
+    }
+
+    fn aws_env_account() -> config::Account {
+        account("bedrock", config::Auth { aws_env: true, ..Default::default() })
+    }
+
+    const AKID: &str = "AKIDEXAMPLE";
+    const SECRET: &str = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+
+    #[test]
+    fn aws_env_reads_the_usual_variables_at_request_time_and_never_caches_them() {
+        let env = env_of(&[("AWS_ACCESS_KEY_ID", AKID), ("AWS_SECRET_ACCESS_KEY", SECRET)]);
+        let redactor = Redactor::new();
+        let store = store_with(&env, &redactor);
+        let a = aws_env_account();
+        assert_eq!(a.key_ref().unwrap().to_string(), "aws-env");
+
+        let c = store.resolve(&a).unwrap();
+        assert_eq!(c.secret.expose(), &format!("{AKID}:{SECRET}"));
+        assert_eq!(c.kind, AuthMethodKind::Env);
+        // The secret half is registered with the redactor, like a key would be.
+        assert!(!redactor.redact(&format!("saw {SECRET}")).contains(SECRET));
+
+        // A session token joins as the third part, and a rotated value is seen at once.
+        env.lock().unwrap().insert("AWS_SESSION_TOKEN".into(), "FwoGZXIvYXdzEXAMPLETOKEN".into());
+        env.lock().unwrap().insert("AWS_ACCESS_KEY_ID".into(), "AKIDROTATED".into());
+        let c = store.resolve(&a).unwrap();
+        assert_eq!(c.secret.expose(), &format!("AKIDROTATED:{SECRET}:FwoGZXIvYXdzEXAMPLETOKEN"));
+        assert!(!redactor.redact("t FwoGZXIvYXdzEXAMPLETOKEN").contains("FwoGZXIvYXdzEXAMPLETOKEN"));
+    }
+
+    #[test]
+    fn aws_env_without_the_pair_is_a_missing_credential() {
+        let env = env_of(&[("AWS_ACCESS_KEY_ID", AKID)]);
+        let store = store_with(&env, &Redactor::new());
+        assert!(matches!(store.resolve(&aws_env_account()), Err(CredentialError::Missing(_))));
+    }
+
+    #[cfg(unix)]
+    fn credentials_file(mode: u32, text: &str) -> (tempfile::TempDir, String) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials");
+        std::fs::write(&path, text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        let p = path.display().to_string();
+        (dir, p)
+    }
+
+    const PROFILES: &str = "[default]\naws_access_key_id = AKIDDEFAULT\naws_secret_access_key = DEFAULTSECRET123\n\n\
+        [work]\naws_access_key_id = AKIDWORK\naws_secret_access_key = WORKSECRET456\naws_session_token = WORKTOKEN789\n";
+
+    #[cfg(unix)]
+    #[test]
+    fn aws_profile_reads_static_keys_from_the_credentials_file() {
+        let (_dir, path) = credentials_file(0o600, PROFILES);
+        let env = env_of(&[("AWS_SHARED_CREDENTIALS_FILE", &path)]);
+        let redactor = Redactor::new();
+        let store = store_with(&env, &redactor);
+        let work = account("w", config::Auth { aws_profile: Some("work".into()), ..Default::default() });
+        assert_eq!(work.key_ref().unwrap().to_string(), "aws-profile:work");
+        let c = store.resolve(&work).unwrap();
+        assert_eq!(c.secret.expose(), "AKIDWORK:WORKSECRET456:WORKTOKEN789");
+        assert!(!redactor.redact("x WORKSECRET456").contains("WORKSECRET456"));
+
+        let default = account("d", config::Auth { aws_profile: Some("default".into()), ..Default::default() });
+        assert_eq!(store.resolve(&default).unwrap().secret.expose(), "AKIDDEFAULT:DEFAULTSECRET123");
+        let ghost = account("g", config::Auth { aws_profile: Some("ghost".into()), ..Default::default() });
+        assert!(matches!(store.resolve(&ghost), Err(CredentialError::Missing(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_world_readable_credentials_file_is_refused_with_the_chmod_hint() {
+        for mode in [0o644, 0o640, 0o604] {
+            let (_dir, path) = credentials_file(mode, PROFILES);
+            let store = store_with(&env_of(&[("AWS_SHARED_CREDENTIALS_FILE", &path)]), &Redactor::new());
+            let work = account("w", config::Auth { aws_profile: Some("work".into()), ..Default::default() });
+            let e = store.resolve(&work).unwrap_err();
+            assert!(matches!(e, CredentialError::FileMode(_, m) if m == mode), "{mode:o}");
+            assert!(e.to_string().contains(&format!("chmod 600 {path}")), "{e}");
+            assert!(!e.to_string().contains("WORKSECRET456"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_default_credentials_file_is_under_home() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".aws")).unwrap();
+        let (_d, path) = credentials_file(0o600, PROFILES);
+        std::fs::copy(&path, dir.path().join(".aws/credentials")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path().join(".aws/credentials"), std::fs::Permissions::from_mode(0o600)).unwrap();
+        let home = dir.path().display().to_string();
+        let store = store_with(&env_of(&[("HOME", &home)]), &Redactor::new());
+        let work = account("w", config::Auth { aws_profile: Some("work".into()), ..Default::default() });
+        assert_eq!(store.resolve(&work).unwrap().secret.expose(), "AKIDWORK:WORKSECRET456:WORKTOKEN789");
+    }
+
+    #[test]
+    fn a_gcloud_account_has_no_stored_key_and_a_none_credential() {
+        let store = store_with(&env_of(&[]), &Redactor::new());
+        let a = account("vertex", config::Auth { gcloud: true, ..Default::default() });
+        assert_eq!(a.key_ref(), None);
+        let c = store.resolve(&a).unwrap();
+        assert_eq!((c.kind, c.secret.expose().as_str()), (AuthMethodKind::None, ""));
+    }
+
+    #[test]
+    fn a_fetched_token_is_cached_for_its_ttl_under_the_account_name_and_redacted() {
+        let now = Arc::new(Mutex::new(Instant::now()));
+        let redactor = Redactor::new();
+        let clock = now.clone();
+        let store = CredentialStore::new(Arc::new(MemoryKeychain::default()), redactor.clone())
+            .with_clock(move || *clock.lock().unwrap());
+        let name = AccountName("vertex".into());
+        let ttl = Duration::from_secs(50 * 60);
+        let calls = Mutex::new(0);
+        let fetch = |token: &'static str| {
+            let calls = &calls;
+            move || {
+                *calls.lock().unwrap() += 1;
+                Ok::<_, String>(token.to_owned())
+            }
+        };
+        let t = store.cached_token(&name, ttl, fetch("ya29.first-token-0001")).unwrap();
+        assert_eq!(t.expose(), "ya29.first-token-0001");
+        assert!(!redactor.redact("t ya29.first-token-0001").contains("ya29.first"));
+        *now.lock().unwrap() += Duration::from_secs(49 * 60);
+        assert_eq!(store.cached_token(&name, ttl, fetch("ya29.second-token-0002")).unwrap().expose(), "ya29.first-token-0001");
+        assert_eq!(*calls.lock().unwrap(), 1);
+        *now.lock().unwrap() += Duration::from_secs(2 * 60);
+        assert_eq!(store.cached_token(&name, ttl, fetch("ya29.second-token-0002")).unwrap().expose(), "ya29.second-token-0002");
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn a_failed_fetch_is_an_error_and_is_not_cached() {
+        let store = store_with(&env_of(&[]), &Redactor::new());
+        let name = AccountName("vertex".into());
+        let ttl = Duration::from_secs(50 * 60);
+        let e = store.cached_token(&name, ttl, || Err("gcloud is not logged in".to_owned())).unwrap_err();
+        assert!(e.to_string().contains("gcloud is not logged in"));
+        assert_eq!(store.cached_token(&name, ttl, || Ok("ya29.after-0003".to_owned())).unwrap().expose(), "ya29.after-0003");
+    }
 }

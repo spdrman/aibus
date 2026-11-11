@@ -51,12 +51,29 @@ impl ProviderFactory for Oauthy {
 
 const TOKEN: &str = "oauth-access-1-abcdef";
 
+/// The strict fake, except that its verify call reports what the one request cost (Bedrock and
+/// Vertex have no cheap call, so they make a real one).
+struct Priced;
+
+impl ProviderFactory for Priced {
+    fn id(&self) -> ProviderId {
+        ProviderId("fake")
+    }
+    fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", KEY).with_verify_cost(0.0004)))
+    }
+    fn auth_methods(&self) -> &'static [AuthMethodKind] {
+        &[AuthMethodKind::ApiKey]
+    }
+}
+
 struct Rig {
     home: TempDir,
     keychain: Arc<MemoryKeychain>,
     env: HashMap<String, String>,
     oauth: Option<Arc<dyn OAuthFlow>>,
     offers_oauth: bool,
+    priced: bool,
 }
 
 struct Ran {
@@ -72,6 +89,7 @@ impl Rig {
             env: HashMap::new(),
             oauth: None,
             offers_oauth: false,
+            priced: false,
         }
     }
 
@@ -103,7 +121,11 @@ impl Rig {
             })
             .unwrap(),
             keychain: self.keychain.clone(),
-            factories: if self.offers_oauth { vec![Box::new(Oauthy)] } else { vec![Box::new(Strict)] },
+            factories: match (self.offers_oauth, self.priced) {
+                (true, _) => vec![Box::new(Oauthy)],
+                (_, true) => vec![Box::new(Priced)],
+                _ => vec![Box::new(Strict)],
+            },
             env: Arc::new(move |v| env.get(v).cloned()),
             redactor: Redactor::new(),
             oauth: self.oauth.clone(),
@@ -484,4 +506,20 @@ fn add_oauth_for_a_login_that_returns_a_key_stores_it_as_a_plain_keyring_account
     assert_eq!(kept.expose(), TOKEN, "the key itself, not a JSON token set");
     assert_eq!(rig.secret_in_files(TOKEN), Vec::<PathBuf>::new());
     assert!(!ran.out.contains(TOKEN));
+}
+
+#[test]
+fn test_shows_what_the_one_request_cost_and_says_nothing_when_the_provider_has_no_cost() {
+    let rig = Rig { priced: true, ..Rig::new() };
+    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    let ran = rig.run(&name_cmd(|name| AccountCmd::Test { name }), "", None);
+    assert!(ran.out.starts_with("ok work ") && ran.out.contains("cost $0.0004"), "{}", ran.out);
+    let json = rig.json(&name_cmd(|name| AccountCmd::Test { name }));
+    assert_eq!(json["cost_usd"], 0.0004);
+
+    let plain = Rig::new();
+    assert_eq!(exit(&plain.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    let ran = plain.run(&name_cmd(|name| AccountCmd::Test { name }), "", None);
+    assert!(!ran.out.contains("cost"), "{}", ran.out);
+    assert!(plain.json(&name_cmd(|name| AccountCmd::Test { name }))["cost_usd"].is_null());
 }

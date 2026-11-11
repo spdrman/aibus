@@ -2,7 +2,6 @@
 //! drawing (6.1), the help screen, and the draw gate that redraws only when `view:dirty` names a
 //! widget, a piece of UI state changed, or the size changed (08 section 1).
 
-use std::io;
 
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{
@@ -794,7 +793,7 @@ impl Ui {
 
     /// Draws if a widget is dirty, the size, the UI state, the pointer or the prompt changed, or
     /// nothing was drawn yet. Returns whether it did.
-    pub fn draw<G: Graph, B: Backend>(&mut self, term: &mut Terminal<B>, g: &G) -> io::Result<bool> {
+    pub fn draw<G: Graph, B: Backend>(&mut self, term: &mut Terminal<B>, g: &G) -> Result<bool, B::Error> {
         let size = term.size()?;
         let now = (size.width, size.height);
         let chrome = Chrome::read(g);

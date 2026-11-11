@@ -312,6 +312,26 @@ Gated calls, taken at the recommended default:
 
 **Why.** It keeps the reducer pure and puts the choice where the accounts are. The cost is one extra message per switch, which is also what lets the log say which account answered.
 
+## G3 (2026-11-11): the /model picker, where its rows come from and how a row is named
+
+**Context.** #122 asks for a screen of `(account, model)` rows with prices and capabilities, filtered by the target's role, that sends `SetModel`. The reducer has no providers and the TUI draws from graph nodes only, and `SetModel` carries a model string with no room for an account. #111 (per-model capabilities) is in flight.
+
+**Decision.**
+
+1. The rows ride on `AccountsReloaded`: `AccountView` gains `models: Vec<ModelView>` (id, alias, context window, prices as `Option`, five capability flags), built by `AccountRegistry::model_views` from the provider's `models()`, `price()` and `capabilities()`, deprecated models skipped. The `model` key is only written to the account's graph node when the list is not empty, and serialised only when not empty, so a graph without models keeps its shape. `view:models` is a new widget (the dirty list and `WIDGETS` grow by one), `view:models` reads `PALETTE_TEXT` for the filter, as the palette does.
+2. Capabilities are read in one line of `model_views` (`provider.capabilities()`); #111 replaces it with `capabilities_for(&id)`.
+3. A row is sent as `account/model`. `ChildLauncher::switch_model` treats a prefix that names an account as `SelectHints::explicit`, so the picked account is the one used when several serve a model. I chose the string over a new field on `Command::SetModel` because the command, its effect and the executor would all change shape and the typed form (`/model work/sonnet`) comes free.
+4. The filter is entered with `/`, not by typing, because `a`, `r` and `s` are keys of the screen. While it is open the keys are text and every change is mirrored into the graph, so the rows narrow as you type. `Enter` or `Esc` ends it and keeps the text.
+5. `s` on a picker opened for the lead says so in a note instead of guessing which card the user meant.
+6. The screen needs `Screen::Models(ModelTarget)`; the modal is named `models:<target label>`.
+7. The palette and the card menu get no new row (their order is pinned by tests); `/model` is the way in.
+
+**Alternatives.** A `SetModel { account }` field (rejected, above). Typing to filter with `a`/`r`/`s` on `Ctrl` (rejected: the keys are named on the buttons like every other screen). Reading the providers from the TUI through a hook (rejected: the frame would not be a function of the graph).
+
+**Why.** The picker stays a pure function of the graph, nothing asks the network, and the only code that knows about accounts is still the launcher.
+
+**Snapshots.** The four frames of the screen are written by the tests and generated on the release PR with the other stale ones.
+
 ## E11 (2026-11-11): Streamable HTTP is built, on loopback with a token (#106)
 
 **Context.** #106 sat behind owner decision 6 on epic #95. The owner wants zero open issues and the recommended default for decision 6 was to do it, with elicitation first. The order does not matter for the code, so I did the HTTP one first, as the issues are numbered.

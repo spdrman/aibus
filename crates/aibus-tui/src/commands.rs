@@ -252,18 +252,19 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "model",
-        args: "[@target] <ref>",
-        help: "change the model of the lead, a run or a seat",
+        args: "[@target] [ref]",
+        help: "pick a model from the connected accounts, or set one by name",
         label: "",
         hint: "",
         scope: Scope::Run,
         needs: 0,
         surfaces: at(7, 0, 0),
         run: |c, out| {
+            let target = c.target.unwrap_or(ModelTarget::Lead);
             if c.args.is_empty() {
-                return need(c, "a model");
+                return command(out, Command::OpenScreen(Screen::Models(target)));
             }
-            command(out, Command::SetModel { target: c.target.unwrap_or(ModelTarget::Lead), model: c.args.to_owned() })
+            command(out, Command::SetModel { target, model: c.args.to_owned() })
         },
     },
     Spec {
@@ -851,7 +852,7 @@ mod tests {
         assert!(m("/ledger now ship it").contains("LedgerUpdate { section: \"now\", text: \"ship it\" }"));
         assert!(m("/ledger now").starts_with("BAD"));
         assert_eq!(m("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
-        assert_eq!(m("/model"), "BAD /model needs a model");
+        assert_eq!(m("/model"), "Command(OpenScreen(Models(Lead)))");
         assert_eq!(m("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
         assert_eq!(m("/advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
         assert_eq!(m("/router fast"), "Command(SetModel { target: Router, model: \"fast\" })");
@@ -911,7 +912,9 @@ mod tests {
         assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Lead, "haiku".into())));
         env.focused = Some(card);
         assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Run(card), "haiku".into())));
-        assert_eq!(line(&env, "/model @grep"), Err("/model needs a model".into()));
+        // With no reference the line opens the picker for that target.
+        let Sent::Msgs(m) = send("/model @grep", &env) else { panic!("the picker opens") };
+        assert!(matches!(&m[..], [Msg::Command(Command::OpenScreen(Screen::Models(ModelTarget::Run(r))))] if *r == rs[2].0), "{m:?}");
     }
 
     #[test]

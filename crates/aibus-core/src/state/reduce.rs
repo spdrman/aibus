@@ -337,7 +337,7 @@ impl R<'_> {
                 ]),
             );
         }
-        if matches!(name, "palette" | "agents" | "accounts") {
+        if matches!(name, "palette" | "agents" | "accounts") || name.starts_with("models:") {
             self.put(SCREEN_SEL, n(0));
             self.put(PALETTE_TEXT, s(""));
         }
@@ -812,6 +812,7 @@ impl R<'_> {
             }
             Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
             Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
+            Command::OpenScreen(Screen::Models(target)) => self.open_modal(&format!("models:{}", target.label())),
             Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
             Command::OpenScreen(Screen::ConfirmCancel(run)) => self.open_modal(&format!("confirm:cancel:{run}")),
             Command::OpenScreen(Screen::RunStatus(run)) => self.open_modal(&format!("status:{run}")),
@@ -994,7 +995,7 @@ fn account_value(a: &AccountView) -> Result<Value, AibusError> {
     if !ok {
         return Err(CredentialError::NotAReference(a.name.clone()).into());
     }
-    Ok(map([
+    let mut v = map([
         ("name", s(&a.name.0)),
         ("provider", s(&a.provider)),
         ("label", s(&a.label)),
@@ -1003,7 +1004,27 @@ fn account_value(a: &AccountView) -> Result<Value, AibusError> {
             a.default_model.as_ref().map_or(Value::Null, |m| s(&m.0)),
         ),
         ("key_ref", s(&a.key_ref)),
-    ]))
+    ]);
+    // Only an account that lists models carries the key, so a graph without them keeps its shape.
+    if !a.models.is_empty() {
+        let price = |p: Option<f64>| p.map_or(Value::Null, Value::F64);
+        let rows = a.models.iter().map(|m| {
+            map([
+                ("id", s(&m.id.0)),
+                ("alias", m.alias.as_deref().map_or(Value::Null, s)),
+                ("context", n(m.context_window)),
+                ("input", price(m.input_per_mtok)),
+                ("output", price(m.output_per_mtok)),
+                ("tools", Value::Bool(m.tools)),
+                ("thinking", Value::Bool(m.thinking)),
+                ("images", Value::Bool(m.images)),
+                ("cache", Value::Bool(m.cache)),
+                ("logprobs", Value::Bool(m.logprobs)),
+            ])
+        });
+        v = with(&v, "models", list(rows.collect()));
+    }
+    Ok(v)
 }
 
 /// The writes for one message. Always includes `model:last_msg` and `eng:msg_seq`, so every

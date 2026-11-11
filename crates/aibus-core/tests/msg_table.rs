@@ -204,6 +204,7 @@ fn a_key_ref_that_is_not_a_reference_is_refused_without_echoing_it() {
                 label: "w".into(),
                 default_model: None,
                 key_ref: secret.into(),
+                models: vec![],
             }],
         })
         .unwrap_err();

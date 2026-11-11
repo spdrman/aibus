@@ -387,13 +387,35 @@ impl Checkpoint {
 
 /// What the graph may know about an account. There is deliberately no secret-shaped field:
 /// `key_ref` is `keyring:aibus/<name>`, `env:AIBUS_ACCOUNT_<NAME>_KEY`, `file:<path>` or `none`.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct AccountView {
     pub name: AccountName,
     pub provider: SmolStr,
     pub label: String,
     pub default_model: Option<ModelId>,
     pub key_ref: String,
+    /// What the account's provider serves, read from the tables at startup (the `/model` picker
+    /// draws from this; it never asks the network). Empty when the table lists nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelView>,
+}
+
+/// One model of an account as the picker shows it. The fields vary together per model: the price
+/// and the capability flags come from the provider's tables for this id.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ModelView {
+    pub id: ModelId,
+    /// The `[models]` or account alias that names this model, when there is one.
+    pub alias: Option<String>,
+    pub context_window: u32,
+    /// USD per million tokens; `None` when the table has no price (shown as `n/a`).
+    pub input_per_mtok: Option<f64>,
+    pub output_per_mtok: Option<f64>,
+    pub tools: bool,
+    pub thinking: bool,
+    pub images: bool,
+    pub cache: bool,
+    pub logprobs: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -419,6 +441,8 @@ impl ShutdownReason {
 pub enum Screen {
     Agents,
     Accounts,
+    /// `/model` with no reference: the models of the connected accounts, for this target.
+    Models(ModelTarget),
     /// `/clear` asks first.
     ConfirmClear,
     /// `/cancel` on the lead asks first.

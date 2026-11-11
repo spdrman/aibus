@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER};
 use aibus_core::{
-    Command, Decision, KeyCode, KeyEvent, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
+    Command, Decision, KeyCode, KeyEvent, ModelTarget, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
 };
 use aibus_graph::{Graph, Value};
 use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -29,7 +29,7 @@ use crate::screens::{Entry, EntryKind};
 use crate::transcript::Cells;
 use crate::ui::{Chrome, Drawn, Pointer};
 use crate::view::{CARDS, LOG_LINES, MENU_VIEW};
-use crate::views::{ACCOUNTS_VIEW, AGENTS, PALETTE, PERMISSION, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, TRANSCRIPT};
 
 /// Two presses on the same thing this close together are a double click.
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -88,6 +88,9 @@ pub struct Context {
     /// The agents screen's rows: name and the file it lives in, when it has one.
     pub agent_rows: Vec<(String, Option<PathBuf>)>,
     pub account_rows: Vec<String>,
+    /// The picker's rows as the `account/model` that `SetModel` takes, and who it was opened for.
+    pub model_refs: Vec<String>,
+    pub models_target: Option<ModelTarget>,
     /// Names for the prompt's completion.
     pub agents: Vec<String>,
     /// Every run, oldest first, with its agent (the `@target` of a command).
@@ -157,7 +160,7 @@ impl Context {
             .filter_map(|i| get(i, "id").and_then(as_str).map(str::to_owned))
             .collect();
         let palette_text = palette_view.and_then(|p| get(p, "text")).and_then(as_str).unwrap_or("").to_owned();
-        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW]
+        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS]
             .iter()
             .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
             .unwrap_or(0)
@@ -179,6 +182,13 @@ impl Context {
             .iter()
             .map(|r| get(r, "name").and_then(as_str).unwrap_or("").to_owned())
             .collect();
+        let model_refs = view(MODELS)
+            .and_then(|a| get(a, "rows"))
+            .map_or(&[][..], as_list)
+            .iter()
+            .filter_map(|r| get(r, "ref").and_then(as_str).map(str::to_owned))
+            .collect();
+        let models_target = view(MODELS).and_then(|a| get(a, "target")).and_then(as_str).and_then(ModelTarget::parse);
         let agents = g
             .read_key(aibus_core::state::AGENTS_DEFS)
             .map_or(&[][..], as_list)
@@ -219,6 +229,8 @@ impl Context {
             screen_sel,
             agent_rows,
             account_rows,
+            model_refs,
+            models_target,
             agents,
             runs,
             states,
@@ -258,6 +270,7 @@ impl Context {
             Some("palette") => Ctx::Palette,
             Some("agents") => Ctx::Agents,
             Some("accounts") => Ctx::Accounts,
+            Some(m) if m.starts_with("models:") => Ctx::Models,
             Some("outcome") => Ctx::Outcome,
             Some(m) if m.starts_with("confirm:") => Ctx::Confirm,
             Some(_) => Ctx::Modal,
@@ -343,6 +356,11 @@ enum Scr {
     AcctTest,
     AcctAdd,
     AcctDisable,
+    /// The picker: the row for its own target, for a seat, for the one run it was opened on.
+    ModelUse,
+    ModelSeat(ModelTarget),
+    ModelThisRun,
+    ModelFilter,
     Outcome(Outcome),
     QuitNow,
     ConfirmYes,
@@ -361,6 +379,11 @@ fn scr_of(id: &str) -> Option<Scr> {
         "test" => Scr::AcctTest,
         "add" => Scr::AcctAdd,
         "disable" => Scr::AcctDisable,
+        "model_use" => Scr::ModelUse,
+        "seat_advisor" => Scr::ModelSeat(ModelTarget::Advisor),
+        "seat_router" => Scr::ModelSeat(ModelTarget::Router),
+        "this_run" => Scr::ModelThisRun,
+        "filter" => Scr::ModelFilter,
         "outcome:1" => Scr::Outcome(Outcome::Succeeded),
         "outcome:2" => Scr::Outcome(Outcome::PartialPlus),
         "outcome:3" => Scr::Outcome(Outcome::PartialMinus),
@@ -607,7 +630,7 @@ impl Input {
         let notch = if up { WHEEL_LINES } else { -WHEEL_LINES };
         match cx.keys() {
             Ctx::Transcript => return out.msgs.push(tr(TrOp::Scroll(notch))),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models => {
                 return out.msgs.push(ui(UiIntent::Pick(if up { Selection::Prev } else { Selection::Next })));
             }
             _ if cx.chrome.modal.is_some() => return,
@@ -805,6 +828,7 @@ impl Input {
                         Ctx::Palette => Some(Scr::Run),
                         Ctx::Agents => Some(Scr::AgentEdit),
                         Ctx::Accounts => Some(Scr::AcctTest),
+                        Ctx::Models => Some(Scr::ModelUse),
                         _ => None,
                     };
                     if let Some(a) = default {
@@ -999,7 +1023,7 @@ impl Input {
         }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Outcome | Ctx::Confirm => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Outcome | Ctx::Confirm => {
                 self.screen_key(ev, ctx, cx, prompt, &mut out);
             }
             _ => {
@@ -1107,6 +1131,19 @@ impl Input {
                 };
                 self.screen(a, cx, prompt, out);
             }
+            Ctx::Models => {
+                let a = match (ev.code, c) {
+                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
+                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Enter, _) => Scr::ModelUse,
+                    (_, Some('a')) => Scr::ModelSeat(ModelTarget::Advisor),
+                    (_, Some('r')) => Scr::ModelSeat(ModelTarget::Router),
+                    (_, Some('s')) => Scr::ModelThisRun,
+                    (_, Some('/')) => Scr::ModelFilter,
+                    _ => return,
+                };
+                self.screen(a, cx, prompt, out);
+            }
             Ctx::Outcome => {
                 let a = match c {
                     Some('1') => Scr::Outcome(Outcome::Succeeded),
@@ -1187,6 +1224,23 @@ impl Input {
                     out.jobs.push(Job::Account(AccountOp::Disable(name.clone())));
                 }
             }
+            Scr::ModelUse | Scr::ModelSeat(_) | Scr::ModelThisRun => {
+                let Some(opened) = cx.models_target else { return };
+                let target = match a {
+                    Scr::ModelSeat(seat) => seat,
+                    Scr::ModelThisRun if !matches!(opened, ModelTarget::Run(_)) => {
+                        self.note = "open the picker with /model @agent to change one run".into();
+                        return;
+                    }
+                    _ => opened,
+                };
+                let Some(model) = cx.model_refs.get(sel) else { return };
+                out.msgs.push(cmd(Command::SetModel { target, model: model.clone() }));
+                out.msgs.push(cmd(Command::CloseModal));
+            }
+            Scr::ModelFilter => {
+                self.entry = Some(Entry { kind: EntryKind::ModelFilter, label: "filter".into(), text: cx.palette_text.clone(), secret: false });
+            }
             Scr::Outcome(o) => {
                 out.msgs.extend([cmd(Command::CreateHandoff { outcome: Some(o) }), cmd(Command::Quit { force: false })]);
             }
@@ -1215,6 +1269,12 @@ impl Input {
             KeyCode::Char(c) if !ev.ctrl && !ev.alt => e.text.push(c),
             _ => {}
         }
+        // The picker's rows are narrowed by the graph, so the text goes there as it is typed.
+        if let Some(Entry { kind: EntryKind::ModelFilter, text, .. }) = &self.entry {
+            if matches!(ev.code, KeyCode::Backspace | KeyCode::Char(_)) {
+                out.msgs.push(Msg::Command(Command::PaletteText(text.clone())));
+            }
+        }
     }
 
     /// Enter in a text field: the next step of adding an account, or the result.
@@ -1235,6 +1295,7 @@ impl Input {
             }
             EntryKind::Message(run) if !text.is_empty() => out.msgs.push(cmd(Command::SendMessage { run, text })),
             EntryKind::Resume(run) if !text.is_empty() => out.msgs.push(cmd(Command::Resume { run, message: text, parent: None })),
+            EntryKind::ModelFilter => {}
             EntryKind::AgentName if !text.is_empty() => out.jobs.push(Job::NewAgent(text)),
             EntryKind::AccountName if !text.is_empty() => {
                 self.entry = Some(Entry { kind: EntryKind::AccountProvider(text), label: "provider (anthropic, openai, ...)".into(), text: String::new(), secret: false });

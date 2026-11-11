@@ -94,6 +94,7 @@ pub enum Ctx {
     Palette,
     Agents,
     Accounts,
+    Models,
     Outcome,
     Confirm,
 }
@@ -519,6 +520,7 @@ fn ctx_name(c: Ctx) -> &'static str {
         Ctx::Palette => "palette",
         Ctx::Agents => "agents",
         Ctx::Accounts => "accounts",
+        Ctx::Models => "models",
         Ctx::Outcome => "outcome",
         Ctx::Confirm => "confirm",
     }

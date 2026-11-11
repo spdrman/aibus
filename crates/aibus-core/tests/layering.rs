@@ -132,6 +132,7 @@ fn accounts_have_no_secret_shaped_field() {
         label: "l".into(),
         default_model: None,
         key_ref: "env:AIBUS_ACCOUNT_A_KEY".into(),
+        models: vec![],
     })
     .unwrap();
     let fields: BTreeSet<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();

@@ -88,7 +88,9 @@ pub fn verdict(result: Option<&RunResult>, interrupted: bool) -> Result<(), Aibu
             Err(AibusError::Budget(failure("budget exceeded").message))
         }
         // A rejected credential is exit 4 even when the run kept some text.
-        RunStatus::Partial if r.error.as_ref().is_some_and(|e| e.kind == RunErrorKind::Auth) => {
+        RunStatus::Partial
+            if r.error.as_ref().is_some_and(|e| matches!(e.kind, RunErrorKind::Auth | RunErrorKind::Quota)) =>
+        {
             Err(CredentialError::RunRejected(failure("credential rejected").message).into())
         }
         RunStatus::Partial => Err(failure("ended with a partial result").into()),
@@ -101,7 +103,10 @@ pub fn verdict(result: Option<&RunResult>, interrupted: bool) -> Result<(), Aibu
                 RunErrorKind::Provider => {
                     ProviderError::new(ProviderErrorKind::Unknown, e.message).into()
                 }
-                RunErrorKind::Auth => CredentialError::RunRejected(e.message).into(),
+                RunErrorKind::Auth | RunErrorKind::Quota => CredentialError::RunRejected(e.message).into(),
+                RunErrorKind::ContentFilter => {
+                    ProviderError::new(ProviderErrorKind::ContentFilter, e.message).into()
+                }
                 RunErrorKind::Budget => AibusError::Budget(e.message),
                 RunErrorKind::Denied => AibusError::Denied(e.message),
                 RunErrorKind::Tool | RunErrorKind::Internal => e.into(),
@@ -403,6 +408,9 @@ mod tests {
         assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Provider)), 5);
         assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Auth)), 4);
         assert_eq!(c(RunStatus::Partial, err(RunErrorKind::Auth)), 4);
+        assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Quota)), 4);
+        assert_eq!(c(RunStatus::Partial, err(RunErrorKind::Quota)), 4);
+        assert_eq!(c(RunStatus::Failed, err(RunErrorKind::ContentFilter)), 5);
         assert_eq!(c(RunStatus::Denied, None), 6);
         assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Denied)), 6);
         assert_eq!(c(RunStatus::Failed, err(RunErrorKind::Budget)), 8);

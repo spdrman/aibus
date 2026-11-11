@@ -549,6 +549,12 @@ impl R<'_> {
         if pane == Pane::Log && !sideways {
             next = next.min(self.store.log_len().saturating_sub(1) as i64);
         }
+        // When there are more cards than the three in the window, the row pans between the first
+        // card and the one that puts the last card at the window's edge, and no further.
+        let cards = self.visible_workers().len();
+        if pane == Pane::Cards && sideways && cards > 3 {
+            next = next.min((cards - 3) as i64);
+        }
         self.put(key, n(next));
     }
 
@@ -807,6 +813,11 @@ impl R<'_> {
             Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
             Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
             Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
+            Command::OpenScreen(Screen::ConfirmCancel(run)) => self.open_modal(&format!("confirm:cancel:{run}")),
+            Command::OpenScreen(Screen::RunStatus(run)) => self.open_modal(&format!("status:{run}")),
+            Command::OpenScreen(Screen::AdvisorStatus) => self.open_modal("status:advisor"),
+            Command::OpenScreen(Screen::RouterStatus) => self.open_modal("status:router"),
+            Command::OpenScreen(Screen::Cost) => self.open_modal("cost"),
             Command::OpenHelp => self.open_modal("help"),
             Command::LedgerUpdate { section, text } => {
                 if ["goal", "now", "in_progress"].contains(&section.as_str()) {

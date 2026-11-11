@@ -55,7 +55,7 @@ fn stream_error(e: &Value) -> ProviderError {
         0 => status_of(e["type"].as_str().unwrap_or_default()),
         s => s,
     };
-    ProviderError::from_http(status, e["message"].as_str().unwrap_or(code), None, None)
+    ProviderError::from_http(status, e["message"].as_str().unwrap_or(code), None, None, code)
 }
 
 impl Turn {
@@ -85,6 +85,9 @@ impl Turn {
         self.usage.input_tokens = prompt.saturating_sub(cached);
         self.usage.cache_read = cached;
         self.usage.output_tokens = n(&u["completion_tokens"]).or(n(&u["output_tokens"])).unwrap_or(0);
+        // Chat says `completion_tokens_details`, Responses says `output_tokens_details`.
+        self.usage.reasoning_tokens = n(&u["completion_tokens_details"]["reasoning_tokens"])
+            .or(n(&u["output_tokens_details"]["reasoning_tokens"]));
     }
 
     fn start_tool(&mut self, key: String, name: &str, out: &mut Vec<StreamChunk>) -> ToolCallId {
@@ -157,7 +160,7 @@ impl Turn {
                 "stop" => StopReason::EndTurn,
                 "tool_calls" | "function_call" => StopReason::ToolUse,
                 "length" => StopReason::MaxTokens,
-                "content_filter" => StopReason::Refusal,
+                "content_filter" => StopReason::ContentFilter,
                 other => StopReason::Other(other.into()),
             });
         }
@@ -212,7 +215,7 @@ impl Turn {
                 self.take_usage(&v["response"]["usage"]);
                 self.stop = Some(match v["response"]["incomplete_details"]["reason"].as_str() {
                     Some("max_output_tokens") => StopReason::MaxTokens,
-                    Some("content_filter") => StopReason::Refusal,
+                    Some("content_filter") => StopReason::ContentFilter,
                     Some(other) => StopReason::Other(other.into()),
                     None if self.tools.is_empty() => StopReason::EndTurn,
                     None => StopReason::ToolUse,
@@ -271,6 +274,44 @@ impl Turn {
             usage: self.usage,
             stop: self.stop.unwrap_or(StopReason::EndTurn),
             request_id: request_id.or(self.response_id),
+            rate_limit: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reasoning_tokens_come_from_either_dialect_and_stay_none_when_unsaid() {
+        let mut t = Turn::new(None);
+        t.take_usage(&serde_json::json!({
+            "prompt_tokens": 10, "completion_tokens": 50,
+            "completion_tokens_details": {"reasoning_tokens": 32}
+        }));
+        assert_eq!((t.usage.output_tokens, t.usage.reasoning_tokens), (50, Some(32)));
+
+        let mut t = Turn::new(None);
+        t.take_usage(&serde_json::json!({
+            "input_tokens": 10, "output_tokens": 40,
+            "output_tokens_details": {"reasoning_tokens": 7}
+        }));
+        assert_eq!(t.usage.reasoning_tokens, Some(7));
+
+        let mut t = Turn::new(None);
+        t.take_usage(&serde_json::json!({"prompt_tokens": 10, "completion_tokens": 5}));
+        assert_eq!(t.usage.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn a_mid_stream_quota_error_is_quota_and_the_responses_filter_is_a_stop_reason() {
+        let e = stream_error(&serde_json::json!({"code": "insufficient_quota", "message": "spent"}));
+        assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Quota, false));
+
+        let mut t = Turn::new(None);
+        t.responses_event(r#"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}"#)
+            .unwrap();
+        assert_eq!(t.stop, Some(StopReason::ContentFilter));
     }
 }

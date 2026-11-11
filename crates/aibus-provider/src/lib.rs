@@ -12,7 +12,7 @@ pub mod sse;
 pub mod tokens;
 pub mod types;
 
-pub use error::{ConfigError, ProviderError, ProviderErrorKind};
+pub use error::{ConfigError, ProviderError, ProviderErrorKind, RateLimitInfo};
 pub use limits::{Gated, Limiter, Permit, RateLimits};
 pub use provider::{
     AccountInfo, Capabilities, ChatRequest, ChatResponse, ModelInfo, Price, Provider,

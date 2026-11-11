@@ -522,6 +522,46 @@ async fn auth_never_retries_and_commits_the_account_banner() {
 }
 
 #[tokio::test]
+async fn quota_never_retries_and_ends_with_a_banner_that_names_the_account() {
+    let clock = FakeClock::new();
+    let done = run(
+        script([err(ProviderErrorKind::Quota, "insufficient_quota"), Step::Text("never".into())]),
+        def("explore", &[]),
+    )
+    .await;
+    assert_eq!(done.fake.requests().len(), 1);
+    assert_eq!(clock.elapsed(), Duration::ZERO);
+    let r = done.finished();
+    assert_eq!(r.status, RunStatus::Failed);
+    let e = r.error.as_ref().unwrap();
+    assert_eq!(e.kind, RunErrorKind::Quota);
+    assert!(!e.retryable);
+    assert!(e.message.starts_with("account fake: quota or billing cap reached"), "{}", e.message);
+    assert!(e.message.contains("aibus account test fake"), "{}", e.message);
+    assert_eq!(done.count("RunFailed"), 1);
+}
+
+#[tokio::test]
+async fn a_content_filter_never_retries_and_does_not_blame_the_account() {
+    let clock = FakeClock::new();
+    let done = run(
+        script([err(ProviderErrorKind::ContentFilter, "blocked by policy"), Step::Text("never".into())]),
+        def("explore", &[]),
+    )
+    .await;
+    assert_eq!(done.fake.requests().len(), 1);
+    assert_eq!(clock.elapsed(), Duration::ZERO);
+    let r = done.finished();
+    assert_eq!(r.status, RunStatus::Failed);
+    let e = r.error.as_ref().unwrap();
+    assert_eq!(e.kind, RunErrorKind::ContentFilter);
+    assert!(!e.retryable);
+    assert!(e.message.contains("content filter") && e.message.contains("blocked by policy"), "{}", e.message);
+    assert!(!e.message.contains("account"), "{}", e.message);
+    assert_eq!(done.count("RunFailed"), 1);
+}
+
+#[tokio::test]
 async fn a_run_with_text_keeps_it_when_the_provider_gives_up() {
     let _clock = FakeClock::new();
     let s = script(

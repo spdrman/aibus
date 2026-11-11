@@ -27,7 +27,7 @@ pub const MENU_VIEW: &str = "view:menu";
 pub const DIRTY: &str = "view:dirty";
 
 /// Widget name and the one `view:` node it draws. `view:dirty` lists the names.
-pub const WIDGETS: [(&str, &str); 16] = [
+pub const WIDGETS: [(&str, &str); 18] = [
     ("header", HEADER),
     ("rail", RAIL),
     ("lead_box", LEAD_BOX),
@@ -44,10 +44,12 @@ pub const WIDGETS: [(&str, &str); 16] = [
     ("agents", crate::views::AGENTS),
     ("accounts", crate::views::ACCOUNTS_VIEW),
     ("transcript", crate::views::TRANSCRIPT),
+    ("run_status", crate::views::RUN_STATUS),
+    ("cost", crate::views::COST),
 ];
 
 /// The router questions the fork layer shows, as `(kind, row label)`.
-const FORK_KINDS: [(&str, &str); 3] = [
+pub(crate) const FORK_KINDS: [(&str, &str); 3] = [
     ("which_file", "which file"),
     ("which_tool", "which tool"),
     ("retry_or_stop", "retry or stop"),
@@ -352,6 +354,7 @@ fn status_bar(store: &Store, t: &mut Tracker) -> Value {
         ("ledger", ledger),
         ("alerts", list(alerts)),
         ("mem", mem),
+        ("cost", s(&crate::views::dollars(crate::views::session_cost(t)))),
     ])
 }
 
@@ -609,6 +612,8 @@ pub fn register<G: Graph>(g: &mut G, store: Store) -> Vec<NodeKey> {
             "agents" => Box::new(move |t| crate::views::agents(&st, t)),
             "accounts" => Box::new(crate::views::accounts),
             "transcript" => Box::new(move |t| crate::views::transcript(&st, t)),
+            "run_status" => Box::new(crate::views::run_status),
+            "cost" => Box::new(crate::views::cost),
             _ => Box::new(move |t| status_bar(&st, t)),
         };
         let key = NodeKey::from(key);

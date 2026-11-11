@@ -359,3 +359,31 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Keep `String` in the job and zeroise after (rejected: it is in the loop's state for the length of the verify). A `Secret` newtype with `Clone` for the entry (rejected: a clone is exactly how it would end up in a frame). Swap `session_default` as well in this PR (rejected: it touches the defaults every launch reads and the issue says to split rather than widen).
 
 **Why.** The key never exists outside a `Secret`, nothing waits on the network, and the part of the reload that would have been a second PR is named instead of half done.
+
+## D-15: the write tools of `aibus mcp` (E8, #103, 2026-11-11)
+
+**Context.** The issue left several calls open, and the owner's rule is to take the recommended default and write it down.
+
+**Decision.**
+
+1. The revision is the SHA-256 of the file bytes in lower-case hex, the same value `workflow_get` returns. A write holds a process-wide lock from the revision check to the rename; two processes writing the same file are not covered.
+2. The roster the write tools validate against is what agent discovery finds for the project and the user, without `agents.extra_dirs` or `--agents`, as for `workflow_validate`.
+3. `--no-provenance` is the switch for the provenance option (the epic's decision 5 made it default on). Written files are 0600 in both scopes, because the atomic write has no other mode.
+4. Text a redactor would change (a credential) is refused and never echoed, on top of the checks in the issue.
+5. The security tests are in `crates/aibus/tests/mcp_security.rs` and `crates/aibus-mcp/tests/write_tools.rs`, not `aibus-core/tests/security/`, for the same reason as E4 item 7. The golden transcript (`create_update_conflict`) is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run, since nothing was run for this PR.
+
+**Alternatives.** A fixed mode for the project scope that follows the umask (rejected: it needs a second atomic write for one mode bit). Locking the file across processes (rejected for now: an exclusive lock on a file that is replaced by rename does not hold).
+
+**Why.** The safety model in the issue (names not paths, validate first, a revision check, no gate without its flag) holds with one writer, and a second writer is the user's editor, which the revision check already catches.
+
+## E12 (2026-11-11): confirmation through elicitation and MRTR is built, the permission relay is not (#107)
+
+**Context.** #107 sat behind owner decisions 6 and 7 on epic #95. Decision 6 (do #106 and #107, elicitation first) has the recommended default of yes. Decision 7 (relay a run's `bash` prompts through the client) has the recommended default of non-goal: the epic says "I lean non-goal until a client I use supports elicitation", and I have no such client. The owner wants zero open issues, so I took both defaults.
+
+**Decision.** Build the confirmation, in `crates/aibus-mcp/src/confirm.rs`. The step sits in `call_tool` before `Server::call`, so the argument cap, rate limit, redaction and audit stay in one place; refusals and asks add `confirm/ask` and `confirm/refused` audit lines. It applies to the three tools the issue names, only when they are listed (flags on) and only when the request's capabilities include `elicitation` in form mode (rmcp's rule: a bare `elicitation: {}` counts as form). The form is `name` (a string whose `minLength` and `maxLength` are the name's length) and, for `workflow_run` under a cap, `max_cost_usd` (`maximum` is the cap). rmcp's `StringSchema` has no `pattern` keyword, so the issue's `pattern` set to the exact name is not expressible; the answer is compared with the name on the server, which is the check that counts anyway. `requestState` uses rmcp's own `request-state` feature (`RequestStateCodec`, HMAC-SHA256, 32 random bytes per process): the sealed payload is a ULID nonce, the associated data is the tool, the arguments with sorted keys and `clientInfo` (so the digest the issue asks for is in the tag and not stored), the ttl is 10 minutes, and a consumed-nonce set makes it single use. Every failure to open is one message, as the codec's docs ask. `--confirm elicit` is the default; `--confirm never` skips it. `ConfirmConfig { elicit, run_cap_usd, ttl }` is how the run tools set the cap later and how the tests shorten the ttl. The write and run tools are other PRs, so the wire scenarios in `crates/aibus/tests/mcp_confirm.rs` use `workflow_create` and go green when #103 is on the branch; the decisions are tested directly in `crates/aibus-mcp/tests/confirm.rs`.
+
+**The permission relay is a recorded no-go.** Evidence: decision 7's recommended default is non-goal; the run tools it would relay from (#104: `PermissionNeeded`, the run mailbox, `dont_ask`) are not on `cut/0.2.0`; and #104's acceptance criteria say a call that would ask "is denied, not queued", which is the behaviour the relay would change, so building the relay first would make the run lane build against a moving rule. Nothing upstream blocks it (rmcp has the form and MRTR types), so the no-go is a choice and not a limit. I did not add a dead `--permission-relay` flag. If a client I use gains elicitation and decision 7 flips, the relay is a new issue on top of #104, not a rewrite of this.
+
+**Alternatives.** Put the question inside `Server::call` (rejected: it is sync and the legacy path has to await the client). A hand-rolled HMAC (rejected: rmcp's codec has the ttl and associated data, and a second implementation is a second place to get constant-time wrong). Keep a table of pending confirmations instead of a sealed state (rejected: it is state to expire and leak, and the spec's stateless direction points the other way). Ask for any tool that writes, whatever its name (rejected: the issue names three).
+
+**Why.** It adds the server's own question for the clients that can show one and changes nothing for the rest, and it keeps the unknown (run tools, a relay) out of this PR.

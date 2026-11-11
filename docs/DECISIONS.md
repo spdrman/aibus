@@ -556,3 +556,33 @@ Gated calls, taken at the recommended default:
 **Alternatives.** A clock or a fresh server per call in the tests (rejected: it hides that a refused call should not spend a write). Making the testkit scan skip fixtures (rejected: it is another crate's rule). A `Record` struct for the audit line (rejected: a pass-through).
 
 **Why.** The limits protect the disk and the process table, so they count what reaches them.
+## F7 follow-up (2026-11-11): the unused half of the login framework stays, and says so
+
+**Context.** The first full gate on `cut/0.2.0` built with `-D warnings` failed on `Kind::DeviceCode` and `Outcome::Tokens` in `oauth/mod.rs`: the only `Def` in the binary is OpenRouter's (PKCE, returns a key), so nothing outside the tests builds either variant.
+
+**Decision.** I kept both and marked them `#[cfg_attr(not(test), expect(dead_code, ...))]`. The device flow, the token refresh and the tokens branch of `Login::tokens` are exercised by the tests and are the half of #115 that a second vendor needs. The `expect` (not `allow`) turns into a build error the day a `Def` uses the variant, which is the moment to delete the attribute.
+
+**Alternatives.** Wire them up now (rejected: a `Def` exists only for a vendor that documents a login for third-party applications, SECURITY.md "Identity", and I know of none). Remove the device flow and the tokens branch (rejected: that is a shipped, tested RFC 8628 implementation and the refresh path, to be written again later).
+
+**Why.** The release needs a clean `-D warnings` build; deleting working, tested code to get it would be the wrong trade.
+
+## Gate fixes in the aibus crate (2026-11-11)
+
+**Context.** Triage of the first full gate on `cut/0.2.0`.
+
+**Decision.** `FakeAuthServer` (testkit) is served by a task on the test's own runtime instead of wiremock's thread. The oauth tests use a paused clock; tokio advances a paused clock whenever the runtime has nothing ready, and a reply that has to come from another thread is never ready at that moment, so reqwest's 30 s timeout fired before every answer. The product's timeouts are right and stay. Smaller test fixes: the reload test stored its key under `work` where the credential store reads `account:work`; the gcloud test checked the log capture after dropping it; the agent roster count is measured instead of written down (the built-ins are ten now).
+
+**Alternatives.** Give `Login` test-only timeout knobs, or drop `start_paused` and wait the real 5 s device interval (rejected: product code bent for a harness, or a 20 s test).
+
+**Why.** The bug was in the harness, so the harness changed.
+
+
+## D-R1: Provider fixes from the first full gate on cut/0.2.0 (#172)
+
+**Context.** The first full gate on cut/0.2.0 was red in the provider crates and the testkit catalog tests. I read each failure to see whether the product or the test was wrong.
+
+**Decision.** `price_of` is a pointer into the plain Anthropic table: the Bedrock and Vertex files only hold pointers (D-F5) and the catalog test says the target must be an anthropic row, so `price_at` now looks the target up in its own table first and then in the built-in anthropic one (the product was wrong, the tests were right). The gemini wire sent `0.20000000298023224` for a temperature of 0.2 because the `f32` was widened to `f64`; `ChatRequest::temperature_f64` goes through the shortest decimal the `f32` prints as, and the anthropic and openai wires use it too, since all four callers had the same bug (the test was right). The four OpenAI conformance sets named the content-filter case `content_filter` while the kit requires `refusal` (the anthropic and gemini sets already use it), so I renamed the cases and left the kit alone (the test data was wrong). The 95 `result_large_err` warnings came from `ProviderError` being 152 bytes, 64 of them the rate-limit windows, so `rate_limit` is now `Option<Box<RateLimitInfo>>` (96 bytes), which only the quota test in `aibus-core` and one line of `accounts.rs` had to follow.
+
+**Alternatives.** Copying the plain rows into the Bedrock and Vertex files (rejected: the model list would then offer ids Bedrock cannot serve, and `catalog-sync` would have to keep two copies in step). Rounding the temperature in the tests (rejected: the wire was what looked wrong). Boxing the whole `ProviderError` (rejected: it touches every `Result` in the workspace for no extra gain). An `allow` for the lint (rejected: the size was real).
+
+**Why.** Each fix sits where the wrong behaviour was, and the tests stay as the contract they were written as.

@@ -11,7 +11,7 @@ use std::fs;
 use std::path::Path;
 
 use aibus_testkit::xdg_temp;
-use common::mcp_client::{mcp_command, McpClient, Protocol};
+use common::mcp_client::{mcp_command, Answer, McpClient, Protocol};
 use serde_json::{json, Value};
 
 const TOML: &str = "name = \"ship\"\ndescription = \"Plan, build\"\n\n\
@@ -63,10 +63,10 @@ fn a_client_without_elicitation_sees_no_confirmation() {
 
 #[test]
 fn legacy_clients_get_one_elicitation_and_need_accept_with_the_name() {
-    let accept = |name: &'static str| -> Box<dyn FnMut(&Value) -> Value> {
+    let accept = |name: &'static str| -> Answer {
         Box::new(move |_| json!({ "action": "accept", "content": { "name": name } }))
     };
-    let decide = |action: &'static str| -> Box<dyn FnMut(&Value) -> Value> {
+    let decide = |action: &'static str| -> Answer {
         Box::new(move |_| json!({ "action": action }))
     };
 

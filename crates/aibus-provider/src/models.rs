@@ -240,9 +240,17 @@ impl ModelTable {
         let secs = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let own = (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten();
         // One hop: the row it points at is priced by its own `price`, never by another pointer.
+        // The row is in this table (a profile of a model the table also lists) or, for the Bedrock
+        // and Vertex tables that only carry pointers, in the plain Anthropic table.
         own.or_else(|| {
-            let target = self.entry_at(&ModelId(e.price_of.as_deref()?.into()), at)?;
-            (target.price_from.unwrap_or(0) <= secs).then_some(target.price).flatten()
+            static PLAIN: std::sync::OnceLock<Option<ModelTable>> = std::sync::OnceLock::new();
+            let target = ModelId(e.price_of.as_deref()?.into());
+            let plain = PLAIN.get_or_init(|| {
+                let json = crate::catalog::table("anthropic")?;
+                Self::load("anthropic", json, &ProviderConfig::default(), &[], false).ok()
+            });
+            let row = self.entry_at(&target, at).or_else(|| plain.as_ref()?.entry_at(&target, at))?;
+            (row.price_from.unwrap_or(0) <= secs).then_some(row.price).flatten()
         })
     }
 

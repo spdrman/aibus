@@ -124,7 +124,7 @@ pub fn body(req: &ChatRequest, reasoning: bool) -> Value {
         v["toolConfig"] = json!({"functionCallingConfig": config});
     }
     let mut generation = json!({"maxOutputTokens": req.max_output_tokens});
-    if let Some(t) = req.temperature {
+    if let Some(t) = req.temperature_f64() {
         generation["temperature"] = json!(t);
     }
     if let (true, Some(budget)) = (reasoning, req.thinking) {

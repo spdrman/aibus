@@ -177,6 +177,15 @@ pub struct ChatRequest {
     pub metadata: RequestMetadata,
 }
 
+impl ChatRequest {
+    /// The temperature as the number the user typed: the `f32` widened to `f64` reads
+    /// `0.20000000298023224`, which every wire would send, so this goes through the shortest
+    /// decimal the `f32` prints as (`0.2`).
+    pub fn temperature_f64(&self) -> Option<f64> {
+        self.temperature.and_then(|t| t.to_string().parse().ok())
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum StreamChunk {
     TextDelta(String),

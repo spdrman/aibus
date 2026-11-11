@@ -38,7 +38,7 @@ pub struct ProviderError {
     pub message: String,
     /// What the answer's headers said about the account's windows, when it said anything.
     #[serde(default)]
-    pub rate_limit: Option<RateLimitInfo>,
+    pub rate_limit: Option<Box<RateLimitInfo>>,
     #[serde(skip)]
     #[source]
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,

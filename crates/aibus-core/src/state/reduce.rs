@@ -807,6 +807,11 @@ impl R<'_> {
             Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
             Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
             Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
+            Command::OpenScreen(Screen::ConfirmCancel(run)) => self.open_modal(&format!("confirm:cancel:{run}")),
+            Command::OpenScreen(Screen::RunStatus(run)) => self.open_modal(&format!("status:{run}")),
+            Command::OpenScreen(Screen::AdvisorStatus) => self.open_modal("status:advisor"),
+            Command::OpenScreen(Screen::RouterStatus) => self.open_modal("status:router"),
+            Command::OpenScreen(Screen::Cost) => self.open_modal("cost"),
             Command::OpenHelp => self.open_modal("help"),
             Command::LedgerUpdate { section, text } => {
                 if ["goal", "now", "in_progress"].contains(&section.as_str()) {

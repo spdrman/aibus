@@ -16,7 +16,7 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 28] = [
+pub const ALL_NAMES: [&str; 29] = [
     "Key",
     "Mouse",
     "Ui",
@@ -41,6 +41,7 @@ pub const ALL_NAMES: [&str; 28] = [
     "HandoffWritten",
     "AgentsReloaded",
     "AccountsReloaded",
+    "AccountOpDone",
     "IoError",
     "Shutdown",
     "ModelSwitched",
@@ -603,6 +604,12 @@ pub fn cases() -> Vec<Case> {
                 }],
             },
             expect: vec!["model:accounts", "model:log"],
+        },
+        Case {
+            name: "AccountOpDone",
+            setup: none,
+            msg: Msg::AccountOpDone { op: "add".into(), account: "work".into(), ok: true, text: t.clone() },
+            expect: vec!["model:log"],
         },
         Case {
             name: "IoError",

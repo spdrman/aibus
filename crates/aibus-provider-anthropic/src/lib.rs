@@ -10,7 +10,7 @@ mod sigv4;
 mod stream;
 mod wire;
 
-pub use cloud::TokenSource;
+pub use cloud::{CloudFactory, TokenSource};
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -18,10 +18,10 @@ use std::time::SystemTime;
 
 use aibus_provider::models::ModelTable;
 use aibus_provider::{
-    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, CompatFlag,
-    ConfigError, Credential, ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig,
-    ProviderDef, ProviderError, ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk,
-    SystemRole,
+    AccountInfo, AliasTable, Api, AuthMethodKind, CacheHint, Capabilities, ChatRequest, ChatResponse, CompatFlag,
+    ConfigError, Credential, Message, MessageRole, ModelId, RequestMetadata, ToolChoice, ModelInfo, ModelRef, Price, Provider, ProviderConfig,
+    ModelTableSpec, ProviderDef, ProviderError, ProviderErrorKind, ProviderFactory, ProviderId,
+    StreamChunk, SystemRole,
 };
 use aibus_provider_http::reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE,
@@ -92,8 +92,13 @@ impl Anthropic {
             base_url: cfg.base_url.clone(),
             ..ProviderDef::default()
         });
-        if def.api != Some(Api::AnthropicMessages) {
-            return Err(ConfigError::Invalid(def.id.clone(), "this adapter speaks anthropic-messages only".into()));
+        let api_ok = match &transport {
+            Transport::Direct => def.api == Some(Api::AnthropicMessages),
+            Transport::Bedrock { .. } => matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicBedrock)),
+            Transport::Vertex { .. } => matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicVertex)),
+        };
+        if !api_ok {
+            return Err(ConfigError::Invalid(def.id.clone(), "this adapter speaks the Messages API (anthropic-messages, anthropic-bedrock, anthropic-vertex) only".into()));
         }
         let id = def.static_id();
         let base = def.base_url.as_deref().unwrap_or(&default_base).trim_end_matches('/');
@@ -108,6 +113,20 @@ impl Anthropic {
                 HeaderValue::from_str(v).map_err(|e| bad(e.to_string()))?,
             );
         }
+        let builtin = match &def.model_table {
+            Some(ModelTableSpec::Inline(v)) => v.to_string(),
+            Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
+                .ok_or_else(|| ConfigError::Invalid(id.into(), format!("model_table: no built-in table called {n}")))?
+                .to_owned(),
+            None => {
+                let name = match transport {
+                    Transport::Direct => "anthropic",
+                    Transport::Bedrock { .. } => "bedrock",
+                    Transport::Vertex { .. } => "vertex",
+                };
+                aibus_provider::catalog::table(name).unwrap_or_default().to_owned()
+            }
+        };
         // A definition's own prefixes win over the transport's (Bedrock has its own).
         let own: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
         let prefixes = if own.is_empty() || !matches!(transport, Transport::Direct) { prefixes } else { &own[..] };
@@ -129,7 +148,7 @@ impl Anthropic {
             .with(&def.default_capabilities),
             compat: def.compat_flags().to_vec(),
             base: base.to_owned(),
-            table: Mutex::new(ModelTable::load(id, aibus_provider::catalog::table("anthropic").unwrap_or_default(), cfg, prefixes, false)?),
+            table: Mutex::new(ModelTable::load(id, &builtin, cfg, prefixes, false)?),
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
             transport,
@@ -156,6 +175,41 @@ impl Anthropic {
             }
         }
         Ok(h)
+    }
+
+    /// Bedrock and Vertex have no cheap authenticated call, so `verify` makes one real request:
+    /// one token out, on the smallest model, whose cost it reports. A Bedrock global inference
+    /// profile is preferred, since the newer models cannot be called without a profile.
+    async fn probe(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
+        let models = self.models();
+        let haiku = |m: &&ModelInfo| m.family == "haiku" && !m.deprecated;
+        let model = models
+            .iter()
+            .filter(haiku)
+            .find(|m| m.id.0.starts_with("global."))
+            .or_else(|| models.iter().find(haiku))
+            .or(models.first())
+            .map_or_else(|| ModelId("claude-haiku-4-5".into()), |m| m.id.clone());
+        let req = ChatRequest {
+            model: model.clone(),
+            system: String::new(),
+            messages: vec![Message::text(MessageRole::User, "hi")],
+            tools: Vec::new(),
+            tool_choice: ToolChoice::Auto,
+            max_output_tokens: 1,
+            temperature: None,
+            effort: None,
+            thinking: None,
+            cache_hint: CacheHint::None,
+            logprobs: false,
+            metadata: RequestMetadata::default(),
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+        let drain = async { while rx.recv().await.is_some() {} };
+        let (resp, ()) = tokio::join!(self.stream(creds, req, tx, CancellationToken::new()), drain);
+        let resp = resp?;
+        let cost_usd = self.price(&model).and_then(|p| p.cost_usd(&resp.usage));
+        Ok(AccountInfo { label: creds.account.to_string(), org: None, models: models.into_iter().map(|m| m.id).collect(), cost_usd })
     }
 
     async fn list_models(&self, creds: &Credential) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
@@ -309,12 +363,10 @@ impl Provider for Anthropic {
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
         if !matches!(self.transport, Transport::Direct) {
-            self.check_cloud_auth(creds).await?;
-            let models = self.models().into_iter().map(|m| m.id).collect();
-            return Ok(AccountInfo { label: creds.account.to_string(), org: None, models });
+            return self.probe(creds).await;
         }
         let (models, org) = self.list_models(creds).await?;
-        Ok(AccountInfo { label: creds.account.to_string(), org, models })
+        Ok(AccountInfo { label: creds.account.to_string(), org, models, cost_usd: None })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

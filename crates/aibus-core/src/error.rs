@@ -36,6 +36,9 @@ pub enum CredentialError {
     OAuth(String),
     #[error("keychain: {0}")]
     Keychain(String),
+    /// A token source (`gcloud auth print-access-token`) gave no token. Never carries its output.
+    #[error("access token: {0}")]
+    Token(String),
     /// A run's provider refused the credential; the text is the run's banner.
     #[error("{0}")]
     RunRejected(String),

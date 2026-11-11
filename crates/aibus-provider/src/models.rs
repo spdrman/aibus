@@ -52,6 +52,10 @@ pub struct ModelEntry {
     /// but has not started yet. `None` means "always".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_from: Option<u64>,
+    /// This model is priced like the one with this id (a Bedrock inference profile, `us.anthropic.
+    /// claude-...`, costs what the plain Claude model does). A `price` on the row itself wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_of: Option<String>,
 }
 
 fn is_unset(c: &CapabilityOverrides) -> bool {
@@ -181,6 +185,12 @@ impl ModelTable {
         let at = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         // `name-20250929` and `name-2025-09-29` are snapshots of `name`.
         fn undated(id: &str) -> &str {
+            // Vertex spells a snapshot `name@20250929`.
+            if let Some((head, d)) = id.rsplit_once('@') {
+                if d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()) {
+                    return head;
+                }
+            }
             let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
             if let Some((head, d)) = id.rsplit_once('-') {
                 if digits(d, 8) {
@@ -228,7 +238,12 @@ impl ModelTable {
     pub fn price_at(&self, id: &ModelId, at: SystemTime) -> Option<Price> {
         let e = self.entry_at(id, at)?;
         let secs = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten()
+        let own = (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten();
+        // One hop: the row it points at is priced by its own `price`, never by another pointer.
+        own.or_else(|| {
+            let target = self.entry_at(&ModelId(e.price_of.as_deref()?.into()), at)?;
+            (target.price_from.unwrap_or(0) <= secs).then_some(target.price).flatten()
+        })
     }
 
     /// Characters per token for this model's family (Q20).
@@ -274,6 +289,7 @@ impl ModelTable {
                     capabilities: CapabilityOverrides::default(),
                     reasoning: None,
                     price_from: None,
+                    price_of: None,
                 })
             })
             .collect();
@@ -624,5 +640,46 @@ mod tests {
     fn a_dated_snapshot_takes_its_models_capabilities() {
         let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
         assert!(!t.capabilities_for(base_caps(), &id("caps-20250929")).logprobs);
+    }
+
+    const PRICED: &str = r#"{"models": [
+      {"id": "claude-sonnet-4-5", "context_window": 1, "max_output": 1, "family": "sonnet", "deprecated": false,
+       "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0, "cache_read_per_mtok": 0.3, "cache_write_per_mtok": 3.75}},
+      {"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 1, "max_output": 1, "family": "sonnet",
+       "deprecated": false, "price_of": "claude-sonnet-4-5"},
+      {"id": "orphan", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "price_of": "nobody"}
+    ]}"#;
+
+    #[test]
+    fn price_of_gives_an_inference_profile_the_plain_models_price() {
+        let t = ModelTable::load("p", PRICED, &ProviderConfig::default(), &[], false).unwrap();
+        let profile = id("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+        assert_eq!(t.price(&profile), t.price(&id("claude-sonnet-4-5")));
+        assert_eq!(t.price(&profile).unwrap().output_per_mtok, 15.0);
+        // A pointer at nothing is "n/a", never a guess.
+        assert_eq!(t.price(&id("orphan")), None);
+    }
+
+    #[test]
+    fn a_price_a_row_has_itself_wins_over_its_price_of() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 1, "max_output": 1, "family": "sonnet",
+               "deprecated": false, "price_of": "claude-sonnet-4-5",
+               "price": {"input_per_mtok": 1.0, "output_per_mtok": 2.0, "cache_read_per_mtok": null, "cache_write_per_mtok": null}}]}"#,
+        )
+        .unwrap();
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", PRICED, &cfg, &[], false).unwrap();
+        assert_eq!(t.price(&id("us.anthropic.claude-sonnet-4-5-20250929-v1:0")).unwrap().output_per_mtok, 2.0);
+    }
+
+    #[test]
+    fn a_vertex_snapshot_with_an_at_sign_shares_its_models_entry() {
+        let t = ModelTable::load("p", PRICED, &ProviderConfig::default(), &[], false).unwrap();
+        assert_eq!(t.price(&id("claude-sonnet-4-5@20250929")).unwrap().input_per_mtok, 3.0);
+        assert_eq!(t.price(&id("claude-other@20250929")), None);
     }
 }

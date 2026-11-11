@@ -1,0 +1,9 @@
+{
+  "models": [
+    {"id": "claude-opus-4-5@20251101", "context_window": 200000, "max_output": 64000, "family": "opus", "deprecated": false, "effort": true, "price_of": "claude-opus-4-5"},
+    {"id": "claude-opus-4-1@20250805", "context_window": 200000, "max_output": 32000, "family": "opus", "deprecated": false, "price_of": "claude-opus-4-1"},
+    {"id": "claude-sonnet-4-5@20250929", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": false, "price_of": "claude-sonnet-4-5"},
+    {"id": "claude-haiku-4-5@20251001", "context_window": 200000, "max_output": 64000, "family": "haiku", "deprecated": false, "price_of": "claude-haiku-4-5"}
+  ],
+  "families": {}
+}

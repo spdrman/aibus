@@ -459,6 +459,41 @@
    "prefixes": [
     "gemini-"
    ]
+  },
+  {
+   "id": "bedrock",
+   "api": "anthropic-bedrock",
+   "env_vars": [
+    "AWS_BEARER_TOKEN_BEDROCK"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "bedrock",
+   "prefixes": [
+    "claude-",
+    "anthropic.",
+    "us.anthropic.",
+    "eu.anthropic.",
+    "apac.anthropic.",
+    "global.anthropic."
+   ],
+   "responses": false
+  },
+  {
+   "id": "vertex",
+   "api": "anthropic-vertex",
+   "env_vars": [],
+   "auth_methods": [
+    "none"
+   ],
+   "model_table": "vertex",
+   "prefixes": [
+    "claude-"
+   ],
+   "responses": false
   }
  ]
 }

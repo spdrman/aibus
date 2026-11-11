@@ -10,7 +10,7 @@ use aibus_provider::fake::{FakeProvider, Script};
 use aibus_provider::{ModelId, ProviderConfig, ProviderFactory, ProviderId, ProviderRegistry};
 
 use super::account_views;
-use crate::providers::{builtin_factories, provider_configs};
+use crate::providers::{provider_configs};
 
 const CONFIG: &str = r#"
 [models]
@@ -55,7 +55,7 @@ fn registry() -> (Config, AccountRegistry, Arc<FakeProvider>) {
     let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths).unwrap();
     let fake = Arc::new(FakeProvider::new(Script::new()));
     let mut factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(Held(fake.clone()))];
-    factories.extend(builtin_factories().into_iter().filter(|f| f.id().0 != "fake"));
+    factories.extend(crate::providers::os_factories(&aibus_core::Redactor::new()).into_iter().filter(|f| f.id().0 != "fake"));
     let providers = Arc::new(ProviderRegistry::new(&factories, &configs).unwrap());
     (cfg.clone(), AccountRegistry::new(&cfg, providers), fake)
 }

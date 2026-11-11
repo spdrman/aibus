@@ -252,6 +252,21 @@ fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
     assert_eq!(gone.status.code(), Some(11));
 }
 
+#[test]
+fn doctor_shows_the_region_and_project_of_the_cloud_providers() {
+    let home = xdg_temp();
+    user_config(
+        home.path(),
+        "[[account]]\nname = \"bedrock\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\nregion = \"us-east-1\"\n\n\
+         [[account]]\nname = \"vertex\"\nprovider = \"vertex\"\nauth = { gcloud = true }\nproject = \"my-project\"\nregion = \"us-east5\"\n",
+    );
+    let out = aibus(home.path(), &["doctor"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let providers = text.lines().find(|l| l.contains("providers")).unwrap_or_default();
+    assert!(providers.contains("bedrock (anthropic-bedrock") && providers.contains("region us-east-1"), "{text}");
+    assert!(providers.contains("vertex (anthropic-vertex") && providers.contains("project my-project") && providers.contains("region us-east5"), "{text}");
+}
+
 // ---- completions ------------------------------------------------------------------------
 
 #[test]

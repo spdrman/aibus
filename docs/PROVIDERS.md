@@ -4,7 +4,7 @@ What the real providers (B1.5) read from the config and from disk. The account f
 
 ## Providers are data
 
-A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, default_capabilities, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `openai-chat`, `openai-responses` or `gemini-generate-content`, and that is the only part that is code (`aibus-provider-anthropic` serves the first, `aibus-provider-openai` the next two, `aibus-provider-gemini` the last). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
+A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, default_capabilities, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `anthropic-bedrock`, `anthropic-vertex`, `openai-chat`, `openai-responses` or `gemini-generate-content`, and that is the only part that is code (`aibus-provider-anthropic` serves the first three, `aibus-provider-openai` the next two, `aibus-provider-gemini` the last). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
 
 An account says `provider = "<id>"`. The registry builds one instance per id, so an id carries its URL: two Ollama servers are two ids, and nothing conflicts.
 
@@ -34,6 +34,8 @@ Nothing to write for these:
 | `vllm` | `openai-chat` | `http://127.0.0.1:8000/v1` | `VLLM_API_KEY` | Local, no key needed. |
 | `llama-cpp` | `openai-chat` | `http://127.0.0.1:8080/v1` | none | Local, no key needed. |
 | `litellm` | `openai-chat` | `http://127.0.0.1:4000/v1` | `LITELLM_API_KEY` | Local, no key needed. |
+| `bedrock` | `anthropic-bedrock` | by region | `AWS_BEARER_TOKEN_BEDROCK` | Claude on Amazon Bedrock. See "Claude on Bedrock and Vertex". |
+| `vertex` | `anthropic-vertex` | by region | none (`gcloud`) | Claude on Google Vertex AI. |
 | `gemini` | `gemini-generate-content` | `https://generativelanguage.googleapis.com` | `GEMINI_API_KEY` | Google's native API (D-14). Key in the `x-goog-api-key` header. Keeps thought signatures, shows thought summaries, counts tokens, has a priced model table. Leave `/v1beta` off the `base_url`. Vertex for Gemini is not served. |
 | `gemini-openai` | `openai-chat` | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | Google's `/v1beta/openai` shim, a subset of Chat Completions: no thought signatures, no context cache, and it answers `store` with a 400. Use `gemini` when you need more than plain chat. |
 
@@ -113,17 +115,45 @@ Every flag has a fixture under `tests/fixtures/compat/` in the crate that honour
 
 ## Claude on Bedrock and Vertex
 
-Both are off by default: the plain `anthropic` provider never talks to either. They live in `aibus-provider-anthropic` and are built with `Anthropic::bedrock(cfg, region, clock)` or `Anthropic::vertex(cfg, project, region, token_source)`, with the account's `base_url` overriding the default host.
+Both are off by default: the plain `anthropic` provider never talks to either. They are two more `api` values of `aibus-provider-anthropic`, `anthropic-bedrock` and `anthropic-vertex`, behind the `bedrock` and `vertex` presets, so a config picks them like any other provider:
 
-| | Bedrock (`auth = sigv4`) | Vertex (`auth = gcloud`) |
+```toml
+[[account]]
+name = "bedrock"
+provider = "bedrock"
+auth = { sigv4 = true }        # or { aws_env = true } or { aws_profile = "work" }
+region = "us-east-1"
+
+[[account]]
+name = "vertex"
+provider = "vertex"
+auth = { gcloud = true }
+project = "my-project"
+region = "us-east5"            # "global" for the global endpoint
+```
+
+`region` and `project` can also sit on a `[[provider]]` with the same id; the account's own wins. The loader refuses `sigv4`, `aws_env` and `aws_profile` on a provider whose api is not `anthropic-bedrock`, and `gcloud` on one that is not `anthropic-vertex`, with the line. `aibus account add NAME --provider bedrock --region us-east-1 --key-stdin` writes the table for a keychain key (`project` has a flag too); the `aws_*` and `gcloud` forms go in the config by hand.
+
+| | Bedrock | Vertex |
 |---|---|---|
 | Default host | `https://bedrock-runtime.<region>.amazonaws.com` | `https://<region>-aiplatform.googleapis.com` (`global` has no region prefix) |
 | Endpoint | `POST /model/<id>/invoke-with-response-stream` | `POST /v1/projects/<project>/locations/<region>/publishers/anthropic/models/<id>:streamRawPredict` |
-| Auth | SigV4 over the request, from the account secret `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]` | `Authorization: Bearer <token>` from a `TokenSource` (for example `gcloud auth print-access-token`), asked for on every request |
+| Auth | SigV4 over the request, or `Authorization: Bearer` for a Bedrock API key | `Authorization: Bearer <token>`, asked for on every request |
 | Stream | AWS event stream, each chunk a base64 Messages API event | the usual SSE |
 | Model ids | `anthropic.claude-...-v1:0` or an inference profile such as `us.anthropic.claude-...` | `claude-sonnet-4-5@20250929` |
 
-The signer is about sixty lines on `hmac` and `sha2` (already in the lock file) instead of the AWS SDK, which would add dozens of crates and a second HTTP stack to `cargo deny`. Neither transport has a token counting endpoint (the estimate is used) or a model list, and `aibus account test` only checks that the secret parses or that a token can be had, with no network call. Prices are only known for the plain `claude-` ids, so a Bedrock id shows cost `n/a` until you add it to your `models.json`.
+Credentials for Bedrock, one source per account:
+
+* `sigv4`: the keychain entry holds `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]` (`account add --key-stdin` stores it; the `keyring` it writes means the same thing).
+* `aws_env`: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` are read when a request is made, and never stored.
+* `aws_profile = "name"`: static keys from `~/.aws/credentials` (or `AWS_SHARED_CREDENTIALS_FILE`). A file readable by anyone but you is refused with the `chmod 600` hint. There is no SSO, no `credential_process` and no instance metadata.
+* A Bedrock API key, `AWS_BEARER_TOKEN_BEDROCK`, goes through `auth = { env = "AWS_BEARER_TOKEN_BEDROCK" }`. A secret with no colon in it is sent as a bearer token and nothing is signed.
+
+For Vertex, the token is `GOOGLE_OAUTH_ACCESS_TOKEN` when that is set, else the output of `gcloud auth print-access-token`. `gcloud` is found on `PATH` and run with no shell, killed after 10 seconds, with its stderr dropped; its output is treated as a secret, kept 50 minutes in memory under the account's name, and never written to disk or to a log.
+
+The signer is about sixty lines on `hmac` and `sha2` (already in the lock file) instead of the AWS SDK, which would add dozens of crates and a second HTTP stack to `cargo deny`. Neither transport has a token counting endpoint (the estimate is used) or a model list, so `aibus account test` makes one real request instead: one output token on the smallest model, and it shows the cost. `aibus doctor` shows each provider's region and project.
+
+Prices come from the plain Claude rows through `price_of`: `catalog/bedrock.json` lists the Bedrock ids and inference profiles (`anthropic.`, `us.`, `global.`), and `catalog/vertex.json` the `name@date` ids, each pointing at the plain `claude-` row it costs the same as. A model you add to your own `models.json` can say `"price_of": "claude-sonnet-4-5"` too, or carry a `price` of its own, which wins.
 
 ## Model tables
 

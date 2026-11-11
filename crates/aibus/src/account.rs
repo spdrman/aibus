@@ -145,6 +145,8 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         provider: a.provider.clone(),
         label: a.label.clone(),
         base_url: a.base_url.clone(),
+        region: a.region.clone(),
+        project: a.project.clone(),
         ..Account::default()
     };
     let store = store(io);
@@ -250,7 +252,12 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         let mut t = Table::new();
         t.insert("name", value(account.name.as_str()));
         t.insert("provider", value(account.provider.as_str()));
-        for (k, v) in [("label", &account.label), ("base_url", &account.base_url)] {
+        for (k, v) in [
+            ("label", &account.label),
+            ("base_url", &account.base_url),
+            ("region", &account.region),
+            ("project", &account.project),
+        ] {
             if let Some(v) = v {
                 t.insert(k, value(v.as_str()));
             }
@@ -285,6 +292,9 @@ fn auth_kind(a: &Account) -> &'static str {
         Some(KeyRef::Keyring { .. }) => "keyring",
         Some(KeyRef::Env { .. }) => "env",
         Some(KeyRef::File { .. }) => "file",
+        Some(KeyRef::AwsEnv) => "aws_env",
+        Some(KeyRef::AwsProfile { .. }) => "aws_profile",
+        None if a.auth.gcloud => "gcloud",
         None => "none",
     }
 }
@@ -393,10 +403,14 @@ fn test(name: &str, file: &Path, json: bool, io: &mut Io) -> Result<(), AibusErr
                 let v = json!({
                     "name": a.name, "ok": true, "latency_ms": ms,
                     "label": info.label, "org": info.org, "models": models,
+                    "cost_usd": info.cost_usd,
                 });
                 writeln!(io.out, "{v}")?;
             } else {
-                writeln!(io.out, "ok {} ({}) {ms}ms", a.name, info.label)?;
+                match info.cost_usd {
+                    Some(usd) => writeln!(io.out, "ok {} ({}) {ms}ms cost ${usd:.4}", a.name, info.label)?,
+                    None => writeln!(io.out, "ok {} ({}) {ms}ms", a.name, info.label)?,
+                }
             }
             Ok(())
         }

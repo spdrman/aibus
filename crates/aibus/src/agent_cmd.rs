@@ -15,7 +15,7 @@ use aibus_provider::ProviderRegistry;
 use serde_json::{json, Value};
 
 use crate::cli::{AgentCmd, Global};
-use crate::providers::{builtin_factories, provider_configs};
+use crate::providers::{os_factories, provider_configs};
 
 /// What every subcommand starts from: where definitions live and the config that says so.
 pub(crate) struct Env {
@@ -255,7 +255,8 @@ fn check(env: &Env, path: &Path) -> Result<Report, AibusError> {
     // "Resolves on some account": the fake account and every enabled one. A provider this
     // build does not have cannot be asked, so its accounts give the benefit of the doubt.
     let configs = provider_configs(&cfg.accounts, &cfg.providers, &env.paths)?;
-    let registry = ProviderRegistry::new(&builtin_factories(), &configs)?;
+    // Only model names are resolved here, so Vertex's token source is never asked.
+    let registry = ProviderRegistry::new(&os_factories(&aibus_core::Redactor::new()), &configs)?;
     let mut ids = vec!["fake"];
     ids.extend(
         cfg.accounts

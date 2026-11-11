@@ -149,11 +149,14 @@ impl Price {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct AccountInfo {
     pub label: String,
     pub org: Option<String>,
     pub models: Vec<ModelId>,
+    /// What the verifying call cost, for a provider whose only authenticated call is a real
+    /// request (Bedrock and Vertex). `None` when it was free or its price is not known.
+    pub cost_usd: Option<f64>,
 }
 
 /// Provider-neutral request. Credentials are never part of it.

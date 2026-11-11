@@ -5,6 +5,7 @@
 pub fn table(name: &str) -> Option<&'static str> {
     Some(match name {
         "anthropic" => include_str!("../../../catalog/anthropic.json"),
+        "bedrock" => include_str!("../../../catalog/bedrock.json"),
         "cerebras" => include_str!("../../../catalog/cerebras.json"),
         "deepinfra" => include_str!("../../../catalog/deepinfra.json"),
         "deepseek" => include_str!("../../../catalog/deepseek.json"),
@@ -18,6 +19,7 @@ pub fn table(name: &str) -> Option<&'static str> {
         "openrouter" => include_str!("../../../catalog/openrouter.json"),
         "perplexity" => include_str!("../../../catalog/perplexity.json"),
         "together" => include_str!("../../../catalog/together.json"),
+        "vertex" => include_str!("../../../catalog/vertex.json"),
         "xai" => include_str!("../../../catalog/xai.json"),
         "empty" => r#"{"models": []}"#,
         _ => return None,

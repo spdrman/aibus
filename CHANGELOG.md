@@ -17,6 +17,11 @@ uses as the release notes, so every release needs its entry before it is merged 
 * `/workflow list`, `show <name>`, `save <name> [--user] [--force]` and `run <name> <input>` in the TUI (G7, #126). `list` and `show` open modals (the rows, or the file with the validator's summary under it, `Enter` on a row fills the prompt with `/workflow run <name> `). `save` takes the latest drafted workflow, validates it against the real roster, and writes `.aibus/workflows/<name>.toml` (or the user's directory with `--user`, 0600, atomic) starting with `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`. The name is checked against `^[a-z0-9][a-z0-9_-]{0,63}$` before the disk is touched, an existing file needs `--force`, and the prompt's `/fix` family now reads the workflows on disk. `/workflow run` is `/workflow <name> <input>` under a second name, and in a running session it makes the lead call the `workflow` tool at its next turn.
 * `aibus mcp --allow run` adds the run resources (E10, #105): `aibus://runs/{run}` is the `run_status` body without the tail and `aibus://runs/{run}/log` the run's output, redacted, wrapped as data and cut at the result cap. Only runs the server started are readable; the `explain_run` prompt points at them.
 
+### Accounts and models in the terminal
+
+* `/model` with no reference opens a picker of what the connected accounts serve, with context window, prices (`n/a` when the table has none) and capabilities; it filters by the target's role and sets the lead, a run or a seat (G3, #122).
+* `/login [provider]`, `/logout <account>` and `/accounts`: pick a provider, name the account, type the key into a masked field (a `Secret` from the first keystroke). The verify runs off the UI loop, and the new account is usable at once for a session that started with accounts (G4, #123).
+
 ### Providers
 
 * Gemini has a native adapter, `aibus-provider-gemini`, behind a new `gemini` preset (`api = "gemini-generate-content"`, key in `x-goog-api-key`, `GEMINI_API_KEY`). It keeps thought signatures across tool turns, streams thought summaries, reports reasoning and cached tokens, counts tokens through `countTokens`, and has a priced model table. `gemini-openai` (the OpenAI shim) is unchanged. See `docs/PROVIDERS.md` and D-14.

@@ -73,6 +73,8 @@ impl Default for Prompt {
 pub enum Sent {
     /// Goes to the reducer as `SubmitPrompt` (or is a slash command the reducer already knows).
     Msgs(Vec<Msg>),
+    /// `/login <provider>`: the messages, and the provider whose add flow starts in the terminal.
+    Login(String, Vec<Msg>),
     /// A command the dashboard cannot make sense of; the line says why.
     Bad(String),
 }
@@ -396,7 +398,8 @@ impl Prompt {
         if text.is_empty() {
             return None;
         }
-        if self.history.last() != Some(&text) {
+        // A key typed after `/login <provider>` must not be recalled with the up arrow.
+        if self.history.last() != Some(&text) && !crate::commands::carries_key(&text) {
             self.history.push(text.clone());
         }
         self.text.clear();

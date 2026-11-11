@@ -10,6 +10,7 @@ use aibus_provider_anthropic as _;
 use aibus_provider_openai as _;
 
 mod boundaries;
+mod commands;
 mod environment;
 mod fuzz;
 mod redaction;

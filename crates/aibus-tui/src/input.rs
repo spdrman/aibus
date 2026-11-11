@@ -18,6 +18,7 @@ use aibus_core::{
     Command, Decision, KeyCode, KeyEvent, ModelTarget, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
 };
 use aibus_graph::{Graph, Value};
+use aibus_provider::Secret;
 use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::hit::{HitId, HitKind, Segment};
@@ -29,7 +30,7 @@ use crate::screens::{Entry, EntryKind};
 use crate::transcript::Cells;
 use crate::ui::{Chrome, Drawn, Pointer};
 use crate::view::{CARDS, LOG_LINES, MENU_VIEW};
-use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, TRANSCRIPT, WORKFLOWS_VIEW};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, PROVIDERS, TRANSCRIPT, WORKFLOWS_VIEW};
 
 /// Two presses on the same thing this close together are a double click.
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -88,8 +89,12 @@ pub struct Context {
     /// The agents screen's rows: name and the file it lives in, when it has one.
     pub agent_rows: Vec<(String, Option<PathBuf>)>,
     pub account_rows: Vec<String>,
+    /// Every account of the session, whether or not the Accounts screen is open (`/logout`).
+    pub account_names: Vec<String>,
     /// The picker's rows as the `account/model` that `SetModel` takes, and who it was opened for.
     pub model_refs: Vec<String>,
+    /// The ids of the providers the `/login` picker lists.
+    pub provider_rows: Vec<String>,
     pub models_target: Option<ModelTarget>,
     /// Names for the prompt's completion.
     pub agents: Vec<String>,
@@ -164,7 +169,7 @@ impl Context {
             .filter_map(|i| get(i, "id").and_then(as_str).map(str::to_owned))
             .collect();
         let palette_text = palette_view.and_then(|p| get(p, "text")).and_then(as_str).unwrap_or("").to_owned();
-        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS, WORKFLOWS_VIEW]
+        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS, PROVIDERS, WORKFLOWS_VIEW]
             .iter()
             .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
             .unwrap_or(0)
@@ -192,7 +197,19 @@ impl Context {
             .iter()
             .filter_map(|r| get(r, "ref").and_then(as_str).map(str::to_owned))
             .collect();
+        let provider_rows = view(PROVIDERS)
+            .and_then(|a| get(a, "rows"))
+            .map_or(&[][..], as_list)
+            .iter()
+            .filter_map(|r| get(r, "id").and_then(as_str).map(str::to_owned))
+            .collect();
         let models_target = view(MODELS).and_then(|a| get(a, "target")).and_then(as_str).and_then(ModelTarget::parse);
+        let account_names = g
+            .read_key(aibus_core::state::ACCOUNTS)
+            .map_or(&[][..], as_list)
+            .iter()
+            .filter_map(|a| get(a, "name").and_then(as_str).map(str::to_owned))
+            .collect();
         let agents = g
             .read_key(aibus_core::state::AGENTS_DEFS)
             .map_or(&[][..], as_list)
@@ -240,7 +257,9 @@ impl Context {
             screen_sel,
             agent_rows,
             account_rows,
+            account_names,
             model_refs,
+            provider_rows,
             models_target,
             agents,
             workflows,
@@ -263,6 +282,7 @@ impl Context {
             states: &self.states,
             accounts: true,
             mcp: true,
+            account_names: &self.account_names,
         }
     }
 
@@ -283,6 +303,7 @@ impl Context {
             Some("palette") => Ctx::Palette,
             Some("agents") => Ctx::Agents,
             Some("accounts") => Ctx::Accounts,
+            Some("providers") => Ctx::Providers,
             Some("workflows") => Ctx::Workflows,
             Some(m) if m.starts_with("models:") => Ctx::Models,
             Some("outcome") => Ctx::Outcome,
@@ -299,7 +320,7 @@ impl Context {
 }
 
 /// Something the terminal loop does outside the graph because a key or a click asked for it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Job {
     /// Open this file in `$EDITOR`.
     EditFile(PathBuf),
@@ -310,13 +331,30 @@ pub enum Job {
     Account(AccountOp),
 }
 
-#[derive(Clone, PartialEq, Eq)]
 pub enum AccountOp {
     Test(String),
-    /// The key was typed into a masked field and goes straight to the keychain.
-    Add { name: String, provider: String, key: String },
+    /// The key was typed into a masked field and stays a `Secret` until the worker thread feeds
+    /// it to the same code as `aibus account add`.
+    Add { name: String, provider: String, key: Secret<String> },
     Disable(String),
+    /// `/logout`: deletes the keychain entry when it is ours and the account from the config.
+    Remove(String),
 }
+
+// `Secret` is not `PartialEq` on purpose; two ops are equal when their keys expose the same text.
+impl PartialEq for AccountOp {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AccountOp::Add { name: a, provider: p, key: k }, AccountOp::Add { name: b, provider: q, key: l }) => {
+                a == b && p == q && k.expose() == l.expose()
+            }
+            (AccountOp::Test(a), AccountOp::Test(b)) | (AccountOp::Disable(a), AccountOp::Disable(b)) | (AccountOp::Remove(a), AccountOp::Remove(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AccountOp {}
 
 // A key must not reach a log through Debug.
 impl std::fmt::Debug for AccountOp {
@@ -325,6 +363,7 @@ impl std::fmt::Debug for AccountOp {
             AccountOp::Add { name, provider, .. } => write!(f, "Add {name} {provider} <hidden>"),
             AccountOp::Test(n) => write!(f, "Test {n}"),
             AccountOp::Disable(n) => write!(f, "Disable {n}"),
+            AccountOp::Remove(n) => write!(f, "Remove {n}"),
         }
     }
 }
@@ -340,6 +379,9 @@ pub struct Out {
     /// A menu pick or `Ctrl+C` on a selection asked for this to be copied.
     pub copy: Option<Clip>,
     pub jobs: Vec<Job>,
+    /// `/login <provider>`: start the add flow for it. The entry is the terminal's own state, so
+    /// a command can only ask for it.
+    pub login: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -370,6 +412,7 @@ enum Scr {
     AcctTest,
     AcctAdd,
     AcctDisable,
+    ProviderPick,
     /// The picker: the row for its own target, for a seat, for the one run it was opened on.
     ModelUse,
     ModelSeat(ModelTarget),
@@ -395,6 +438,7 @@ fn scr_of(id: &str) -> Option<Scr> {
         "test" => Scr::AcctTest,
         "add" => Scr::AcctAdd,
         "disable" => Scr::AcctDisable,
+        "provider_pick" => Scr::ProviderPick,
         "model_use" => Scr::ModelUse,
         "seat_advisor" => Scr::ModelSeat(ModelTarget::Advisor),
         "seat_router" => Scr::ModelSeat(ModelTarget::Router),
@@ -647,7 +691,7 @@ impl Input {
         let notch = if up { WHEEL_LINES } else { -WHEEL_LINES };
         match cx.keys() {
             Ctx::Transcript => return out.msgs.push(tr(TrOp::Scroll(notch))),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Workflows => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows => {
                 return out.msgs.push(ui(UiIntent::Pick(if up { Selection::Prev } else { Selection::Next })));
             }
             _ if cx.chrome.modal.is_some() => return,
@@ -846,6 +890,7 @@ impl Input {
                         Ctx::Agents => Some(Scr::AgentEdit),
                         Ctx::Accounts => Some(Scr::AcctTest),
                         Ctx::Models => Some(Scr::ModelUse),
+                        Ctx::Providers => Some(Scr::ProviderPick),
                         Ctx::Workflows => Some(Scr::WorkflowRun),
                         _ => None,
                     };
@@ -973,7 +1018,12 @@ impl Input {
     pub fn paste(&mut self, text: &str, cx: &Context, prompt: &mut Prompt) -> Out {
         let mut out = Out { redraw: true, ..Out::default() };
         if let Some(e) = &mut self.entry {
-            e.text.push_str(text.lines().next().unwrap_or(""));
+            let line = text.lines().next().unwrap_or("");
+            if e.key.is_some() {
+                e.edit_key(line.len(), |k| k.push_str(line.trim()));
+            } else {
+                e.text.push_str(line);
+            }
         } else if cx.chrome.modal.is_none() {
             prompt.paste(text);
             out.msgs.push(ui(UiIntent::Focus(Pane::Input)));
@@ -1041,7 +1091,7 @@ impl Input {
         }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Workflows | Ctx::Outcome | Ctx::Confirm => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows | Ctx::Outcome | Ctx::Confirm => {
                 self.screen_key(ev, ctx, cx, prompt, &mut out);
             }
             _ => {
@@ -1070,6 +1120,10 @@ impl Input {
                 if let Some(line) = prompt.take() {
                     match commands::send(&line, &cx.env(&cx.workflows)) {
                         Sent::Msgs(m) => out.msgs.extend(m),
+                        Sent::Login(provider, m) => {
+                            out.msgs.extend(m);
+                            self.begin_login(&provider, out);
+                        }
                         Sent::Bad(why) => prompt.notice = Some(why),
                     }
                 }
@@ -1149,6 +1203,15 @@ impl Input {
                 };
                 self.screen(a, cx, prompt, out);
             }
+            Ctx::Providers => {
+                let a = match (ev.code, c) {
+                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
+                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Enter, _) => Scr::ProviderPick,
+                    _ => return,
+                };
+                self.screen(a, cx, prompt, out);
+            }
             Ctx::Models => {
                 let a = match (ev.code, c) {
                     (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
@@ -1219,7 +1282,7 @@ impl Input {
                 }
             }
             Scr::AgentNew => {
-                self.entry = Some(Entry { kind: EntryKind::AgentName, label: "new agent name".into(), text: String::new(), secret: false });
+                self.entry = Some(Entry::plain(EntryKind::AgentName, "new agent name", ""));
             }
             Scr::AgentEdit => match cx.agent_rows.get(sel) {
                 Some((_, Some(path))) => out.jobs.push(Job::EditFile(path.clone())),
@@ -1243,8 +1306,10 @@ impl Input {
                     out.jobs.push(Job::Account(AccountOp::Test(name.clone())));
                 }
             }
-            Scr::AcctAdd => {
-                self.entry = Some(Entry { kind: EntryKind::AccountName, label: "account name".into(), text: String::new(), secret: false });
+            Scr::AcctAdd => out.msgs.push(cmd(Command::OpenScreen(Screen::Providers))),
+            Scr::ProviderPick => {
+                let Some(provider) = cx.provider_rows.get(sel) else { return };
+                self.begin_login(provider, out);
             }
             Scr::AcctDisable => {
                 if let Some(name) = cx.account_rows.get(sel) {
@@ -1266,7 +1331,7 @@ impl Input {
                 out.msgs.push(cmd(Command::CloseModal));
             }
             Scr::ModelFilter => {
-                self.entry = Some(Entry { kind: EntryKind::ModelFilter, label: "filter".into(), text: cx.palette_text.clone(), secret: false });
+                self.entry = Some(Entry::plain(EntryKind::ModelFilter, "filter", &cx.palette_text));
             }
             Scr::WorkflowRun => match cx.workflow_rows.get(sel) {
                 Some(name) if cx.workflows.contains(name) => {
@@ -1282,9 +1347,16 @@ impl Input {
             Scr::QuitNow => out.msgs.push(cmd(Command::Quit { force: true })),
             Scr::ConfirmYes => {
                 // The modal's name says what was asked: `confirm:clear` or `confirm:cancel:<run>`.
-                let run = cx.chrome.modal.as_deref().and_then(|m| m.strip_prefix("confirm:cancel:")).and_then(|r| r.parse().ok());
-                out.msgs.push(cmd(run.map_or(Command::Clear, |run| Command::Cancel { run })));
-                out.msgs.push(cmd(Command::CloseModal));
+                let modal = cx.chrome.modal.as_deref().unwrap_or("");
+                if let Some(account) = modal.strip_prefix("confirm:logout:") {
+                    self.note = format!("logging out of {account}...");
+                    out.jobs.push(Job::Account(AccountOp::Remove(account.to_owned())));
+                    out.msgs.push(cmd(Command::OpenScreen(Screen::Accounts)));
+                } else {
+                    let run = modal.strip_prefix("confirm:cancel:").and_then(|r| r.parse().ok());
+                    out.msgs.push(cmd(run.map_or(Command::Clear, |run| Command::Cancel { run })));
+                    out.msgs.push(cmd(Command::CloseModal));
+                }
             }
             Scr::SendEntry => self.finish_entry(cx, prompt, out),
             Scr::CancelEntry => self.entry = None,
@@ -1298,9 +1370,13 @@ impl Input {
         match ev.code {
             KeyCode::Esc => self.entry = None,
             KeyCode::Enter => self.finish_entry(cx, prompt, out),
+            KeyCode::Backspace if e.key.is_some() => e.edit_key(0, |k| {
+                k.pop();
+            }),
             KeyCode::Backspace => {
                 e.text.pop();
             }
+            KeyCode::Char(c) if !ev.ctrl && !ev.alt && e.key.is_some() => e.edit_key(4, |k| k.push(c)),
             KeyCode::Char(c) if !ev.ctrl && !ev.alt => e.text.push(c),
             _ => {}
         }
@@ -1314,8 +1390,9 @@ impl Input {
 
     /// Enter in a text field: the next step of adding an account, or the result.
     fn finish_entry(&mut self, cx: &Context, _prompt: &mut Prompt, out: &mut Out) {
-        let Some(e) = self.entry.take() else { return };
-        let text = e.text.trim().to_owned();
+        let Some(mut e) = self.entry.take() else { return };
+        // A secret field has no text to read: its dots are not the content.
+        let text = if e.key.is_some() { String::new() } else { e.text.trim().to_owned() };
         let cmd = |c: Command| Msg::Command(c);
         match e.kind {
             EntryKind::EditInput => {
@@ -1332,16 +1409,38 @@ impl Input {
             EntryKind::Resume(run) if !text.is_empty() => out.msgs.push(cmd(Command::Resume { run, message: text, parent: None })),
             EntryKind::ModelFilter => {}
             EntryKind::AgentName if !text.is_empty() => out.jobs.push(Job::NewAgent(text)),
-            EntryKind::AccountName if !text.is_empty() => {
-                self.entry = Some(Entry { kind: EntryKind::AccountProvider(text), label: "provider (anthropic, openai, ...)".into(), text: String::new(), secret: false });
+            EntryKind::AccountName(provider) if !text.is_empty() => {
+                let label = format!("{provider} key");
+                self.entry = Some(Entry::secret(EntryKind::AccountKey(text, provider), &label));
             }
-            EntryKind::AccountProvider(name) if !text.is_empty() => {
-                self.entry = Some(Entry { kind: EntryKind::AccountKey(name, text), label: "key".into(), text: String::new(), secret: true });
-            }
-            EntryKind::AccountKey(name, provider) if !e.text.is_empty() => {
-                out.jobs.push(Job::Account(AccountOp::Add { name, provider, key: e.text }));
+            EntryKind::AccountKey(name, provider) => {
+                // An empty key is not a key: the field stays open for the next try.
+                let key = e.key.take().filter(|k| !k.expose().trim().is_empty());
+                match key {
+                    Some(key) => {
+                        self.note = format!("verifying {name}...");
+                        out.jobs.push(Job::Account(AccountOp::Add { name, provider, key }));
+                    }
+                    None => self.entry = Some(Entry::secret(EntryKind::AccountKey(name, provider.clone()), &format!("{provider} key"))),
+                }
             }
             _ => {}
+        }
+    }
+
+    /// `/login <provider>` or a pick in the provider list: the Accounts screen with the name field
+    /// open, which asks for the key next.
+    fn begin_login(&mut self, provider: &str, out: &mut Out) {
+        self.note.clear();
+        out.msgs.push(Msg::Command(Command::OpenScreen(Screen::Accounts)));
+        self.entry = Some(Entry::plain(EntryKind::AccountName(provider.to_owned()), &format!("{provider} account name"), ""));
+    }
+
+    /// What the loop tells the input about a message that came from outside the keyboard. The end
+    /// of an account operation is the line the Accounts screen shows under its rows.
+    pub fn observe(&mut self, m: &Msg) {
+        if let Msg::AccountOpDone { text, .. } = m {
+            self.note = text.clone();
         }
     }
 
@@ -1367,6 +1466,10 @@ impl Input {
                 if let Some(line) = prompt.take() {
                     match commands::send(&line, &cx.env(&cx.workflows)) {
                         Sent::Msgs(m) => out.msgs.extend(m),
+                        Sent::Login(provider, m) => {
+                            out.msgs.extend(m);
+                            self.begin_login(&provider, out);
+                        }
                         Sent::Bad(why) => prompt.notice = Some(why),
                     }
                     out.redraw = true;
@@ -1433,13 +1536,13 @@ impl Input {
             MessageRun => {
                 let run = if in_transcript { cx.transcript.as_ref().map(|t| t.run) } else { cx.selected_run };
                 if let Some(run) = run {
-                    self.entry = Some(Entry { kind: EntryKind::Message(run), label: "message to the run".into(), text: String::new(), secret: false });
+                    self.entry = Some(Entry::plain(EntryKind::Message(run), "message to the run", ""));
                 }
             }
             ResumeRun => {
                 let run = if in_transcript { cx.transcript.as_ref().filter(|t| t.partial).map(|t| t.run) } else { cx.selected_run };
                 if let Some(run) = run {
-                    self.entry = Some(Entry { kind: EntryKind::Resume(run), label: "resume with".into(), text: "continue".into(), secret: false });
+                    self.entry = Some(Entry::plain(EntryKind::Resume(run), "resume with", "continue"));
                 }
             }
             ToggleBackground | BackgroundWait => {
@@ -1472,12 +1575,8 @@ impl Input {
             }
             EditInput => {
                 if cx.permission.is_some() {
-                    self.entry = Some(Entry {
-                        kind: EntryKind::EditInput,
-                        label: "run instead".into(),
-                        text: cx.permission_summary.split_once(": ").map_or(cx.permission_summary.clone(), |(_, rest)| rest.to_owned()),
-                        secret: false,
-                    });
+                    let text = cx.permission_summary.split_once(": ").map_or(cx.permission_summary.clone(), |(_, rest)| rest.to_owned());
+                    self.entry = Some(Entry::plain(EntryKind::EditInput, "run instead", &text));
                 }
             }
             OpenPalette => out.msgs.push(cmd(Command::OpenPalette)),

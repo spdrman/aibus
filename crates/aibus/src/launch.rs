@@ -32,7 +32,8 @@ pub struct Picked {
 pub struct ChildLauncher {
     /// The definitions a child can be started from; a reload replaces them.
     pub agents: RwLock<BTreeMap<AgentName, AgentDef>>,
-    pub registry: Arc<AccountRegistry>,
+    /// The accounts a pick chooses from; a login or a logout in the terminal swaps it.
+    pub(crate) registry: RwLock<Arc<AccountRegistry>>,
     pub store: Arc<CredentialStore>,
     /// No account is configured: the built-in fake stands in with its fixed key.
     pub builtin: bool,
@@ -69,6 +70,17 @@ fn recall<T: Clone>(m: &Mutex<HashMap<RunId, T>>, run: RunId) -> Option<T> {
 }
 
 impl ChildLauncher {
+    /// The accounts as they are now.
+    pub fn registry(&self) -> Arc<AccountRegistry> {
+        self.registry.read().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Swaps in the accounts of a reloaded config, so a login or a logout is usable by the next
+    /// pick. A run that already started keeps its provider and credential.
+    pub fn set_accounts(&self, registry: Arc<AccountRegistry>) {
+        *self.registry.write().unwrap_or_else(PoisonError::into_inner) = registry;
+    }
+
     /// One side role's seat: its definition, and the account and model it runs on, apart from the
     /// lead's. `None` (with a note on stderr when the user asked for it or has accounts) when it
     /// is turned off or no account serves its model (Q6). `fallback` is the alias used when
@@ -106,7 +118,7 @@ impl ChildLauncher {
         let reserved = format!("{role}_model");
         let target = match &def.model {
             ModelRef::Alias(a) if *a == *reserved => {
-                self.registry.model_ref(named.unwrap_or(fallback))
+                self.registry().model_ref(named.unwrap_or(fallback))
             }
             other => expand(other, &self.defaults),
         };
@@ -180,8 +192,8 @@ impl ChildLauncher {
     /// The account for `target` under `hints`, its provider, and a credential that works (so a
     /// missing key fails now, with exit 4, rather than on the first request).
     pub fn pick(&self, target: &ModelRef, hints: &SelectHints) -> Result<Picked, AibusError> {
-        let (account, model) = self.registry.select(target, hints)?;
-        let provider = self.registry.provider(&account)?;
+        let (account, model) = self.registry().select(target, hints)?;
+        let provider = self.registry().provider(&account)?;
         let creds: Arc<dyn CredentialSource> = if self.builtin {
             self.redactor.register(&account, FAKE_KEY);
             Arc::new(Credential {
@@ -191,7 +203,7 @@ impl ChildLauncher {
                 resolved_at: Instant::now(),
             })
         } else {
-            let configured = self.registry.account(&account).cloned().ok_or_else(|| {
+            let configured = self.registry().account(&account).cloned().ok_or_else(|| {
                 aibus_core::CredentialError::UnknownAccount(account.clone())
             })?;
             Arc::new(AccountCredential {
@@ -256,12 +268,12 @@ impl Launcher for ChildLauncher {
         // The picker names the row it was clicked on as `account/model`; a prefix that is not an
         // account (`meta-llama/...`) is part of the model id.
         let (pinned, model) = match model.split_once('/') {
-            Some((acct, rest)) if self.registry.account(&AccountName(acct.into())).is_some() => {
+            Some((acct, rest)) if self.registry().account(&AccountName(acct.into())).is_some() => {
                 (Some(AccountName(acct.into())), rest)
             }
             _ => (None, model),
         };
-        let reference = self.registry.model_ref(model);
+        let reference = self.registry().model_ref(model);
         let def = match target {
             ModelTarget::Run(run) => recall(&self.defs, *run).ok_or_else(|| format!("run {run} is not known"))?,
             ModelTarget::Advisor | ModelTarget::Router => {
@@ -334,7 +346,7 @@ impl Launcher for ChildLauncher {
             ),
             None => (
                 match (&spec.model, expand(&def.model, &self.defaults), &parent) {
-                    (Some(m), _, _) => self.registry.model_ref(m),
+                    (Some(m), _, _) => self.registry().model_ref(m),
                     (None, ModelRef::Inherit, None) => self.session_default.clone(),
                     (None, other, _) => other,
                 },

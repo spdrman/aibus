@@ -438,12 +438,16 @@ impl ShutdownReason {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Screen {
     Agents,
     Accounts,
     /// `/model` with no reference: the models of the connected accounts, for this target.
     Models(ModelTarget),
+    /// `/login` with no provider: the providers an account can be added for.
+    Providers,
+    /// `/logout <account>` asks first.
+    ConfirmLogout(AccountName),
     /// `/clear` asks first.
     ConfirmClear,
     /// `/cancel` on the lead asks first.
@@ -706,6 +710,15 @@ pub enum Msg {
     Shutdown {
         reason: ShutdownReason,
     },
+    /// An account operation the terminal ran off the UI thread has finished. `op` is `add`,
+    /// `test`, `disable` or `remove`; `text` is the line the Accounts screen shows. The graph
+    /// logs the outcome only, never the text.
+    AccountOpDone {
+        op: String,
+        account: String,
+        ok: bool,
+        text: String,
+    },
     /// The executor's answer to a queued `Command::SetModel` (`id` is the request's). `Ok(None)`
     /// is a seat turned off; `Err` is why nothing changed.
     ModelSwitched {
@@ -754,6 +767,7 @@ impl Msg {
             Msg::HandoffWritten { .. } => "HandoffWritten",
             Msg::AgentsReloaded { .. } => "AgentsReloaded",
             Msg::AccountsReloaded { .. } => "AccountsReloaded",
+            Msg::AccountOpDone { .. } => "AccountOpDone",
             Msg::IoError { .. } => "IoError",
             Msg::Shutdown { .. } => "Shutdown",
             Msg::ModelSwitched { .. } => "ModelSwitched",
@@ -886,6 +900,7 @@ impl Msg {
             Msg::AccountsReloaded { accounts } => {
                 map([("msg", name), ("accounts", n(accounts.len()))])
             }
+            Msg::AccountOpDone { ok, text, .. } => map([("msg", name), ("ok", Value::Bool(*ok)), ("text_len", len(text))]),
             Msg::IoError { context, error } => map([
                 ("msg", name),
                 ("context_len", len(context)),

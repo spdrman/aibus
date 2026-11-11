@@ -5,6 +5,11 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ## [0.2.0] - unreleased
 
+### Added
+
+* `aibus mcp`: an MCP server over stdio, in a new `aibus-mcp` crate on `rmcp` 3.9 (D-13). It answers `2026-07-28` (`server/discover`) and `2025-11-25` (`initialize`) as `aibus` plus the crate version, starts read-only, and lists one tool for now, `workflow_list`. `--allow write|gates|run` and `--allow-tool` are parsed (`gates` needs `write`, exit 2 otherwise; the run budget flags are refused as not available yet). Every call leaves one redacted line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (0600), 60 calls a minute are allowed and arguments are capped at 256 KiB. stdout carries JSON-RPC only; the log goes to stderr. `aibus doctor` lists the audit directory.
+* `aibus mcp --http 127.0.0.1:<port>`: the same server over Streamable HTTP for clients that cannot spawn a process (E11, #106). Loopback only (any other address is exit 2, no override), a bearer token on every request (`AIBUS_MCP_TOKEN`, or 32 random bytes shown once on stderr), 403 for a foreign `Origin` or `Host`, 400 for an unsupported `MCP-Protocol-Version`, and the stdio rate limit and audit log, with the client address on each audit line. `--origin <value>` adds an accepted origin. See `docs/MCP.md` for the SSH tunnel recipe.
+
 ### Providers
 
 * Gemini has a native adapter, `aibus-provider-gemini`, behind a new `gemini` preset (`api = "gemini-generate-content"`, key in `x-goog-api-key`, `GEMINI_API_KEY`). It keeps thought signatures across tool turns, streams thought summaries, reports reasoning and cached tokens, counts tokens through `countTokens`, and has a priced model table. `gemini-openai` (the OpenAI shim) is unchanged. See `docs/PROVIDERS.md` and D-14.

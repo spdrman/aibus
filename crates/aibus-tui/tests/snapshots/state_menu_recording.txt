@@ -9,9 +9,9 @@
                                    │   Resume          │
                ····················│   Copy id         │
                                    │   Copy result     │
-                ┌ back to Sonnet 5.└───────────────────┘
-                │ review + verify                      │
-                └──────────────────────────────────────┘
+                ┌ back to Sonnet 5.│   Status          │
+                │ review + verify  │   Cost            │
+                └──────────────────└───────────────────┘
 
 
 

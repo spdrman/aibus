@@ -303,9 +303,11 @@ fn help(buf: &mut Buffer, full: Rect, sc: &Scene) -> Rect {
     let th = sc.theme;
     let rows = sc.keys.help_rows();
     let per_col = rows.len().div_ceil(2).max(1);
-    let area = centred(full, 76, per_col as u16 + 4);
+    // Two columns of every key take the whole of 80x24 now, so "any key closes" is in the title
+    // and not on a row of its own.
+    let area = centred(full, 76, per_col as u16 + 2);
     Clear.render(area, buf);
-    let inner = panel(buf, area, "help · key map", th.focus, th);
+    let inner = panel(buf, area, "help · key map · any key closes", th.focus, th);
     let half = inner.width / 2;
     for (i, row) in rows.iter().enumerate() {
         let (col, y) = ((i / per_col) as u16, (i % per_col) as u16);
@@ -317,7 +319,6 @@ fn help(buf: &mut Buffer, full: Rect, sc: &Scene) -> Rect {
         let x = put(buf, cell, 0, y, &row.keys, Style::new().fg(th.swarm).add_modifier(Modifier::BOLD));
         put(buf, cell, x.max(11) + 1, y, row.text, Style::new().fg(th.fg));
     }
-    put(buf, inner, 0, per_col as u16 + 1, "any key closes", Style::new().fg(th.dim_text));
     area
 }
 

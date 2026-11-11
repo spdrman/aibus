@@ -1,0 +1,40 @@
+                                    AIBUS   ·   SONNET 5.5 LEADS
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ■ Sonnet 5.5 · lead
+ ┌ OPUS 5.5 ──────────┐                   ┌ Sonnet 5.5 · main session ───────────┐
+ │ advisor · on call  │                   │ edits + runs tests                   │
+ │                    │                   │ effort ▮▮▮▮ high      --model sonnet │
+ │ ◇ before a plan    │                   └──────────────────────────────────────┘
+ │ │ reads the whole  │                                       ●
+ │ │ session, every   │                                       ·
+ │ │ tool call and    │                   ┌ JEV · fork layer ────────────forks 0─┐
+ │ │ every result     │                   │ which file     ···                   │
+┌ workflows ───────────────────────────────────────────────────────────────────────────────────────┐
+│ name               scope    steps and description                                                │
+│ broken             project  broken: not valid TOML: TOML parse error at line 1, column 9  |1 …   │
+│ review             project  explore > plan  Find what changed, then review it                    │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│  [Enter] Run    [Esc] Close                                                                      │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ │                    │                   │ review + verify                      │
+ │                    │                   └──────────────────────────────────────┘
+ └────────────────────┘
+┌ session log ─────────────────────────────────────────────────────────────────────────────────────┐
+│ 22:13:20  aibus      queued lead                                                                 │
+│ 22:13:20  lead       started                                                                     │
+│ 22:13:20  aibus      3 agents loaded                                                             │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ~/app $ ▌
+  swarm [idle]   subagents [0/0]   opus [on call]   jev [ 0 forks]

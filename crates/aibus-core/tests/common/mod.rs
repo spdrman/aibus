@@ -599,6 +599,7 @@ pub fn cases() -> Vec<Case> {
                     label: "work".into(),
                     default_model: None,
                     key_ref: "keyring:aibus/anthropic-work".into(),
+                    models: vec![],
                 }],
             },
             expect: vec!["model:accounts", "model:log"],

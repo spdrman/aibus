@@ -8,7 +8,7 @@ use aibus_core::state::{
     router_last, run_key, transcript_body, ADVISOR_STATE, AGENTS_DEFS, AGENTS_WARNINGS, ACCOUNTS, CLOCK_MS, MODAL,
     PALETTE_TEXT, PERMISSIONS_OPEN, ROUTER_FORKS, RUNS_ORDER, SCREEN_SEL, SESSION_ASSIST, SIZE, TRANSCRIPT_UI,
 };
-use aibus_core::RunStatus;
+use aibus_core::{ModelTarget, RunStatus};
 use aibus_graph::{Tracker, Value};
 
 pub const PERMISSION: &str = "view:permission";
@@ -18,6 +18,7 @@ pub const ACCOUNTS_VIEW: &str = "view:accounts";
 pub const TRANSCRIPT: &str = "view:transcript";
 pub const RUN_STATUS: &str = "view:run_status";
 pub const COST: &str = "view:cost";
+pub const MODELS: &str = "view:models";
 
 /// The palette's fuzzy match: every character of `needle` in `hay`, in order. A run of
 /// consecutive characters and a match at the start of a word score higher. `None` is no match.
@@ -180,6 +181,113 @@ pub fn accounts(t: &mut Tracker) -> Value {
         .collect();
     map([("rows", list(rows)), ("sel", n(sel))])
 }
+
+/// `$3.00`, `$0.25`, `$0.075`: two decimals, a third only when the price has one.
+fn usd(price: Option<&Value>) -> String {
+    match price {
+        Some(Value::F64(x)) => {
+            let long = format!("{x:.3}");
+            format!("${}", long.strip_suffix('0').unwrap_or(&long))
+        }
+        _ => "n/a".to_owned(),
+    }
+}
+
+/// `200k`, `1M`: a context window in the room a column has.
+fn window(tokens: i64) -> String {
+    if tokens >= 1_000_000 && tokens % 1_000_000 == 0 {
+        format!("{}M", tokens / 1_000_000)
+    } else {
+        format!("{}k", tokens / 1000)
+    }
+}
+
+/// `view:models`: one row per `(account, model)` the connected accounts serve, for the target the
+/// screen was opened for. A lead or a worker needs tools, so a model without them is not offered;
+/// the advisor has no requirement; the router prefers logprobs and shows the rest dimmed.
+/// `{target, rows, sel, text, hidden}`; each row has the `ref` that `SetModel` takes
+/// (`account/model`, which pins the account).
+pub fn models(t: &mut Tracker) -> Value {
+    let Some(target) = t.get_key(MODAL).and_then(as_str).and_then(|m| m.strip_prefix("models:")).and_then(ModelTarget::parse) else {
+        return Value::Null;
+    };
+    let text = t.get_key(PALETTE_TEXT).and_then(as_str).unwrap_or("").to_owned();
+    // What the target runs on now, to mark its row.
+    let run = match target {
+        ModelTarget::Run(r) => Some(r.to_string()),
+        ModelTarget::Lead => {
+            let order: Vec<String> = t.get_key(RUNS_ORDER).map(as_list).unwrap_or_default().iter().filter_map(as_str).map(str::to_owned).collect();
+            order
+                .into_iter()
+                .find(|id| t.get_key(&run_key(id, "meta")).and_then(|m| get(m, "role")).and_then(as_str) == Some("lead"))
+        }
+        _ => None,
+    };
+    let now: Option<(String, Option<String>)> = match (&run, target) {
+        (Some(run), _) => {
+            let meta = t.get_key(&run_key(run, "meta")).cloned().unwrap_or(Value::Null);
+            let model = get(&meta, "model").and_then(as_str).map(str::to_owned);
+            model.map(|m| (m, get(&meta, "account").and_then(as_str).map(str::to_owned)))
+        }
+        (None, ModelTarget::Advisor) => t
+            .get_key(SESSION_ASSIST)
+            .and_then(|a| get(a, "advisor"))
+            .and_then(|x| get(x, "label"))
+            .and_then(as_str)
+            .map(|m| (m.to_owned(), None)),
+        _ => None,
+    };
+    let accounts = t.get_key(ACCOUNTS).map(as_list).unwrap_or_default().to_vec();
+    let mut rows: Vec<(i64, Value)> = Vec::new();
+    let mut hidden = 0;
+    for a in &accounts {
+        let account = get(a, "name").and_then(as_str).unwrap_or("");
+        for m in get(a, "models").map(as_list).unwrap_or_default() {
+            let flag = |k: &str| matches!(get(m, k), Some(Value::Bool(true)));
+            if matches!(target, ModelTarget::Lead | ModelTarget::Run(_)) && !flag("tools") {
+                hidden += 1;
+                continue;
+            }
+            let id = get(m, "id").and_then(as_str).unwrap_or("");
+            let alias = get(m, "alias").and_then(as_str).unwrap_or("");
+            let score = if text.is_empty() { Some(0) } else { fuzzy(&text, &format!("{alias} {id} {account}")) };
+            let Some(score) = score else { continue };
+            let caps: String = [(flag("tools"), 'T'), (flag("thinking"), 'R'), (flag("images"), 'I'), (flag("cache"), 'C')]
+                .iter()
+                .map(|(on, c)| if *on { *c } else { '-' })
+                .collect();
+            let current = now.as_ref().is_some_and(|(model, acct)| model == id && acct.as_deref().is_none_or(|x| x == account));
+            rows.push((
+                score,
+                map([
+                    ("ref", s(&format!("{account}/{id}"))),
+                    ("alias", s(alias)),
+                    ("id", s(id)),
+                    ("account", s(account)),
+                    ("context", s(&window(get(m, "context").and_then(as_i64).unwrap_or(0)))),
+                    ("input", s(&usd(get(m, "input")))),
+                    ("output", s(&usd(get(m, "output")))),
+                    ("caps", s(&caps)),
+                    ("dim", Value::Bool(target == ModelTarget::Router && !flag("logprobs"))),
+                    ("current", Value::Bool(current)),
+                ]),
+            ));
+        }
+    }
+    // Typing a filter ranks; with none, the accounts' own order stands.
+    if !text.is_empty() {
+        rows.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+    let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, rows.len().saturating_sub(1) as i64);
+    map([
+        ("target", s(&target.label())),
+        ("text", s(&text)),
+        ("sel", n(sel)),
+        ("hidden", n(hidden)),
+        ("rows", list(rows.into_iter().map(|r| r.1).collect())),
+    ])
+}
+
 
 fn row_value(row: &Row, selected: Option<i64>) -> Value {
     match row {

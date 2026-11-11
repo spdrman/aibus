@@ -56,6 +56,8 @@ pub enum EntryKind {
     AccountKey(String, String),
     /// `n` on the agents screen: the new agent's name.
     AgentName,
+    /// `/` in the model picker: the text mirrors into the graph as it is typed.
+    ModelFilter,
 }
 
 pub fn centred(full: Rect, w: u16, h: u16) -> Rect {
@@ -379,6 +381,116 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
     }
     Placed { area, hits }
 }
+
+/// The `/model` picker: one row per `(account, model)` with the alias that names it, the context
+/// window, what a million tokens cost in and out (`n/a` when the table has no price) and four
+/// capability letters (T tools, R reasoning, I images, C cache). The row the target runs on now
+/// is marked; the columns share what the width leaves after the fixed ones.
+pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, entry: Option<&Entry>, note: &str) -> Placed {
+    let area = full;
+    Clear.render(area, buf);
+    let target = get(v, "target").and_then(|t| t.as_text()).unwrap_or("lead").to_owned();
+    let for_run = target.starts_with("run ");
+    let title = if for_run { "models for this run".to_owned() } else { format!("models for the {target}") };
+    let inner = {
+        let i = panel(buf, area, &title, th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let sel = int(v, "sel") as usize;
+    let dim = Style::new().fg(th.dim_text);
+    let fg = Style::new().fg(th.fg);
+    let text = get(v, "text").and_then(|t| t.as_text()).unwrap_or("");
+    match entry {
+        Some(e) => entry_line(buf, inner, 0, e, th),
+        None if text.is_empty() => {
+            put(buf, inner, 0, 0, "/ to filter", dim);
+        }
+        None => {
+            put(buf, inner, 0, 0, &format!("filter: {text}"), fg);
+        }
+    }
+    // alias, model, account, context, in, out, caps: the model and account columns take the slack.
+    let slack = inner.width.saturating_sub(67);
+    let (w_model, w_acct) = (20 + slack * 2 / 3, 10 + slack / 3);
+    let x_model = 11;
+    let x_acct = x_model + w_model + 1;
+    let x_ctx = x_acct + w_acct + 1;
+    let (x_in, x_out, x_caps) = (x_ctx + 6, x_ctx + 13, x_ctx + 20);
+    let head = Rect { y: inner.y + 1, height: 1, ..inner };
+    column(buf, head, 2, 8, "alias", dim);
+    column(buf, head, x_model, w_model, "model", dim);
+    column(buf, head, x_acct, w_acct, "account", dim);
+    column(buf, head, x_ctx, 5, "ctx", dim);
+    column(buf, head, x_in, 6, "in $/M", dim);
+    column(buf, head, x_out, 6, "out $/M", dim);
+    column(buf, head, x_caps, 4, "TRIC", dim);
+    let shown = usize::from(inner.height.saturating_sub(6)).max(1);
+    let first = sel.saturating_sub(shown.saturating_sub(1));
+    let mut hits = Vec::new();
+    if rows.is_empty() {
+        let hidden = int(v, "hidden");
+        let why = if !text.is_empty() {
+            "no model matches the filter".to_owned()
+        } else if hidden > 0 {
+            format!("{hidden} models have no tool calling, which this target needs")
+        } else {
+            "no account serves a model yet: /login adds one".to_owned()
+        };
+        put(buf, inner, 0, 2, &why, dim);
+    }
+    for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + 2 + k as u16, height: 1, ..inner };
+        let i = first + k;
+        let hit = HitId::ListRow(i);
+        let state = if pointer.pressed == Some(hit) {
+            Some(Interact::Pressed)
+        } else if pointer.hover == Some(hit) {
+            Some(Interact::Hover)
+        } else if i == sel {
+            Some(Interact::Selected)
+        } else {
+            None
+        };
+        if let Some(s) = state {
+            buf.set_style(r, th.interact(s));
+        }
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let faded = matches!(get(row, "dim"), Some(Value::Bool(true)));
+        let main = if faded { dim } else { fg };
+        let current = matches!(get(row, "current"), Some(Value::Bool(true)));
+        column(buf, r, 0, 2, if current { th.g("●") } else { "" }, Style::new().fg(th.ok));
+        column(buf, r, 2, 8, &word("alias"), dim);
+        column(buf, r, x_model, w_model, &word("id"), main);
+        column(buf, r, x_acct, w_acct, &word("account"), dim);
+        column(buf, r, x_ctx, 5, &word("context"), dim);
+        column(buf, r, x_in, 6, &word("input"), main);
+        column(buf, r, x_out, 6, &word("output"), main);
+        column(buf, r, x_caps, 4, &word("caps"), dim);
+        hits.push((hit, r));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(3), height: 3, ..inner };
+    put(buf, bottom, 0, 0, &clip(note, usize::from(bottom.width)), dim);
+    let any = !rows.is_empty();
+    let (b, _) = buttons(
+        buf,
+        bottom,
+        1,
+        &[
+            ("model_use", "Enter", "Use", any),
+            ("seat_advisor", "a", "Advisor", any),
+            ("seat_router", "r", "Router", any),
+            ("this_run", "s", "This run only", any && for_run),
+            ("filter", "/", "Filter", true),
+            ("cancel", "Esc", "Close", true),
+        ],
+        th,
+        pointer,
+    );
+    hits.extend(b);
+    Placed { area, hits }
+}
+
 
 fn row_model(row: &Value) -> &str {
     get(row, "model").and_then(|m| m.as_text()).unwrap_or("")

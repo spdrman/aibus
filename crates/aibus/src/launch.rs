@@ -253,6 +253,14 @@ impl Launcher for ChildLauncher {
             seat_assist()?.switch(*target, None);
             return Ok(None);
         }
+        // The picker names the row it was clicked on as `account/model`; a prefix that is not an
+        // account (`meta-llama/...`) is part of the model id.
+        let (pinned, model) = match model.split_once('/') {
+            Some((acct, rest)) if self.registry.account(&AccountName(acct.into())).is_some() => {
+                (Some(AccountName(acct.into())), rest)
+            }
+            _ => (None, model),
+        };
         let reference = self.registry.model_ref(model);
         let def = match target {
             ModelTarget::Run(run) => recall(&self.defs, *run).ok_or_else(|| format!("run {run} is not known"))?,
@@ -264,7 +272,7 @@ impl Launcher for ChildLauncher {
             }
             ModelTarget::Lead => return Err("the lead is switched through its run".into()),
         };
-        let hints = SelectHints { agent: def.account.clone(), logprobs: *target == ModelTarget::Router, ..SelectHints::default() };
+        let hints = SelectHints { agent: def.account.clone(), explicit: pinned, logprobs: *target == ModelTarget::Router, ..SelectHints::default() };
         let p = self.pick(&reference, &hints).map_err(|e| e.to_string())?;
         let switch = ModelSwitch { provider: p.provider, creds: p.creds, model: p.model, account: p.account };
         match target {

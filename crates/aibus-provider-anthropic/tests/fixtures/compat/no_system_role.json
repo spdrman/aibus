@@ -1,0 +1,11 @@
+{
+ "flag": "no_system_role",
+ "api": "anthropic-messages",
+ "with": {
+  "/system": "<absent>",
+  "/messages/0/content/0/text": "Be terse.\n\n"
+ },
+ "without": {
+  "/system/0/text": "Be terse."
+ }
+}

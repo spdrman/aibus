@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::error::ConfigError;
-use crate::provider::{ModelInfo, Price, ProviderConfig};
+use crate::provider::{Capabilities, CapabilityOverrides, ModelInfo, Price, ProviderConfig};
 use crate::tokens::CHARS_PER_TOKEN;
 use crate::types::{AliasTable, ModelId, ModelRef};
 
@@ -35,14 +35,27 @@ pub struct ModelEntry {
     pub info: ModelInfo,
     #[serde(default)]
     pub price: Option<Price>,
-    /// The model accepts the `effort` parameter.
+    /// The model accepts the `effort` parameter. Older tables say it here; `capabilities.effort`
+    /// says the same and wins when both are given.
     #[serde(default)]
     pub effort: bool,
+    /// What this model can do differently from its provider's default. Only the named fields
+    /// count, and a later layer names over an earlier one field by field.
+    #[serde(default, skip_serializing_if = "is_unset")]
+    pub capabilities: CapabilityOverrides,
+    /// The model emits thinking or reasoning tokens at all (`capabilities.thinking` is whether
+    /// a request may ask for a budget). `None` means the table did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<bool>,
     /// Epoch seconds from which this row applies. A row with the same `id` and no `price_from`
     /// is the current one; a row with a later `price_from` is a price that has been announced
     /// but has not started yet. `None` means "always".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_from: Option<u64>,
+}
+
+fn is_unset(c: &CapabilityOverrides) -> bool {
+    *c == CapabilityOverrides::default()
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -111,8 +124,20 @@ impl ModelTable {
     /// A row replaces the one with the same id and the same `price_from`. With `exclusive` (the
     /// user's overrides) an undated row also drops every dated row of that id from the earlier
     /// layers, so an override of a price is not undone when a built-in future price starts.
+    /// What a model can do is merged field by field instead: a layer that only knows sizes or a
+    /// price (a 0.1.0 file, the API list) keeps what the layer below said the model can do.
     fn layer(&mut self, f: File, exclusive: bool) {
-        for e in f.models {
+        for mut e in f.models {
+            let below = self
+                .entries
+                .iter()
+                .filter(|x| x.info.id == e.info.id)
+                .fold((CapabilityOverrides::default(), None, false), |(c, r, eff), x| {
+                    (c.over(&x.capabilities), x.reasoning.or(r), eff | x.effort)
+                });
+            e.capabilities = below.0.over(&e.capabilities);
+            e.reasoning = e.reasoning.or(below.1);
+            e.effort |= below.2;
             if exclusive && e.price_from.is_none() {
                 self.entries.retain(|x| x.info.id != e.info.id || x.price_from.is_none());
             }
@@ -180,6 +205,20 @@ impl ModelTable {
         find(&id.0).or_else(|| find(undated(&id.0)))
     }
 
+    /// What `id` can do: `base` (the provider's capabilities from its definition) with the
+    /// model's entry laid over it. The layers of the entry itself (built-in, cache, user file)
+    /// were merged field by field when the table was loaded, and every row of the model (a
+    /// dated price row too) carries the merged value. A model with no entry gets `base`.
+    pub fn capabilities_for(&self, base: Capabilities, id: &ModelId) -> Capabilities {
+        match self.entry(id) {
+            Some(e) => {
+                let legacy = CapabilityOverrides { effort: e.effort.then_some(true), ..CapabilityOverrides::default() };
+                base.with(&legacy.over(&e.capabilities))
+            }
+            None => base,
+        }
+    }
+
     /// The price now. Past usage is never repriced: it is already in the graph as `cost_usd`.
     pub fn price(&self, id: &ModelId) -> Option<Price> {
         self.price_at(id, SystemTime::now())
@@ -232,6 +271,8 @@ impl ModelTable {
                     info: defaults(id),
                     price: None,
                     effort: false,
+                    capabilities: CapabilityOverrides::default(),
+                    reasoning: None,
                     price_from: None,
                 })
             })
@@ -278,6 +319,7 @@ pub fn cache_is_stale(cache_dir: &Path, provider: &str, now: SystemTime) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::{Capabilities, CapabilityOverrides, SystemRole};
 
     const BUILTIN: &str = r#"{
         "models": [
@@ -472,5 +514,115 @@ mod tests {
         assert!(cache_is_stale(dir.path(), "other", now), "no file is stale");
         // The next process starts from the cache.
         assert_eq!(table(&cfg).models().len(), 3);
+    }
+
+    fn base_caps() -> Capabilities {
+        Capabilities {
+            tools: true,
+            parallel_tool_calls: true,
+            streaming: true,
+            thinking: false,
+            prompt_cache: false,
+            logprobs: true,
+            effort: false,
+            images: false,
+            system_role: SystemRole::Separate,
+            max_tools: None,
+        }
+    }
+
+    #[test]
+    fn an_entry_parses_capabilities_and_reasoning_and_defaults_both() {
+        let f: File = serde_json::from_str(
+            r#"{"models": [
+              {"id": "a", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false},
+              {"id": "b", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false,
+               "reasoning": true,
+               "capabilities": {"logprobs": false, "max_tools": 8, "system_role": "first_message"}}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(f.models[0].capabilities, CapabilityOverrides::default());
+        assert_eq!(f.models[0].reasoning, None);
+        assert_eq!(f.models[1].reasoning, Some(true));
+        assert_eq!(
+            f.models[1].capabilities,
+            CapabilityOverrides {
+                logprobs: Some(false),
+                max_tools: Some(8),
+                system_role: Some(SystemRole::FirstMessage),
+                ..CapabilityOverrides::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_0_1_0_override_file_loads_unchanged_and_keeps_what_the_builtin_said() {
+        // No capabilities, no reasoning: the shape every 0.1.0 `models.json` has.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "caps", "context_window": 5, "max_output": 5, "family": "f", "deprecated": false}]}"#,
+        )
+        .unwrap();
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap();
+        assert_eq!(t.models().iter().find(|m| m.id.0 == "caps").unwrap().context_window, 5);
+        assert!(!t.capabilities_for(base_caps(), &id("caps")).logprobs, "the built-in's claim survives a size-only override");
+    }
+
+    const CAPS: &str = r#"{"models": [
+      {"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false,
+       "capabilities": {"logprobs": false, "images": true}},
+      {"id": "legacy", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "effort": true}
+    ]}"#;
+
+    #[test]
+    fn capabilities_for_resolves_default_then_builtin_then_cache_then_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cache, over) = (dir.path().join("cache"), dir.path().join("providers"));
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(over.join("p")).unwrap();
+        let cfg = ProviderConfig { cache_dir: Some(cache.clone()), overrides_dir: Some(over.clone()), ..ProviderConfig::default() };
+
+        // Preset default only: the model is not in any table.
+        let t = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap();
+        assert_eq!(t.capabilities_for(base_caps(), &id("nope")), base_caps());
+
+        // Built-in names logprobs=false and images=true; the rest is the preset's.
+        let c = t.capabilities_for(base_caps(), &id("caps"));
+        assert!(!c.logprobs && c.images && c.tools);
+
+        // The cache names tools=false, and says nothing of images: images stays.
+        std::fs::write(
+            cache.join("p.json"),
+            r#"{"fetched_at": 1, "models": [{"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "capabilities": {"tools": false}}]}"#,
+        )
+        .unwrap();
+        let c = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap().capabilities_for(base_caps(), &id("caps"));
+        assert!(!c.tools && c.images && !c.logprobs);
+
+        // The user's file wins last: logprobs back on, tools still off.
+        std::fs::write(
+            over.join("p/models.json"),
+            r#"{"models": [{"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "capabilities": {"logprobs": true}}]}"#,
+        )
+        .unwrap();
+        let c = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap().capabilities_for(base_caps(), &id("caps"));
+        assert!(c.logprobs && !c.tools && c.images);
+    }
+
+    #[test]
+    fn the_old_effort_field_still_means_the_effort_capability() {
+        let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
+        assert!(t.capabilities_for(base_caps(), &id("legacy")).effort);
+        assert!(!t.capabilities_for(base_caps(), &id("caps")).effort);
+    }
+
+    #[test]
+    fn a_dated_snapshot_takes_its_models_capabilities() {
+        let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
+        assert!(!t.capabilities_for(base_caps(), &id("caps-20250929")).logprobs);
     }
 }

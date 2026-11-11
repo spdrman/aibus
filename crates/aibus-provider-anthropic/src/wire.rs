@@ -4,6 +4,7 @@
 //! first messages produce the same bytes for that prefix. A fork's first request relies on it
 //! to hit the cache entry its parent wrote.
 
+use aibus_provider::presets::CompatFlag;
 use aibus_provider::{
     CacheHint, ChatRequest, ContentBlock, Effort, Message, MessageRole, ToolCallId, ToolChoice,
 };
@@ -75,7 +76,7 @@ fn mark(v: &mut Value) {
 }
 
 /// The body for `POST /v1/messages`. `effort` says the model takes the effort parameter.
-pub fn messages_body(req: &ChatRequest, effort_ok: bool) -> Value {
+pub fn messages_body(req: &ChatRequest, effort_ok: bool, compat: &[CompatFlag]) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(req.model.0));
     body.insert("max_tokens".into(), json!(req.max_output_tokens));
@@ -132,15 +133,16 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool) -> Value {
         .filter(|b| *b >= 1024);
     if let Some(budget) = thinking {
         body.insert("thinking".into(), json!({"type": "enabled", "budget_tokens": budget}));
-    } else if let Some(t) = req.temperature {
+    } else if let (Some(t), false) = (req.temperature, compat.contains(&CompatFlag::NoSamplingParams)) {
         body.insert("temperature".into(), json!(t));
     }
-    if !req.tools.is_empty() {
+    if !req.tools.is_empty() && !compat.contains(&CompatFlag::NoToolChoice) {
         // Forcing a tool is not allowed while thinking.
         let choice = match (&req.tool_choice, thinking) {
             (ToolChoice::Auto, _) | (_, Some(_)) => json!({"type": "auto"}),
             (ToolChoice::None, _) => json!({"type": "none"}),
             (ToolChoice::Required, _) => json!({"type": "any"}),
+            (ToolChoice::Named(_), _) if compat.contains(&CompatFlag::NoNamedToolChoice) => json!({"type": "any"}),
             (ToolChoice::Named(n), _) => json!({"type": "tool", "name": n}),
         };
         body.insert("tool_choice".into(), choice);
@@ -165,7 +167,7 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool) -> Value {
 
 /// The body for `POST /v1/messages/count_tokens`: what counts, without the sampling settings.
 pub fn count_body(req: &ChatRequest) -> Value {
-    let mut body = messages_body(req, false);
+    let mut body = messages_body(req, false, &[]);
     if let Some(m) = body.as_object_mut() {
         for k in ["max_tokens", "stream", "temperature", "metadata"] {
             m.remove(k);
@@ -177,7 +179,7 @@ pub fn count_body(req: &ChatRequest) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aibus_provider::{ModelId, RequestMetadata, ThinkingBudget, ToolSpec};
+    use aibus_provider::{Capabilities, ModelId, RequestMetadata, SystemRole, ThinkingBudget, ToolSpec};
     use ulid::Ulid;
 
     fn req() -> ChatRequest {
@@ -210,7 +212,7 @@ mod tests {
 
     #[test]
     fn a_plain_request_has_the_fields_the_api_needs() {
-        let b = messages_body(&req(), false);
+        let b = messages_body(&req(), false, &[]);
         assert_eq!(b["model"], "claude-sonnet-4-5");
         assert_eq!(b["max_tokens"], 4096);
         assert_eq!(b["stream"], true);
@@ -227,12 +229,12 @@ mod tests {
     fn each_hint_puts_exactly_one_breakpoint_in_its_place() {
         let mut r = req();
         r.cache_hint = CacheHint::AfterTools;
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         assert_eq!(count_marks(&b), 1);
         assert!(b["tools"][1].get("cache_control").is_some() && b["tools"][0].get("cache_control").is_none());
 
         r.cache_hint = CacheHint::AfterSystem;
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         assert_eq!((count_marks(&b), b["system"][0]["cache_control"]["type"].as_str()), (1, Some("ephemeral")));
 
         r.cache_hint = CacheHint::LastMessage;
@@ -241,7 +243,7 @@ mod tests {
             blocks: vec![ContentBlock::Text("a".into()), ContentBlock::Thinking { text: "t".into(), redacted: false, signature: Some("s".into()) }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         assert_eq!(count_marks(&b), 1);
         // The last block that can carry it: the text, not the thinking block after it.
         assert!(b["messages"][1]["content"][0].get("cache_control").is_some());
@@ -253,7 +255,7 @@ mod tests {
         r.tools.clear();
         r.system.clear();
         r.cache_hint = CacheHint::AfterSystem;
-        assert_eq!(count_marks(&messages_body(&r, false)), 0);
+        assert_eq!(count_marks(&messages_body(&r, false, &[])), 0);
     }
 
     #[test]
@@ -266,7 +268,7 @@ mod tests {
             let (mut p, mut f) = (parent.clone(), fork.clone());
             p.cache_hint = hint;
             f.cache_hint = hint;
-            let (pb, fb) = (messages_body(&p, false), messages_body(&f, false));
+            let (pb, fb) = (messages_body(&p, false, &[]), messages_body(&f, false, &[]));
             for key in ["tools", "system"] {
                 assert_eq!(pb[key].to_string(), fb[key].to_string(), "{key} under {hint:?}");
             }
@@ -288,7 +290,7 @@ mod tests {
             blocks: vec![ContentBlock::ToolResult { id, content: "boom".into(), is_error: true }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         let call = &b["messages"][1]["content"][0];
         let result = &b["messages"][2]["content"][0];
         assert_eq!(call["id"], result["tool_use_id"]);
@@ -301,7 +303,7 @@ mod tests {
         let mut r = req();
         r.messages.push(Message::text(MessageRole::System, "advice"));
         r.messages.push(Message::text(MessageRole::Assistant, ""));
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         assert_eq!(b["messages"].as_array().unwrap().len(), 1);
         assert_eq!(b["messages"][0]["content"][1]["text"], "advice");
     }
@@ -311,15 +313,15 @@ mod tests {
         let mut r = req();
         r.thinking = Some(ThinkingBudget { tokens: 2048 });
         r.tool_choice = ToolChoice::Required;
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         assert_eq!(b["thinking"], json!({"type": "enabled", "budget_tokens": 2048}));
         assert!(b.get("temperature").is_none());
         assert_eq!(b["tool_choice"], json!({"type": "auto"}));
 
         r.max_output_tokens = 1500;
-        assert_eq!(messages_body(&r, false)["thinking"]["budget_tokens"], 1499);
+        assert_eq!(messages_body(&r, false, &[])["thinking"]["budget_tokens"], 1499);
         r.max_output_tokens = 1000;
-        let b = messages_body(&r, false);
+        let b = messages_body(&r, false, &[]);
         assert!(b.get("thinking").is_none() && b.get("temperature").is_some());
     }
 
@@ -328,13 +330,13 @@ mod tests {
         let mut r = req();
         r.effort = Some(Effort::Max);
         r.tool_choice = ToolChoice::Named("read".into());
-        assert_eq!(messages_body(&r, true)["tool_choice"], json!({"type": "tool", "name": "read"}));
-        assert_eq!(messages_body(&r, true)["output_config"], json!({"effort": "high"}));
-        assert!(messages_body(&r, false).get("output_config").is_none());
+        assert_eq!(messages_body(&r, true, &[])["tool_choice"], json!({"type": "tool", "name": "read"}));
+        assert_eq!(messages_body(&r, true, &[])["output_config"], json!({"effort": "high"}));
+        assert!(messages_body(&r, false, &[]).get("output_config").is_none());
         r.tool_choice = ToolChoice::None;
-        assert_eq!(messages_body(&r, false)["tool_choice"], json!({"type": "none"}));
+        assert_eq!(messages_body(&r, false, &[])["tool_choice"], json!({"type": "none"}));
         r.tools.clear();
-        assert!(messages_body(&r, false).get("tool_choice").is_none());
+        assert!(messages_body(&r, false, &[]).get("tool_choice").is_none());
     }
 
     #[test]
@@ -350,7 +352,7 @@ mod tests {
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
-        let c = &messages_body(&r, false)["messages"][1]["content"];
+        let c = &messages_body(&r, false, &[])["messages"][1]["content"];
         assert_eq!(c[0], json!({"type": "thinking", "thinking": "a", "signature": "sig"}));
         assert_eq!(c[1], json!({"type": "redacted_thinking", "data": "opaque"}));
         assert_eq!(c.as_array().unwrap().len(), 3);
@@ -360,7 +362,7 @@ mod tests {
     fn metadata_carries_ids_only_and_count_tokens_drops_sampling() {
         let mut r = req();
         r.metadata = RequestMetadata { run_id: Some("RUN".into()), session_id: Some("SES".into()) };
-        assert_eq!(messages_body(&r, false)["metadata"]["user_id"], "aibus:SES:RUN");
+        assert_eq!(messages_body(&r, false, &[])["metadata"]["user_id"], "aibus:SES:RUN");
         let c = count_body(&r);
         for k in ["max_tokens", "stream", "temperature", "metadata"] {
             assert!(c.get(k).is_none(), "{k}");
@@ -375,8 +377,63 @@ mod tests {
             media_type: "image/png".into(),
             data: bytes::Bytes::from_static(b"\x89PNG"),
         });
-        let img = &messages_body(&r, false)["messages"][0]["content"][1];
+        let img = &messages_body(&r, false, &[])["messages"][0]["content"][1];
         assert_eq!(img["source"]["data"], "iVBORw==");
         assert_eq!(img["source"]["media_type"], "image/png");
+    }
+
+    // One test per compat flag this wire honours, each asserting the body that goes out.
+
+    fn caps() -> Capabilities {
+        Capabilities {
+            tools: true,
+            parallel_tool_calls: true,
+            streaming: true,
+            thinking: true,
+            prompt_cache: true,
+            logprobs: false,
+            effort: true,
+            images: true,
+            system_role: SystemRole::Separate,
+            max_tools: None,
+        }
+    }
+
+    #[test]
+    fn flag_no_tool_choice_sends_tools_without_a_choice() {
+        let b = messages_body(&req(), false, &[CompatFlag::NoToolChoice]);
+        assert!(b.get("tools").is_some() && b.get("tool_choice").is_none());
+        assert_eq!(messages_body(&req(), false, &[])["tool_choice"], json!({"type": "auto"}));
+    }
+
+    #[test]
+    fn flag_no_named_tool_choice_turns_a_named_choice_into_any() {
+        let mut r = req();
+        r.tool_choice = ToolChoice::Named("read".into());
+        assert_eq!(messages_body(&r, false, &[])["tool_choice"], json!({"type": "tool", "name": "read"}));
+        assert_eq!(messages_body(&r, false, &[CompatFlag::NoNamedToolChoice])["tool_choice"], json!({"type": "any"}));
+    }
+
+    #[test]
+    fn flag_no_sampling_params_leaves_temperature_out() {
+        assert!(messages_body(&req(), false, &[]).get("temperature").is_some());
+        assert!(messages_body(&req(), false, &[CompatFlag::NoSamplingParams]).get("temperature").is_none());
+    }
+
+    #[test]
+    fn flag_no_system_role_folds_the_prompt_into_the_first_message() {
+        let degraded = caps().with_compat(&[CompatFlag::NoSystemRole]).degrade(req());
+        let b = messages_body(&degraded, false, &[]);
+        assert!(b.get("system").is_none());
+        assert_eq!(b["messages"][0]["content"][0]["text"], "You are terse.\n\n");
+    }
+
+    #[test]
+    fn flag_strip_images_sends_a_note_instead_of_the_picture() {
+        let mut r = req();
+        r.messages[0].blocks.push(ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") });
+        let b = messages_body(&caps().with_compat(&[CompatFlag::StripImages]).degrade(r), false, &[]);
+        assert!(!b.to_string().contains("\"image\""), "{b}");
+        assert!(b.to_string().contains("[image omitted]"));
     }
 }

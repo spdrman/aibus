@@ -1,0 +1,14 @@
+{
+ "flag": {
+  "max_tokens_field": "max_completion_tokens"
+ },
+ "api": "openai-chat",
+ "with": {
+  "/max_completion_tokens": 1024,
+  "/max_tokens": "<absent>"
+ },
+ "without": {
+  "/max_tokens": 1024,
+  "/max_completion_tokens": "<absent>"
+ }
+}

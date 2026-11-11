@@ -409,16 +409,66 @@ pub fn outcome(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer) -> P
     Placed { area, hits }
 }
 
-/// `/clear` asks first.
-pub fn confirm_clear(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer) -> Placed {
+/// `/clear` and `/cancel @lead` ask first: a title, the question and the id of the yes button.
+pub fn confirm(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer, title: &str, question: &str, yes: (&'static str, &str)) -> Placed {
     let area = centred(full, 44, 6);
     Clear.render(area, buf);
     let inner = {
-        let i = panel(buf, area, "clear", th.warn, th);
+        let i = panel(buf, area, title, th.warn, th);
         Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
     };
-    put(buf, inner, 0, 0, "Clear the session log?", Style::new().fg(th.fg));
-    let (hits, _) = buttons(buf, inner, 2, &[("clear_yes", "y", "Clear", true), ("cancel", "n", "Cancel", true)], th, pointer);
+    put(buf, inner, 0, 0, question, Style::new().fg(th.fg));
+    let (hits, _) = buttons(buf, inner, 2, &[(yes.0, "y", yes.1, true), ("cancel", "n", "Cancel", true)], th, pointer);
+    Placed { area, hits }
+}
+
+/// The `/status` modal: label and value rows from `view:run_status`.
+pub fn run_status(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let area = centred(full, 46, rows.len() as u16 + 5);
+    Clear.render(area, buf);
+    let title = get(v, "title").and_then(|t| t.as_text()).unwrap_or("status");
+    let inner = {
+        let i = panel(buf, area, title, th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    for (i, row) in rows.iter().enumerate() {
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let x = put(buf, inner, 0, i as u16, &format!("{:<14}", word("k")), Style::new().fg(th.dim_text));
+        put(buf, inner, x, i as u16, &clip(&word("v"), usize::from(inner.width.saturating_sub(x))), Style::new().fg(th.fg));
+    }
+    let (hits, _) = buttons(buf, inner, rows.len() as u16 + 1, &[("close", "Esc", "Close", true)], th, pointer);
+    Placed { area, hits }
+}
+
+/// The `/cost` modal: one row per run, dearest first, and the session total under them.
+pub fn cost(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let shown = rows.len().min(usize::from(full.height.saturating_sub(8)).max(1));
+    let area = centred(full, 56, shown as u16 + 7);
+    Clear.render(area, buf);
+    let inner = {
+        let i = panel(buf, area, "cost", th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let dim = Style::new().fg(th.dim_text);
+    let fg = Style::new().fg(th.fg);
+    let head = Rect { height: 1, ..inner };
+    column(buf, head, 0, 16, "agent", dim);
+    column(buf, head, 17, 10, "run", dim);
+    column(buf, head, 28, 14, "status", dim);
+    column(buf, head, 43, 10, "cost", dim);
+    for (i, row) in rows.iter().take(shown).enumerate() {
+        let r = Rect { y: inner.y + 1 + i as u16, height: 1, ..inner };
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        column(buf, r, 0, 16, &word("agent"), fg);
+        column(buf, r, 17, 10, &word("run"), fg);
+        column(buf, r, 28, 14, &word("status"), dim);
+        column(buf, r, 43, 10, &word("cost"), fg);
+    }
+    let total = get(v, "total").and_then(|x| x.as_text()).unwrap_or("").to_owned();
+    put(buf, inner, 0, shown as u16 + 1, &format!("{:<43}{total}", "session total"), fg.add_modifier(Modifier::BOLD));
+    let (hits, _) = buttons(buf, inner, shown as u16 + 3, &[("close", "Esc", "Close", true)], th, pointer);
     Placed { area, hits }
 }
 

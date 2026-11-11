@@ -39,11 +39,11 @@ static NULL: Value = Value::Null;
 pub struct Views<'a> {
     header: &'a Value,
     rail: &'a Value,
-    lead: &'a Value,
-    delegate: &'a Value,
-    fork: &'a Value,
-    cards: &'a Value,
-    ret: &'a Value,
+    pub(crate) lead: &'a Value,
+    pub(crate) delegate: &'a Value,
+    pub(crate) fork: &'a Value,
+    pub(crate) cards: &'a Value,
+    pub(crate) ret: &'a Value,
     log: &'a Value,
     status: &'a Value,
     tips: &'a Value,
@@ -208,14 +208,15 @@ fn dotted(buf: &mut Buffer, path: &[(u16, u16)], at: Option<usize>, dim: Style, 
 }
 
 /// Where the centre column put things, for the connectors and the hit map.
-struct Centre {
-    cards: Vec<(usize, Rect)>,
-    lead: Rect,
-    ret: Rect,
+pub(crate) struct Centre {
+    pub(crate) cards: Vec<(usize, Rect)>,
+    pub(crate) lead: Rect,
+    pub(crate) ret: Rect,
 }
 
 /// The centre column: lead box, fork layer, delegate row, cards, return box. Items that do
 /// not fit are dropped from the bottom up.
+#[cfg_attr(feature = "flow-diagram", allow(unreachable_code))]
 fn centre(
     buf: &mut Buffer,
     area: Rect,
@@ -223,6 +224,10 @@ fn centre(
     th: &Theme,
     (compact, first_card, tick): (bool, usize, i64),
 ) -> Centre {
+    // The one branch: with `flow-diagram` the column is drawn by rataflow, and the code below is
+    // the classic path, still compiled so the two stay comparable.
+    #[cfg(feature = "flow-diagram")]
+    return crate::diagram::centre(buf, area, v, th, (compact, first_card, tick));
     const W: u16 = 40;
     let narrow = |r: Rect| Rect {
         x: r.x + r.width.saturating_sub(W) / 2,

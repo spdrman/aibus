@@ -294,3 +294,25 @@ const LIGHT_SPLIT_TEXT: [(&str, &str, f64); 6] = [
     ("split", "pressed", 4.89),
     ("split", "selected", 5.10),
 ];
+
+/// The palette handed to rataflow: its edge, border and text colours against `bg` and `panel`.
+/// Measured: recording muted 5.91 / 5.60, accent 9.96 / 9.44, text 10.59 / 10.03; light muted
+/// 6.95 / 7.63, accent 6.11 / 6.70, text 15.58 / 17.09.
+#[cfg(feature = "flow-diagram")]
+#[test]
+fn the_rataflow_palette_meets_3_on_bg_and_panel() {
+    for (name, t) in [("recording", Theme::recording()), ("light", Theme::light())] {
+        let p = aibus_tui::diagram::palette(&t);
+        for (role, colour) in [("muted", p.muted), ("accent", p.accent), ("text", p.text)] {
+            for (on, bg) in [("bg", t.bg), ("panel", t.panel)] {
+                let r = ratio(colour, bg);
+                println!("{name}: palette {role} on {on} = {r:.2}");
+                assert!(r >= 3.0, "{name}: palette {role} on {on} is {r:.2}");
+            }
+        }
+        assert_eq!(p.canvas_bg, t.bg);
+        assert_eq!(p.surface, t.panel);
+    }
+    let mono = aibus_tui::diagram::palette(&Theme::mono());
+    assert_eq!([mono.muted, mono.accent, mono.text, mono.canvas_bg], [Color::Reset; 4]);
+}

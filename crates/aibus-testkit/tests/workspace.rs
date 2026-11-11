@@ -12,8 +12,14 @@ fn root() -> PathBuf {
 
 /// Normal (non-dev, non-build) dependency closure of `name`, by package name.
 fn closure(name: &str) -> BTreeSet<String> {
+    closure_with(name, &[])
+}
+
+/// The same with extra `cargo metadata` arguments, e.g. `--features aibus-tui/flow-diagram`.
+fn closure_with(name: &str, extra: &[&str]) -> BTreeSet<String> {
     let out = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--locked"])
+        .args(extra)
         .current_dir(root())
         .output()
         .expect("run cargo metadata");
@@ -168,4 +174,30 @@ fn tui_is_on_ratatui_030_and_crossterm_029() {
         assert_eq!(got.len(), 1, "{name} must appear once in Cargo.lock, got {got:?}");
         assert!(got[0].starts_with(line), "{name} is {}, want {line}x", got[0]);
     }
+}
+
+const FLOW: [&str; 2] = ["--features", "aibus-tui/flow-diagram"];
+
+#[test]
+fn rataflow_is_optional_and_only_the_tui_sees_it() {
+    for krate in ["aibus", "aibus-tui", "aibus-core", "aibus-graph", "aibus-provider"] {
+        assert!(!closure(krate).contains("rataflow"), "{krate} sees rataflow by default");
+    }
+    for krate in ["aibus-core", "aibus-graph", "aibus-provider"] {
+        assert!(!closure_with(krate, &FLOW).contains("rataflow"), "{krate} sees rataflow");
+    }
+    for krate in ["aibus-tui", "aibus"] {
+        assert!(closure_with(krate, &FLOW).contains("rataflow"), "{krate} lacks rataflow with the feature on");
+    }
+}
+
+#[test]
+fn rataflow_brings_no_layout_or_network_crates() {
+    let tui = closure_with("aibus-tui", &FLOW);
+    let rataflow = closure_with("rataflow", &FLOW);
+    assert!(!rataflow.is_empty(), "rataflow has dependencies");
+    for banned in ["rust-sugiyama", "petgraph", "ratzilla", "termion", "termwiz", "serde_json"] {
+        assert!(!rataflow.contains(banned), "rataflow pulls in {banned}");
+    }
+    assert!(tui.contains("rataflow"));
 }

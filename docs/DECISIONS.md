@@ -127,6 +127,16 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 
 **Why.** Flipping would make the default build depend on a source nobody but the owner can fetch. The gate is re-evaluated at each release (Q12): flip once the crate is public or vendored under a confirmed licence and the differential has been green across a release.
 
+## D-12: rataflow for the centre column, behind a feature, with no events handed to it
+
+**Context.** The epic (#85) wants the worker cards on a canvas so that more than three of them can be panned to. rataflow is a 0.1 crate with one maintainer and its own mouse model (left drag moves nodes, the wheel zooms).
+
+**Decision.** Phase 1 moves to ratatui 0.30 (#86) and adds rataflow as an optional dependency behind `flow-diagram`, off by default (#87). One file, `diagram.rs`, names it. The flow is rebuilt every frame, locked, at zoom 1, so world cells are screen cells and no flow state outlives a frame. The mapping from our `Theme` to rataflow's palette lives in `diagram.rs` (`diagram::palette`), not in `theme.rs` as the epic first said, so that "only `diagram.rs` names rataflow" stays true and a test can enforce it. No mouse event is forwarded to the flow: the hit map resolves first as before, and panning is done by changing the offset the next frame is built from.
+
+**Alternatives.** Keep a long-lived `Flow` and forward only pan events (rejected for now: state that can drift from the graph, and a locked flow turns the wheel into zoom). Put `palette` in `theme.rs` behind the feature (rejected: a second file naming the crate). Draw the overflow by hand in `widgets.rs` (not tried: the epic's point is to find out if the canvas earns its place).
+
+**Why.** It keeps the default build exactly as it was, keeps the cost of backing out to one file, and keeps the graph as the only place state lives.
+
 ## E2 (2026-11-11): what `workflow validate` warns about, and what the schema leaves out
 
 **Context.** #97 adds the workflow JSON Schema, `workflow::validate` and the two CLI commands. A few calls were open when I wrote it.

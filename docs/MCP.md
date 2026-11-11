@@ -96,7 +96,9 @@ At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.
 
 ## What is not in this release
 
-Running workflows (`--allow run`) and the run resources, prompts that need a run, and elicitation. The README and this page will say so when that changes.
+Running workflows (`--allow run`) and the run resources, and prompts that need a run.
+
+Relaying a run's permission prompts to the client is not built. See E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
 
 ## Streamable HTTP (`--http`)
 

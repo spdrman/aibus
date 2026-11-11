@@ -108,12 +108,22 @@ fn tab_opens_a_completion_popup_for_commands_and_agents() {
     for c in ["/fork", "/delegate", "/compact", "/clear", "/handoff", "/ledger", "/model", "/advisor"] {
         assert!(text.contains(c), "the popup lacks {c}");
     }
-    for _ in 0..11 {
+    // The popup shows eight rows and follows the selection, so walk to /help and then to the end.
+    let items = r.ui.prompt.popup.as_ref().unwrap().items.clone();
+    let help = items.iter().position(|i| i.starts_with("/help")).expect("/help is offered");
+    for _ in 0..help {
         r.key(K::Tab);
     }
     for c in ["/workflow", "/agents", "/accounts", "/help"] {
         assert!(r.text().contains(c), "the popup lacks {c} after walking down");
     }
+    for _ in help..items.len() - 1 {
+        r.key(K::Tab);
+    }
+    for c in ["/login", "/logout"] {
+        assert!(r.text().contains(c), "the popup lacks {c} at the end");
+    }
+    // One more wraps to the first, and one after that is /delegate.
     r.key(K::Tab);
     r.key(K::Tab);
     r.key(K::Enter);
@@ -145,8 +155,8 @@ fn every_slash_command_becomes_a_command() {
     assert!(run("/delegate search map it").contains("Delegate"));
     assert_eq!(run("/handoff"), "Command(CreateHandoff { outcome: None })");
     assert!(run("/ledger now ship").contains("LedgerUpdate"));
-    assert!(run("/model opus").contains("/model opus"));
-    assert!(run("/advisor opus").contains("/advisor opus"));
+    assert_eq!(run("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
+    assert_eq!(run("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
     assert!(run("/workflow review the diff").contains("Workflow"));
     assert_eq!(run("/agents"), "Command(OpenScreen(Agents))");
     assert_eq!(modal(&r).as_deref(), Some("agents"));

@@ -121,6 +121,8 @@ fn cost_table_total_equals_the_status_bar() {
     assert_eq!(get(&rows[0], "agent"), Some(&s("grep")), "dearest run first");
     assert!(r.text().contains("session total") && r.text().contains("$0.0520"), "{}", r.text());
     r.key(K::Esc);
+    // `$` is a dashboard key, so it is typing while the prompt has focus: leave the prompt first.
+    r.key(K::Tab);
     r.press('$');
     assert_eq!(modal(&r).as_deref(), Some("cost"), "the key opens the same table");
 }

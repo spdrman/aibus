@@ -241,3 +241,30 @@ fn the_bedrock_and_vertex_tables_price_every_row_through_price_of_to_a_plain_cla
         }
     }
 }
+
+#[test]
+fn the_sync_writes_aibus_capability_names_not_models_dev_names_and_the_table_reads_them() {
+    let (files, _) = plan(&fixture_snapshot(), &before(&["anthropic"]), true, false).unwrap();
+    let v: Value = serde_json::from_str(&files["anthropic"]).unwrap();
+    let rows = v["models"].as_array().unwrap();
+    let row = |id: &str| rows.iter().find(|r| r["id"] == id && r.get("price_from").is_none()).unwrap();
+
+    // tool_call -> capabilities.tools, an image modality -> capabilities.images, reasoning -> the row's.
+    let haiku = row("claude-haiku-4-5");
+    assert_eq!(haiku["capabilities"], serde_json::json!({"images": true, "tools": true}));
+    assert_eq!(haiku["reasoning"], true);
+    let newcomer = row("claude-newcomer-1");
+    assert_eq!(newcomer["capabilities"], serde_json::json!({"images": false, "tools": true}));
+    assert_eq!(newcomer["reasoning"], false);
+
+    // A hand-set capability stays; the keys an older sync wrote under models.dev's names go.
+    let sonnet = row("claude-sonnet-4-5");
+    assert_eq!(sonnet["capabilities"], serde_json::json!({"images": true, "max_tools": 8, "tools": true}));
+    for r in rows {
+        for stale in ["tool_call", "reasoning", "input_modalities"] {
+            assert!(r["capabilities"].get(stale).is_none(), "{} still has {stale}", r["id"]);
+        }
+    }
+    // And the table that loads the file accepts every row as written.
+    ModelTable::load("anthropic", &files["anthropic"], &ProviderConfig::default(), &[], false).unwrap();
+}

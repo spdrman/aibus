@@ -77,7 +77,9 @@ fn short(label: &str) -> String {
 
 /// The header: `search · haiku · anthropic-work`.
 pub fn title(v: &Value) -> String {
-    let mut t = format!("{} · {} · {}", text(v, "agent"), short(text(v, "model")), text(v, "account"));
+    // After a fallback the account reads `↷ anthropic-personal`: where the run went (F9).
+    let marker = if text(v, "fallback_from").is_empty() { "" } else { "↷ " };
+    let mut t = format!("{} · {} · {marker}{}", text(v, "agent"), short(text(v, "model")), text(v, "account"));
     let status = text(v, "status");
     if !status.is_empty() {
         t.push_str(&format!(" · {status}"));

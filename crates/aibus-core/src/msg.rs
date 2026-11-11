@@ -738,6 +738,14 @@ pub enum Msg {
         target: ModelTarget,
         to: Result<Option<(ModelId, AccountName)>, String>,
     },
+    /// A fallback moved the run to another account before the first token of a turn (F9). The
+    /// card shows `↷ <to>` and `model:run:<id>:meta` carries the final account.
+    RunSwitched {
+        run: RunId,
+        from: AccountName,
+        to: AccountName,
+        model: ModelId,
+    },
     /// The workflow files as the loop found them, after a list, a show or a save. `rows` replaces
     /// `model:workflows` (the prompt's `/fix` family reads the names), `shown` replaces
     /// `model:workflow:shown` when there is one, and `said` goes to the session log.
@@ -784,6 +792,7 @@ impl Msg {
             Msg::IoError { .. } => "IoError",
             Msg::Shutdown { .. } => "Shutdown",
             Msg::ModelSwitched { .. } => "ModelSwitched",
+            Msg::RunSwitched { .. } => "RunSwitched",
             Msg::WorkflowsLoaded { .. } => "WorkflowsLoaded",
             Msg::Persisted => "Persisted",
         }
@@ -802,7 +811,7 @@ impl Msg {
             }
             Msg::SubmitPrompt { text } => map([("msg", name), ("len", len(text))]),
             Msg::Command(c) => map([("msg", name), ("command", s(command_name(c)))]),
-            Msg::RunStarted { run, .. } => map([("msg", name), ("run", s(&run.to_string()))]),
+            Msg::RunStarted { run, .. } | Msg::RunSwitched { run, .. } => map([("msg", name), ("run", s(&run.to_string()))]),
             Msg::Stream { run, chunks } => {
                 let bytes: usize = chunks
                     .iter()

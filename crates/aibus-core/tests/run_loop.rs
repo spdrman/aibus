@@ -125,6 +125,7 @@ fn plan(script: Script, def: AgentDef) -> (Plan, mpsc::Receiver<Msg>) {
             hooks: runner(dir.path()),
             compactor: None,
             assist: None,
+            fallback: None,
         },
         fake,
         dir,
@@ -803,6 +804,7 @@ impl Tool for Relay {
                 hooks: Arc::new(HookRunner::default()),
                 compactor: None,
                 assist: None,
+                fallback: None,
             },
         );
         let mut out = None;

@@ -203,6 +203,7 @@ fn start_on(
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
             assist: None,
+            fallback: None,
         },
     );
     Rig { fake, rx, handle }

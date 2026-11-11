@@ -173,6 +173,7 @@ pub struct Account {
     pub rate: RateLimits,                 // max_concurrent, requests_per_minute, tokens_per_minute
     pub tags: Vec<SmolStr>,               // "cheap", "eu", used by selection hints
     pub enabled: bool,
+    pub fallback: Vec<AccountName>,       // tried in order when this account fails before the first token (4.3)
 }
 
 pub enum AuthMethod {
@@ -205,6 +206,29 @@ The chosen pair is written to `model:run:<id>:meta` so the card and the log show
 ### 4.2 Per-account concurrency and rate limits
 
 `RateLimits { max_concurrent: 4, requests_per_minute: Option<u32>, tokens_per_minute: Option<u32> }`. A token-bucket per account in `aibus-provider` gates `stream`; a run waiting on it shows `◌ waiting for anthropic-work slot` on its card. 429s with `retry_after` tighten the bucket for 60 s.
+
+### 4.3 Account fallback
+
+With several accounts for one model, a spent quota or a long overload on one should move the run to the next instead of ending it. This is the only place in the epic that touches the run loop, and it is off unless configured.
+
+```toml
+[defaults]
+fallback_on = ["quota", "auth", "overloaded"]   # the default; "rate_limit" is not in it, waiting usually wins
+
+[[account]]
+name = "anthropic-work"
+provider = "anthropic"
+fallback = ["anthropic-personal", "bedrock"]    # in order
+```
+
+* **Config.** `fallback` names accounts; a name that is not an account, or the account's own, is a config error with its line. An agent definition can set `fallback: [...]` to replace the account's list, and `fallback: []` to stay put.
+* **Before the first token.** A switch happens only before the first `TextDelta`, `ThinkingDelta` or `ToolUseStart` of a turn, so the user has seen nothing from the failed account and the conversation goes to the next one unchanged. After the first token a `Quota` ends the run as it did before.
+* **Budgets.** The retry budget is per account: a retryable error (`Overloaded`, and `RateLimit` when it is in `fallback_on`) retries five times on the account, and only then moves. `Quota` and `Auth` are not retried and move at once. A kind that is not in `fallback_on` retries or ends as before.
+* **Model.** The model is resolved again on the new account. An account where it does not resolve, or whose credential is missing, is left out of the chain with a log line.
+* **Where it shows.** The run's header reads `↷ <account>` after a switch, `model:run:<id>:meta` carries the final account (and `fallback_from`), and the transcript records a `switch` line after the `start` line that names the first account.
+* **Cooldown.** An account that triggered a switch is skipped by the selection chain for a while, in memory only: after a `Quota` until the `resets_in` the response's headers gave (`RateLimitInfo`), or 30 minutes; after an `Overloaded` for 60 seconds; after a `RateLimit` for its `retry_after`; after an `Auth` until `aibus account test` passes (a reload of the accounts, which a login or logout causes, clears it). An explicit `--account` is a demand and ignores it, and an account that is the only one able to serve a model is used anyway.
+* **Header-driven limits.** The account's limiter already reads `requests_remaining`, `tokens_remaining` and the reset on every response, so an account at zero waits for its window, and a `Quota` on it goes straight to the fallback.
+* **Seats.** The advisor and the router get the same behaviour through their `Seat`: a failed consultation is asked again on the next account, and a seat that cannot be answered still never blocks the lead.
 
 ## 5. Credential storage
 

@@ -38,6 +38,11 @@ pub struct ModelEntry {
     /// The model accepts the `effort` parameter.
     #[serde(default)]
     pub effort: bool,
+    /// Epoch seconds from which this row applies. A row with the same `id` and no `price_from`
+    /// is the current one; a row with a later `price_from` is a price that has been announced
+    /// but has not started yet. `None` means "always".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_from: Option<u64>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -89,23 +94,33 @@ impl ModelTable {
             prefixes: prefixes.iter().map(|p| (*p).to_owned()).collect(),
             open_aliases,
         };
-        t.layer(base);
+        t.layer(base, false);
         if let Some(dir) = &cfg.cache_dir {
             if let Ok(Some(cached)) = read(&dir.join(format!("{provider}.json"))) {
-                t.layer(cached);
+                t.layer(cached, false);
             }
         }
         if let Some(dir) = &cfg.overrides_dir {
             if let Some(over) = read(&dir.join(provider).join("models.json")).map_err(bad)? {
-                t.layer(over);
+                t.layer(over, true);
             }
         }
         Ok(t)
     }
 
-    fn layer(&mut self, f: File) {
+    /// A row replaces the one with the same id and the same `price_from`. With `exclusive` (the
+    /// user's overrides) an undated row also drops every dated row of that id from the earlier
+    /// layers, so an override of a price is not undone when a built-in future price starts.
+    fn layer(&mut self, f: File, exclusive: bool) {
         for e in f.models {
-            match self.entries.iter_mut().find(|x| x.info.id == e.info.id) {
+            if exclusive && e.price_from.is_none() {
+                self.entries.retain(|x| x.info.id != e.info.id || x.price_from.is_none());
+            }
+            match self
+                .entries
+                .iter_mut()
+                .find(|x| x.info.id == e.info.id && x.price_from == e.price_from)
+            {
                 Some(slot) => *slot = e,
                 None => self.entries.push(e),
             }
@@ -113,13 +128,32 @@ impl ModelTable {
         self.families.extend(f.families);
     }
 
+    /// One info per model, from the row that applies now.
     pub fn models(&self) -> Vec<ModelInfo> {
-        self.entries.iter().map(|e| e.info.clone()).collect()
+        let now = SystemTime::now();
+        let mut seen = Vec::new();
+        for e in &self.entries {
+            if !seen.contains(&&e.info.id) {
+                seen.push(&e.info.id);
+            }
+        }
+        seen.into_iter()
+            .filter_map(|id| self.entry_at(id, now))
+            .map(|e| e.info.clone())
+            .collect()
     }
 
     /// The entry for `id`, or for the model a dated snapshot of it (`x-20250929`,
     /// `x-2025-09-29`) is a copy of.
     pub fn entry(&self, id: &ModelId) -> Option<&ModelEntry> {
+        self.entry_at(id, SystemTime::now())
+    }
+
+    /// The same for the wall clock `at`: of the rows for the model, the one with the latest
+    /// `price_from` that has started. When none has started yet the earliest row is returned,
+    /// and `price_at` finds it has no price to give.
+    pub fn entry_at(&self, id: &ModelId, at: SystemTime) -> Option<&ModelEntry> {
+        let at = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         // `name-20250929` and `name-2025-09-29` are snapshots of `name`.
         fn undated(id: &str) -> &str {
             let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
@@ -136,12 +170,26 @@ impl ModelTable {
             }
             id
         }
-        let find = |s: &str| self.entries.iter().find(|e| e.info.id.0 == s);
+        let find = |s: &str| {
+            let rows = || self.entries.iter().filter(|e| e.info.id.0 == s);
+            rows()
+                .filter(|e| e.price_from.unwrap_or(0) <= at)
+                .max_by_key(|e| e.price_from.unwrap_or(0))
+                .or_else(|| rows().min_by_key(|e| e.price_from.unwrap_or(0)))
+        };
         find(&id.0).or_else(|| find(undated(&id.0)))
     }
 
+    /// The price now. Past usage is never repriced: it is already in the graph as `cost_usd`.
     pub fn price(&self, id: &ModelId) -> Option<Price> {
-        self.entry(id)?.price
+        self.price_at(id, SystemTime::now())
+    }
+
+    /// The price in force at `at`; `None` when the only rows start later.
+    pub fn price_at(&self, id: &ModelId, at: SystemTime) -> Option<Price> {
+        let e = self.entry_at(id, at)?;
+        let secs = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten()
     }
 
     /// Characters per token for this model's family (Q20).
@@ -184,13 +232,17 @@ impl ModelTable {
                     info: defaults(id),
                     price: None,
                     effort: false,
+                    price_from: None,
                 })
             })
             .collect();
-        self.layer(File {
-            models: entries.clone(),
-            ..File::default()
-        });
+        self.layer(
+            File {
+                models: entries.clone(),
+                ..File::default()
+            },
+            false,
+        );
         if let Some(dir) = cache_dir {
             let file = File {
                 fetched_at: now.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs()),
@@ -253,6 +305,60 @@ mod tests {
         assert_eq!(t.chars_per_token(&id("big")), 3.0);
         assert_eq!(t.chars_per_token(&id("old")), 4.0);
         assert_eq!(t.chars_per_token(&id("nope")), 4.0);
+    }
+
+    #[test]
+    fn a_future_price_waits_for_its_price_from_and_not_a_second_before() {
+        let from = 1_800_000_000;
+        let dated = format!(
+            r#"{{"models": [
+              {{"id": "big", "context_window": 1000, "max_output": 100, "family": "f", "deprecated": false,
+                "price": {{"input_per_mtok": 3.0, "output_per_mtok": 15.0}}}},
+              {{"id": "big", "context_window": 1000, "max_output": 100, "family": "f", "deprecated": false,
+                "price_from": {from}, "price": {{"input_per_mtok": 2.0, "output_per_mtok": 10.0}}}}
+            ]}}"#
+        );
+        let t = ModelTable::load("p", &dated, &ProviderConfig::default(), &[], false).unwrap();
+        let at = |s: u64| UNIX_EPOCH + Duration::from_secs(s);
+        let input = |s: u64| t.price_at(&id("big"), at(s)).unwrap().input_per_mtok;
+        assert_eq!(input(from - 1), 3.0);
+        assert_eq!(input(from), 2.0);
+        assert_eq!(input(from + 86_400), 2.0);
+        assert_eq!(t.models().len(), 1, "one model, however many price rows");
+        // A snapshot of the model follows the same rows.
+        assert_eq!(t.price_at(&id("big-20250929"), at(from)).unwrap().input_per_mtok, 2.0);
+    }
+
+    #[test]
+    fn a_model_whose_only_price_starts_later_has_none_until_then() {
+        let json = r#"{"models": [{"id": "soon", "context_window": 1, "max_output": 1, "family": "f",
+            "price_from": 1800000000, "price": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}}]}"#;
+        let t = ModelTable::load("p", json, &ProviderConfig::default(), &[], false).unwrap();
+        let at = |s: u64| UNIX_EPOCH + Duration::from_secs(s);
+        assert_eq!(t.price_at(&id("soon"), at(1_799_999_999)), None);
+        assert!(t.price_at(&id("soon"), at(1_800_000_000)).is_some());
+        assert_eq!(t.models().len(), 1);
+    }
+
+    #[test]
+    fn a_user_price_override_also_beats_a_builtin_future_price() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "big", "context_window": 1000, "max_output": 100, "family": "f",
+                "price": {"input_per_mtok": 9.0, "output_per_mtok": 9.0}}]}"#,
+        )
+        .unwrap();
+        let builtin = r#"{"models": [
+            {"id": "big", "context_window": 1000, "max_output": 100, "family": "f",
+             "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}},
+            {"id": "big", "context_window": 1000, "max_output": 100, "family": "f", "price_from": 1800000000,
+             "price": {"input_per_mtok": 2.0, "output_per_mtok": 10.0}}]}"#;
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", builtin, &cfg, &[], false).unwrap();
+        let later = UNIX_EPOCH + Duration::from_secs(1_900_000_000);
+        assert_eq!(t.price_at(&id("big"), later).unwrap().input_per_mtok, 9.0);
     }
 
     #[test]

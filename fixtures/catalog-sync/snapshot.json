@@ -1,0 +1,47 @@
+{
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "models": {
+      "claude-sonnet-4-5": {
+        "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "family": "claude-sonnet",
+        "tool_call": true, "reasoning": true,
+        "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]},
+        "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75},
+        "limit": {"context": 200000, "output": 64000}
+      },
+      "claude-haiku-4-5": {
+        "id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "family": "claude-haiku",
+        "tool_call": true, "reasoning": true,
+        "modalities": {"input": ["text", "image"], "output": ["text"]},
+        "cost": {"input": 1.1, "output": 5, "cache_read": 0.1, "cache_write": 1.25},
+        "limit": {"context": 200000, "output": 64000}
+      },
+      "claude-newcomer-1": {
+        "id": "claude-newcomer-1", "name": "Claude Newcomer", "family": "claude-newcomer",
+        "tool_call": true, "reasoning": false,
+        "modalities": {"input": ["text"], "output": ["text"]},
+        "cost": {"input": 2, "output": 8},
+        "limit": {"context": 100000, "output": 8000}
+      }
+    }
+  },
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "models": {
+      "gpt-4.1": {
+        "id": "gpt-4.1", "name": "GPT-4.1", "family": "gpt",
+        "tool_call": true, "reasoning": false,
+        "modalities": {"input": ["text", "image"], "output": ["text"]},
+        "cost": {"input": 2, "output": 8},
+        "limit": {"context": 1047576, "output": 32768}
+      }
+    }
+  },
+  "moonshotai": {
+    "id": "moonshotai",
+    "name": "Moonshot AI",
+    "models": {}
+  }
+}

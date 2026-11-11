@@ -20,6 +20,7 @@ mod logfile;
 mod logging;
 mod mcp_cmd;
 mod net;
+mod oauth;
 mod plain;
 mod providers;
 mod session_cmd;

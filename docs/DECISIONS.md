@@ -263,3 +263,12 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Make `CredentialSource` async (rejected: it ripples through every provider crate other lanes are editing). The `oauth2` crate (rejected: a second HTTP abstraction for two flows). Put the definition on `ProviderFactory` now (rejected: collides with #110).
 
 **Why.** It fixes the race and the blocking trait without touching what other lanes own, and OpenRouter proves the whole flow with nothing to refresh.
+## G2 (2026-11-11): where /model is resolved, and what the reducer keeps
+
+**Context.** The issue has the reducer validate a model reference through `AccountRegistry` and write `model:defaults:<role>`. The reducer is a pure function of the graph and has no accounts, and no `model:defaults:*` node exists; the lead's model lives in its run's `meta.model`, which the header already reads.
+
+**Decision.** `Command::SetModel` only queues the request in `model:session:assist.pending` (no new node, so the snapshot fixtures keep their shape). The effects executor hands it to the launcher, which picks the provider, credential, model and account the way a launch does, and answers with `Msg::ModelSwitched { id, target, to }`. That answer is what writes `meta.model` and `meta.account` (so the header and the card follow) and the log line `model: lead -> <id> (<account>)`; an `Err` is one `model: <why>` line and nothing else. A run takes the switch through its mailbox (`RunMail::Model`) and applies it at the next turn boundary, so the request in flight finishes on the old model. A seat is switched in `Assist` and read at its next consultation. With no lead running, `/model` is a logged `no lead is running yet`; a session that started without a seat cannot switch it on later, because it has no definition to speak from.
+
+**Alternatives.** Resolve in the reducer by copying the alias tables into the graph (rejected: a second copy of config that drifts). Add a `model:defaults:<role>` node (rejected: a node nothing reads, and it changes the snapshot fixtures).
+
+**Why.** It keeps the reducer pure and puts the choice where the accounts are. The cost is one extra message per switch, which is also what lets the log say which account answered.

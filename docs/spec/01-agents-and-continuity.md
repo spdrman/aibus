@@ -139,6 +139,8 @@ The lead's `delegate` tool description embeds the roster: every non-built-in def
 
 CLI `--model <alias|id>` sets the lead's model for the session; `--advisor <alias|id>` and `--router <alias|id>` set those roles (the recording's prompt line reads `claude --model sonnet --advisor opus`, frames f01 to f37). A definition's `model` beats the parent's; the CLI only sets the lead's.
 
+In the TUI, `/model [@target] <ref>` changes the model of the lead (no target), of `@advisor` or `@router`, or of one run (`@<agent>`, its newest run, or `@<run id prefix>`); `/advisor <ref|off>` and `/router <ref|off>` are the seat shorthands, and `off` is only for a seat. The change applies from the **next request**: a request already in flight finishes on the model it started with, and the next one (the next turn of a tool loop included) goes to the new model on the account that serves it. An unknown reference, or one no account can serve, changes nothing and leaves one log line. The header and the cards show the new model as soon as the switch is accepted.
+
 ## 4. Delegation
 
 ### 4.1 Automatic

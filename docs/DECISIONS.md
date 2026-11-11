@@ -244,6 +244,24 @@ Gated calls, taken at the recommended default:
 
 **Why.** The two protocol lifecycles and paging are the expensive part to get right and they work on the first try. A separate crate keeps the new dependencies and the closure test local, and makes the fallback a swap rather than a rewrite.
 
+## E4 (2026-11-11): the first `aibus mcp` PR, and what I chose where the issue left room
+
+**Context.** #99 adds the `aibus-mcp` crate, the `mcp` subcommand, the capability flags, the audit log, the rate limit and `workflow_list`. Several details were open.
+
+**Decision.**
+
+1. The tool table is written by hand (`Tool::new` and JSON schemas), not with `#[tool]` and `Parameters<T>`. `workflow_list` takes nothing and its schemas are four lines each, so a derive would add `schemars` output I would then have to bend into `additionalProperties: false` and 2020-12. The `macros` feature stays on, because D-13 names it, and the next PR can move to the macros if the tool count makes the table hard to read.
+2. `Server::call` is the one way into a tool: argument cap, unknown-tool check, rate limit, redaction of the result and the audit line all live there, and the rmcp handler only converts. A call that cannot be routed (unknown or switched-off tool, arguments over 256 KiB, arguments the schema forbids) is `-32602`; a rate limit is an `isError` result with "try again in N s". Refused calls do not spend a token.
+3. `tools/list` pages by offset with cursors of the form `p<offset>` (50 per page); a cursor that is not one is `-32602`. With one tool nothing pages, but the harness asks for the error.
+4. `--allow` on `aibus mcp` shares its argument id with the global `--allow <tool>`, because clap skips a global that a subcommand already defines and panics when two arguments have the same long name. Both are text so clap can share them; `aibus mcp --allow write` is the capability, and `--allow gates` without `write` is exit 2. `--max-runs`, `--max-concurrent-runs` and `--max-cost-usd` parse and are refused with exit 2 and "not available yet", as the issue says.
+5. Logging for `mcp` is stderr only, through the redactor, at the level `-v`, `AIBUS_LOG` or `RUST_LOG` give. It does not also write the rotating log file the other commands write: a server started by a client for a few calls would otherwise leave a log file per start, and the audit file is the record.
+6. The audit file for a process is `~/.local/state/aibus/logs/mcp/<ulid>.jsonl`, created 0600, and its first line is the start line with the flags (`method: "server/start"`). The client name is `clientInfo` from `initialize`, or from `_meta` on a `2026-07-28` request; a client that sends neither has `client: null`.
+7. `no_secret_leaves_over_stdio` lives in `crates/aibus/tests/mcp_security.rs`, not in `aibus-core/tests/security/`, because it drives the binary and only the `aibus` package can name `CARGO_BIN_EXE_aibus`.
+
+**Alternatives.** The `#[tool]` macros now (rejected for the reason in 1). A cursor that is a bare number (rejected: clients must not parse it, and a prefix makes a made-up number fail). Writing the rotating log file as well (rejected, 5). A separate `--capability` flag so `--allow` stays unshared (rejected: the epic and the issue both say `--allow`).
+
+**Why.** Each keeps the first PR to what its acceptance criteria name and leaves the next PR a place to put the write and run tools.
+
 ## D-14: Gemini gets a native adapter crate, and the OpenAI shim stays as a preset (#114)
 
 **Context.** The epic's open decision 3 asked whether Google's OpenAI shim (`gemini-openai`, F2) is enough. The shim covers chat with tools. It does not carry thought signatures (Gemini 3 rejects a function-calling turn that lacks the signature of the previous call), does not show thought summaries, has no context cache, no `countTokens`, and answers `store` with a 400. Gemini is also the one widely used family that is neither Anthropic nor OpenAI shaped, and the owner wants no open decisions left on the epic.

@@ -16,6 +16,7 @@ publish = false
 [workspace.dependencies]
 aibus-core = { path = "crates/aibus-core" }
 aibus-graph = { path = "crates/aibus-graph" }
+aibus-mcp = { path = "crates/aibus-mcp" }
 aibus-provider = { path = "crates/aibus-provider" }
 aibus-provider-anthropic = { path = "crates/aibus-provider-anthropic" }
 aibus-provider-gemini = { path = "crates/aibus-provider-gemini" }

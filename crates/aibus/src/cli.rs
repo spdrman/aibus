@@ -161,6 +161,8 @@ pub enum Command {
     /// The config file
     #[command(subcommand)]
     Config(ConfigCmd),
+    /// Serve workflows to an MCP client over stdio
+    Mcp(McpArgs),
     /// Put the example workflows in .aibus/workflows
     Init,
     /// Check the install and the config
@@ -180,6 +182,35 @@ pub enum Command {
         #[arg(long)]
         text: bool,
     },
+}
+
+/// `aibus mcp`: read-only unless these say otherwise. The surface is fixed when the process
+/// starts and nothing the client sends can raise it.
+#[derive(Args, Debug)]
+pub struct McpArgs {
+    /// Add to what the server may do (repeatable): write, gates (needs write) or run
+    ///
+    /// Same name as the global `--allow`, which this shadows for `mcp`; the values are text in
+    /// both so clap can share the argument.
+    #[arg(
+        long,
+        value_name = "CAP",
+        value_parser = ["write", "gates", "run"],
+        action = ArgAction::Append
+    )]
+    pub allow: Vec<String>,
+    /// Pre-approve a tool for runs started through MCP (repeatable)
+    #[arg(long, value_name = "PATTERN", action = ArgAction::Append)]
+    pub allow_tool: Vec<String>,
+    /// Runs one process may start (not available yet)
+    #[arg(long, value_name = "N")]
+    pub max_runs: Option<u32>,
+    /// Runs that may be live at once (not available yet)
+    #[arg(long, value_name = "N")]
+    pub max_concurrent_runs: Option<u32>,
+    /// Cost cap for one run (not available yet)
+    #[arg(long, value_name = "USD")]
+    pub max_cost_usd: Option<f64>,
 }
 
 #[derive(Args, Debug, Default)]
@@ -445,6 +476,7 @@ mod tests {
         "config init",
         "config validate",
         "config edit",
+        "mcp",
         "doctor",
         "completions",
         "version",

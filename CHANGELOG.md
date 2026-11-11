@@ -23,6 +23,8 @@ uses as the release notes, so every release needs its entry before it is merged 
 * `/model` with no reference opens a picker of what the connected accounts serve, with context window, prices (`n/a` when the table has none) and capabilities; it filters by the target's role and sets the lead, a run or a seat (G3, #122).
 * `/login [provider]`, `/logout <account>` and `/accounts`: pick a provider, name the account, type the key into a masked field (a `Secret` from the first keystroke). The verify runs off the UI loop, and the new account is usable at once for a session that started with accounts (G4, #123).
 
+* `/login openrouter` offers the browser login in a modal: the address and the device code the flow prints, `o` to open the browser, `Esc` to cancel the flow. A session that started with no account now runs on the account `/login` adds, with no restart; the fake key and the fake's default model never go to the new account (G4b, #161).
+
 ### Providers
 
 * Gemini has a native adapter, `aibus-provider-gemini`, behind a new `gemini` preset (`api = "gemini-generate-content"`, key in `x-goog-api-key`, `GEMINI_API_KEY`). It keeps thought signatures across tool turns, streams thought summaries, reports reasoning and cached tokens, counts tokens through `countTokens`, and has a priced model table. `gemini-openai` (the OpenAI shim) is unchanged. See `docs/PROVIDERS.md` and D-14.

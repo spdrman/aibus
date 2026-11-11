@@ -725,6 +725,12 @@ pub enum Msg {
         ok: bool,
         text: String,
     },
+    /// A browser login the terminal started has something to show: the authorization address, or
+    /// the device code. `line` is for the modal only; the graph and the logs never keep it.
+    AccountPrompt {
+        account: String,
+        line: String,
+    },
     /// The executor's answer to a queued `Command::SetModel` (`id` is the request's). `Ok(None)`
     /// is a seat turned off; `Err` is why nothing changed.
     ModelSwitched {
@@ -774,6 +780,7 @@ impl Msg {
             Msg::AgentsReloaded { .. } => "AgentsReloaded",
             Msg::AccountsReloaded { .. } => "AccountsReloaded",
             Msg::AccountOpDone { .. } => "AccountOpDone",
+            Msg::AccountPrompt { .. } => "AccountPrompt",
             Msg::IoError { .. } => "IoError",
             Msg::Shutdown { .. } => "Shutdown",
             Msg::ModelSwitched { .. } => "ModelSwitched",
@@ -906,6 +913,7 @@ impl Msg {
             Msg::AccountsReloaded { accounts } => {
                 map([("msg", name), ("accounts", n(accounts.len()))])
             }
+            Msg::AccountPrompt { line, .. } => map([("msg", name), ("line_len", len(line))]),
             Msg::AccountOpDone { ok, text, .. } => map([("msg", name), ("ok", Value::Bool(*ok)), ("text_len", len(text))]),
             Msg::IoError { context, error } => map([
                 ("msg", name),

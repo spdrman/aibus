@@ -59,7 +59,8 @@ pub struct Assist {
     forks: AtomicU64,
     /// What `/advisor` and `/router` chose, over the seats above: `None` is no choice yet,
     /// `Some(None)` is the seat turned off.
-    chosen: Mutex<(Option<Option<Seat>>, Option<Option<Seat>>)>,
+    chosen_advisor: Mutex<Option<Option<Seat>>>,
+    chosen_router: Mutex<Option<Option<Seat>>>,
 }
 
 impl Assist {
@@ -69,7 +70,8 @@ impl Assist {
             router,
             ledger: Ledger::default(),
             forks: AtomicU64::new(0),
-            chosen: Mutex::default(),
+            chosen_advisor: Mutex::default(),
+            chosen_router: Mutex::default(),
         })
     }
 
@@ -77,19 +79,19 @@ impl Assist {
     /// for `None`. A seat the session started without cannot be switched on this way, since it
     /// has no definition to speak from.
     pub fn switch(&self, target: ModelTarget, seat: Option<Seat>) {
-        let mut g = self.chosen.lock().unwrap_or_else(PoisonError::into_inner);
-        match target {
-            ModelTarget::Advisor => g.0 = Some(seat),
-            ModelTarget::Router => g.1 = Some(seat),
-            ModelTarget::Lead | ModelTarget::Run(_) => {}
-        }
+        let slot = match target {
+            ModelTarget::Advisor => &self.chosen_advisor,
+            ModelTarget::Router => &self.chosen_router,
+            ModelTarget::Lead | ModelTarget::Run(_) => return,
+        };
+        *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(seat);
     }
 
     /// The advisor as it is now: its definition with the model it was last switched to, or
     /// `None` when it was never configured or has been turned off.
     pub fn advisor_now(&self) -> Option<AdvisorSeat> {
         let base = self.advisor.as_ref()?;
-        match &self.chosen.lock().unwrap_or_else(PoisonError::into_inner).0 {
+        match &*self.chosen_advisor.lock().unwrap_or_else(PoisonError::into_inner) {
             None => Some(base.clone()),
             Some(None) => None,
             Some(Some(seat)) => Some(AdvisorSeat { seat: seat.clone(), ..base.clone() }),
@@ -98,7 +100,7 @@ impl Assist {
 
     pub fn router_now(&self) -> Option<RouterSeat> {
         let base = self.router.as_ref()?;
-        match &self.chosen.lock().unwrap_or_else(PoisonError::into_inner).1 {
+        match &*self.chosen_router.lock().unwrap_or_else(PoisonError::into_inner) {
             None => Some(base.clone()),
             Some(None) => None,
             Some(Some(seat)) => Some(RouterSeat { seat: seat.clone(), ..base.clone() }),

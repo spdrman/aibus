@@ -1,10 +1,10 @@
-{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"chunks":[{"k":"text","v":"Looking at the readme."},{"id":"00000000000000000000000001","k":"tool_start","name":"read"}],"msg":"Stream","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\"README.md\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":120,"output_tokens":18}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"msg":"UsageUpdate","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00021,"input_tokens":120,"output_tokens":18}}
-{"call":"00000000000000000000000001","input":{"path":"README.md"},"msg":"ToolCallRequested","name":"read","needs_permission":false,"run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"call":"00000000000000000000000001","content_len":69,"is_error":false,"ms":1,"msg":"ToolCallFinished","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"chunks":[{"k":"text","v":"It is a one-line readme for a demo project."},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":210,"output_tokens":12}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
-{"msg":"UsageUpdate","run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00048,"input_tokens":330,"output_tokens":30}}
-{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":3982460,"secs":0},"error":null,"run_id":"01M6Z6N4ZP60KTNAA9J6MR1Q2W","status":"Completed","summary":"","summary_file":null,"summary_len":43,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00048,"input_tokens":330,"output_tokens":30}},"run":"01M6Z6N4ZP60KTNAA9J6MR1Q2W"}
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"chunks":[{"k":"text","v":"Looking at the readme."},{"id":"00000000000000000000000001","k":"tool_start","name":"read"}],"msg":"Stream","run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\"README.md\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":120,"output_tokens":18,"reasoning_tokens":null}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"msg":"UsageUpdate","run":"01M769A2QEJ7APHANJM2BEWSR4","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00021,"input_tokens":120,"output_tokens":18,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"path":"README.md"},"msg":"ToolCallRequested","name":"read","needs_permission":false,"run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"call":"00000000000000000000000001","content_len":69,"is_error":false,"ms":5,"msg":"ToolCallFinished","run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"chunks":[{"k":"text","v":"It is a one-line readme for a demo project."},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":210,"output_tokens":12,"reasoning_tokens":null}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A2QEJ7APHANJM2BEWSR4"}
+{"msg":"UsageUpdate","run":"01M769A2QEJ7APHANJM2BEWSR4","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00048,"input_tokens":330,"output_tokens":30,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":12236214,"secs":0},"error":null,"run_id":"01M769A2QEJ7APHANJM2BEWSR4","status":"Completed","summary":"","summary_file":null,"summary_len":43,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00048,"input_tokens":330,"output_tokens":30,"reasoning_tokens":null}},"run":"01M769A2QEJ7APHANJM2BEWSR4"}

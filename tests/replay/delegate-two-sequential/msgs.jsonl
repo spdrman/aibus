@@ -1,24 +1,24 @@
-{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"k":"text","v":"Two searches, one after the other."},{"id":"00000000000000000000000001","k":"tool_start","name":"delegate"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"agent\":\"explore\",\"background\":false,\"prompt\":\"map src\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"msg":"UsageUpdate","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"00000000000000000000000001","input":{"agent":"explore","background":false,"prompt":"map src"},"msg":"ToolCallRequested","name":"delegate","needs_permission":false,"run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":"01M6Z6N6S3T1VDAYQB1QRQR1S3","role":"worker","run":"01M6Z6N6SC3WJAR6MTWWH05THC"}
-{"chunks":[{"k":"text","v":"src has a main.rs"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6SC3WJAR6MTWWH05THC"}
-{"msg":"UsageUpdate","run":"01M6Z6N6SC3WJAR6MTWWH05THC","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":1673998,"secs":0},"error":null,"run_id":"01M6Z6N6SC3WJAR6MTWWH05THC","status":"Completed","summary":"","summary_file":null,"summary_len":17,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6SC3WJAR6MTWWH05THC"}
-{"call":"00000000000000000000000001","content_len":193,"is_error":false,"ms":3,"msg":"ToolCallFinished","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"delegate"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"agent\":\"explore\",\"background\":false,\"prompt\":\"map the docs\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"msg":"UsageUpdate","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"00000000000000000000000001","input":{"agent":"explore","background":false,"prompt":"map the docs"},"msg":"ToolCallRequested","name":"delegate","needs_permission":false,"run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":"01M6Z6N6S3T1VDAYQB1QRQR1S3","role":"worker","run":"01M6Z6N6SGG0W95K6JJP9M2QKS"}
-{"chunks":[{"k":"text","v":"the docs are one README"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6SGG0W95K6JJP9M2QKS"}
-{"msg":"UsageUpdate","run":"01M6Z6N6SGG0W95K6JJP9M2QKS","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":1581793,"secs":0},"error":null,"run_id":"01M6Z6N6SGG0W95K6JJP9M2QKS","status":"Completed","summary":"","summary_file":null,"summary_len":23,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6SGG0W95K6JJP9M2QKS"}
-{"call":"00000000000000000000000001","content_len":199,"is_error":false,"ms":4,"msg":"ToolCallFinished","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"chunks":[{"k":"text","v":"Both reports are in: a main.rs and a README."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
-{"msg":"UsageUpdate","run":"01M6Z6N6S3T1VDAYQB1QRQR1S3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":13355019,"secs":0},"error":null,"run_id":"01M6Z6N6S3T1VDAYQB1QRQR1S3","status":"Completed","summary":"","summary_file":null,"summary_len":44,"turns":3,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6S3T1VDAYQB1QRQR1S3"}
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"k":"text","v":"Two searches, one after the other."},{"id":"00000000000000000000000001","k":"tool_start","name":"delegate"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"agent\":\"explore\",\"background\":false,\"prompt\":\"map src\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"msg":"UsageUpdate","run":"01M769A5X3C78TCZ8K3J0T6DXY","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"agent":"explore","background":false,"prompt":"map src"},"msg":"ToolCallRequested","name":"delegate","needs_permission":false,"run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":"01M769A5X3C78TCZ8K3J0T6DXY","role":"worker","run":"01M769A5Y0PBKXP9GZ8VAM9XXG"}
+{"chunks":[{"k":"text","v":"src has a main.rs"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A5Y0PBKXP9GZ8VAM9XXG"}
+{"msg":"UsageUpdate","run":"01M769A5Y0PBKXP9GZ8VAM9XXG","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":10344699,"secs":0},"error":null,"run_id":"01M769A5Y0PBKXP9GZ8VAM9XXG","status":"Completed","summary":"","summary_file":null,"summary_len":17,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A5Y0PBKXP9GZ8VAM9XXG"}
+{"call":"00000000000000000000000001","content_len":193,"is_error":false,"ms":16,"msg":"ToolCallFinished","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"delegate"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"agent\":\"explore\",\"background\":false,\"prompt\":\"map the docs\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"msg":"UsageUpdate","run":"01M769A5X3C78TCZ8K3J0T6DXY","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"agent":"explore","background":false,"prompt":"map the docs"},"msg":"ToolCallRequested","name":"delegate","needs_permission":false,"run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":"01M769A5X3C78TCZ8K3J0T6DXY","role":"worker","run":"01M769A5YH4YP8MRVZZHWZ0J9G"}
+{"chunks":[{"k":"text","v":"the docs are one README"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A5YH4YP8MRVZZHWZ0J9G"}
+{"msg":"UsageUpdate","run":"01M769A5YH4YP8MRVZZHWZ0J9G","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":69252227,"secs":0},"error":null,"run_id":"01M769A5YH4YP8MRVZZHWZ0J9G","status":"Completed","summary":"","summary_file":null,"summary_len":23,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A5YH4YP8MRVZZHWZ0J9G"}
+{"call":"00000000000000000000000001","content_len":199,"is_error":false,"ms":76,"msg":"ToolCallFinished","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"chunks":[{"k":"text","v":"Both reports are in: a main.rs and a README."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A5X3C78TCZ8K3J0T6DXY"}
+{"msg":"UsageUpdate","run":"01M769A5X3C78TCZ8K3J0T6DXY","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":105426459,"secs":0},"error":null,"run_id":"01M769A5X3C78TCZ8K3J0T6DXY","status":"Completed","summary":"","summary_file":null,"summary_len":44,"turns":3,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A5X3C78TCZ8K3J0T6DXY"}

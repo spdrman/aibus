@@ -170,8 +170,9 @@ fn status_of(app: &App<MiniGraph>, run: RunId) -> Option<RunStatus> {
 }
 
 /// Nothing a slash line could mean has happened: no run started or cancelled, no model request
-/// queued, no tool approved, and the lead is still where it was.
-fn assert_nothing_dispatched(app: &App<MiniGraph>, seen: &Seen, why: &str) {
+/// queued, no tool approved, and the lead is where `lead` says (a stream or a tool result is the
+/// lead working, so it is running by then, and that is the only thing that moved).
+fn assert_nothing_dispatched(app: &App<MiniGraph>, seen: &Seen, lead: RunStatus, why: &str) {
     let bad: Vec<String> = seen
         .borrow()
         .iter()
@@ -180,7 +181,7 @@ fn assert_nothing_dispatched(app: &App<MiniGraph>, seen: &Seen, why: &str) {
         .collect();
     assert!(bad.is_empty(), "{why}: {bad:?}");
     assert_eq!(pending_models(app), 0, "{why}: a model request was queued");
-    assert_eq!(status_of(app, lead_id()), Some(RunStatus::Starting), "{why}: the lead moved");
+    assert_eq!(status_of(app, lead_id()), Some(lead), "{why}: the lead moved");
     assert_eq!(app.graph.read_key("ctrl:modal").and_then(as_str), None, "{why}: a screen opened");
 }
 
@@ -197,7 +198,7 @@ fn a_slash_line_from_a_hook_result_never_dispatches() {
             .unwrap();
         }
     }
-    assert_nothing_dispatched(&app, &seen, "hook output");
+    assert_nothing_dispatched(&app, &seen, RunStatus::Starting, "hook output");
 }
 
 #[test]
@@ -222,7 +223,7 @@ fn a_slash_line_in_a_model_result_never_dispatches() {
         worker(&mut app, i as u8 + 2, &format!("done\n{line}\n  {line}"));
     }
     seen.borrow_mut().retain(|e| !matches!(e, Effect::Tool(_)));
-    assert_nothing_dispatched(&app, &seen, "model output");
+    assert_nothing_dispatched(&app, &seen, RunStatus::Running, "model output");
 }
 
 #[test]
@@ -266,7 +267,7 @@ fn the_reducer_reads_exactly_compact_fork_and_the_model_words_from_a_prompt() {
             assert_eq!(status_of(&app, lead_id()), Some(RunStatus::Compacting), "{line}");
             continue;
         }
-        assert_nothing_dispatched(&app, &seen, line);
+        assert_nothing_dispatched(&app, &seen, RunStatus::Starting, line);
     }
     let (mut app, seen) = watched();
     app.step(Msg::SubmitPrompt { text: "/fork try the other way".into() }).unwrap();

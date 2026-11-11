@@ -20,13 +20,17 @@ fn account() -> config::Account {
 async fn expired_store() -> (CredentialStore, Arc<FakeOAuth>, config::Account) {
     let mut flow = FakeOAuth::new(1_000, 3_600);
     flow.refresh_delay = Duration::from_millis(80);
+    let first = flow.authorize(&|_| {}, &CancellationToken::new()).await.unwrap();
+    // The first token ran out at 4,600. A refresh is issued from `now`, so move it on: a token
+    // from the exchange has to outlive the test clock, or the next caller finds it expired too
+    // and rightly refreshes again.
+    flow.now = 10_000;
     let flow = Arc::new(flow);
     // The clock is past the first token's expiry, so every caller finds it expired.
     let store = CredentialStore::new(Arc::new(MemoryKeychain::default()), Redactor::new())
         .with_oauth(flow.clone())
         .with_wall_clock(|| 1_000 + 3_600 + 10);
     let a = account();
-    let first = flow.authorize(&|_| {}, &CancellationToken::new()).await.unwrap();
     store.store_oauth(&a.account_name(), &first).unwrap();
     (store, flow, a)
 }

@@ -1,12 +1,12 @@
-{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"chunks":[{"k":"text","v":"I will write a note."},{"id":"00000000000000000000000001","k":"tool_start","name":"write"}],"msg":"Stream","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"content\":\"hello\",\"path\":\"notes.txt\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"msg":"UsageUpdate","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"00000000000000000000000001","input":{"content":"hello","path":"notes.txt"},"msg":"ToolCallRequested","name":"write","needs_permission":false,"run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"agent":"lead","call":"00000000000000000000000001","id":"01M6Z6N6JWNY7K84YR7XQH2VR1","msg":"PermissionNeeded","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA","summary":"write: /tmp/tmp.U4fRVZbE6l/proj/notes.txt","tool":"write"}
-{"decision":"Deny","id":"01M6Z6N6JWNY7K84YR7XQH2VR1","msg":"PermissionDecided","reason":"no tty"}
-{"call":"00000000000000000000000001","content_len":25,"is_error":true,"ms":2,"msg":"ToolCallFinished","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"chunks":[{"k":"text","v":"The write was refused, so I stopped."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
-{"msg":"UsageUpdate","run":"01M6Z6N6JER9BAJ16V9Q6PYVAA","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":6201109,"secs":0},"error":null,"run_id":"01M6Z6N6JER9BAJ16V9Q6PYVAA","status":"Completed","summary":"","summary_file":null,"summary_len":36,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6JER9BAJ16V9Q6PYVAA"}
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M769A592F2WC77HZTB0KNA4X"}
+{"chunks":[{"k":"text","v":"I will write a note."},{"id":"00000000000000000000000001","k":"tool_start","name":"write"}],"msg":"Stream","run":"01M769A592F2WC77HZTB0KNA4X"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"content\":\"hello\",\"path\":\"notes.txt\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A592F2WC77HZTB0KNA4X"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A592F2WC77HZTB0KNA4X"}
+{"msg":"UsageUpdate","run":"01M769A592F2WC77HZTB0KNA4X","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"content":"hello","path":"notes.txt"},"msg":"ToolCallRequested","name":"write","needs_permission":false,"run":"01M769A592F2WC77HZTB0KNA4X"}
+{"agent":"lead","call":"00000000000000000000000001","id":"01M769A59XS91K4SN7RBQ5PGJ8","msg":"PermissionNeeded","run":"01M769A592F2WC77HZTB0KNA4X","summary":"write: /tmp/tmp.jE7wh3shN4/proj/notes.txt","tool":"write"}
+{"decision":"Deny","id":"01M769A59XS91K4SN7RBQ5PGJ8","msg":"PermissionDecided","reason":"no tty"}
+{"call":"00000000000000000000000001","content_len":25,"is_error":true,"ms":5,"msg":"ToolCallFinished","run":"01M769A592F2WC77HZTB0KNA4X"}
+{"chunks":[{"k":"text","v":"The write was refused, so I stopped."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A592F2WC77HZTB0KNA4X"}
+{"msg":"UsageUpdate","run":"01M769A592F2WC77HZTB0KNA4X","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":17539482,"secs":0},"error":null,"run_id":"01M769A592F2WC77HZTB0KNA4X","status":"Completed","summary":"","summary_file":null,"summary_len":36,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A592F2WC77HZTB0KNA4X"}

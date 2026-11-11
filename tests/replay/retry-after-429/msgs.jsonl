@@ -1,6 +1,6 @@
-{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N59YX3KDK6JQFCCTP4NY"}
-{"chunks":[{"k":"waiting","v":"retrying in 1 s (1/5)"}],"msg":"Stream","run":"01M6Z6N59YX3KDK6JQFCCTP4NY"}
-{"chunks":[{"k":"waiting","v":""}],"msg":"Stream","run":"01M6Z6N59YX3KDK6JQFCCTP4NY"}
-{"chunks":[{"k":"text","v":"recovered"},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":30,"output_tokens":3}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N59YX3KDK6JQFCCTP4NY"}
-{"msg":"UsageUpdate","run":"01M6Z6N59YX3KDK6JQFCCTP4NY","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000045,"input_tokens":30,"output_tokens":3}}
-{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":3494234,"secs":1},"error":null,"run_id":"01M6Z6N59YX3KDK6JQFCCTP4NY","status":"Completed","summary":"","summary_file":null,"summary_len":9,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000045,"input_tokens":30,"output_tokens":3}},"run":"01M6Z6N59YX3KDK6JQFCCTP4NY"}
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M769A3JPXQAZJ49587ZB4CAR"}
+{"chunks":[{"k":"waiting","v":"retrying in 1 s (1/5)"}],"msg":"Stream","run":"01M769A3JPXQAZJ49587ZB4CAR"}
+{"chunks":[{"k":"waiting","v":""}],"msg":"Stream","run":"01M769A3JPXQAZJ49587ZB4CAR"}
+{"chunks":[{"k":"text","v":"recovered"},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":30,"output_tokens":3,"reasoning_tokens":null}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A3JPXQAZJ49587ZB4CAR"}
+{"msg":"UsageUpdate","run":"01M769A3JPXQAZJ49587ZB4CAR","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000045,"input_tokens":30,"output_tokens":3,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":8819796,"secs":1},"error":null,"run_id":"01M769A3JPXQAZJ49587ZB4CAR","status":"Completed","summary":"","summary_file":null,"summary_len":9,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000045,"input_tokens":30,"output_tokens":3,"reasoning_tokens":null}},"run":"01M769A3JPXQAZJ49587ZB4CAR"}

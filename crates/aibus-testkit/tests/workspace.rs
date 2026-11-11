@@ -1,6 +1,6 @@
 //! Build-time facts about the workspace: dependency direction and `forbid(unsafe_code)`.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -10,51 +10,22 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Normal (non-dev, non-build) dependency closure of `name`, by package name.
+/// Normal (non-dev, non-build) dependency closure of `name`, by package name, for every target.
+///
+/// This is `cargo tree`, not `cargo metadata`: metadata's resolve lists a crate's optional
+/// dependencies whether or not a feature turns them on (`ratatui` 0.30 shows `ratatui-termwiz`
+/// and `ratatui-termina` that way, and neither is ever compiled), so a guard built on it blames
+/// crates for code that is not in the build. `cargo tree` prints what the feature set links.
 fn closure(name: &str) -> BTreeSet<String> {
     let out = Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1", "--locked"])
+        .args(["tree", "--locked", "--target", "all", "-e", "normal", "--prefix", "none", "-f", "{p}", "-p", name])
         .current_dir(root())
         .output()
-        .expect("run cargo metadata");
+        .expect("run cargo tree");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let meta: Value = serde_json::from_slice(&out.stdout).expect("metadata json");
-
-    let names: HashMap<&str, &str> = meta["packages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap()))
-        .collect();
-    let edges: HashMap<&str, Vec<&str>> = meta["resolve"]["nodes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|n| {
-            let deps = n["deps"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|d| {
-                    d["dep_kinds"].as_array().unwrap().iter().any(|k| k["kind"].is_null())
-                })
-                .map(|d| d["pkg"].as_str().unwrap())
-                .collect();
-            (n["id"].as_str().unwrap(), deps)
-        })
-        .collect();
-
-    let start = names.iter().find(|(_, n)| **n == name).map(|(id, _)| *id).expect("crate exists");
-    let mut seen = BTreeSet::new();
-    let mut todo = vec![start];
-    while let Some(id) = todo.pop() {
-        for dep in &edges[id] {
-            if seen.insert(names[dep].to_string()) {
-                todo.push(dep);
-            }
-        }
-    }
-    seen
+    let text = String::from_utf8(out.stdout).expect("cargo tree is utf-8");
+    // The first line is `name` itself; every other line is `name vX.Y.Z [(path)] [(*)]`.
+    text.lines().skip(1).filter_map(|l| l.split_whitespace().next()).map(str::to_owned).collect()
 }
 
 #[test]
@@ -131,9 +102,10 @@ fn graph_has_no_workspace_deps() {
 
 #[test]
 fn every_crate_forbids_unsafe_code() {
-    let mut checked = 0;
+    let (mut checked, mut crates) = (0, 0);
     for entry in std::fs::read_dir(root().join("crates")).unwrap() {
         let dir = entry.unwrap().path();
+        crates += 1;
         for file in ["src/lib.rs", "src/main.rs"] {
             let path = dir.join(file);
             if path.exists() {
@@ -147,8 +119,8 @@ fn every_crate_forbids_unsafe_code() {
             }
         }
     }
-    // Ten workspace members plus aibus-graph-causl, which sits outside the workspace.
-    assert_eq!(checked, 11, "expected one root file per crate");
+    // Every directory under crates/ is a crate, aibus-graph-causl (outside the workspace) included.
+    assert_eq!(checked, crates, "expected one root file per crate");
 }
 
 #[test]

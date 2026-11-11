@@ -325,7 +325,7 @@ async fn the_cloud_factory_builds_both_from_a_provider_config_and_asks_the_token
     def.region = Some("us-east5".into());
     let provider = factory.build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap();
     assert_eq!(provider.id().0, "vertex");
-    let (result, _) = collect(&provider, &cred(AuthMethodKind::None), request("hi")).await;
+    let (result, _) = collect(&*provider, &cred(AuthMethodKind::None), request("hi")).await;
     result.unwrap();
     assert_eq!(*spy.0.lock().unwrap(), ["work"]);
     let seen = server.received_requests().await.unwrap();

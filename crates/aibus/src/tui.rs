@@ -155,7 +155,7 @@ fn account_op(
             (
                 "login",
                 name.clone(),
-                AccountCmd::Add(AccountAdd { name, provider, key_stdin: false, env: None, file: None, oauth: true, base_url: None, label: None }),
+                AccountCmd::Add(AccountAdd { name, provider, key_stdin: false, env: None, file: None, oauth: true, base_url: None, label: None, region: None, project: None }),
                 None,
             )
         }
@@ -180,7 +180,7 @@ fn account_op(
         let mut io = Io {
             paths: paths.clone(),
             keychain: Arc::new(crate::keychain::OsKeychain),
-            factories: crate::providers::builtin_factories(),
+            factories: crate::providers::os_factories(&redactor),
             env: Arc::new(|v| std::env::var(v).ok()),
             redactor: redactor.clone(),
             // The browser is opened by `o` in the modal, and there is no stdin to paste on.
@@ -205,7 +205,7 @@ fn account_op(
         };
         // The accounts changed: the new set is usable by the next pick, and the screens show it.
         if ok && what != "test" {
-            match crate::startup::reload_accounts(&paths, &project_settings, &crate::providers::builtin_factories()) {
+            match crate::startup::reload_accounts(&paths, &project_settings, &crate::providers::os_factories(&redactor)) {
                 Ok((registry, accounts, defaults)) => {
                     if let Some(Err(why)) = launcher.as_ref().map(|l| l.set_accounts(registry, &accounts, &defaults)) {
                         text.push_str(&format!(" (this session keeps the built-in fake: {why})"));

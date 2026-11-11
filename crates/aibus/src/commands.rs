@@ -11,7 +11,6 @@ use serde_json::json;
 use crate::account::{self, Io};
 use crate::cli::{AccountCmd, ConfigCmd, Global};
 use crate::keychain::OsKeychain;
-use crate::providers::builtin_factories;
 
 /// The account commands against the real keychain, environment, terminal and providers.
 pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
@@ -26,7 +25,7 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
     let mut io = Io {
         paths: g.paths()?,
         keychain: Arc::new(OsKeychain),
-        factories: builtin_factories(Arc::new(aibus_core::CredentialStore::new(Arc::new(OsKeychain), redactor.clone()))),
+        factories: crate::providers::os_factories(redactor),
         env: Arc::new(|v| std::env::var(v).ok()),
         redactor: redactor.clone(),
         oauth: match cmd {

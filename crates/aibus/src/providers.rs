@@ -33,6 +33,11 @@ pub fn builtin_factories(store: Arc<CredentialStore>) -> Vec<Box<dyn ProviderFac
     ]
 }
 
+/// The built-in factories with the real keychain behind Vertex's token cache.
+pub fn os_factories(redactor: &aibus_core::Redactor) -> Vec<Box<dyn ProviderFactory>> {
+    builtin_factories(Arc::new(CredentialStore::new(Arc::new(crate::keychain::OsKeychain), redactor.clone())))
+}
+
 /// What each provider id is built from: its definition (the preset of that id, the user's
 /// `[[provider]]` of that id, or both), the settings of the enabled accounts that use it, and
 /// where the model tables live. A provider is one instance per id, so an id carries its URL:

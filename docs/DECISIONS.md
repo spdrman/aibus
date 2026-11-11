@@ -172,7 +172,7 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 
 ## F8 (2026-11-11): the model catalog, the sync tool and reported cost
 
-**Context.** #116 moves the three built-in tables to `catalog/`, adds a reviewed sync tool, dated prices and the gateway-reported cost. The epic's open decision 2 (catalog source) gates it, and two other issues (#110 provider definitions, #111 per-model capabilities) are not in the tree yet.
+**Context.** #116 moves the three built-in tables to `catalog/`, adds a reviewed sync tool, dated prices and the gateway-reported cost. The epic's open decision 2 (catalog source) gates it, and #111 (per-model capabilities) is not in the tree yet. #110 landed while I was working, so the catalog follows its presets.
 
 **Decision.**
 
@@ -180,11 +180,30 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 2. The tool is a bin in `aibus-testkit` (`catalog-sync`), with the logic in a pure function (`catalog_sync::plan`) that the tests call. Dry run is the default and `--write` applies. It updates the models already in a catalog and only adds new ones with `--add-new`, because models.dev lists embeddings, audio and retired models we do not want in a table.
 3. Capabilities are written as `capabilities: {tool_call, reasoning, input_modalities}` using models.dev's names, and `ModelEntry` ignores them for now. #111 can rename or consume them. The `price_of` alias column is not added: no alias column exists in the tree yet, and snapshots already resolve through the undated id.
 4. `price_from` is a second row with the same `id`. `layer()` keys on `(id, price_from)`, and an undated row from the user's `models.json` also drops the earlier dated rows of that id, so your override is not undone when a built-in future price starts. `price()` uses the wall clock; `price_at` takes a time so tests need no clock.
-5. Gateway cost is recognised for `openai-compatible` accounts whose `base_url` contains `openrouter.ai`, since the `openrouter` preset arrives with #110. When #110 lands the check should move to the preset. A run total is marked `provider` as soon as one turn was.
+5. Gateway cost is recognised for the `openrouter` preset (and any definition whose `base_url` contains `openrouter.ai`). A run total is marked `provider` as soon as one turn was.
+6. Every preset that names a built-in table has a `catalog/<name>.json`, including the eleven whose tables were inline in `presets.json` (they moved, and the preset now names them). The nine presets that ship no models (local servers, Azure, the generic server) name `empty` and have no file, because an empty file would only pad the directory. `aibus_provider::catalog::table(name)` is the one place that `include_str!`s them, used by the Anthropic and OpenAI adapters.
 
 **Alternatives.** Fetching the snapshot inside the tool (rejected: it is the fetch we said we would not do). Adding every model of a provider by default (rejected, above). A separate file for dated prices (rejected: one model, one place).
 
 **Why.** One source for the tables, a diff to review for every price change, and nothing in the binary that talks to a third party.
+
+## F2 (2026-11-11): providers are definitions, instances are per id
+
+**Context.** Five provider ids were code (`providers.rs` listed five factories, `kimi` was a flavour inside the OpenAI crate), so a new vendor meant a new factory and two local servers could not coexist: `provider_configs` refused two accounts of one id with different URLs.
+
+**Decision.** A provider is a `ProviderDef` (api, base URL, env vars, auth methods, model table, prefixes, compat flags, headers). Presets live in `presets.json` in `aibus-provider`; a `[[provider]]` table overrides a preset field by field or defines a new id. The registry builds one instance per id with the factory that serves the definition's `api`. The factories keep their ids (`anthropic`, `openai`) and now also report which apis they serve (`ProviderFactory::apis`), so the binary registers one adapter per wire and `Factory::kimi()` and `compatible()` stay only as constructors for the presets of those names. Provider ids became leaked `&'static str` (one leak per distinct id, at startup), because `ProviderId` holds a `&'static str` and user ids are not known at compile time.
+
+Gated calls, taken at the recommended default:
+
+* The old conflict error stays for the old form only (two accounts of one id with different `base_url` or `api` on the accounts). With `[[provider]]` ids the situation cannot arise, and keeping the error for the old form is safer than guessing which URL gets which key. The message now points at `[[provider]]`.
+* `[[provider]]` is user-file only, like `[[account]]`, since it decides where a key is sent.
+* A user-supplied `compat` replaces the preset's whole instead of merging per flag, to keep the merge rule one sentence long.
+* Model tables for the new cloud presets list one or two models without prices; an unknown price is `n/a`, never a guess.
+
+**Alternatives.** One factory per vendor (rejected: it is exactly the code-per-vendor this removes). Resolving the instance per account instead of per id (rejected: `registry.get(&account.provider)` is used in four places in core and the id is the cleaner key). Merging `compat` flag by flag (rejected for now: needs an `Option` per flag).
+
+**Why.** The vendor is data and the wire is code, so adding Groq is a review of a JSON entry.
+
 
 ## G5 (2026-11-11): the per-agent commands
 

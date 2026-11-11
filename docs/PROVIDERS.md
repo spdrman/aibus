@@ -2,16 +2,72 @@
 
 What the real providers (B1.5) read from the config and from disk. The account fields are in 04 section 4; this is the part that is specific to the code.
 
-## Accounts
+## Providers are data
 
-| Provider id | Crate | Default `base_url` | Notes |
-|---|---|---|---|
-| `anthropic` | `aibus-provider-anthropic` | `https://api.anthropic.com` | Messages API. `auth = { env = ... }`, `keyring` or `file` send `x-api-key`. Leave `/v1` off the `base_url`. |
-| `openai` | `aibus-provider-openai` | `https://api.openai.com/v1` | Chat Completions by default; `api = "responses"` on the account switches that account to the Responses API. |
-| `kimi` | `aibus-provider-openai` | `https://api.moonshot.ai/v1` | Chat Completions only (`api = "responses"` is a config error). Its own model and price table. |
-| `openai-compatible` | `aibus-provider-openai` | none, `base_url` is required | Ollama, vLLM, LM Studio. `auth = { none = true }` sends no key at all. |
+A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `openai-chat` or `openai-responses`, and that is the only part that is code (`aibus-provider-anthropic` serves the first, `aibus-provider-openai` the other two). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
 
-One provider id is one client for all its accounts, so two enabled accounts with the same `provider` must agree on `base_url` and `api`. If they do not, startup stops and names both accounts, because picking one would send the other account's key to the wrong server. Two local servers therefore need two ids, which `openai-compatible` does not offer yet (see the PR).
+An account says `provider = "<id>"`. The registry builds one instance per id, so an id carries its URL: two Ollama servers are two ids, and nothing conflicts.
+
+### Presets
+
+Nothing to write for these:
+
+| Provider id | Wire | Default `base_url` | Key variable | Notes |
+|---|---|---|---|---|
+| `anthropic` | `anthropic-messages` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | Messages API. Leave `/v1` off the `base_url`. |
+| `openai` | `openai-chat` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `api = "openai-responses"` switches it to the Responses API. |
+| `kimi` | `openai-chat` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | Chat Completions only. Its own model and price table. |
+| `openai-compatible` | `openai-chat` | yours | none | Kept for migration. `base_url` is required; `auth = { none = true }` sends no key. |
+| `groq` | `openai-chat` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` |  |
+| `mistral` | `openai-chat` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |  |
+| `deepseek` | `openai-chat` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` |  |
+| `xai` | `openai-chat` | `https://api.x.ai/v1` | `XAI_API_KEY` |  |
+| `together` | `openai-chat` | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` |  |
+| `fireworks` | `openai-chat` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` |  |
+| `cerebras` | `openai-chat` | `https://api.cerebras.ai/v1` | `CEREBRAS_API_KEY` |  |
+| `deepinfra` | `openai-chat` | `https://api.deepinfra.com/v1/openai` | `DEEPINFRA_API_KEY` |  |
+| `perplexity` | `openai-chat` | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` | Search models; no `/v1` in the path. |
+| `openrouter` | `openai-chat` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |  |
+| `azure-openai` | `openai-chat` | yours | `AZURE_OPENAI_API_KEY` | Key in the `api-key` header, `?api-version=` on every call. `base_url` is your deployment: `https://<resource>.openai.azure.com/openai/deployments/<deployment>`. |
+| `ollama` | `openai-chat` | `http://127.0.0.1:11434/v1` | none | Local, no key needed. |
+| `lm-studio` | `openai-chat` | `http://127.0.0.1:1234/v1` | none | Local, no key needed. |
+| `vllm` | `openai-chat` | `http://127.0.0.1:8000/v1` | `VLLM_API_KEY` | Local, no key needed. |
+| `llama-cpp` | `openai-chat` | `http://127.0.0.1:8080/v1` | none | Local, no key needed. |
+| `litellm` | `openai-chat` | `http://127.0.0.1:4000/v1` | `LITELLM_API_KEY` | Local, no key needed. |
+| `gemini-openai` | `openai-chat` | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | Google's `/v1beta/openai` shim, a subset of Chat Completions. |
+
+A model table is the built-in list for that vendor (a start, sizes only, no prices unless I know one), refreshed from the API and overridable as described under "Model tables". A model that is not listed still resolves when its id starts with one of the preset's `prefixes`.
+
+### `[[provider]]`
+
+For a server the presets do not know, or to change a preset (a gateway in front of Groq, an extra header):
+
+```toml
+[[provider]]
+id = "ollama-home"
+api = "openai-chat"                 # anthropic-messages | openai-chat | openai-responses
+base_url = "http://10.0.0.5:11434/v1"
+headers = { "x-team" = "home" }     # never a secret
+
+[[account]]
+name = "home"
+provider = "ollama-home"
+auth = { none = true }
+```
+
+Rules:
+
+* A `[[provider]]` with the id of a preset overrides that preset field by field: what you leave out stays the preset's. `headers` and `query` merge; `compat`, if you give it, replaces the preset's whole.
+* A new id with an OpenAI `api` starts from `openai-compatible` (open aliases, logprobs on, no cache or effort claims), so `id`, `api` and `base_url` are enough.
+* `headers` and `query` are checked like `auth.key` is: a name that looks like a credential (`authorization`, `api-key`, anything with `auth`, `key`, `token`, `secret`, `cookie`) is rejected, because credentials do not go in config. Azure's `api-key` header is the preset's `compat.auth_header`, not a header you write.
+* `[[provider]]` is read from the user file only, like `[[account]]`: a project file cannot point a key at another server. It is ignored there with a warning.
+* `base_url` must start with `http://` or `https://`, and `api` must be one of the three.
+
+`aibus doctor` lists every configured provider with its wire, its URL and where the definition came from (a preset, a `[[provider]]`, or both). `aibus account add NAME --provider groq` asks for the key and names `GROQ_API_KEY` as the environment alternative (`--env GROQ_API_KEY`).
+
+### Old configs
+
+A 0.1.0 config loads unchanged (`fixtures/config/` has one per id). `base_url` and `api` on an account still work and are laid over the provider's definition. `provider = "openai-compatible"` with a `base_url` keeps working, and `aibus doctor` suggests the `[[provider]]` form. `api = "responses"` on an `openai` account is the same as `provider = "openai"` with `api = "openai-responses"`. Two accounts of one id that set different `base_url`s or `api`s in the old form are still an error, since one instance cannot serve both; the fix is two `[[provider]]` ids.
 
 ## Claude on Bedrock and Vertex
 
@@ -52,13 +108,13 @@ The files share one shape:
 
 ### The catalog
 
-The built-in table is not inside a provider crate any more: it is `catalog/<provider>.json` at the repo root, one file per provider, and the crates `include_str!` it from there, so there is exactly one copy. A priced row always writes all four buckets (`cache_write_per_mtok: null` means the provider has no separate rate, which is different from a key that was forgotten). `crates/aibus-testkit/tests/catalog.rs` runs in the default test run and checks that every provider has a file, that every file parses, that no crate keeps a second copy, and that the files are in the layout the sync tool writes.
+The built-in table is not inside a provider crate any more: it is `catalog/<name>.json` at the repo root, one file per table a preset names (`model_table` in `presets.json` is now always a name), and `aibus_provider::catalog::table` is the one place that `include_str!`s them, so there is exactly one copy. A preset that ships no models (a local server, Azure) names `empty` and has no file. A priced row always writes all four buckets (`cache_write_per_mtok: null` means the provider has no separate rate, which is different from a key that was forgotten). `crates/aibus-testkit/tests/catalog.rs` runs in the default test run and checks that every provider has a file, that every file parses, that no crate keeps a second copy, and that the files are in the layout the sync tool writes.
 
 `catalog-sync` (`cargo run -p aibus-testkit --bin catalog-sync -- --snapshot api.json`) refreshes the files from a saved copy of the [models.dev](https://models.dev) data set. It never fetches anything, it is not part of the build, and the binary never runs it: I save the snapshot myself (the licence has to be confirmed before the first sync, see D-F8 in `docs/DECISIONS.md`), run the tool, read `git diff` and commit. It maps `limit.context` and `limit.output` to the sizes, `cost.input`, `output`, `cache_read` and `cache_write` to the four buckets, and `tool_call`, `reasoning` and `modalities.input` to a `capabilities` object. By default it only updates models that are already in the catalog (`--add-new` adds the rest), it leaves rows with a `price_from` alone, it prints a note per change and writes nothing without `--write`, and it refuses to write when a model would lose a price bucket it has today unless you pass `--allow-price-removal`. Prices change only through a reviewed PR.
 
 A row can carry `price_from` (epoch seconds). Put the announced price in a second row with the same `id` and the date it starts, and `price()` picks the row with the latest `price_from` that has started, by the wall clock of the request. Usage that is already in the graph keeps the `cost_usd` it was given, it is never repriced. Your own `models.json` still wins over both rows.
 
-For a gateway that reports what a request cost (OpenRouter, an `openai-compatible` account whose `base_url` is on `openrouter.ai`), the request asks for it with `usage: {"include": true}`, `usage.cost` in the response replaces the table's estimate, and `Usage.cost_source` is `provider` instead of `table`, so a dashboard can mark it. A response without `usage.cost` falls back to the table. Nothing changes at run time otherwise: the API's model list still refreshes into `~/.cache/aibus/models/`, and aibus still fetches no third-party catalog.
+For a gateway that reports what a request cost (the `openrouter` preset, or any definition whose `base_url` is on `openrouter.ai`), the request asks for it with `usage: {"include": true}`, `usage.cost` in the response replaces the table's estimate, and `Usage.cost_source` is `provider` instead of `table`, so a dashboard can mark it. A response without `usage.cost` falls back to the table. Nothing changes at run time otherwise: the API's model list still refreshes into `~/.cache/aibus/models/`, and aibus still fetches no third-party catalog.
 
 The sizes for a model that only the API list knows (no table entry) are a guess (128k context, 8k output; 32k and 4k for `openai-compatible`). Put the real numbers in your `models.json`.
 

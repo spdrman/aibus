@@ -1,0 +1,6 @@
+{
+  "models": [
+    {"id": "openai/gpt-4.1", "context_window": 1047576, "max_output": 32768, "family": "gpt", "deprecated": false}
+  ],
+  "families": {}
+}

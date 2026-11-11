@@ -1,0 +1,7 @@
+{
+  "models": [
+    {"id": "sonar", "context_window": 127072, "max_output": 8192, "family": "sonar", "deprecated": false},
+    {"id": "sonar-pro", "context_window": 200000, "max_output": 8192, "family": "sonar", "deprecated": false}
+  ],
+  "families": {}
+}

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use aibus_provider::models::ModelTable;
+use aibus_provider::presets::{presets, ModelTableSpec};
 use aibus_provider::{ModelId, ProviderConfig};
 use aibus_testkit::catalog_sync::{plan, SOURCES};
 use serde_json::Value;
@@ -92,23 +93,22 @@ fn the_move_to_catalog_changed_no_models_or_price_result() {
 #[test]
 fn every_preset_has_a_catalog_file_that_parses_and_prices_are_complete() {
     let files = catalog_files();
-    // The preset list lands with the provider definitions; until then the three built-in
-    // providers are the presets.
-    let mut presets: Vec<String> = SOURCES.iter().map(|(n, _)| (*n).to_owned()).collect();
-    if let Ok(text) = std::fs::read_to_string(root().join("presets.json")) {
-        let v: Value = serde_json::from_str(&text).expect("presets.json parses");
-        let ids: Vec<String> = match &v {
-            Value::Object(m) => m.get("presets").and_then(Value::as_array).map_or_else(
-                || m.keys().cloned().collect(),
-                |a| a.iter().filter_map(|p| p["id"].as_str().map(str::to_owned)).collect(),
-            ),
-            Value::Array(a) => a.iter().filter_map(|p| p["id"].as_str().map(str::to_owned)).collect(),
-            _ => Vec::new(),
-        };
-        presets.extend(ids);
+    let mut named = Vec::new();
+    for p in presets() {
+        match &p.model_table {
+            // A server that lists its own models (a local one, Azure) ships no table.
+            Some(ModelTableSpec::Named(n)) if n == "empty" => {}
+            Some(ModelTableSpec::Named(n)) => {
+                assert!(files.contains_key(n), "preset {} names table {n}, which has no catalog/{n}.json", p.id);
+                assert!(aibus_provider::catalog::table(n).is_some(), "catalog::table does not know {n}");
+                named.push(n.clone());
+            }
+            other => panic!("preset {} keeps its table inline ({other:?}); it belongs in catalog/", p.id),
+        }
     }
-    for p in &presets {
-        assert!(files.contains_key(p), "preset {p} has no catalog/{p}.json");
+    for name in files.keys() {
+        assert!(named.contains(name), "catalog/{name}.json is not used by any preset");
+        assert!(SOURCES.iter().any(|(n, _)| n == name), "catalog-sync does not know where {name} comes from");
     }
     for (name, text) in &files {
         let v: Value = serde_json::from_str(text).unwrap_or_else(|e| panic!("catalog/{name}.json: {e}"));
@@ -126,15 +126,16 @@ fn every_preset_has_a_catalog_file_that_parses_and_prices_are_complete() {
 }
 
 #[test]
-fn the_provider_crates_include_their_tables_from_catalog_and_have_no_copy() {
-    for krate in ["aibus-provider-anthropic", "aibus-provider-openai"] {
+fn only_aibus_provider_includes_tables_and_only_from_catalog_so_no_crate_keeps_a_copy() {
+    for krate in ["aibus-provider", "aibus-provider-anthropic", "aibus-provider-openai"] {
         let src = root().join("crates").join(krate).join("src");
         for e in std::fs::read_dir(&src).unwrap() {
             let p = e.unwrap().path();
-            assert!(p.extension().is_none_or(|x| x != "json"), "{} is a second copy of a table", p.display());
+            let is_preset_file = p.file_name().is_some_and(|n| n == "presets.json");
+            assert!(p.extension().is_none_or(|x| x != "json") || is_preset_file, "{} is a second copy of a table", p.display());
             if p.extension().is_some_and(|x| x == "rs") {
                 for line in read(&p).lines().filter(|l| l.contains("include_str!") && l.contains(".json")) {
-                    assert!(line.contains("/catalog/"), "{}: {line}", p.display());
+                    assert!(line.contains("/catalog/") || line.contains("presets.json"), "{}: {line}", p.display());
                 }
             }
         }

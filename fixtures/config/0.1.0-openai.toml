@@ -1,0 +1,7 @@
+# A 0.1.0 config: OpenAI on the Responses API, key from the environment.
+[[account]]
+name = "oa"
+provider = "openai"
+api = "responses"
+auth = { env = "OPENAI_API_KEY" }
+default_model = "gpt-5"

@@ -8,7 +8,22 @@ use serde_json::{Map, Number, Value};
 
 /// Where each catalog file's rows come from in the models.dev data set. A file not listed here
 /// is looked up under its own name.
-pub const SOURCES: [(&str, &str); 3] = [("anthropic", "anthropic"), ("openai", "openai"), ("kimi", "moonshotai")];
+pub const SOURCES: [(&str, &str); 14] = [
+    ("anthropic", "anthropic"),
+    ("openai", "openai"),
+    ("kimi", "moonshotai"),
+    ("groq", "groq"),
+    ("mistral", "mistral"),
+    ("deepseek", "deepseek"),
+    ("xai", "xai"),
+    ("together", "togetherai"),
+    ("fireworks", "fireworks-ai"),
+    ("cerebras", "cerebras"),
+    ("deepinfra", "deepinfra"),
+    ("perplexity", "perplexity"),
+    ("openrouter", "openrouter"),
+    ("gemini-openai", "google"),
+];
 
 const BUCKETS: [&str; 4] = ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"];
 

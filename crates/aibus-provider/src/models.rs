@@ -60,7 +60,7 @@ pub struct ModelTable {
     families: BTreeMap<SmolStr, f64>,
     /// A full id with one of these prefixes resolves even when the table has not heard of it,
     /// so a model released after the table was written still works (without a price).
-    prefixes: &'static [&'static str],
+    prefixes: Vec<String>,
     /// An alias target resolves whatever it is: a local server names its own models.
     open_aliases: bool,
 }
@@ -83,7 +83,7 @@ impl ModelTable {
         provider: &str,
         builtin: &str,
         cfg: &ProviderConfig,
-        prefixes: &'static [&'static str],
+        prefixes: &[&str],
         open_aliases: bool,
     ) -> Result<Self, ConfigError> {
         let bad = |e: String| ConfigError::Invalid(provider.to_owned(), e);
@@ -91,7 +91,7 @@ impl ModelTable {
         let mut t = Self {
             entries: Vec::new(),
             families: BTreeMap::new(),
-            prefixes,
+            prefixes: prefixes.iter().map(|p| (*p).to_owned()).collect(),
             open_aliases,
         };
         t.layer(base, false);
@@ -209,7 +209,7 @@ impl ModelTable {
         };
         let id = ModelId(id);
         let known = self.entry(&id).is_some()
-            || self.prefixes.iter().any(|p| id.0.starts_with(p))
+            || self.prefixes.iter().any(|p| id.0.starts_with(p.as_str()))
             || (aliased && self.open_aliases);
         known.then_some(id)
     }

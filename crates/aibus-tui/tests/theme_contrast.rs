@@ -316,3 +316,25 @@ fn the_rataflow_palette_meets_3_on_bg_and_panel() {
     let mono = aibus_tui::diagram::palette(&Theme::mono());
     assert_eq!([mono.muted, mono.accent, mono.text, mono.canvas_bg], [Color::Reset; 4]);
 }
+
+/// The colours the `Dotted` edge paints with, on `bg` and `panel`: the travelling dots (`lead`,
+/// `swarm`) and the pulsing arrow head (`dim_text`) clear 3:1. The rule itself is `dim`, the
+/// sampled decorative colour pinned above: 2.76 / 2.62 in the recording theme, which is under 3:1
+/// and is the same colour the hand-drawn connectors have always used, so it stays (the frames must
+/// not change); the light theme's rule clears it (3.55 / 3.89).
+/// Measured: recording lead 8.11 / 7.69, swarm 6.79 / 6.43, dim_text 5.91 / 5.60; light lead
+/// 6.06 / 6.65, swarm 6.43 / 7.05, dim_text 6.95 / 7.63.
+#[test]
+fn the_dotted_edge_colours_meet_3_on_bg_and_panel() {
+    for (name, t) in [("recording", Theme::recording()), ("light", Theme::light())] {
+        for (role, colour) in [("lead", t.lead), ("swarm", t.swarm), ("dim_text", t.dim_text)] {
+            for (on, bg) in [("bg", t.bg), ("panel", t.panel)] {
+                let r = ratio(colour, bg);
+                println!("{name}: dotted {role} on {on} = {r:.2}");
+                assert!(r >= 3.0, "{name}: dotted {role} on {on} is {r:.2}");
+            }
+        }
+    }
+    let light = Theme::light();
+    assert!(ratio(light.dim, light.bg) >= 3.0 && ratio(light.dim, light.panel) >= 3.0);
+}

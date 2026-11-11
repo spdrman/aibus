@@ -59,16 +59,6 @@ const LOG_LINES_KEPT: usize = 128;
 /// A result that reached the lead this recently (ms) still counts as in flight.
 const IN_FLIGHT_MS: i64 = 3000;
 
-/// The menu's items, in order: `(id, label)`.
-pub const MENU_ITEMS: [(&str, &str); 6] = [
-    ("open", "Open transcript"),
-    ("cancel", "Cancel"),
-    ("fork", "Fork"),
-    ("resume", "Resume"),
-    ("copy_id", "Copy id"),
-    ("copy_result", "Copy result"),
-];
-
 fn runs<'a>(t: &mut Tracker<'a>, role: &str) -> Vec<(&'a str, &'a Value)> {
     let Some(order) = t.get_key(RUNS_ORDER) else {
         return Vec::new();
@@ -556,7 +546,7 @@ fn menu(t: &mut Tracker) -> Value {
         .unwrap_or("")
         .to_owned();
     let live = st.is_some_and(|x| x.is_active() || x == RunStatus::Queued);
-    let items = MENU_ITEMS.map(|(item, label)| {
+    let items: Vec<Value> = crate::commands::menu_items().into_iter().map(|(item, label)| {
         let enabled = match item {
             "cancel" => live,
             "resume" => st == Some(RunStatus::Partial),
@@ -565,14 +555,14 @@ fn menu(t: &mut Tracker) -> Value {
             _ => true,
         };
         map([("id", s(item)), ("label", s(label)), ("enabled", Value::Bool(enabled))])
-    });
+    }).collect();
     map([
         ("run_id", s(&id)),
         ("title", s(&name)),
         ("col", get(&m, "col").cloned().unwrap_or(n(0))),
         ("row", get(&m, "row").cloned().unwrap_or(n(0))),
         ("selected", get(&m, "selected").cloned().unwrap_or(n(0))),
-        ("items", list(items.to_vec())),
+        ("items", list(items)),
     ])
 }
 

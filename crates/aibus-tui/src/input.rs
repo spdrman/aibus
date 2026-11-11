@@ -23,7 +23,8 @@ use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventK
 use crate::hit::{HitId, HitKind, Segment};
 use crate::keys::{Action, Ctx, Keymap};
 use crate::layout::{log_for_drag, rail_for_drag};
-use crate::prompt::{send, Prompt, Sent};
+use crate::commands::{self, Env, Via};
+use crate::prompt::{Prompt, Sent};
 use crate::screens::{Entry, EntryKind};
 use crate::transcript::Cells;
 use crate::ui::{Chrome, Drawn, Pointer};
@@ -89,6 +90,8 @@ pub struct Context {
     pub account_rows: Vec<String>,
     /// Names for the prompt's completion.
     pub agents: Vec<String>,
+    /// Every run, oldest first, with its agent (the `@target` of a command).
+    pub runs: Vec<(RunId, String)>,
     /// Some run has finished: quitting asks how it went.
     pub any_runs: bool,
 }
@@ -180,6 +183,16 @@ impl Context {
             .iter()
             .filter_map(|d| get(d, "name").and_then(as_str).map(str::to_owned))
             .collect();
+        let runs: Vec<(RunId, String)> = g
+            .read_key(RUNS_ORDER)
+            .map_or(&[][..], as_list)
+            .iter()
+            .filter_map(as_str)
+            .filter_map(|id| {
+                let agent = g.read_key(&run_key(id, "meta")).and_then(|m| get(m, "agent")).and_then(as_str)?;
+                Some((id.parse().ok()?, agent.to_owned()))
+            })
+            .collect();
         let any_runs = !g.read_key(RUNS_ORDER).map_or(&[][..], as_list).is_empty();
         let permission_summary = view(PERMISSION).and_then(|p| get(p, "summary")).and_then(as_str).unwrap_or("").to_owned();
         Self {
@@ -198,7 +211,22 @@ impl Context {
             agent_rows,
             account_rows,
             agents,
+            runs,
             any_runs,
+        }
+    }
+
+    /// The session as the commands see it. The dashboard passes no workflows yet, so the `/fix`
+    /// family stays out of the popup and out of reach, as before.
+    pub fn env<'a>(&'a self, workflows: &'a [String]) -> Env<'a> {
+        Env {
+            agents: &self.agents,
+            workflows,
+            lead: self.lead_run,
+            focused: (self.chrome.focus == Pane::Cards).then_some(self.selected_run).flatten(),
+            runs: &self.runs,
+            accounts: true,
+            mcp: true,
         }
     }
 
@@ -554,24 +582,11 @@ impl Input {
 
     /// What choosing item `i` of the menu does, then the menu closes. An item that does not apply
     /// does nothing and the menu stays.
-    fn pick(menu: &Menu, i: usize, out: &mut Out) {
+    fn pick(menu: &Menu, i: usize, cx: &Context, out: &mut Out) {
         let Some((item, true)) = menu.items.get(i).map(|(id, on)| (id.as_str(), *on)) else {
             return;
         };
-        let run = menu.run;
-        match item {
-            "open" => out.msgs.push(Msg::Command(Command::OpenTranscript(run))),
-            "cancel" => out.msgs.push(Msg::Command(Command::Cancel { run })),
-            "fork" => out.msgs.push(Msg::Command(Command::Fork {
-                prompt: format!("continue the work of run {run}"),
-                parent: Some(run),
-                run: None,
-            })),
-            "resume" => out.msgs.push(Msg::Command(Command::Resume { run, message: "continue".into(), parent: None })),
-            "copy_id" => out.copy = Some(Clip::Text(run.to_string())),
-            "copy_result" => out.copy = Some(Clip::Result(run)),
-            _ => {}
-        }
+        commands::pick(item, Via::Menu, Some(menu.run), &cx.env(&[]), out);
         out.msgs.push(ui(UiIntent::CloseMenu));
     }
 
@@ -618,7 +633,7 @@ impl Input {
                 HitId::MenuItem(i) => {
                     self.pointer.pressed = Some(id);
                     out.redraw = true;
-                    Self::pick(menu, i, out);
+                    Self::pick(menu, i, cx, out);
                 }
                 HitId::MenuBox => {}
                 _ => out.msgs.push(ui(UiIntent::CloseMenu)),
@@ -980,19 +995,19 @@ impl Input {
             (KeyCode::Enter, ..) if prompt.accept_popup() => {}
             (KeyCode::Enter, ..) => {
                 if let Some(line) = prompt.take() {
-                    match send(&line, &cx.agents, &[]) {
+                    match commands::send(&line, &cx.env(&[])) {
                         Sent::Msgs(m) => out.msgs.extend(m),
                         Sent::Bad(why) => prompt.notice = Some(why),
                     }
                 }
             }
             (KeyCode::Tab, ..) => {
-                let (_, found) = prompt.candidates(&cx.agents, &[]);
+                let (_, found) = prompt.candidates(&cx.env(&[]));
                 if prompt.popup.is_some() || !found.is_empty() {
                     if shift {
                         prompt.shift_tab();
                     } else {
-                        prompt.tab(&cx.agents, &[]);
+                        prompt.tab(&cx.env(&[]));
                     }
                 } else if let Some(action) = keys.lookup(ev, Ctx::Prompt) {
                     self.act(action, cx, drawn, prompt, out);
@@ -1093,27 +1108,9 @@ impl Input {
             }
             Scr::Run => {
                 let Some(id) = cx.palette.get(sel) else { return };
-                let lead = cx.lead_run;
                 let close = cmd(Command::CloseModal);
                 match id.split_once(':') {
-                    Some(("cmd", "agents")) => out.msgs.push(cmd(Command::OpenScreen(Screen::Agents))),
-                    Some(("cmd", "accounts")) => out.msgs.push(cmd(Command::OpenScreen(Screen::Accounts))),
-                    Some(("cmd", "help")) => out.msgs.push(cmd(Command::OpenHelp)),
-                    Some(("cmd", "lead")) => match lead {
-                        Some(run) => out.msgs.push(cmd(Command::OpenTranscript(run))),
-                        None => out.msgs.push(close),
-                    },
-                    Some(("cmd", "permission")) => out.msgs.push(ui(UiIntent::ShowPermission)),
-                    Some(("cmd", "handoff")) => out.msgs.extend([close, cmd(Command::CreateHandoff { outcome: None })]),
-                    Some(("cmd", "clear")) => out.msgs.push(cmd(Command::OpenScreen(Screen::ConfirmClear))),
-                    Some(("cmd", "rail")) => out.msgs.extend([close, ui(UiIntent::Focus(Pane::Advisor)), ui(UiIntent::ToggleRail)]),
-                    Some(("cmd", "compact")) => {
-                        out.msgs.push(close);
-                        if let Some(run) = lead {
-                            out.msgs.push(cmd(Command::Compact { run }));
-                        }
-                    }
-                    Some(("cmd", "quit")) => out.msgs.extend([close, cmd(Command::Quit { force: false })]),
+                    Some(("cmd", name)) => commands::pick(name, Via::Palette, None, &cx.env(&[]), out),
                     Some(("agent", name)) => {
                         out.msgs.extend([close, ui(UiIntent::Focus(Pane::Input))]);
                         prompt.set(&format!("@agent-{name} "));
@@ -1236,7 +1233,7 @@ impl Input {
             FocusPrev => out.msgs.push(ui(UiIntent::FocusPrev)),
             Submit => {
                 if let Some(line) = prompt.take() {
-                    match send(&line, &cx.agents, &[]) {
+                    match commands::send(&line, &cx.env(&[])) {
                         Sent::Msgs(m) => out.msgs.extend(m),
                         Sent::Bad(why) => prompt.notice = Some(why),
                     }
@@ -1359,7 +1356,7 @@ impl Input {
             CloseModal => out.msgs.push(cmd(Command::CloseModal)),
             PickMenuItem => {
                 if let Some(menu) = &cx.menu {
-                    Self::pick(menu, menu.selected, out);
+                    Self::pick(menu, menu.selected, cx, out);
                 }
             }
             OpenMenu => {

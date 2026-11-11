@@ -549,6 +549,12 @@ impl R<'_> {
         if pane == Pane::Log && !sideways {
             next = next.min(self.store.log_len().saturating_sub(1) as i64);
         }
+        // When there are more cards than the three in the window, the row pans between the first
+        // card and the one that puts the last card at the window's edge, and no further.
+        let cards = self.visible_workers().len();
+        if pane == Pane::Cards && sideways && cards > 3 {
+            next = next.min((cards - 3) as i64);
+        }
         self.put(key, n(next));
     }
 

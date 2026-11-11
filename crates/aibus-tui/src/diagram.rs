@@ -19,7 +19,7 @@ use ratatui::widgets::Widget;
 
 use crate::theme::Theme;
 use crate::ui::{Centre, Views};
-use crate::widgets;
+use crate::widgets::{self, CARD_W};
 
 /// Our theme as rataflow's palette. The one place a `Color` of ours reaches rataflow, and only
 /// copies: no colour literal here. `muted` is the edge and border colour, so it takes `dim_text`
@@ -68,14 +68,14 @@ impl NodeContent for Boxed<'_> {
     }
 }
 
-/// A node at screen rect `r`, in world coordinates relative to `origin` (the centre area). No
+/// A node at `at` (world cells, relative to the centre area's corner), `size` cells big. No
 /// handle shows and nothing about it can be dragged, selected, connected or deleted.
-fn node<'a>(id: &str, r: Rect, origin: Rect, piece: Piece<'a>, th: &'a Theme) -> Node<Boxed<'a>> {
+fn node<'a>(id: &str, at: (i32, i32), size: (u16, u16), piece: Piece<'a>, th: &'a Theme) -> Node<Boxed<'a>> {
     let handles = vec![
         Handle::target(HandlePosition::Top).with_hidden(true),
         Handle::source(HandlePosition::Bottom).with_hidden(true),
     ];
-    Node::new(id, (f64::from(r.x - origin.x), f64::from(r.y - origin.y)), (r.width, r.height), Boxed { piece, th })
+    Node::new(id, (f64::from(at.0), f64::from(at.1)), size, Boxed { piece, th })
         .with_handles(handles)
         .with_draggable(false)
         .with_selectable(false)
@@ -178,13 +178,13 @@ pub(crate) fn centre(
     let has_lead = lead.height > 0;
     if has_lead {
         c.lead = narrow(lead);
-        nodes.push(node("lead", c.lead, area, Piece::Lead(v.lead), th));
+        nodes.push(node("lead", world(c.lead.x, c.lead.y), (c.lead.width, c.lead.height), Piece::Lead(v.lead), th));
     }
     let gap = if roomy { Some(slot(2)) } else { None };
     let fork = narrow(slot(fork_h));
     let has_fork = fork.height > 0;
     if has_fork {
-        nodes.push(node("fork", fork, area, Piece::Fork { v: v.fork, footer: !compact, lead: lead_label }, th));
+        nodes.push(node("fork", world(fork.x, fork.y), (fork.width, fork.height), Piece::Fork { v: v.fork, footer: !compact, lead: lead_label }, th));
     }
     if let Some(gap) = gap.filter(|g| g.height > 0 && has_lead && has_fork) {
         // The lead's orange dot travels down to the fork layer.
@@ -208,8 +208,18 @@ pub(crate) fn centre(
     let cards_area = slot(cards_h);
     let all = as_list(v.cards);
     let planned = if cards_area.height > 0 { widgets::card_rects(cards_area, all.len(), first_card) } else { Vec::new() };
-    for (i, r) in &planned {
-        nodes.push(node(&format!("card:{i}"), *r, area, Piece::Card(&all[*i]), th));
+    // Every card whose box reaches into the column, at the stride the window uses: the window's own
+    // are where the classic row puts them, the others sit beside it and come in by panning.
+    let mut shown: Vec<(usize, i32)> = Vec::new();
+    if let Some(&(first, base)) = planned.first() {
+        let (bx, by) = world(base.x, base.y);
+        for (j, card) in all.iter().enumerate() {
+            let x = bx + (j as i32 - first as i32) * i32::from(CARD_W + 1);
+            if x + i32::from(CARD_W) > 0 && x < i32::from(area.width) {
+                shown.push((j, x));
+                nodes.push(node(&format!("card:{j}"), (x, by), (CARD_W, base.height), Piece::Card(card), th));
+            }
+        }
     }
     if let (Some((first, _)), Some((last, _))) = (planned.first(), planned.last()) {
         let card_h = cards_area.height.min(7);
@@ -223,48 +233,47 @@ pub(crate) fn centre(
         y.set(y.get().max(cards_top + cards_h + 2));
         let r = narrow(slot(3));
         if r.height > 0 {
-            nodes.push(node("return", r, area, Piece::Return(v.ret), th));
+            nodes.push(node("return", world(r.x, r.y), (r.width, r.height), Piece::Return(v.ret), th));
             ret_planned = Some(r);
         }
     }
-    if roomy && has_fork && !planned.is_empty() {
+    if roomy && has_fork && !shown.is_empty() {
         // The fork splits into one dotted path per card, a dot travelling down each working one.
         let mid = narrow(Rect { y: connector_y, height: 1, ..area });
-        let xc = mid.x + mid.width / 2;
+        let (xc, cy) = world(mid.x + mid.width / 2, connector_y);
         let offsets = as_list(get(v.delegate, "connectors").unwrap_or(&Value::Null));
-        for (i, r) in &planned {
-            let xi = r.x + r.width / 2;
-            let mut path = vec![(xc, connector_y), (xc, connector_y + 1)];
-            let across: Vec<u16> = if xi >= xc { (xc + 1..=xi).collect() } else { (xi..xc).rev().collect() };
-            path.extend(across.into_iter().map(|x| (x, connector_y + 1)));
+        let centre_of = |x: i32| x + i32::from(CARD_W / 2);
+        for &(j, x) in &shown {
+            let xi = centre_of(x);
+            let mut path = vec![(xc, cy), (xc, cy + 1)];
+            let across: Vec<i32> = if xi >= xc { (xc + 1..=xi).collect() } else { (xi..xc).rev().collect() };
+            path.extend(across.into_iter().map(|x| (x, cy + 1)));
             let at = offsets
-                .get(*i)
+                .get(j)
                 .and_then(as_i64)
                 .filter(|o| *o >= 0)
                 .map(|o| usize::try_from(o).unwrap_or(0) % path.len());
-            let cells = path.into_iter().map(|(x, y)| world(x, y)).collect();
             edges.push(
-                Edge::new(format!("fork-card:{i}"), "fork", format!("card:{i}"))
-                    .with_content(connector(cells, at, Style::new().fg(th.swarm))),
+                Edge::new(format!("fork-card:{j}"), "fork", format!("card:{j}"))
+                    .with_content(connector(path, at, Style::new().fg(th.swarm))),
             );
         }
         // Below the cards the paths merge into one arrow at the return box; its head pulses
         // while a result is on its way.
         let merge = cards_top + cards_h;
-        if merge + 3 <= area.bottom() {
-            if let (Some(_), Some((first, _))) = (ret_planned, planned.first()) {
-                let xs: Vec<u16> = planned.iter().map(|(_, r)| r.x + r.width / 2).collect();
-                let (lo, hi) = (xs.iter().copied().min().unwrap_or(xc), xs.iter().copied().max().unwrap_or(xc));
-                let pulse = matches!(get(v.ret, "pulse"), Some(Value::Bool(true)));
-                let head = if pulse && (tick / 4) % 2 != 0 {
-                    Style::new().fg(th.dim_text)
-                } else {
-                    Style::new().fg(th.lead).add_modifier(Modifier::BOLD)
-                };
-                let mut merged = connector((lo..=hi).map(|x| world(x, merge)).collect(), None, dim);
-                merged.head = Some((world(xc, merge + 1), th.g("▾"), head));
-                edges.push(Edge::new("cards-return", format!("card:{first}"), "return").with_content(merged));
-            }
+        if merge + 3 <= area.bottom() && ret_planned.is_some() {
+            let xs: Vec<i32> = shown.iter().map(|&(_, x)| centre_of(x)).collect();
+            let (lo, hi) = (xs.iter().copied().min().unwrap_or(xc), xs.iter().copied().max().unwrap_or(xc));
+            let pulse = matches!(get(v.ret, "pulse"), Some(Value::Bool(true)));
+            let head = if pulse && (tick / 4) % 2 != 0 {
+                Style::new().fg(th.dim_text)
+            } else {
+                Style::new().fg(th.lead).add_modifier(Modifier::BOLD)
+            };
+            let my = i32::from(merge) - i32::from(area.y);
+            let mut merged = connector((lo..=hi).map(|x| (x, my)).collect(), None, dim);
+            merged.head = Some(((xc, my + 1), th.g("▾"), head));
+            edges.push(Edge::new("cards-return", format!("card:{}", shown[0].0), "return").with_content(merged));
         }
     }
     let Ok(flow) = Flow::with_graph(nodes, edges) else { return c };
@@ -275,6 +284,9 @@ pub(crate) fn centre(
         c.lead = on_screen(&flow, "lead", area).unwrap_or(c.lead);
     }
     c.ret = ret_planned.map_or(c.ret, |r| on_screen(&flow, "return", area).unwrap_or(r));
-    c.cards = planned.iter().map(|(i, r)| (*i, on_screen(&flow, &format!("card:{i}"), area).unwrap_or(*r))).collect();
+    c.cards = shown
+        .iter()
+        .filter_map(|&(j, _)| on_screen(&flow, &format!("card:{j}"), area).filter(|r| r.width > 0).map(|r| (j, r)))
+        .collect();
     c
 }

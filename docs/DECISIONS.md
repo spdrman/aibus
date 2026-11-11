@@ -155,3 +155,13 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Draw the section now and update the two snapshots by hand (rejected: I cannot run the suites on this lane, and a hand-edited frame is a guess). Derive the shape check from the `args` hint (rejected: `/x needs <section> <text>` is a different notice from the current one).
 
 **Why.** Behaviour first, frames with the suites.
+
+## D-13: the card row pans a card at a time, and the flow gets no mouse events (#89)
+
+**Context.** #89 asks for pan on the rataflow canvas, with `cards_x` "now a world offset" and `ViewportChanged` read back from the flow. But `ctrl:scroll:cards:x` is already the index of the first card in the window, the reducer already moves it when the selection leaves the window, and a locked flow turns the wheel into zoom and a left press into a pan without any hit test (D1.1, item 7).
+
+**Decision.** `cards:x` stays a card index. A drag from empty canvas (`Drag::Pan` in `input.rs`) and Shift plus the wheel both change it through the existing `UiIntent::Scroll { sideways: true }`, one card and its gap (20 cells) per step, so the position persists and replays like before. The reducer clamps it to the last window when there are more than three cards (it keeps accepting anything for three or fewer, which the older `ui_intent` test relies on). On the flow path the cards beside the window are nodes at the same 20-cell stride, so a card the window reaches is exactly where the classic row would draw it, and the neighbours show at the column's edges. The flow is rebuilt every frame and never sees a mouse event, so zoom, node drag, connect and box select are unreachable, not just switched off.
+
+**Alternatives.** A cell-granular world offset in the graph (rejected: it forks the reducer's selection logic and the replay fixtures for a smoother drag). Forward pan gestures to a long-lived `Flow` and read `ViewportChanged` (rejected: two sources of truth for one offset).
+
+**Why.** It meets the behaviour the issue wants (more than three cards reachable by mouse and key, clamped, selection stays in view) without a second copy of the pan state.

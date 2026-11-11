@@ -134,7 +134,7 @@ fn account_op(
         AccountOp::Add { name, provider, key } => (
             "add",
             name.clone(),
-            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None }),
+            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None, region: None, project: None }),
             Some(key),
         ),
     };

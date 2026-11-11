@@ -226,7 +226,19 @@ fn providers_check(cfg: Option<&Config>) -> Check {
                 let legacy = cfg.accounts.iter().find(|a| a.enabled && a.provider == id && a.base_url.is_some());
                 let url = legacy.and_then(|a| a.base_url.as_deref()).or(def.base_url.as_deref());
                 let api = def.api.map_or("?", Api::as_str);
-                let mut row = format!("{id} ({api}, {}, {from})", url.unwrap_or("no base_url"));
+                let cloud = matches!(def.api, Some(Api::AnthropicBedrock | Api::AnthropicVertex));
+                let mut row = format!("{id} ({api}, {}, {from})", url.unwrap_or(if cloud { "default host" } else { "no base_url" }));
+                if cloud {
+                    // The account's own region and project win over the provider's.
+                    let account = cfg.accounts.iter().find(|a| a.enabled && a.provider == id);
+                    let region = account.and_then(|a| a.region.clone()).or(def.region.clone());
+                    let project = account.and_then(|a| a.project.clone()).or(def.project.clone());
+                    for (what, value) in [("project", project), ("region", region)] {
+                        if let Some(v) = value {
+                            row.push_str(&format!(", {what} {v}"));
+                        }
+                    }
+                }
                 if let (Some(a), "openai-compatible") = (legacy, id) {
                     row.push_str(&format!(
                         "; account {} could use [[provider]] id = \"{}\", api = \"openai-chat\", base_url = \"{}\"",

@@ -37,6 +37,8 @@ pub struct FakeProvider {
     caps: Capabilities,
     /// Per model, laid over `caps` by `capabilities_for`.
     model_caps: BTreeMap<String, CapabilityOverrides>,
+    /// What `verify` reports it cost.
+    verify_cost: Option<f64>,
     /// Account name to its key. Empty means any credential is accepted.
     accounts: BTreeMap<AccountName, String>,
     recorded: Mutex<Vec<RecordedRequest>>,
@@ -60,6 +62,7 @@ impl FakeProvider {
             script: Arc::new(Mutex::new(script)),
             caps,
             model_caps: BTreeMap::new(),
+            verify_cost: None,
             accounts: BTreeMap::new(),
             recorded: Mutex::new(vec![]),
         }
@@ -67,6 +70,12 @@ impl FakeProvider {
 
     pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
         self.caps = caps;
+        self
+    }
+
+    /// Makes `verify` report this cost, like a provider whose verifying call is a real request.
+    pub fn with_verify_cost(mut self, usd: f64) -> Self {
+        self.verify_cost = Some(usd);
         self
     }
 
@@ -359,6 +368,7 @@ impl Provider for FakeProvider {
             label: creds.account.to_string(),
             org: None,
             models: self.models().into_iter().map(|m| m.id).collect(),
+            cost_usd: self.verify_cost,
         })
     }
 

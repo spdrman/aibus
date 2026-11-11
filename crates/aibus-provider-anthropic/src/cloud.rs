@@ -1,7 +1,8 @@
 //! Claude over Bedrock (`auth = sigv4`) and Vertex AI (`auth = gcloud`): the same Messages API
 //! body, a different URL, a different way to authenticate and, for Bedrock, a different
 //! framing of the stream (04 section 3, 09 section 8). Both are off unless a caller builds the
-//! provider with `Anthropic::bedrock` or `Anthropic::vertex`; the plain `Factory` never does.
+//! provider with `Anthropic::bedrock` or `Anthropic::vertex`, or through `CloudFactory` from the
+//! `bedrock` and `vertex` presets; the plain `Factory` never does.
 //!
 //! The AWS secret and the Google token reach the wire only as sensitive headers, and neither
 //! the signed header set nor the token is logged.
@@ -9,7 +10,11 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use aibus_provider::{ConfigError, Credential, ModelId, ProviderConfig, ProviderError, ProviderErrorKind, Secret};
+use aibus_provider::{
+    Api, ConfigError, Credential, ModelId, Provider, ProviderConfig, ProviderError, ProviderErrorKind,
+    ProviderFactory, ProviderId, Secret,
+};
+use aibus_provider::AuthMethodKind;
 use aibus_provider_http::reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use aibus_provider_http::reqwest::Url;
 use aibus_provider_http::sensitive;
@@ -21,11 +26,52 @@ use crate::sigv4::{amz_date, authorization, uri_encode, AwsKeys};
 use crate::{Anthropic, EFFORT_BETA};
 
 /// Where Vertex's access token comes from: `gcloud auth print-access-token` in a real run, a
-/// fixed token in a test. It is asked for on every request, so a token that expired is replaced
-/// by whoever implements this, never cached here.
+/// fixed token in a test. It is asked for on every request, on behalf of the account the request
+/// is for (`creds.account`), so a token that expired is replaced by whoever implements this and
+/// a cache can key on the account. The secret in `creds` is not the token.
 #[async_trait]
 pub trait TokenSource: Send + Sync {
-    async fn token(&self) -> Result<Secret<String>, ProviderError>;
+    async fn token(&self, creds: &Credential) -> Result<Secret<String>, ProviderError>;
+}
+
+/// Builds the `anthropic-bedrock` and `anthropic-vertex` apis from a provider definition (the
+/// `bedrock` and `vertex` presets, or a `[[provider]]` with one of those apis). `tokens` is the
+/// binary's Vertex token source; Bedrock needs none, since it signs with the account's secret.
+pub struct CloudFactory {
+    pub tokens: Arc<dyn TokenSource>,
+}
+
+impl ProviderFactory for CloudFactory {
+    fn id(&self) -> ProviderId {
+        ProviderId("anthropic-cloud")
+    }
+
+    fn build(&self, cfg: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        let def = cfg.def.as_ref().ok_or_else(|| {
+            ConfigError::NotConfigured("anthropic-cloud".into(), "built from a bedrock or vertex definition only".into())
+        })?;
+        let need = |field: &Option<String>, what: &str| {
+            field.as_deref().ok_or_else(|| {
+                ConfigError::Invalid(def.id.clone(), format!("{what} is required: set it on the account or on the [[provider]]"))
+            })
+        };
+        let region = need(&def.region, "region")?;
+        match def.api {
+            Some(Api::AnthropicBedrock) => Ok(Arc::new(Anthropic::bedrock(cfg, region, SystemTime::now)?)),
+            Some(Api::AnthropicVertex) => {
+                Ok(Arc::new(Anthropic::vertex(cfg, need(&def.project, "project")?, region, self.tokens.clone())?))
+            }
+            other => Err(ConfigError::Invalid(def.id.clone(), format!("api {other:?} is not a cloud api"))),
+        }
+    }
+
+    fn auth_methods(&self) -> &'static [AuthMethodKind] {
+        &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env, AuthMethodKind::None]
+    }
+
+    fn apis(&self) -> &'static [&'static str] {
+        &["anthropic-bedrock", "anthropic-vertex"]
+    }
 }
 
 pub(crate) enum Transport {
@@ -113,7 +159,6 @@ impl Anthropic {
                 Ok((format!("{}/v1/messages", self.base), headers, body.to_string()))
             }
             Transport::Bedrock { region, now } => {
-                let keys = AwsKeys::parse(creds.secret.expose())?;
                 let obj = body.as_object_mut().expect("the body is an object");
                 obj.remove("model");
                 obj.remove("stream");
@@ -127,6 +172,15 @@ impl Anthropic {
                 let model = uri_encode(&model.0);
                 let tail = "invoke-with-response-stream";
                 let url = format!("{}/model/{model}/{tail}", self.base);
+                headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.amazon.eventstream"));
+                // A Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) has no colon; an access key pair
+                // always does. The key is a bearer token and nothing is signed.
+                if !creds.secret.expose().contains(':') {
+                    let value = Zeroizing::new(format!("Bearer {}", creds.secret.expose()));
+                    headers.insert(AUTHORIZATION, sensitive(&value)?);
+                    return Ok((url, headers, body));
+                }
+                let keys = AwsKeys::parse(creds.secret.expose())?;
                 let canonical = format!("/model/{}/{tail}", uri_encode(&model));
                 let host = Url::parse(&url)
                     .ok()
@@ -151,7 +205,6 @@ impl Anthropic {
                     headers.insert("x-amz-security-token", sensitive(t)?);
                 }
                 headers.insert(AUTHORIZATION, sensitive(&auth)?);
-                headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.amazon.eventstream"));
                 Ok((url, headers, body))
             }
             Transport::Vertex { project, region, tokens } => {
@@ -161,23 +214,13 @@ impl Anthropic {
                 if beta {
                     obj.insert("anthropic_beta".into(), json!([EFFORT_BETA]));
                 }
-                let token = tokens.token().await?;
+                let token = tokens.token(creds).await?;
                 let value = Zeroizing::new(format!("Bearer {}", token.expose()));
                 headers.insert(AUTHORIZATION, sensitive(&value)?);
                 headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
                 let path = format!("v1/projects/{project}/locations/{region}/publishers/anthropic/models/{}:streamRawPredict", model.0);
                 Ok((format!("{}/{path}", self.base), headers, body.to_string()))
             }
-        }
-    }
-
-    /// Checks that the account can sign (Bedrock) or get a token (Vertex) without a network call:
-    /// neither service has a cheap authenticated call that every account may make.
-    pub(crate) async fn check_cloud_auth(&self, creds: &Credential) -> Result<(), ProviderError> {
-        match &self.transport {
-            Transport::Direct => Ok(()),
-            Transport::Bedrock { .. } => AwsKeys::parse(creds.secret.expose()).map(drop),
-            Transport::Vertex { tokens, .. } => tokens.token().await.map(drop),
         }
     }
 }

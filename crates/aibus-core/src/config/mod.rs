@@ -87,6 +87,10 @@ pub struct Account {
     pub tags: Vec<SmolStr>,
     pub enabled: bool,
     pub auth: Auth,
+    /// The cloud region of a Bedrock or Vertex account; the `[[provider]]`'s is the default.
+    pub region: Option<String>,
+    /// The Google Cloud project of a Vertex account; the `[[provider]]`'s is the default.
+    pub project: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -102,6 +106,17 @@ pub struct Auth {
     pub none: bool,
     /// OAuth tokens in the keychain, refreshed before use. Off unless asked for.
     pub oauth: bool,
+    /// Claude on Bedrock, signed with the `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]` the
+    /// keychain holds. Only for an `anthropic-bedrock` provider.
+    pub sigv4: bool,
+    /// Claude on Vertex with the access token `gcloud` prints. Only for an `anthropic-vertex`
+    /// provider.
+    pub gcloud: bool,
+    /// Bedrock, signed with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`
+    /// read at request time and never stored.
+    pub aws_env: bool,
+    /// Bedrock, signed with the static keys of this profile in `~/.aws/credentials`.
+    pub aws_profile: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -441,9 +456,15 @@ impl Account {
     /// key is read from `AIBUS_ACCOUNT_<NAME>_KEY` (06 section 7).
     pub fn key_ref(&self) -> Option<KeyRef> {
         let a = &self.auth;
-        if a.none {
+        if a.none || a.gcloud {
+            // A gcloud account stores no key: the access token comes from `gcloud` and is
+            // cached in the credential store for fifty minutes.
             None
-        } else if a.keyring || a.oauth {
+        } else if a.aws_env {
+            Some(KeyRef::AwsEnv)
+        } else if let Some(profile) = &a.aws_profile {
+            Some(KeyRef::AwsProfile { profile: profile.clone() })
+        } else if a.keyring || a.oauth || a.sigv4 {
             Some(KeyRef::Keyring {
                 service: KEYCHAIN_SERVICE.into(),
                 name: self.account_name(),
@@ -544,12 +565,42 @@ impl Config {
                 a.auth.env.is_some(),
                 a.auth.file.is_some(),
                 a.auth.none,
+                a.auth.sigv4,
+                a.auth.gcloud,
+                a.auth.aws_env,
+                a.auth.aws_profile.is_some(),
             ];
             if sources.into_iter().filter(|s| *s).count() > 1 {
                 bad(
                     "account.auth",
-                    format!("account {}: pick one of keyring, env, file, none", a.name),
+                    format!("account {}: pick one of keyring, env, file, none, sigv4, gcloud, aws_env, aws_profile", a.name),
                 );
+            }
+            // The cloud auth forms only make sense for their own api, and name the line.
+            let user = self.providers.iter().find(|d| d.id == a.provider);
+            let def = aibus_provider::presets::resolve(&a.provider, user).ok().flatten();
+            let api = def.as_ref().and_then(|d| d.api);
+            let bedrock = api == Some(aibus_provider::Api::AnthropicBedrock);
+            let vertex = api == Some(aibus_provider::Api::AnthropicVertex);
+            for (key, on, ok, wants) in [
+                ("sigv4", a.auth.sigv4, bedrock, "anthropic-bedrock"),
+                ("aws_env", a.auth.aws_env, bedrock, "anthropic-bedrock"),
+                ("aws_profile", a.auth.aws_profile.is_some(), bedrock, "anthropic-bedrock"),
+                ("gcloud", a.auth.gcloud, vertex, "anthropic-vertex"),
+            ] {
+                if on && !ok {
+                    bad(
+                        &format!("account.auth.{key}"),
+                        format!("account {}: auth {key} needs a provider whose api is {wants}, and {} is {}", a.name, a.provider, api.map_or("not defined", aibus_provider::Api::as_str)),
+                    );
+                }
+            }
+            let region = a.region.as_ref().or(def.as_ref().and_then(|d| d.region.as_ref()));
+            if (bedrock || vertex) && region.is_none() {
+                bad("account.region", format!("account {}: region is required for {}; set it here or on the [[provider]]", a.name, a.provider));
+            }
+            if vertex && a.project.is_none() && def.as_ref().is_none_or(|d| d.project.is_none()) {
+                bad("account.project", format!("account {}: project is required for {}; set it here or on the [[provider]]", a.name, a.provider));
             }
             if a.rate.max_concurrent == 0 {
                 bad("account.rate", format!("account {}: max_concurrent must be at least 1", a.name));

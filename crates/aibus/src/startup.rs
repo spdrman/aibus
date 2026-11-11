@@ -526,14 +526,14 @@ impl Step for LoadAccounts {
             .map_err(|e| AibusError::Usage(format!("script: {e}")))?;
         let mut factories: Vec<Box<dyn ProviderFactory>> =
             vec![Box::new(Scripted(Arc::new(FakeProvider::new(script))))];
-        factories.extend(builtin_factories().into_iter().filter(|f| f.id().0 != "fake"));
-        let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
-        let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
-        let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
         let store = Arc::new(CredentialStore::new(
             Arc::new(OsKeychain),
             ctx.redactor.clone(),
         ));
+        factories.extend(builtin_factories(store.clone()).into_iter().filter(|f| f.id().0 != "fake"));
+        let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
+        let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
+        let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
         let builtin = cfg.accounts.is_empty();
         if !builtin {
             refresh_stale_models(&cfg.accounts, providers.clone(), store.clone(), paths.cache.join("models"));

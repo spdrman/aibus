@@ -368,7 +368,7 @@ impl Provider for OpenAi {
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
         let (models, org) = self.list_models(creds).await?;
-        Ok(AccountInfo { label: creds.account.to_string(), org, models })
+        Ok(AccountInfo { label: creds.account.to_string(), org, models, cost_usd: None })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

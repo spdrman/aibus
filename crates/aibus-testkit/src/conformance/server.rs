@@ -32,6 +32,8 @@ pub enum Body {
     Raw(String),
     /// Sent one chunk per step, each after its delay.
     Steps(Vec<(String, Duration)>),
+    /// Sent in one chunk, and not necessarily text: Bedrock's binary event stream.
+    Bytes(Vec<u8>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -134,6 +136,7 @@ impl Fixture {
         match &self.body {
             Body::Raw(b) => b.split_inclusive("\n\n").map(str::to_owned).collect(),
             Body::Steps(s) => s.iter().map(|(t, _)| t.clone()).collect(),
+            Body::Bytes(_) => Vec::new(),
         }
     }
 
@@ -150,6 +153,7 @@ impl Fixture {
         match &self.body {
             Body::Raw(b) => b.clone(),
             Body::Steps(s) => s.iter().map(|(t, _)| t.as_str()).collect(),
+            Body::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         }
     }
 }
@@ -276,10 +280,16 @@ async fn read_request(sock: &mut TcpStream) -> Option<Seen> {
 }
 
 async fn write_chunk(sock: &mut TcpStream, text: &str) -> std::io::Result<()> {
-    if text.is_empty() {
+    write_bytes(sock, text.as_bytes()).await
+}
+
+async fn write_bytes(sock: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
+    if bytes.is_empty() {
         return Ok(());
     }
-    sock.write_all(format!("{:x}\r\n{text}\r\n", text.len()).as_bytes()).await?;
+    sock.write_all(format!("{:x}\r\n", bytes.len()).as_bytes()).await?;
+    sock.write_all(bytes).await?;
+    sock.write_all(b"\r\n").await?;
     sock.flush().await
 }
 
@@ -303,6 +313,7 @@ async fn play(sock: &mut TcpStream, fx: Fixture, state: &State) -> std::io::Resu
     sock.write_all(head.as_bytes()).await?;
     match &fx.body {
         Body::Raw(b) => write_chunk(sock, b).await?,
+        Body::Bytes(b) => write_bytes(sock, b).await?,
         Body::Steps(steps) => {
             for (text, delay) in steps {
                 tokio::time::sleep(*delay).await;

@@ -172,6 +172,8 @@ fn add(name: &str) -> AccountAdd {
         oauth: false,
         base_url: None,
         label: None,
+        region: None,
+        project: None,
     }
 }
 
@@ -522,4 +524,19 @@ fn test_shows_what_the_one_request_cost_and_says_nothing_when_the_provider_has_n
     let ran = plain.run(&name_cmd(|name| AccountCmd::Test { name }), "", None);
     assert!(!ran.out.contains("cost"), "{}", ran.out);
     assert!(plain.json(&name_cmd(|name| AccountCmd::Test { name }))["cost_usd"].is_null());
+}
+
+#[test]
+fn add_writes_the_region_and_project_it_was_given() {
+    let rig = Rig::new();
+    let cmd = add_cmd(|a| {
+        a.key_stdin = true;
+        a.region = Some("us-east5".into());
+        a.project = Some("my-project".into());
+    });
+    assert_eq!(exit(&rig.run(&cmd, &format!("{KEY}\n"), None).result), 0);
+    let text = std::fs::read_to_string(rig.config()).unwrap();
+    assert!(text.contains("region = \"us-east5\"") && text.contains("project = \"my-project\""), "{text}");
+    let acct = &config::load(&rig.config(), None).unwrap().config.accounts[0];
+    assert_eq!((acct.region.as_deref(), acct.project.as_deref()), (Some("us-east5"), Some("my-project")));
 }

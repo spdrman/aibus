@@ -26,6 +26,7 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 * Gemini has a native adapter, `aibus-provider-gemini`, behind a new `gemini` preset (`api = "gemini-generate-content"`, key in `x-goog-api-key`, `GEMINI_API_KEY`). It keeps thought signatures across tool turns, streams thought summaries, reports reasoning and cached tokens, counts tokens through `countTokens`, and has a priced model table. `gemini-openai` (the OpenAI shim) is unchanged. See `docs/PROVIDERS.md` and D-14.
 * `ContentBlock::ToolUse` has an optional `signature`; the other providers leave it empty.
+* Claude on Bedrock and Vertex can be chosen from the config file (F5, #113). Two more `api` values of the Anthropic adapter, `anthropic-bedrock` and `anthropic-vertex`, behind the `bedrock` and `vertex` presets. An account says `auth = { sigv4 = true }`, `{ aws_env = true }` or `{ aws_profile = "name" }` for Bedrock and `{ gcloud = true }` for Vertex, with `region` (and `project` for Vertex) on the account or the `[[provider]]`; the wrong auth for an api is a config error with the line. `aws_env` reads the usual `AWS_*` variables at request time, `aws_profile` reads static keys from a `0600` `~/.aws/credentials`, and a Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) goes through `env`. The Vertex token comes from `GOOGLE_OAUTH_ACCESS_TOKEN` or `gcloud auth print-access-token` (argv only, 10 s timeout, cached 50 minutes in the credential store). `aibus account test` makes one real request on the smallest model and shows what it cost, and `aibus doctor` shows the region and project. A model row can say `price_of`, so a Bedrock inference profile costs what the plain Claude model does.
 
 ### Models
 
@@ -60,9 +61,6 @@ First release. What is in it:
   (musl) and x86_64 Windows, with a CycloneDX SBOM, `SHA256SUMS` and keyless cosign signatures.
 
 ### Known issues
-
-* The Bedrock and Vertex transports exist as constructors, but `auth = "sigv4"` and
-  `auth = "gcloud"` cannot be selected from the config file yet.
 
 Not proven yet: no real provider has been exercised against a live account by the release
 pipeline, and the Windows build has not been run on a Windows machine. `docs/RELEASE.md` lists

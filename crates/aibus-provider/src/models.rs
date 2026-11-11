@@ -52,6 +52,10 @@ pub struct ModelEntry {
     /// but has not started yet. `None` means "always".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_from: Option<u64>,
+    /// This model is priced like the one with this id (a Bedrock inference profile, `us.anthropic.
+    /// claude-...`, costs what the plain Claude model does). A `price` on the row itself wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_of: Option<String>,
 }
 
 fn is_unset(c: &CapabilityOverrides) -> bool {
@@ -181,6 +185,12 @@ impl ModelTable {
         let at = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         // `name-20250929` and `name-2025-09-29` are snapshots of `name`.
         fn undated(id: &str) -> &str {
+            // Vertex spells a snapshot `name@20250929`.
+            if let Some((head, d)) = id.rsplit_once('@') {
+                if d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()) {
+                    return head;
+                }
+            }
             let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
             if let Some((head, d)) = id.rsplit_once('-') {
                 if digits(d, 8) {
@@ -228,7 +238,12 @@ impl ModelTable {
     pub fn price_at(&self, id: &ModelId, at: SystemTime) -> Option<Price> {
         let e = self.entry_at(id, at)?;
         let secs = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten()
+        let own = (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten();
+        // One hop: the row it points at is priced by its own `price`, never by another pointer.
+        own.or_else(|| {
+            let target = self.entry_at(&ModelId(e.price_of.as_deref()?.into()), at)?;
+            (target.price_from.unwrap_or(0) <= secs).then_some(target.price).flatten()
+        })
     }
 
     /// Characters per token for this model's family (Q20).
@@ -274,6 +289,7 @@ impl ModelTable {
                     capabilities: CapabilityOverrides::default(),
                     reasoning: None,
                     price_from: None,
+                    price_of: None,
                 })
             })
             .collect();

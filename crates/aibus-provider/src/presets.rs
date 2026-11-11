@@ -28,6 +28,12 @@ pub enum Api {
     OpenaiResponses,
     #[serde(rename = "gemini-generate-content")]
     GeminiGenerateContent,
+    /// Claude on Amazon Bedrock: the Messages body, SigV4 or a Bedrock API key.
+    #[serde(rename = "anthropic-bedrock")]
+    AnthropicBedrock,
+    /// Claude on Google Vertex AI: the Messages body, a Google access token.
+    #[serde(rename = "anthropic-vertex")]
+    AnthropicVertex,
 }
 
 impl Api {
@@ -37,6 +43,8 @@ impl Api {
             Self::OpenaiChat => "openai-chat",
             Self::OpenaiResponses => "openai-responses",
             Self::GeminiGenerateContent => "gemini-generate-content",
+            Self::AnthropicBedrock => "anthropic-bedrock",
+            Self::AnthropicVertex => "anthropic-vertex",
         }
     }
 }
@@ -127,6 +135,10 @@ pub struct ProviderDef {
     pub responses: Option<bool>,
     /// The key goes in this header as it is, instead of `Authorization: Bearer` (Azure's `api-key`).
     pub auth_header: Option<String>,
+    /// The cloud region of `anthropic-bedrock` and `anthropic-vertex`; an account's own wins.
+    pub region: Option<String>,
+    /// The Google Cloud project of `anthropic-vertex`; an account's own wins.
+    pub project: Option<String>,
     /// Extra request headers. Never a secret.
     pub headers: BTreeMap<String, String>,
     /// Extra query parameters on every request (`api-version` on Azure).
@@ -181,6 +193,12 @@ impl ProviderDef {
         if user.auth_header.is_some() {
             self.auth_header.clone_from(&user.auth_header);
         }
+        if user.region.is_some() {
+            self.region.clone_from(&user.region);
+        }
+        if user.project.is_some() {
+            self.project.clone_from(&user.project);
+        }
         self.headers.extend(user.headers.clone());
         self.query.extend(user.query.clone());
         self
@@ -204,6 +222,18 @@ impl ProviderDef {
                     "headers",
                     format!("{name} looks like a credential; credentials do not go in config, run: aibus account add <name> --key-stdin"),
                 ));
+            }
+        }
+        // A region lands in a host name and a project in a path, so each is held to what one
+        // looks like.
+        if let Some(r) = &self.region {
+            if r.is_empty() || !r.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+                out.push(("region", "must be lower-case letters, digits and dashes".to_owned()));
+            }
+        }
+        if let Some(p) = &self.project {
+            if p.is_empty() || !p.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':')) {
+                out.push(("project", "must be a Google Cloud project id".to_owned()));
             }
         }
         for m in &self.auth_methods {
@@ -247,13 +277,15 @@ pub fn resolve(id: &str, user: Option<&ProviderDef>) -> Result<Option<ProviderDe
             let generic = match u.api {
                 Some(Api::OpenaiChat | Api::OpenaiResponses) => preset("openai-compatible"),
                 Some(Api::GeminiGenerateContent) => preset("gemini"),
+                Some(Api::AnthropicBedrock) => preset("bedrock"),
+                Some(Api::AnthropicVertex) => preset("vertex"),
                 _ => None,
             };
             generic.cloned().unwrap_or_default().overlaid(u)
         }
     };
     if def.api.is_none() {
-        return Err(format!("provider {id} has no api: set api to one of anthropic-messages, openai-chat, openai-responses, gemini-generate-content"));
+        return Err(format!("provider {id} has no api: set api to one of anthropic-messages, openai-chat, openai-responses, gemini-generate-content, anthropic-bedrock, anthropic-vertex"));
     }
     match def.problems().into_iter().next() {
         Some((field, why)) => Err(format!("provider {id}: {field}: {why}")),

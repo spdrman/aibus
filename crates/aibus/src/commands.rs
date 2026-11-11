@@ -26,7 +26,7 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
     let mut io = Io {
         paths: g.paths()?,
         keychain: Arc::new(OsKeychain),
-        factories: builtin_factories(),
+        factories: builtin_factories(Arc::new(aibus_core::CredentialStore::new(Arc::new(OsKeychain), redactor.clone()))),
         env: Arc::new(|v| std::env::var(v).ok()),
         redactor: redactor.clone(),
         oauth: match cmd {

@@ -1,3 +1,96 @@
+//! The Vertex token source (`auth = { gcloud = true }`): `GOOGLE_OAUTH_ACCESS_TOKEN` when it is
+//! set, else `gcloud auth print-access-token`. The command is run with an argument list and no
+//! shell, found on `PATH`, killed after ten seconds, with stderr dropped. Its output is a secret:
+//! it goes straight into the credential store, which keeps it fifty minutes under the account's
+//! name and registers it with the redactor, and it is never written to disk or into an error.
+
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use aibus_core::CredentialStore;
+use aibus_provider::{Credential, ProviderError, ProviderErrorKind, Secret};
+use aibus_provider_anthropic::TokenSource;
+use async_trait::async_trait;
+use zeroize::Zeroizing;
+
+pub struct GcloudTokens {
+    store: Arc<CredentialStore>,
+    env: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+    run: Arc<dyn Fn() -> Result<String, String> + Send + Sync>,
+}
+
+impl GcloudTokens {
+    /// `env` reads the process environment and `run` is `gcloud` itself in a real run; a test
+    /// hands in fakes.
+    pub fn new(
+        store: Arc<CredentialStore>,
+        env: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+        run: Arc<dyn Fn() -> Result<String, String> + Send + Sync>,
+    ) -> Self {
+        Self { store, env, run }
+    }
+}
+
+#[async_trait]
+impl TokenSource for GcloudTokens {
+    async fn token(&self, creds: &Credential) -> Result<Secret<String>, ProviderError> {
+        let (store, env, run, account) = (self.store.clone(), self.env.clone(), self.run.clone(), creds.account.clone());
+        // Starting `gcloud` blocks, so it happens off the runtime's threads.
+        let fetched = tokio::task::spawn_blocking(move || {
+            store.cached_token(&account, Duration::from_secs(50 * 60), || {
+                match env("GOOGLE_OAUTH_ACCESS_TOKEN").filter(|t| !t.is_empty()) {
+                    Some(t) => Ok(t),
+                    None => run(),
+                }
+            })
+        })
+        .await
+        .map_err(|e| ProviderError::new(ProviderErrorKind::Unknown, format!("the token task failed: {e}")))?;
+        fetched.map_err(|e| {
+            ProviderError::new(ProviderErrorKind::Auth, format!("could not get a Google access token ({e}); run: gcloud auth login"))
+        })
+    }
+}
+
+/// `<program> auth print-access-token`, its trimmed stdout. The errors say what went wrong with
+/// the process and never repeat what it printed.
+pub fn run_gcloud(program: &str, timeout: Duration) -> Result<String, String> {
+    let mut child = Command::new(program)
+        .args(["auth", "print-access-token"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("could not run gcloud ({}); is it installed and on PATH?", e.kind()))?;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("gcloud timed out after {}s", timeout.as_secs().max(1)));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(e) => return Err(format!("gcloud could not be waited for ({})", e.kind())),
+        }
+    };
+    if !status.success() {
+        return Err(format!("gcloud exited with {status}"));
+    }
+    let mut bytes = Zeroizing::new(Vec::new());
+    if let Some(mut out) = child.stdout.take() {
+        out.read_to_end(&mut bytes).map_err(|e| format!("gcloud's output could not be read ({})", e.kind()))?;
+    }
+    let token = Zeroizing::new(String::from_utf8_lossy(&bytes).trim().to_owned());
+    match token.is_empty() {
+        true => Err("gcloud printed no token".to_owned()),
+        false => Ok(token.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};

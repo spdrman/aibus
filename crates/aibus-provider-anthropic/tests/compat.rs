@@ -90,7 +90,7 @@ async fn each_flag_changes_the_request_the_way_its_fixture_records() {
 
 #[tokio::test]
 async fn a_preset_that_claims_a_flag_sends_the_recorded_shape() {
-    for p in presets().iter().filter(|p| p.api == Some(Api::AnthropicMessages)) {
+    for p in presets().iter().filter(|p| matches!(p.api, Some(Api::AnthropicMessages | Api::AnthropicBedrock | Api::AnthropicVertex))) {
         for flag in p.compat.as_deref().unwrap_or_default() {
             let Value::String(name) = serde_json::to_value(flag).unwrap() else {
                 panic!("{} claims {flag:?}, which the Messages wire does not honour", p.id);

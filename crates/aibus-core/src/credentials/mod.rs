@@ -33,6 +33,10 @@ pub enum KeyRef {
     Keyring { service: SmolStr, name: AccountName },
     Env { var: String },
     File { path: PathBuf },
+    /// `AWS_ACCESS_KEY_ID` and friends, read at request time and never stored.
+    AwsEnv,
+    /// Static keys under `[profile]` in `~/.aws/credentials`.
+    AwsProfile { profile: String },
 }
 
 impl fmt::Display for KeyRef {
@@ -41,6 +45,8 @@ impl fmt::Display for KeyRef {
             KeyRef::Keyring { service, name } => write!(f, "keyring:{service}/{name}"),
             KeyRef::Env { var } => write!(f, "env:{var}"),
             KeyRef::File { path } => write!(f, "file:{}", path.display()),
+            KeyRef::AwsEnv => write!(f, "aws-env"),
+            KeyRef::AwsProfile { profile } => write!(f, "aws-profile:{profile}"),
         }
     }
 }
@@ -162,6 +168,10 @@ impl CredentialStore {
             // Never cached: the token has its own expiry.
             return self.resolve_oauth(&name);
         }
+        if matches!(account.key_ref(), Some(KeyRef::AwsEnv)) {
+            // Never cached: the variables are read as they are at the time of the request.
+            return self.resolve_aws_env(&name);
+        }
         let now = (self.now)();
         if let Some(c) = self
             .cache()
@@ -190,6 +200,16 @@ impl CredentialStore {
                 let v = self.keychain.get(&service, &user(&n))?;
                 (v.ok_or_else(missing)?.expose().clone(), AuthMethodKind::ApiKey)
             }
+            Some(KeyRef::AwsProfile { profile }) => {
+                let path = match (self.env)("AWS_SHARED_CREDENTIALS_FILE").filter(|p| !p.is_empty()) {
+                    Some(p) => PathBuf::from(p),
+                    None => PathBuf::from((self.env)("HOME").ok_or_else(missing)?).join(".aws/credentials"),
+                };
+                let (id, secret, token) = file::aws_profile(&path, &profile)?.ok_or_else(missing)?;
+                self.register_aws(&name, &secret, token.as_deref());
+                (aws_pair(&id, &secret, token.as_deref()), AuthMethodKind::Env)
+            }
+            Some(KeyRef::AwsEnv) => unreachable!("handled above"),
         };
         self.redactor.register(&name, &key);
         self.cache().insert(
@@ -219,6 +239,55 @@ impl CredentialStore {
             .ok_or_else(|| CredentialError::OAuth("the stored tokens are unreadable".into()))?;
         let stale = tokens.expires_at.is_some_and(|e| e <= (self.wall)() + SKEW);
         Ok((tokens, stale))
+    }
+
+    /// The AWS environment as it is now: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and, when
+    /// set, `AWS_SESSION_TOKEN`, joined the way the Bedrock transport reads them.
+    fn resolve_aws_env(&self, name: &AccountName) -> Result<Credential, CredentialError> {
+        let get = |v: &str| (self.env)(v).filter(|v| !v.is_empty());
+        let (Some(id), Some(secret)) = (get("AWS_ACCESS_KEY_ID"), get("AWS_SECRET_ACCESS_KEY")) else {
+            return Err(CredentialError::Missing(name.clone()));
+        };
+        let token = get("AWS_SESSION_TOKEN");
+        self.register_aws(name, &secret, token.as_deref());
+        Ok(Credential {
+            account: name.clone(),
+            secret: Secret::new(aws_pair(&id, &secret, token.as_deref())),
+            kind: AuthMethodKind::Env,
+            resolved_at: (self.now)(),
+        })
+    }
+
+    /// The secret half and the session token are what must never show: each is registered under
+    /// a name of its own, next to the whole `ID:SECRET` string the generic path registers.
+    fn register_aws(&self, name: &AccountName, secret: &str, token: Option<&str>) {
+        self.redactor.register(&AccountName(format!("{name}:secret").into()), secret);
+        let token_name = AccountName(format!("{name}:token").into());
+        match token {
+            Some(t) => self.redactor.register(&token_name, t),
+            None => self.redactor.unregister(&token_name),
+        }
+    }
+
+    /// An access token a token source fetched, kept `ttl` under the account's name and never on
+    /// disk. `fetch` runs only when there is no token younger than `ttl`; what it returns is
+    /// registered with the redactor. A failure is not cached, and its text is `fetch`'s to keep
+    /// free of the token.
+    pub fn cached_token(
+        &self,
+        name: &AccountName,
+        ttl: Duration,
+        fetch: impl FnOnce() -> Result<String, String>,
+    ) -> Result<Secret<String>, CredentialError> {
+        let now = (self.now)();
+        let tokens = || self.tokens.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(c) = tokens().get(name).filter(|c| now.duration_since(c.at) < ttl) {
+            return Ok(Secret::new(c.secret.expose().clone()));
+        }
+        let token = fetch().map_err(CredentialError::Token)?;
+        self.redactor.register(&AccountName(format!("{name}:token").into()), &token);
+        tokens().insert(name.clone(), Cached { secret: Secret::new(token.clone()), kind: AuthMethodKind::Bearer, at: now });
+        Ok(Secret::new(token))
     }
 
     /// The stored tokens, refreshed first when they expire within a minute. A refresh that
@@ -360,10 +429,25 @@ impl CredentialStore {
     }
 }
 
+/// `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]`, the one string the Bedrock transport signs with.
+fn aws_pair(id: &str, secret: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!("{id}:{secret}:{t}"),
+        None => format!("{id}:{secret}"),
+    }
+}
+
 impl Drop for CredentialStore {
     fn drop(&mut self) {
         for name in self.cache().keys() {
             self.redactor.unregister(name);
+            for part in ["secret", "token"] {
+                self.redactor.unregister(&AccountName(format!("{name}:{part}").into()));
+            }
+        }
+        let tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
+        for name in tokens.keys() {
+            self.redactor.unregister(&AccountName(format!("{name}:token").into()));
         }
     }
 }

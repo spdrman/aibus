@@ -18,7 +18,7 @@ use aibus_provider::models::ModelTable;
 use aibus_provider::{
     AccountInfo, AliasTable, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, ConfigError,
     Credential, ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig, ProviderError,
-    ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk, SystemRole,
+    ProviderFactory, ProviderId, StreamChunk, SystemRole,
 };
 use aibus_provider_http::reqwest::header::{HeaderMap, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use aibus_provider_http::{cancelled, emit, json, rate_limit, request_id, sensitive, Events, Http};

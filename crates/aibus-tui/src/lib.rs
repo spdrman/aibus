@@ -4,7 +4,6 @@
 pub mod app;
 pub mod commands;
 pub mod demo;
-#[cfg(feature = "flow-diagram")]
 pub mod diagram;
 pub mod glyphs;
 pub mod hit;
@@ -19,6 +18,7 @@ pub mod ui;
 pub mod view;
 pub mod views;
 pub mod widgets;
+pub mod workflows;
 
 pub use layout::{areas, Areas, Layout};
 pub use theme::Theme;

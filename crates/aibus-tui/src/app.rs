@@ -72,6 +72,8 @@ pub struct Options {
     pub validate: Option<Validator>,
     /// The accounts screen's `t`, `a` and `d`: what was done, in a line.
     pub account: Option<AccountHook>,
+    /// Where `/workflow list`, `show` and `save` find the files. Without it they do nothing.
+    pub workflows: Option<crate::workflows::WorkflowFiles>,
 }
 
 /// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
@@ -405,6 +407,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut user = opts.user.take().unwrap_or_else(|| Box::new(|_| {}));
     let mut writer = opts.writer.take();
     let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
+    let workflows = opts.workflows.take();
     let mut input = Input::default();
     let mut ctrl_c = CtrlC::default();
     let supported = input::mouse_supported(opts.term.as_deref());
@@ -468,9 +471,17 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                     let Ok(e) = ev_rx.try_recv() else { break };
                     batch.push(e);
                 }
-                let mut step = |app: &mut App<G>, m: Msg| {
+                let mut step = |app: &mut App<G>, m: Msg| -> Result<(), AibusError> {
                     user(&m);
-                    step_written(app, &mut writer, m)
+                    // A workflow file command is answered with what the files say.
+                    let answer = match (&m, &workflows) {
+                        (Msg::Command(Command::WorkflowFile(op)), Some(files)) => {
+                            crate::workflows::apply(op, app, files, std::time::SystemTime::now())
+                        }
+                        _ => Vec::new(),
+                    };
+                    step_written(app, &mut writer, m)?;
+                    answer.into_iter().try_for_each(|a| step_written(app, &mut writer, a))
                 };
                 done = terminal_events(
                     batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(), &mut step,

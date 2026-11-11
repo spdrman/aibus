@@ -298,7 +298,6 @@ const LIGHT_SPLIT_TEXT: [(&str, &str, f64); 6] = [
 /// The palette handed to rataflow: its edge, border and text colours against `bg` and `panel`.
 /// Measured: recording muted 5.91 / 5.60, accent 9.96 / 9.44, text 10.59 / 10.03; light muted
 /// 6.95 / 7.63, accent 6.11 / 6.70, text 15.58 / 17.09.
-#[cfg(feature = "flow-diagram")]
 #[test]
 fn the_rataflow_palette_meets_3_on_bg_and_panel() {
     for (name, t) in [("recording", Theme::recording()), ("light", Theme::light())] {

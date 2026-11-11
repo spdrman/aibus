@@ -376,6 +376,43 @@ Gated calls, taken at the recommended default:
 
 **Why.** The safety model in the issue (names not paths, validate first, a revision check, no gate without its flag) holds with one writer, and a second writer is the user's editor, which the revision check already catches.
 
+## D-16: the run tools of `aibus mcp` (E9, #104, 2026-11-11)
+
+**Context.** The issue left several calls open, and the owner's rule is to take the recommended default and write it down.
+
+**Decision.**
+
+1. A run is a child process, `aibus run --workflow <name> --json --permission-mode dont-ask [--allow <pattern>]... -- <input>`, started from `std::env::current_exe()` (a `RunConfig` in `aibus-mcp` names the program, so tests can stand in for it). `AIBUS_I_KNOW` is removed from its environment, stdin is closed, and the server folds its NDJSON events into `run_status`. The issue says the server hosts one session the way `headless::run` does; a child gives each run its own session directory, commit log and transcript, makes `bypass` unreachable by construction (the mode is on a command line the model cannot touch), and lets a cancel be a SIGINT, which `aibus run` already turns into a snapshot and exit 7. `aibus-mcp` keeps its closure free of provider crates, which a hosted session would have broken.
+2. `session` in the `workflow_run` answer is `null` until the child has made one; `run_status` shows it from the child's `SessionEnd` on. The id belongs to the child, which does not exist yet when the answer goes out.
+3. The cost cap is the sum of the finished runs' `cost_usd`; each run is started with the remainder as `AIBUS_MAX_COST_USD`, a new variable read next to `AIBUS_MAX_SPAWN_DEPTH` in `env::apply_limits`, so the child ends with the budget error and exit 8 on its own. `--max-cost-usd` defaults to `limits.max_cost_usd`, which makes `aibus mcp --allow run` the one mode that reads `config.toml` (never a key).
+4. `workflow_run` takes a `scope`, but `aibus run` resolves a name project first, so a run for the user scope is refused when the project has the same name.
+5. `run_status` waits without holding a thread (`call_async`, a `tokio::sync::watch` per run) and `wait_ms` is capped by `RunConfig::max_wait` (30 s); `run_cancel` sends the interrupt and waits for the run to end, with a kill after the grace. The synchronous `Server::call` answers at once.
+6. When the server ends, `Drop` cancels live runs and waits up to 11 s for them to snapshot, whichever transport it served. A server killed with SIGKILL leaves its children to finish on their own.
+7. The `explain_run` prompt no longer points at a run resource that does not exist; it reads `run_status`. A handle may contain `-`, so the prompt accepts it.
+8. The golden transcript (`run_status_cancel`) is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run, since nothing was run for this PR. The security tests are in `crates/aibus/tests/mcp_security.rs` and `crates/aibus-mcp/tests/run_bypass.rs`, for the reason in E4 item 7.
+
+**Alternatives.** Host one session in the server process (rejected: it pulls the provider crates and the startup pipeline into `aibus-mcp`, and cancel becomes a task abort with no snapshot). A fixed per-run cost cap instead of the remainder (rejected: N runs could spend N times the cap).
+
+**Why.** The safety model in the issue (nothing prompts, nothing the model sends raises the surface, no secret in a result) is easiest to keep when the run is a separate process with a fixed command line.
+
+## D-17: run resources of `aibus mcp` (E10, #105, 2026-11-11)
+
+**Context.** Runs exist (D-16) and a client wants to read one as a resource, not only poll a tool. The issue left the log's source, the handle spelling and subscriptions open.
+
+**Decision.**
+
+1. `aibus://runs/{run}` is the `run_status` body without `tail`, and `aibus://runs/{run}/log` is `text/plain`. Both are listed as templates only with `--allow run`, and `resources/list` adds one concrete entry per handle this process gave out (oldest first). Without the flag every `aibus://runs/...` uri is `-32602`, the same as a uri that never existed.
+2. `{run}` is the handle as `workflow_run` returns it, `run-` plus the ulid, not the bare ulid the issue wrote. One spelling is easier to explain than two, and the table lookup is the only check: a session ulid on disk, a handle from another process and a made-up one all miss it, so they are `-32602` without anything touching the file system.
+3. The log is not read back from the session on disk (that would be a path from a uri to a file). The server folds the child's stream, its stderr and the final summary into a buffer of the last 256 KiB as they arrive, which is the report's text for a run that ended and the transcript tail for one that has not. Non-JSON lines are redacted on the way in, and the whole buffer again when it is served, so a key cut in half at the front of the buffer is the only thing that can get through, and the buffer drops to the next line start to avoid even that.
+4. The body is cut to its last `limits.result_max_bytes` (the end of a log is the part a client wants), under a "cut at N of M bytes, the start of the log is left out" line, with aibus's markers escaped and a fixed header that says it is output and not instructions. `as_data` cuts the front, which is right for a file and wrong here, so the run log has its own cut.
+5. No subscriptions. `run_status` with `wait_ms` already returns on any change and works on both protocol revisions; `docs/MCP.md` says so.
+6. The `explain_run` prompt now names the two resources next to `run_status`, and the "not in this release" lines in `docs/MCP.md` lose the run resources.
+7. The security test the issue puts in `aibus-core/tests/security/mcp_server.rs` is in `aibus-mcp/tests/run_resources.rs` and `aibus/tests/mcp_security.rs`, for the reason in E4 item 7 (`aibus-core` cannot depend on the server). The golden transcript `run_resources` is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run.
+
+**Alternatives.** Read the log from the child's session directory (rejected: a path reachable from a uri, and the redacted transcript there is not the report). Accept the bare ulid too (rejected: two spellings for one thing).
+
+**Why.** A client can only read what this process started, and nothing it sends can name a file.
+
 ## E12 (2026-11-11): confirmation through elicitation and MRTR is built, the permission relay is not (#107)
 
 **Context.** #107 sat behind owner decisions 6 and 7 on epic #95. Decision 6 (do #106 and #107, elicitation first) has the recommended default of yes. Decision 7 (relay a run's `bash` prompts through the client) has the recommended default of non-goal: the epic says "I lean non-goal until a client I use supports elicitation", and I have no such client. The owner wants zero open issues, so I took both defaults.
@@ -387,3 +424,22 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Put the question inside `Server::call` (rejected: it is sync and the legacy path has to await the client). A hand-rolled HMAC (rejected: rmcp's codec has the ttl and associated data, and a second implementation is a second place to get constant-time wrong). Keep a table of pending confirmations instead of a sealed state (rejected: it is state to expire and leak, and the spec's stateless direction points the other way). Ask for any tool that writes, whatever its name (rejected: the issue names three).
 
 **Why.** It adds the server's own question for the clients that can show one and changes nothing for the rest, and it keeps the unknown (run tools, a relay) out of this PR.
+## D-12 addendum (2026-11-11): flow-diagram on by default for 0.2.0, ahead of the written exit criteria (#92)
+
+**Context.** #92 lists exit criteria before the default flips: two weeks of main without a fix to `diagram.rs`, a clean terminal checklist on iTerm2, Terminal.app and kitty, and no old unanswered issue on rataflow's tracker. None of that can be met inside this wave: `diagram.rs` changed in #89 two days ago, and I have no real terminals here. The owner's goal for the wave is zero open issues. The measurements that were the hard gate did come back clean (#91): p99 render and resize at most 0.33 ms against 3 ms and 10 ms, one hash over 200 renders at three sizes, 100 of 100 demo frames byte-identical with the classic ones, a +0.6 % binary and a clean `cargo deny`.
+
+**Decision.** I flip the default now. The time-based and terminal-based criteria are not waived, they move: the `docs/RELEASE.md` terminal checklist already has the cards line, and it has to be ticked on the release PR before the tag, so a failure there still stops 0.2.0 and the way back is one flag (`--no-default-features`, or reverting the two `default = [...]` lines). The root manifest now says `default-features = false` for `aibus-tui`, so that flag really drops rataflow from a build of `aibus`; `aibus-tui` and `aibus` each default to the feature. Running `-p aibus-testkit` on its own therefore builds the hand-drawn path, while `--workspace`, `-p aibus-tui` and `-p aibus` run the rataflow one. One snapshot, `w_cards_five_scrolled`, cannot be the same in both (the fourth card's edge is on the canvas), so the test picks `w_cards_five_scrolled_flow` on the new default and the classic file stays untouched for the rollback build.
+
+**Alternatives.** Wait out the two weeks (rejected: it leaves #92 and #93 open past the wave for a risk the release checklist covers anyway). Regenerate `w_cards_five_scrolled` in place (rejected: it breaks the rollback build and the issue says no snapshot is regenerated). Force the feature on in `aibus-testkit` (rejected: the metadata test then cannot see a build without it).
+
+**Why.** The numbers the flip was waiting for are in, and the cost of being wrong is one flag until #93 removes it.
+
+## D-12 addendum 2 (2026-11-11): the hand-drawn connectors and the flag go in the same wave (#93)
+
+**Context.** #93 is labelled "later" and says it starts only after a release with the flag on has shipped and the terminal checklist has been run on it. Neither can happen inside this wave, and the owner's goal for the wave is zero open issues.
+
+**Decision.** I remove the classic `centre`, `widgets::cards` (its only caller was the classic path), the `flow-diagram` feature and the feature-gated tests now. `rataflow` is a plain dependency of `aibus-tui`; the workspace dependency on `aibus-tui` is back to plain. `dotted` stays: `advisor_link` still draws the rail-to-box link with it. The way back is no longer a flag, it is reverting this merge, which is why the release PR's checklist line about the cards canvas matters more than it did. `frames.classic.txt` and its test go as the issue says. With one drawing path left, the bench is `render_dashboard` again and the MARS baselines I recorded for the `_flow` names (#91) moved onto those names (the hand-drawn baselines measured code that no longer exists), and `w_cards_five_scrolled.txt` now holds the frame with the fourth card's edge on the canvas, the only snapshot whose content changes.
+
+**Alternatives.** Leave #93 open until after the release (rejected: it is the last open issue of the epic's tail, and the revert path is one merge). Keep `dotted` out of `ui.rs` by moving it into `diagram.rs` (rejected: `advisor_link` is not part of the flow, and the issue says it stays).
+
+**Why.** One drawing path means every change to the centre column is made and tested once.

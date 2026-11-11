@@ -94,6 +94,7 @@ pub fn options(
         agents_dir: Some(paths.config.join("agents")),
         validate: None,
         account: None,
+        workflows: None,
     };
     (opts, warnings)
 }
@@ -213,7 +214,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     for w in warnings {
         eprintln!("aibus: warning: {w}");
     }
-    let (Some(rt), Some(app)) = (ctx.rt.as_ref(), ctx.app.take()) else {
+    let (Some(rt), Some(mut app)) = (ctx.rt.as_ref(), ctx.app.take()) else {
         return Err(not_ready("runtime"));
     };
     let mut opts = opts;
@@ -232,6 +233,15 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     if ctx.global.verbose > 0 {
         opts.mem = Some(aibus_core::mem::rss_mib);
     }
+    // The workflows on disk: the prompt's `/fix` family reads their names, and `/workflow list`,
+    // `show` and `save` work on these directories.
+    let workflows = aibus_tui::workflows::WorkflowFiles {
+        dirs: aibus_core::workflow::dirs(&ctx.cwd, Some(&paths.config)),
+        cap: loaded.config.limits.result_max_bytes,
+        redactor: ctx.redactor.clone(),
+    };
+    app.step(Msg::WorkflowsLoaded { rows: aibus_core::workflow::rows(&workflows.dirs), shown: None, said: None })?;
+    opts.workflows = Some(workflows);
     count_session(&paths.state);
     // Permission answers and messages reach the run that is waiting through its mailbox. The
     // map of which run asked is kept from what the runs say.
@@ -265,6 +275,15 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             }
             Msg::Command(aibus_core::Command::SendMessage { run, text }) => {
                 let _ = o.message(*run, text.clone());
+            }
+            // `/workflow run <name> <input>` and the shorthands: the lead makes the `workflow`
+            // call at its next turn boundary, so the steps are cards under it.
+            Msg::Command(aibus_core::Command::Workflow { name, input }) => {
+                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(mail) = run.and_then(|r| o.mailbox(r)) {
+                    let call = serde_json::json!({"name": name, "input": input});
+                    let _ = mail.try_send(RunMail::Call { tool: "workflow".into(), input: call });
+                }
             }
             // A prompt typed while the lead runs is a message to it; slash commands are not.
             Msg::SubmitPrompt { text } if !text.starts_with('/') => {

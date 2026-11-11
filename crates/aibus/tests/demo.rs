@@ -21,17 +21,6 @@ fn two_plays_give_the_same_text_frames() {
     assert_eq!(fa, fb);
 }
 
-/// The strongest statement of the rataflow epic: over ten seconds of streaming, three cards and
-/// two mouse gestures, the feature build draws the 100 text frames the classic build drew.
-#[cfg(feature = "flow-diagram")]
-#[test]
-fn the_demo_text_frames_match_classic() {
-    let want = std::fs::read_to_string(format!("{}/../../docs/media/demo/frames.classic.txt", env!("CARGO_MANIFEST_DIR"))).unwrap();
-    let got = frames(xdg_temp().path());
-    assert_eq!(got.matches("\n=== t=").count() + 1, 100);
-    assert!(want == got, "the rataflow frames differ from frames.classic.txt");
-}
-
 #[test]
 fn the_ansi_stream_marks_every_frame_with_its_virtual_time() {
     let home = xdg_temp();

@@ -29,7 +29,7 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, PROVIDERS, RUN_STATUS, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, PROVIDERS, RUN_STATUS, TRANSCRIPT, WORKFLOWS_VIEW};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -57,6 +57,7 @@ pub struct Views<'a> {
     transcript: &'a Value,
     run_status: &'a Value,
     cost: &'a Value,
+    workflows: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -83,6 +84,7 @@ impl<'a> Views<'a> {
             transcript: at(TRANSCRIPT),
             run_status: at(RUN_STATUS),
             cost: at(COST),
+            workflows: at(WORKFLOWS_VIEW),
         }
     }
 }
@@ -220,111 +222,6 @@ pub(crate) struct Centre {
     pub(crate) cards: Vec<(usize, Rect)>,
     pub(crate) lead: Rect,
     pub(crate) ret: Rect,
-}
-
-/// The centre column: lead box, fork layer, delegate row, cards, return box. Items that do
-/// not fit are dropped from the bottom up.
-#[cfg_attr(feature = "flow-diagram", allow(unreachable_code))]
-fn centre(
-    buf: &mut Buffer,
-    area: Rect,
-    v: &Views,
-    th: &Theme,
-    (compact, first_card, tick): (bool, usize, i64),
-) -> Centre {
-    // The one branch: with `flow-diagram` the column is drawn by rataflow, and the code below is
-    // the classic path, still compiled so the two stay comparable.
-    #[cfg(feature = "flow-diagram")]
-    return crate::diagram::centre(buf, area, v, th, (compact, first_card, tick));
-    const W: u16 = 40;
-    let narrow = |r: Rect| Rect {
-        x: r.x + r.width.saturating_sub(W) / 2,
-        width: r.width.min(W),
-        ..r
-    };
-    let roomy = area.height >= 28;
-    let fork_h = if compact { 5 } else { 6 };
-    let y = std::cell::Cell::new(area.y);
-    let place = |h: u16, buf: &mut Buffer, draw: &mut dyn FnMut(&mut Buffer, Rect)| {
-        let room = area.bottom().saturating_sub(y.get());
-        let r = Rect { y: y.get(), height: h.min(room), ..area };
-        if r.height > 0 {
-            draw(buf, r);
-        }
-        y.set(y.get() + h);
-    };
-    let dim = Style::new().fg(th.dim);
-    let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("").to_owned();
-    let mut c = Centre { cards: Vec::new(), lead: Rect::default(), ret: Rect::default() };
-    place(4, buf, &mut |b, r| {
-        c.lead = narrow(r);
-        widgets::lead_box(b, c.lead, v.lead, th);
-    });
-    if roomy {
-        // The lead's orange dot travels down to the fork layer.
-        place(2, buf, &mut |b, r| {
-            let n = narrow(r);
-            let x = n.x + n.width / 2;
-            let path = [(x, r.y), (x, r.y + 1)];
-            let at = usize::try_from(tick.rem_euclid(2)).unwrap_or(0);
-            dotted(b, &path, Some(at), dim, Style::new().fg(th.lead), th);
-        });
-    }
-    place(fork_h, buf, &mut |b, r| widgets::fork_layer(b, narrow(r), v.fork, th, !compact, &lead_label));
-    if roomy {
-        place(1, buf, &mut |b, r| widgets::delegate_label(b, r, v.delegate, th));
-    }
-    let connector_y = y.get();
-    if roomy {
-        y.set(connector_y + 2);
-    }
-    let cards_h = area.bottom().saturating_sub(y.get()).min(8);
-    let cards_top = y.get();
-    place(cards_h, buf, &mut |b, r| {
-        c.cards = widgets::cards(b, r, v.cards, th, first_card);
-    });
-    if roomy && !c.cards.is_empty() {
-        // The fork splits into one dotted path per card, a dot travelling down each working one.
-        let mid = narrow(Rect { y: connector_y, height: 1, ..area });
-        let xc = mid.x + mid.width / 2;
-        let offsets = as_list(get(v.delegate, "connectors").unwrap_or(&NULL));
-        for (i, r) in &c.cards {
-            let xi = r.x + r.width / 2;
-            let mut path = vec![(xc, connector_y), (xc, connector_y + 1)];
-            let across: Vec<u16> = if xi >= xc { (xc + 1..=xi).collect() } else { (xi..xc).rev().collect() };
-            path.extend(across.into_iter().map(|x| (x, connector_y + 1)));
-            let at = offsets
-                .get(*i)
-                .and_then(as_i64)
-                .filter(|o| *o >= 0)
-                .map(|o| usize::try_from(o).unwrap_or(0) % path.len());
-            dotted(buf, &path, at, dim, Style::new().fg(th.swarm), th);
-        }
-        // Below the cards the paths merge into one arrow at the return box; its head pulses
-        // while a result is on its way.
-        let merge = cards_top + cards_h;
-        if merge + 3 <= area.bottom() {
-            let xs: Vec<u16> = c.cards.iter().map(|(_, r)| r.x + r.width / 2).collect();
-            let (lo, hi) = (xs.iter().copied().min().unwrap_or(xc), xs.iter().copied().max().unwrap_or(xc));
-            let row: Vec<(u16, u16)> = (lo..=hi).map(|x| (x, merge)).collect();
-            dotted(buf, &row, None, dim, dim, th);
-            let pulse = matches!(get(v.ret, "pulse"), Some(Value::Bool(true)));
-            let head = if pulse && (tick / 4) % 2 != 0 {
-                Style::new().fg(th.dim_text)
-            } else {
-                Style::new().fg(th.lead).add_modifier(Modifier::BOLD)
-            };
-            buf.set_string(xc, merge + 1, th.g("▾"), head);
-        }
-    }
-    if roomy {
-        y.set(y.get().max(cards_top + cards_h + 2));
-        place(3, buf, &mut |b, r| {
-            c.ret = narrow(r);
-            widgets::return_box(b, c.ret, v.ret, th);
-        });
-    }
-    c
 }
 
 /// The checkpoint that is active now and where it was drawn on the rail, with the box it is
@@ -521,7 +418,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     widgets::header(buf, a.header, v.header, th);
     widgets::legend(buf, a.legend, v.header, th);
     let marks = widgets::rail(buf, a.rail, v.rail, th);
-    let cen = centre(buf, a.centre, v, th, (a.compact, c.cards_x, c.tick));
+    let cen = crate::diagram::centre(buf, a.centre, v, th, (a.compact, c.cards_x, c.tick));
     advisor_link(buf, a.rail, &marks, &cen, v, th, c.tick);
     let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("");
     let filter = (c.filter.as_str(), sc.filter_edit, c.follow);
@@ -709,6 +606,8 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             }
             t if t.starts_with("status:") => screens::run_status(buf, full, v.run_status, th, &sc.pointer),
             "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
+            "workflows" => screens::workflows(buf, full, v.workflows, th, &sc.pointer),
+            "workflow_show" => screens::workflow_show(buf, full, v.workflows, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
                 let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
                 for (id, r, kind) in &g.hits {

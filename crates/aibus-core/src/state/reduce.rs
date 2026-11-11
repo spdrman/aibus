@@ -19,6 +19,7 @@ use crate::ids::{PermissionId, RunId};
 use crate::msg::{AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
+use crate::workflow::WorkflowRow;
 
 /// What `reduce` may not read from the world itself.
 #[derive(Clone, Copy, Debug, Default)]
@@ -337,7 +338,7 @@ impl R<'_> {
                 ]),
             );
         }
-        if matches!(name, "palette" | "agents" | "accounts" | "providers") || name.starts_with("models:") {
+        if matches!(name, "palette" | "agents" | "accounts" | "providers" | "workflows") || name.starts_with("models:") {
             self.put(SCREEN_SEL, n(0));
             self.put(PALETTE_TEXT, s(""));
         }
@@ -821,6 +822,8 @@ impl R<'_> {
             Command::OpenScreen(Screen::AdvisorStatus) => self.open_modal("status:advisor"),
             Command::OpenScreen(Screen::RouterStatus) => self.open_modal("status:router"),
             Command::OpenScreen(Screen::Cost) => self.open_modal("cost"),
+            Command::OpenScreen(Screen::Workflows) => self.open_modal("workflows"),
+            Command::OpenScreen(Screen::WorkflowShow) => self.open_modal("workflow_show"),
             Command::OpenHelp => self.open_modal("help"),
             Command::LedgerUpdate { section, text } => {
                 if ["goal", "now", "in_progress"].contains(&section.as_str()) {
@@ -880,6 +883,8 @@ impl R<'_> {
             Command::Workflow { .. } | Command::CreateHandoff { .. } => {
                 self.log("info", "queued request");
             }
+            // The loop reads the files and answers with `Msg::WorkflowsLoaded`.
+            Command::WorkflowFile(_) => {}
         }
     }
 }
@@ -1462,6 +1467,27 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 list(warnings.iter().map(|w| s(w)).collect()),
             );
             r.log("info", &format!("{} agents loaded", defs.len()));
+        }
+        Msg::WorkflowsLoaded { rows, shown, said } => {
+            let row = |w: &WorkflowRow| {
+                map([
+                    ("name", s(&w.name)),
+                    ("scope", s(&w.scope)),
+                    ("description", s(&w.description)),
+                    ("agents", list(w.agents.iter().map(|a| s(a)).collect())),
+                    ("error", w.error.as_deref().map_or(Value::Null, s)),
+                ])
+            };
+            r.put(WORKFLOWS, list(rows.iter().map(row).collect()));
+            if let Some(w) = shown {
+                r.put(
+                    WORKFLOW_SHOWN,
+                    map([("name", s(&w.name)), ("text", r.store.inline_or_handle(&w.text)), ("summary", s(&w.summary))]),
+                );
+            }
+            if let Some(said) = said {
+                r.log("info", said);
+            }
         }
         Msg::AccountsReloaded { accounts } => {
             let items = accounts

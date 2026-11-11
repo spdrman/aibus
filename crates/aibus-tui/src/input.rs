@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
-use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER};
+use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER, WORKFLOWS};
 use aibus_core::{
     Command, Decision, KeyCode, KeyEvent, ModelTarget, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
 };
@@ -30,7 +30,7 @@ use crate::screens::{Entry, EntryKind};
 use crate::transcript::Cells;
 use crate::ui::{Chrome, Drawn, Pointer};
 use crate::view::{CARDS, LOG_LINES, MENU_VIEW};
-use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, PROVIDERS, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, PROVIDERS, TRANSCRIPT, WORKFLOWS_VIEW};
 
 /// Two presses on the same thing this close together are a double click.
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -98,6 +98,10 @@ pub struct Context {
     pub models_target: Option<ModelTarget>,
     /// Names for the prompt's completion.
     pub agents: Vec<String>,
+    /// The workflows that parse, which the prompt's `/fix` family reads.
+    pub workflows: Vec<String>,
+    /// The rows of `/workflow list`, broken files included.
+    pub workflow_rows: Vec<String>,
     /// Every run, oldest first, with its agent (the `@target` of a command).
     pub runs: Vec<(RunId, String)>,
     /// Where each run stands, for the commands that only apply to a run in some state.
@@ -165,7 +169,7 @@ impl Context {
             .filter_map(|i| get(i, "id").and_then(as_str).map(str::to_owned))
             .collect();
         let palette_text = palette_view.and_then(|p| get(p, "text")).and_then(as_str).unwrap_or("").to_owned();
-        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS, PROVIDERS]
+        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS, PROVIDERS, WORKFLOWS_VIEW]
             .iter()
             .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
             .unwrap_or(0)
@@ -212,6 +216,13 @@ impl Context {
             .iter()
             .filter_map(|d| get(d, "name").and_then(as_str).map(str::to_owned))
             .collect();
+        let workflow_values = g.read_key(WORKFLOWS).map_or(&[][..], as_list);
+        let workflow_rows = workflow_values.iter().filter_map(|w| get(w, "name").and_then(as_str).map(str::to_owned)).collect();
+        let workflows = workflow_values
+            .iter()
+            .filter(|w| matches!(get(w, "error"), None | Some(Value::Null)))
+            .filter_map(|w| get(w, "name").and_then(as_str).map(str::to_owned))
+            .collect();
         let runs: Vec<(RunId, String)> = g
             .read_key(RUNS_ORDER)
             .map_or(&[][..], as_list)
@@ -251,14 +262,16 @@ impl Context {
             provider_rows,
             models_target,
             agents,
+            workflows,
+            workflow_rows,
             runs,
             states,
             any_runs,
         }
     }
 
-    /// The session as the commands see it. The dashboard passes no workflows yet, so the `/fix`
-    /// family stays out of the popup and out of reach, as before.
+    /// The session as the commands see it. `workflows` are the ones that parse (`self.workflows`
+    /// for the dashboard), which is what lets the `/fix` family into the popup and within reach.
     pub fn env<'a>(&'a self, workflows: &'a [String]) -> Env<'a> {
         Env {
             agents: &self.agents,
@@ -291,6 +304,7 @@ impl Context {
             Some("agents") => Ctx::Agents,
             Some("accounts") => Ctx::Accounts,
             Some("providers") => Ctx::Providers,
+            Some("workflows") => Ctx::Workflows,
             Some(m) if m.starts_with("models:") => Ctx::Models,
             Some("outcome") => Ctx::Outcome,
             Some(m) if m.starts_with("confirm:") => Ctx::Confirm,
@@ -404,6 +418,8 @@ enum Scr {
     ModelSeat(ModelTarget),
     ModelThisRun,
     ModelFilter,
+    /// The workflow list: put `/workflow run <name> ` in the prompt.
+    WorkflowRun,
     Outcome(Outcome),
     QuitNow,
     ConfirmYes,
@@ -428,6 +444,7 @@ fn scr_of(id: &str) -> Option<Scr> {
         "seat_router" => Scr::ModelSeat(ModelTarget::Router),
         "this_run" => Scr::ModelThisRun,
         "filter" => Scr::ModelFilter,
+        "wf_run" => Scr::WorkflowRun,
         "outcome:1" => Scr::Outcome(Outcome::Succeeded),
         "outcome:2" => Scr::Outcome(Outcome::PartialPlus),
         "outcome:3" => Scr::Outcome(Outcome::PartialMinus),
@@ -666,7 +683,7 @@ impl Input {
         let Some((item, true)) = menu.items.get(i).map(|(id, on)| (id.as_str(), *on)) else {
             return;
         };
-        commands::pick(item, Via::Menu, Some(menu.run), &cx.env(&[]), out);
+        commands::pick(item, Via::Menu, Some(menu.run), &cx.env(&cx.workflows), out);
         out.msgs.push(ui(UiIntent::CloseMenu));
     }
 
@@ -674,7 +691,7 @@ impl Input {
         let notch = if up { WHEEL_LINES } else { -WHEEL_LINES };
         match cx.keys() {
             Ctx::Transcript => return out.msgs.push(tr(TrOp::Scroll(notch))),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows => {
                 return out.msgs.push(ui(UiIntent::Pick(if up { Selection::Prev } else { Selection::Next })));
             }
             _ if cx.chrome.modal.is_some() => return,
@@ -874,6 +891,7 @@ impl Input {
                         Ctx::Accounts => Some(Scr::AcctTest),
                         Ctx::Models => Some(Scr::ModelUse),
                         Ctx::Providers => Some(Scr::ProviderPick),
+                        Ctx::Workflows => Some(Scr::WorkflowRun),
                         _ => None,
                     };
                     if let Some(a) = default {
@@ -1073,7 +1091,7 @@ impl Input {
         }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Outcome | Ctx::Confirm => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows | Ctx::Outcome | Ctx::Confirm => {
                 self.screen_key(ev, ctx, cx, prompt, &mut out);
             }
             _ => {
@@ -1100,7 +1118,7 @@ impl Input {
             (KeyCode::Enter, ..) if prompt.accept_popup() => {}
             (KeyCode::Enter, ..) => {
                 if let Some(line) = prompt.take() {
-                    match commands::send(&line, &cx.env(&[])) {
+                    match commands::send(&line, &cx.env(&cx.workflows)) {
                         Sent::Msgs(m) => out.msgs.extend(m),
                         Sent::Login(provider, m) => {
                             out.msgs.extend(m);
@@ -1111,12 +1129,12 @@ impl Input {
                 }
             }
             (KeyCode::Tab, ..) => {
-                let (_, found) = prompt.candidates(&cx.env(&[]));
+                let (_, found) = prompt.candidates(&cx.env(&cx.workflows));
                 if prompt.popup.is_some() || !found.is_empty() {
                     if shift {
                         prompt.shift_tab();
                     } else {
-                        prompt.tab(&cx.env(&[]));
+                        prompt.tab(&cx.env(&cx.workflows));
                     }
                 } else if let Some(action) = keys.lookup(ev, Ctx::Prompt) {
                     self.act(action, cx, drawn, prompt, out);
@@ -1207,6 +1225,15 @@ impl Input {
                 };
                 self.screen(a, cx, prompt, out);
             }
+            Ctx::Workflows => {
+                let a = match (ev.code, c) {
+                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
+                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Enter, _) => Scr::WorkflowRun,
+                    _ => return,
+                };
+                self.screen(a, cx, prompt, out);
+            }
             Ctx::Outcome => {
                 let a = match c {
                     Some('1') => Scr::Outcome(Outcome::Succeeded),
@@ -1241,7 +1268,7 @@ impl Input {
                 let Some(id) = cx.palette.get(sel) else { return };
                 let close = cmd(Command::CloseModal);
                 match id.split_once(':') {
-                    Some(("cmd", name)) => commands::pick(name, Via::Palette, None, &cx.env(&[]), out),
+                    Some(("cmd", name)) => commands::pick(name, Via::Palette, None, &cx.env(&cx.workflows), out),
                     Some(("agent", name)) => {
                         out.msgs.extend([close, ui(UiIntent::Focus(Pane::Input))]);
                         prompt.set(&format!("@agent-{name} "));
@@ -1306,6 +1333,14 @@ impl Input {
             Scr::ModelFilter => {
                 self.entry = Some(Entry::plain(EntryKind::ModelFilter, "filter", &cx.palette_text));
             }
+            Scr::WorkflowRun => match cx.workflow_rows.get(sel) {
+                Some(name) if cx.workflows.contains(name) => {
+                    out.msgs.extend([cmd(Command::CloseModal), ui(UiIntent::Focus(Pane::Input))]);
+                    prompt.set(&format!("/workflow run {name} "));
+                }
+                Some(name) => self.note = format!("{name} does not parse, /workflow show {name} says why"),
+                None => {}
+            },
             Scr::Outcome(o) => {
                 out.msgs.extend([cmd(Command::CreateHandoff { outcome: Some(o) }), cmd(Command::Quit { force: false })]);
             }
@@ -1429,7 +1464,7 @@ impl Input {
             FocusPrev => out.msgs.push(ui(UiIntent::FocusPrev)),
             Submit => {
                 if let Some(line) = prompt.take() {
-                    match commands::send(&line, &cx.env(&[])) {
+                    match commands::send(&line, &cx.env(&cx.workflows)) {
                         Sent::Msgs(m) => out.msgs.extend(m),
                         Sent::Login(provider, m) => {
                             out.msgs.extend(m);

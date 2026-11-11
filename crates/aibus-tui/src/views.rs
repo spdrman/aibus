@@ -6,7 +6,8 @@ use aibus_core::state::store::{Row, Store};
 use aibus_core::state::value::{as_i64, as_list, as_str, get, list, map, n, s};
 use aibus_core::state::{
     router_last, run_key, transcript_body, ADVISOR_STATE, AGENTS_DEFS, AGENTS_WARNINGS, ACCOUNTS, CLOCK_MS, MODAL,
-    PALETTE_TEXT, PERMISSIONS_OPEN, ROUTER_FORKS, RUNS_ORDER, SCREEN_SEL, SESSION_ASSIST, SIZE, TRANSCRIPT_UI,
+    PALETTE_TEXT, PERMISSIONS_OPEN, ROUTER_FORKS, RUNS_ORDER, SCREEN_SEL, SESSION_ASSIST, SIZE, TRANSCRIPT_UI, WORKFLOWS,
+    WORKFLOW_SHOWN,
 };
 use aibus_core::{ModelTarget, RunStatus};
 use aibus_graph::{Tracker, Value};
@@ -20,6 +21,7 @@ pub const RUN_STATUS: &str = "view:run_status";
 pub const COST: &str = "view:cost";
 pub const MODELS: &str = "view:models";
 pub const PROVIDERS: &str = "view:providers";
+pub const WORKFLOWS_VIEW: &str = "view:workflows";
 
 /// The palette's fuzzy match: every character of `needle` in `hay`, in order. A run of
 /// consecutive characters and a match at the start of a word score higher. `None` is no match.
@@ -154,6 +156,27 @@ pub fn agents(store: &Store, t: &mut Tracker) -> Value {
         ("warnings", n(warnings.len())),
         ("first_warning", warnings.first().cloned().unwrap_or(Value::Null)),
     ])
+}
+
+/// `view:workflows`: the rows of `/workflow list` with the selection, or the text of `/workflow
+/// show` as lines with its summary. Null unless one of those two modals is open.
+pub fn workflows(store: &Store, t: &mut Tracker) -> Value {
+    let modal = t.get_key(MODAL).and_then(as_str).map(str::to_owned);
+    match modal.as_deref() {
+        Some("workflows") => {
+            let rows = t.get_key(WORKFLOWS).map(as_list).unwrap_or_default().to_vec();
+            let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, rows.len().saturating_sub(1) as i64);
+            map([("rows", list(rows)), ("sel", n(sel))])
+        }
+        Some("workflow_show") => {
+            let shown = t.get_key(WORKFLOW_SHOWN).cloned().unwrap_or(Value::Null);
+            let body = get(&shown, "text").map(|x| text_of(store, x)).unwrap_or_default();
+            let word = |k: &str| get(&shown, k).cloned().unwrap_or_else(|| s(""));
+            let lines: Vec<Value> = body.lines().take(400).map(s).collect();
+            map([("name", word("name")), ("lines", list(lines)), ("summary", word("summary"))])
+        }
+        _ => Value::Null,
+    }
 }
 
 pub fn accounts(t: &mut Tracker) -> Value {

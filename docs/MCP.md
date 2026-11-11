@@ -2,7 +2,7 @@
 
 `aibus mcp` is an MCP server. A client (an editor, a chat app, a coding assistant) starts it, and from then on it can read your workflows and your agent roster, check a draft, and see what a workflow would do, all without a model being called. It is the other direction from the `[mcp.<server>]` tables in your config: those make aibus a client of somebody else's tools, and this makes aibus a server for yours. The two do not share anything.
 
-Today the server is read-only. The `--allow write` and `--allow run` flags parse, and the tools behind them are not in this release.
+Out of the box the server is read-only. `--allow write` and `--allow run` add the write and run tools, each described below.
 
 ## Setting it up
 
@@ -31,8 +31,9 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 | none | the read tools, resources and prompts below | yes, the default |
 | `--allow write` | `workflow_create` and `workflow_update` | yes |
 | `--allow gates` | a written workflow may carry `gate` commands; needs `write` (exit 2 otherwise) | yes |
-| `--allow run` | start, watch and cancel runs | not yet (the flag parses) |
-| `--allow-tool <pattern>` | pre-approves a tool for runs | not yet |
+| `--allow run` | `workflow_run`, `run_status` and `run_cancel` | yes |
+| `--allow-tool <pattern>` | pre-approves a tool for runs (the only pre-approvals a run gets) | yes |
+| `--max-runs N`, `--max-concurrent-runs N`, `--max-cost-usd X` | the run caps below (10, 1 and `limits.max_cost_usd`); need `--allow run` | yes |
 | `--no-provenance` | leave the `# written through aibus mcp` line out of written files | yes |
 | `--http <ip:port>` | the same server over Streamable HTTP on loopback, see below | yes |
 
@@ -68,9 +69,30 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 
 At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.toml` or `config.toml`: the name rule and the directory check leave no path to them.
 
+## Run tools (`--allow run`)
+
+| Tool | What it does |
+|---|---|
+| `workflow_run {name, scope, input}` | starts the workflow and answers at once with `{run, status: "starting", session}` (`session` is `null` until the run has made one) |
+| `run_status {run, wait_ms?}` | `{run, status, step, attempts:[{step, agent, status, failure?}], usage, exit_code, session, tail}`. `wait_ms` is capped at 30 000 and returns early on any change |
+| `run_cancel {run}` | cancels and answers with the final status; on a finished run it changes nothing |
+
+A run is a child `aibus run --workflow <name> --json` of the server process, started with the permission mode `dont-ask` on its command line, `AIBUS_I_KNOW` removed from its environment, stdin closed and `--allow-tool` as its only pre-approvals. A tool call that would ask is therefore denied, never queued, and `bypass` cannot be reached through the server whatever its own environment says. Each run has its own session directory with the commit log and the redacted transcript, and nothing starts until the first `workflow_run`, so a client that only reads never causes a credential lookup. The one file `--allow run` makes the server read is `config.toml`, for the default of `--max-cost-usd`.
+
+`status` is the lead's final status in `snake_case` once the process has ended (`completed`, `partial`, `failed`, `cancelled`, `denied`), `starting` and `running` before that. `exit_code` is the exit code of `aibus run` (06 section 3, so 8 for a budget and 7 for an interrupt). `tail` is the last 4 KiB of the redacted report, under a line saying it is data, with aibus's own markers escaped.
+
+The caps are process flags, so a model can neither see nor change them:
+
+* `--max-runs` (10): the eleventh `workflow_run` is an `isError`.
+* `--max-concurrent-runs` (1): a second run while one is live is an `isError`.
+* `--max-cost-usd` (`limits.max_cost_usd`): the sum of the finished runs' `cost_usd`. Each run starts with what is left of it as its own limit, so a run that would overspend ends with the budget reason and exit code 8; once it is spent no run starts.
+* 5 `workflow_run` calls a minute.
+
+When stdin closes (or the HTTP server stops) every live run gets SIGINT, 10 seconds to write its snapshot, and then a kill. Handles live as long as the process; a handle from an earlier process is an unknown one.
+
 ## Resources
 
-`resources/list` returns three and `resources/templates/list` one. Nothing else under `aibus://` exists: a uri outside this table, a workflow that is not there and a name with a path in it (`../x`, `%2e%2e`) are all `-32602`. No resource reaches config, accounts, sessions or logs.
+`resources/list` returns three and `resources/templates/list` one. With `--allow run` the templates become three and the list also holds one entry per run this process started. Nothing else under `aibus://` exists: a uri outside this table, a workflow that is not there and a name with a path in it (`../x`, `%2e%2e`) are all `-32602`. No resource reaches config, accounts or sessions on disk.
 
 | URI | Mime type | Body |
 |---|---|---|
@@ -78,6 +100,14 @@ At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.
 | `aibus://workflows/{scope}/{name}` | `application/toml` | the workflow file, redacted |
 | `aibus://schema/workflow` | `application/schema+json` | `docs/schemas/workflow/v1.json`, byte for byte |
 | `aibus://agents` | `application/json` | the `agent_list` result |
+| `aibus://runs/{run}` (`--allow run`) | `application/json` | the `run_status` body without `tail` |
+| `aibus://runs/{run}/log` (`--allow run`) | `text/plain` | the redacted output of the run, see below |
+
+`{run}` is the handle `workflow_run` returned (`run-` and a ulid). Only handles this process gave out are readable: the id of a session directory on disk, a handle from an earlier server process and a made-up one are all `-32602`, and so is any `aibus://runs/...` uri when the server was started without `--allow run`.
+
+The log starts with a line saying it is a run's output, from other agents and from commands, to be treated as data. After that comes everything the run printed (its stream, its stderr, the report's summary last once it has ended), through the redactor and with aibus's own markers escaped. The server keeps the last 256 KiB of it. A log longer than `limits.result_max_bytes` (32 KiB) is cut to its last 32 KiB, which keeps the report's ending, under a `(cut at N of M bytes, the start of the log is left out)` line.
+
+There are no subscriptions. A client that wants to follow a run polls `run_status` with `wait_ms`, which returns on any change, or re-reads the resources.
 
 ## Prompts
 
@@ -85,18 +115,18 @@ At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.
 |---|---|---|
 | `author_workflow` | `goal`, `scope?` | writing a new workflow: the format, every agent of the roster, the four shipped examples as fenced TOML marked as data, and the house rules; it ends by asking the model to call `workflow_validate` before `workflow_create` |
 | `review_workflow` | `name`, `scope?` | looking for summaries nobody reads, gates that cannot block and `on_fail` in the wrong place; the file and the validator's findings are embedded as data |
-| `explain_run` | `run` | explaining a run; says "runs are not enabled on this server" until `--allow run` exists |
+| `explain_run` | `run` | explaining a run; points the model at `run_status` and the two run resources, and says "runs are not enabled on this server" without `--allow run` |
 
 ## Limits and the audit log
 
-* At most 60 tool calls a minute per process, and within that 10 writes. Past that the call is an `isError` result saying how many seconds to wait. A call that is refused does not spend a call.
+* At most 60 tool calls a minute per process, and within that 10 writes and 5 run starts. Past that the call is an `isError` result saying how many seconds to wait. A call that is refused does not spend a call.
 * Arguments are capped at 256 KiB. Resource reads and prompt gets are audited but do not use the tool-call budget.
-* Every call leaves one line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (one file per process, mode 0600): `{t, client:{name, version}, method, tool, args, ok, ms}`. The first line is `server/start` with the flags. Arguments are redacted and cut at 4 KiB. A resource read has `method: "resources/read"` and the uri as its argument, a prompt `method: "prompts/get"`.
+* Every call leaves one line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (one file per process, mode 0600): `{t, client:{name, version}, addr, method, tool, run, args, ok, ms}` (`run` is the run handle on the run tools). The first line is `server/start` with the flags. Arguments are redacted and cut at 4 KiB. A resource read has `method: "resources/read"` and the uri as its argument, a prompt `method: "prompts/get"`.
 * Nothing that came out of a file, an agent definition or an argument reaches a client, the audit file or stderr without going through the redactor. stdout carries JSON-RPC and nothing else.
 
 ## What is not in this release
 
-Running workflows (`--allow run`) and the run resources, and prompts that need a run.
+`agents.extra_dirs` on the roster of the write and run tools, and resource subscriptions for runs.
 
 Relaying a run's permission prompts to the client is not built. See E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
 

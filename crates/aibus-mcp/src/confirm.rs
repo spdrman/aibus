@@ -250,7 +250,7 @@ impl Server {
             match request.request_state.as_deref() {
                 None => {
                     let asked = self.confirmation_ask(tool, &args, client)?;
-                    self.audit.record(client, addr, "confirm/ask", Some(tool), &args, true, started.elapsed());
+                    self.audit.record(client, addr, "confirm/ask", Some(tool), None, &args, true, started.elapsed());
                     return Some(CallToolResponse::InputRequired(asked));
                 }
                 Some(state) => {
@@ -269,7 +269,7 @@ impl Server {
         match verdict {
             Ok(()) => None,
             Err(why) => {
-                self.audit.record(client, addr, "confirm/refused", Some(tool), &args, false, started.elapsed());
+                self.audit.record(client, addr, "confirm/refused", Some(tool), None, &args, false, started.elapsed());
                 Some(CallToolResponse::from(CallToolResult::error(vec![ContentBlock::text(why)])))
             }
         }

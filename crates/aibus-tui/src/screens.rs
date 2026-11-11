@@ -673,6 +673,86 @@ pub fn cost(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
     Placed { area, hits }
 }
 
+/// `/workflow list`: name, scope, the agents of the steps and the description of each workflow, or
+/// the parse error of a file that is broken. `Enter` puts `/workflow run <name> ` in the prompt.
+pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, 100, 18);
+    Clear.render(area, buf);
+    let inner = {
+        let i = panel(buf, area, "workflows", th.swarm, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let sel = int(v, "sel") as usize;
+    let (dim, fg) = (Style::new().fg(th.dim_text), Style::new().fg(th.fg));
+    let head = Rect { height: 1, ..inner };
+    column(buf, head, 0, 18, "name", dim);
+    column(buf, head, 19, 8, "scope", dim);
+    column(buf, head, 28, inner.width.saturating_sub(28), "steps and description", dim);
+    let shown = usize::from(inner.height.saturating_sub(4)).max(1);
+    let first = sel.saturating_sub(shown - 1);
+    let mut hits = Vec::new();
+    if rows.is_empty() {
+        put(buf, inner, 0, 1, "no workflows yet: /workflow new <goal> drafts one, /workflow save keeps it", dim);
+    }
+    for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let i = first + k;
+        let hit = HitId::ListRow(i);
+        let state = if pointer.pressed == Some(hit) {
+            Some(Interact::Pressed)
+        } else if pointer.hover == Some(hit) {
+            Some(Interact::Hover)
+        } else if i == sel {
+            Some(Interact::Selected)
+        } else {
+            None
+        };
+        if let Some(s) = state {
+            buf.set_style(r, th.interact(s));
+        }
+        column(buf, r, 0, 18, text(row, "name"), fg);
+        column(buf, r, 19, 8, text(row, "scope"), dim);
+        let rest = inner.width.saturating_sub(28);
+        match get(row, "error").and_then(|e| e.as_text()) {
+            Some(why) => column(buf, r, 28, rest, &format!("broken: {why}"), Style::new().fg(th.error)),
+            None => {
+                let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
+                column(buf, r, 28, rest, &format!("{}  {}", agents.join(" > "), text(row, "description")), fg);
+            }
+        }
+        hits.push((hit, r));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    let ok = rows.get(sel).is_some_and(|r| get(r, "error").is_none_or(|e| matches!(e, Value::Null)));
+    let (b, _) = buttons(buf, bottom, 0, &[("wf_run", "Enter", "Run", ok), ("cancel", "Esc", "Close", true)], th, pointer);
+    hits.extend(b);
+    Placed { area, hits }
+}
+
+/// `/workflow show <name>` and a refused `/workflow save`: the text as data, and one summary line
+/// under it.
+pub fn workflow_show(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, 100, full.height.saturating_sub(4).max(8));
+    Clear.render(area, buf);
+    let title = get(v, "name").and_then(|t| t.as_text()).unwrap_or("workflow");
+    let inner = {
+        let i = panel(buf, area, title, th.swarm, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let lines = as_list(get(v, "lines").unwrap_or(&NULL));
+    let room = usize::from(inner.height.saturating_sub(4));
+    for (k, l) in lines.iter().take(room).enumerate() {
+        let r = Rect { y: inner.y + k as u16, height: 1, ..inner };
+        put(buf, r, 0, 0, &clip(l.as_str_or(""), usize::from(r.width)), Style::new().fg(th.fg));
+    }
+    let summary = get(v, "summary").and_then(|t| t.as_text()).unwrap_or("");
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    put(buf, bottom, 0, 0, &clip(summary, usize::from(bottom.width)), Style::new().fg(th.dim_text));
+    let (hits, _) = buttons(buf, bottom, 1, &[("cancel", "Esc", "Close", true)], th, pointer);
+    Placed { area, hits }
+}
+
 /// Small conveniences on `Value` that the screens use.
 trait ValueExt {
     fn as_text(&self) -> Option<&str>;

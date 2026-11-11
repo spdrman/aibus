@@ -95,6 +95,10 @@ Crates in that set that run code at build time:
 | `rmcp-macros`, `schemars_derive`, `pastey`, `ref-cast-impl`, `darling_macro` | proc macros: `rmcp`'s attribute macros (the `macros` feature is on as D-13 says; the handler writes its tool table by hand today), `schemars`' derive, identifier pasting, and the derives under them |
 | `windows-implement`, `windows-interface` | proc macros, Windows targets only |
 
+## rataflow (D-12)
+
+`rataflow` 0.1 draws the dashboard's centre column. It is a plain dependency of `aibus-tui` only (`default-features = false, features = ["crossterm"]`, so no `rust-sugiyama`, `petgraph`, `serde` or `log`), and only `crates/aibus-tui/src/diagram.rs` names it; `crates/aibus-testkit/tests/workspace.rs` and `source_rules.rs` check both. The build adds one crate to the lock, +0.6 % to the release binary, and `cargo deny check` passes with it. The numbers are in `docs/spikes/D1.1-rataflow.md`. There is no feature flag and no hand-drawn fallback any more (#93).
+
 ## CI
 
 `.github/workflows/fuzz.yml` runs the fuzz targets nightly. `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.

@@ -5,7 +5,8 @@
 //! `run` writes into the same `Out` the key handling fills, so a slash line, a palette row and a
 //! menu item are three ways into one function and cannot drift apart.
 
-use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent};
+use aibus_core::workflow::{valid_name, SaveError};
+use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent, WorkflowFile};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
@@ -303,20 +304,14 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "workflow",
-        args: "<name> <input>",
-        help: "run a workflow",
+        args: "list | show <name> | save <name> | run <name> <input>",
+        help: "list, show, save and run workflows (/workflow <name> <input> runs one too)",
         label: "",
         hint: "",
         scope: Scope::Global,
         needs: 0,
         surfaces: at(10, 0, 0),
-        run: |c, out| match c.args.split_once(char::is_whitespace) {
-            Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
-            None if !c.args.is_empty() => {
-                command(out, Command::Workflow { name: c.args.to_owned(), input: String::new() })
-            }
-            None => need(c, "a workflow name"),
-        },
+        run: workflow,
     },
     Spec {
         name: "agents",
@@ -653,6 +648,43 @@ fn open_status(c: &Call, target: Option<ModelTarget>, out: &mut Out) -> Result<(
     command(out, Command::OpenScreen(screen))
 }
 
+/// `/workflow` and its subcommands. A first word that is not one of them is the name of a
+/// workflow to run, so `/workflow review <input>` keeps working (a workflow called `list`,
+/// `show`, `save` or `run` is reached as `/workflow run list <input>`).
+fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
+    let (sub, rest) = c.args.split_once(char::is_whitespace).map_or((c.args, ""), |(w, r)| (w, r.trim()));
+    let run = |args: &str, out: &mut Out| match args.split_once(char::is_whitespace) {
+        Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
+        None if !args.is_empty() => command(out, Command::Workflow { name: args.to_owned(), input: String::new() }),
+        None => need(c, "a workflow name"),
+    };
+    match sub {
+        "list" => command(out, Command::WorkflowFile(WorkflowFile::List)),
+        "show" if rest.is_empty() => need(c, "a workflow name"),
+        "show" => command(out, Command::WorkflowFile(WorkflowFile::Show(rest.to_owned()))),
+        "save" => {
+            let (mut name, mut user, mut force) = (None, false, false);
+            for word in rest.split_whitespace() {
+                match word {
+                    "--user" => user = true,
+                    "--force" => force = true,
+                    w if w.starts_with("--") => return Err(format!("/workflow save: no flag {w} (--user, --force)")),
+                    w if name.is_none() => name = Some(w),
+                    _ => return Err("/workflow save takes one name".into()),
+                }
+            }
+            let name = name.ok_or_else(|| format!("/{} save needs a name", c.name))?;
+            // Before any file is looked at: the name is a name, never a path.
+            if !valid_name(name) {
+                return Err(SaveError::Name(name.to_owned()).to_string());
+            }
+            command(out, Command::WorkflowFile(WorkflowFile::Save { name: name.to_owned(), user, force }))
+        }
+        "run" => run(rest, out),
+        _ => run(c.args, out),
+    }
+}
+
 /// `/fix <input>` and the other three are `/workflow <name> <input>`.
 fn shorthand(c: &Call, out: &mut Out) -> Result<(), String> {
     command(out, Command::Workflow { name: c.name.to_owned(), input: c.args.to_owned() })
@@ -912,6 +944,30 @@ mod tests {
     }
 
     #[test]
+    fn workflow_subcommands_are_file_commands_and_run_is_the_old_command() {
+        let m = |line: &str| msgs(line, &[], &[]);
+        assert_eq!(m("/workflow list"), "Command(WorkflowFile(List))");
+        assert_eq!(m("/workflow show review"), "Command(WorkflowFile(Show(\"review\")))");
+        assert_eq!(m("/workflow show"), "BAD /workflow needs a workflow name");
+        assert_eq!(
+            m("/workflow save review"),
+            "Command(WorkflowFile(Save { name: \"review\", user: false, force: false }))"
+        );
+        assert_eq!(
+            m("/workflow save --force review --user"),
+            "Command(WorkflowFile(Save { name: \"review\", user: true, force: true }))"
+        );
+        assert_eq!(m("/workflow save"), "BAD /workflow save needs a name");
+        assert!(m("/workflow save a b").starts_with("BAD"));
+        assert!(m("/workflow save --nope x").starts_with("BAD"));
+        // A bad name never becomes a message, so nothing downstream can look at the disk for it.
+        for bad in ["../x", "A", ".x", "a/b", "-x"] {
+            assert!(m(&format!("/workflow save {bad}")).starts_with("BAD `"), "{bad}");
+        }
+        assert_eq!(m("/workflow run review the diff"), m("/workflow review the diff"));
+    }
+
+    #[test]
     fn send_table_covers_every_existing_command_unchanged() {
         let agents = vec!["search".to_owned()];
         let m = |line: &str| msgs(line, &agents, &["fix".to_owned()]);
@@ -932,6 +988,8 @@ mod tests {
         assert_eq!(m("/advisor"), "BAD /advisor needs a model or off");
         assert_eq!(m("/model @advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
         assert!(m("/workflow review the diff").contains("Workflow { name: \"review\", input: \"the diff\" }"));
+        assert_eq!(m("/workflow run review the diff"), m("/workflow review the diff"));
+        assert_eq!(m("/workflow run"), "BAD /workflow needs a workflow name");
         assert!(m("/fix the bug").contains("Workflow { name: \"fix\", input: \"the bug\" }"));
         assert_eq!(m("/build x"), "BAD /build is not available: no workflow named build");
         assert_eq!(m("/agents"), "Command(OpenScreen(Agents))");

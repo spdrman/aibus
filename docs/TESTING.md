@@ -17,7 +17,7 @@ the same command, started by hand.
 | Graph conformance | `cargo test --locked -p aibus-graph` (mini); `aibus-graph-causl` for the second backend | every push |
 | Engine integration | `cargo test --locked -p aibus-core --test integration` | every push |
 | TUI snapshots | `cargo test --locked -p aibus-tui` | every push |
-| CLI | `cargo test --locked -p aibus --tests` | every push |
+| CLI | `cargo test --locked -p aibus --tests`, and again with `--features flow-diagram` (the demo tests: two plays, the time marks, nothing personal, and the frames equal to `frames.classic.txt`) | every push |
 | Replay | `cargo test --locked -p aibus-testkit --test replay --test session` and `-p aibus-core --test replay` | every push |
 | Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini` (cassettes) | every push |
 | Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |

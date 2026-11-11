@@ -137,12 +137,12 @@ fn the_dashboard_keeps_ticking_during_the_verify() {
     let (tx, mut rx) = mpsc::channel(8);
     let mut hook: Option<AccountHook> = Some(Box::new(|op, tx| {
         let AccountOp::Add { name, .. } = &op else { panic!() };
-        let name = name.clone();
+        let (shown, name) = (format!("verifying {name}..."), name.clone());
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
             let _ = tx.blocking_send(Msg::AccountOpDone { op: "add".into(), account: name.clone(), ok: true, text: format!("added {name}") });
         });
-        format!("verifying {name}...")
+        shown
     }));
     let mut note = String::new();
     let started = Instant::now();

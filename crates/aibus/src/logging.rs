@@ -18,7 +18,7 @@ use crate::trace::{self, TraceGuard, TARGET};
 /// The file's filter: the level `-q`, `-v` and `-vv` give, then `AIBUS_LOG`'s comma separated
 /// directives on top (`debug`, or `aibus_core=debug`). Directives that do not parse are
 /// returned so they can be logged once the subscriber exists.
-fn filter(g: &Global, directives: Option<&str>) -> (Targets, Vec<String>) {
+pub(crate) fn filter(g: &Global, directives: Option<&str>) -> (Targets, Vec<String>) {
     let base = match (g.quiet, g.verbose) {
         (true, _) => LevelFilter::ERROR,
         (_, 0) => LevelFilter::WARN,

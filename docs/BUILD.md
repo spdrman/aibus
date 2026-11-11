@@ -37,7 +37,7 @@ The MSRV pins two versions in `Cargo.lock`: `smol_str` 0.3.2 (newer ones need ru
 
 ## HTTP and TLS (B1.5)
 
-Only the `aibus-provider-*` crates open sockets. `aibus-provider-http` holds the one `reqwest` 0.12 client setup, and `aibus-provider-anthropic` and `aibus-provider-openai` use it, so `aibus-provider`, `aibus-core` and `aibus-tui` stay free of it (`crates/aibus-testkit/tests/workspace.rs` checks that, and that no OpenSSL or native TLS crate is in the provider crates' tree).
+Only the `aibus-provider-*` crates open sockets. `aibus-provider-http` holds the one `reqwest` 0.12 client setup, and `aibus-provider-anthropic`, `aibus-provider-openai` and `aibus-provider-gemini` use it, so `aibus-provider`, `aibus-core` and `aibus-tui` stay free of it (`crates/aibus-testkit/tests/workspace.rs` checks that, and that no OpenSSL or native TLS crate is in the provider crates' tree).
 
 `reqwest` is built with `default-features = false` and `rustls-tls-native-roots`: rustls with the `ring` crypto provider, and the root certificates read from the system's store (so a company CA or a proxy's CA that is installed system-wide works). I picked `ring` over `aws-lc-rs` because `aws-lc-sys` can want cmake or a prebuilt binary and `ring` only wants a C compiler. I picked the native roots over `webpki-roots` because the latter's data is CDLA-Permissive-2.0, which is not in `deny.toml`'s allow-list, and I did not want to widen it. `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured by `reqwest` itself (there is a test for `HTTP_PROXY`; `HTTPS_PROXY` goes through the same code but needs a CONNECT proxy, which I did not fake). I did not turn on `macos-system-configuration`, so the macOS system proxy settings are not read.
 
@@ -80,6 +80,20 @@ cargo bench --locked --offline --manifest-path crates/aibus-graph-causl/Cargo.to
 The differential replays every fixture in `aibus-testkit` through `MiniGraph` and `CauslGraph` and asserts equal snapshot bytes and equal commit intents. The bench prints both backends and a `side_by_side` line.
 
 **If upstream lands `Persister`, `Reader` and `Observable`.** They are `unimplemented!()` in the pinned commit. `Reader` and `Observable` would change nothing for me (the public `State` getters do the job and I need no engine telemetry). `Persister` would let `snapshot` and `hydrate` use the engine's own state dump, but I would keep the typed-input snapshot unless the differential stayed green, since that is what keeps snapshots byte-identical with `mini`. The three engine gaps from the spike (derived retention seed and default, dynamic dependency ordering) are the ones that would let me delete host workarounds.
+
+## The MCP server crate (E4)
+
+`crates/aibus-mcp` depends on `aibus-core` and on `rmcp` 3.9 with exactly `server`, `macros` and `transport-io` (D-13); `crates/aibus` calls `aibus_mcp::serve_stdio` from the `mcp` subcommand and nothing else sees `rmcp`, `schemars` or `chrono`. The lock gained 27 entries (existing entries are untouched, apart from the version tag cargo now writes in a dependency list where a name became ambiguous): `rmcp`, `rmcp-macros`, `schemars`, `schemars_derive`, `serde_derive_internals`, `pastey`, `chrono`, `iana-time-zone`, `iana-time-zone-haiku`, `android_system_properties`, `sha2` 0.11 with `digest`, `block-buffer`, `crypto-common`, `const-oid` and `hybrid-array`, `ref-cast`, `ref-cast-impl`, `darling` 0.24 with `darling_core` and `darling_macro`, `dyn-clone`, and the Windows-only `windows-core`, `windows-implement`, `windows-interface`, `windows-result`, `windows-strings`. Cargo needed no `--precise` pin on 1.89. `cargo deny check` passes with `deny.toml` unchanged; the new warnings are the duplicates of `sha2`, `digest`, `block-buffer`, `crypto-common` and `darling*`, which `rmcp` brings on a newer line than the rest of the tree uses.
+
+Crates in that set that run code at build time:
+
+| Crate | Reason |
+|---|---|
+| `rmcp` | `build.rs` runs `git config core.hooksPath .githooks`, but only when two directories above the crate holds a `.githooks` directory and a `.git` (its own workspace), so as a registry dependency it does nothing; I read the file |
+| `ref-cast` | `build.rs` probes the compiler for features (transitive, via `schemars`) |
+| `iana-time-zone-haiku` | `build.rs` for Haiku only (transitive, via `chrono`) |
+| `rmcp-macros`, `schemars_derive`, `pastey`, `ref-cast-impl`, `darling_macro` | proc macros: `rmcp`'s attribute macros (the `macros` feature is on as D-13 says; the handler writes its tool table by hand today), `schemars`' derive, identifier pasting, and the derives under them |
+| `windows-implement`, `windows-interface` | proc macros, Windows targets only |
 
 ## CI
 

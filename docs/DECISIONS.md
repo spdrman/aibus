@@ -170,6 +170,60 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 
 **Why.** Behaviour first, frames with the suites.
 
+## F8 (2026-11-11): the model catalog, the sync tool and reported cost
+
+**Context.** #116 moves the three built-in tables to `catalog/`, adds a reviewed sync tool, dated prices and the gateway-reported cost. The epic's open decision 2 (catalog source) gates it, and #111 (per-model capabilities) is not in the tree yet. #110 landed while I was working, so the catalog follows its presets.
+
+**Decision.**
+
+1. The source is a models.dev snapshot that I save by hand and pass with `--snapshot`. The tool has no network code at all, so "no fetch without review" is true by construction. I did not confirm models.dev's licence here, so the first real sync waits for that; the fixture snapshot in `fixtures/catalog-sync/` is made up.
+2. The tool is a bin in `aibus-testkit` (`catalog-sync`), with the logic in a pure function (`catalog_sync::plan`) that the tests call. Dry run is the default and `--write` applies. It updates the models already in a catalog and only adds new ones with `--add-new`, because models.dev lists embeddings, audio and retired models we do not want in a table.
+3. Capabilities are written as `capabilities: {tool_call, reasoning, input_modalities}` using models.dev's names, and `ModelEntry` ignores them for now. #111 can rename or consume them. The `price_of` alias column is not added: no alias column exists in the tree yet, and snapshots already resolve through the undated id.
+4. `price_from` is a second row with the same `id`. `layer()` keys on `(id, price_from)`, and an undated row from the user's `models.json` also drops the earlier dated rows of that id, so your override is not undone when a built-in future price starts. `price()` uses the wall clock; `price_at` takes a time so tests need no clock.
+5. Gateway cost is recognised for the `openrouter` preset (and any definition whose `base_url` contains `openrouter.ai`). A run total is marked `provider` as soon as one turn was.
+6. Every preset that names a built-in table has a `catalog/<name>.json`, including the eleven whose tables were inline in `presets.json` (they moved, and the preset now names them). The nine presets that ship no models (local servers, Azure, the generic server) name `empty` and have no file, because an empty file would only pad the directory. `aibus_provider::catalog::table(name)` is the one place that `include_str!`s them, used by the Anthropic and OpenAI adapters.
+
+**Alternatives.** Fetching the snapshot inside the tool (rejected: it is the fetch we said we would not do). Adding every model of a provider by default (rejected, above). A separate file for dated prices (rejected: one model, one place).
+
+**Why.** One source for the tables, a diff to review for every price change, and nothing in the binary that talks to a third party.
+
+## F2 (2026-11-11): providers are definitions, instances are per id
+
+**Context.** Five provider ids were code (`providers.rs` listed five factories, `kimi` was a flavour inside the OpenAI crate), so a new vendor meant a new factory and two local servers could not coexist: `provider_configs` refused two accounts of one id with different URLs.
+
+**Decision.** A provider is a `ProviderDef` (api, base URL, env vars, auth methods, model table, prefixes, compat flags, headers). Presets live in `presets.json` in `aibus-provider`; a `[[provider]]` table overrides a preset field by field or defines a new id. The registry builds one instance per id with the factory that serves the definition's `api`. The factories keep their ids (`anthropic`, `openai`) and now also report which apis they serve (`ProviderFactory::apis`), so the binary registers one adapter per wire and `Factory::kimi()` and `compatible()` stay only as constructors for the presets of those names. Provider ids became leaked `&'static str` (one leak per distinct id, at startup), because `ProviderId` holds a `&'static str` and user ids are not known at compile time.
+
+Gated calls, taken at the recommended default:
+
+* The old conflict error stays for the old form only (two accounts of one id with different `base_url` or `api` on the accounts). With `[[provider]]` ids the situation cannot arise, and keeping the error for the old form is safer than guessing which URL gets which key. The message now points at `[[provider]]`.
+* `[[provider]]` is user-file only, like `[[account]]`, since it decides where a key is sent.
+* A user-supplied `compat` replaces the preset's whole instead of merging per flag, to keep the merge rule one sentence long.
+* Model tables for the new cloud presets list one or two models without prices; an unknown price is `n/a`, never a guess.
+
+**Alternatives.** One factory per vendor (rejected: it is exactly the code-per-vendor this removes). Resolving the instance per account instead of per id (rejected: `registry.get(&account.provider)` is used in four places in core and the id is the cleaner key). Merging `compat` flag by flag (rejected for now: needs an `Option` per flag).
+
+**Why.** The vendor is data and the wire is code, so adding Groq is a review of a JSON entry.
+
+
+## G5 (2026-11-11): the per-agent commands
+
+**Context.** #124 adds `/status`, `/cost`, `/log`, `/cancel`, `/retry`, `/message`, `/resume` and `/background` to the registry, two menu items and two keys. A few things the issue left open had to be picked.
+
+**Decision.**
+
+1. The state rules (`/retry` on a failed or partial run, `/resume` on a finished one) are two more `needs` bits, `RETRYABLE` and `FINISHED`, judged against the run the `@target` resolved to, after the target is parsed. The popup judges them against the focused card, else the lead. A miss says `/retry is not available: the run is running`.
+2. `/cost` is not a `Run` row. With no target it is the session table, and the focused-card fallback would have turned it into a status. `/cost @t` opens the same modal as `/status @t`. The menu's Cost item opens the table.
+3. `/status @advisor` and `/status @router` get their own screens (`AdvisorStatus`, `RouterStatus`) rather than a `RunId`, since a seat has no run. The advisor shows its checkpoints so far, the router its answers so far.
+4. `/resume @t` with no text sends `continue`, the same as `R` and the menu. `/cancel` asks only when typed against the lead; the menu and `x` still cancel at once, as before.
+5. The status bar has no cost segment drawn yet, so I added a `cost` field to `view:status_bar` computed by the same `session_cost` the cost table uses. The two cannot disagree, and the acceptance test compares them. Drawing it is not part of this issue.
+6. `i` (status) is bound in cards and transcript, `$` (cost) in the dashboard and transcript, not the prompt, where it is typing.
+
+**Alternatives.** A `Screen::RunStatus` for seats too, with a fake id (rejected: it lies about what the id is). Making `/cost` a `Run` row and using a `--all` flag for the table (rejected: the issue says no target means the table). Waiting for a drawn cost segment before adding the field (rejected: the acceptance check needs a number to compare).
+
+**Why.** Each choice keeps the rule in the registry, where the popup, the slash line and the menu already read it.
+
+**Snapshots.** The menu is two rows taller and the help screen lists two more keys, so `state_menu_*`, `shell_help_*` and the menu crops change. I cannot run the suites on this lane, so they regenerate on the release PR, as with G1.
+
 ## D-13: the card row pans a card at a time, and the flow gets no mouse events (#89)
 
 **Context.** #89 asks for pan on the rataflow canvas, with `cards_x` "now a world offset" and `ViewportChanged` read back from the flow. But `ctrl:scroll:cards:x` is already the index of the first card in the window, the reducer already moves it when the selection leaves the window, and a locked flow turns the wheel into zoom and a left press into a pan without any hit test (D1.1, item 7).
@@ -189,3 +243,50 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** A hand-rolled stdio server in the style of `aibus-core/src/mcp.rs` (rejected for now: it would own both protocol lifecycles and the schema generation for good; it stays the fallback if rmcp stops fitting the MSRV or a duplicate becomes a `deny` hit). Putting the handler in `aibus-core` or `aibus` (rejected: rmcp's tokio, schemars and chrono would reach every crate, or the handler would only be testable through the binary).
 
 **Why.** The two protocol lifecycles and paging are the expensive part to get right and they work on the first try. A separate crate keeps the new dependencies and the closure test local, and makes the fallback a swap rather than a rewrite.
+
+## E4 (2026-11-11): the first `aibus mcp` PR, and what I chose where the issue left room
+
+**Context.** #99 adds the `aibus-mcp` crate, the `mcp` subcommand, the capability flags, the audit log, the rate limit and `workflow_list`. Several details were open.
+
+**Decision.**
+
+1. The tool table is written by hand (`Tool::new` and JSON schemas), not with `#[tool]` and `Parameters<T>`. `workflow_list` takes nothing and its schemas are four lines each, so a derive would add `schemars` output I would then have to bend into `additionalProperties: false` and 2020-12. The `macros` feature stays on, because D-13 names it, and the next PR can move to the macros if the tool count makes the table hard to read.
+2. `Server::call` is the one way into a tool: argument cap, unknown-tool check, rate limit, redaction of the result and the audit line all live there, and the rmcp handler only converts. A call that cannot be routed (unknown or switched-off tool, arguments over 256 KiB, arguments the schema forbids) is `-32602`; a rate limit is an `isError` result with "try again in N s". Refused calls do not spend a token.
+3. `tools/list` pages by offset with cursors of the form `p<offset>` (50 per page); a cursor that is not one is `-32602`. With one tool nothing pages, but the harness asks for the error.
+4. `--allow` on `aibus mcp` shares its argument id with the global `--allow <tool>`, because clap skips a global that a subcommand already defines and panics when two arguments have the same long name. Both are text so clap can share them; `aibus mcp --allow write` is the capability, and `--allow gates` without `write` is exit 2. `--max-runs`, `--max-concurrent-runs` and `--max-cost-usd` parse and are refused with exit 2 and "not available yet", as the issue says.
+5. Logging for `mcp` is stderr only, through the redactor, at the level `-v`, `AIBUS_LOG` or `RUST_LOG` give. It does not also write the rotating log file the other commands write: a server started by a client for a few calls would otherwise leave a log file per start, and the audit file is the record.
+6. The audit file for a process is `~/.local/state/aibus/logs/mcp/<ulid>.jsonl`, created 0600, and its first line is the start line with the flags (`method: "server/start"`). The client name is `clientInfo` from `initialize`, or from `_meta` on a `2026-07-28` request; a client that sends neither has `client: null`.
+7. `no_secret_leaves_over_stdio` lives in `crates/aibus/tests/mcp_security.rs`, not in `aibus-core/tests/security/`, because it drives the binary and only the `aibus` package can name `CARGO_BIN_EXE_aibus`.
+
+**Alternatives.** The `#[tool]` macros now (rejected for the reason in 1). A cursor that is a bare number (rejected: clients must not parse it, and a prefix makes a made-up number fail). Writing the rotating log file as well (rejected, 5). A separate `--capability` flag so `--allow` stays unshared (rejected: the epic and the issue both say `--allow`).
+
+**Why.** Each keeps the first PR to what its acceptance criteria name and leaves the next PR a place to put the write and run tools.
+
+## D-14: Gemini gets a native adapter crate, and the OpenAI shim stays as a preset (#114)
+
+**Context.** The epic's open decision 3 asked whether Google's OpenAI shim (`gemini-openai`, F2) is enough. The shim covers chat with tools. It does not carry thought signatures (Gemini 3 rejects a function-calling turn that lacks the signature of the previous call), does not show thought summaries, has no context cache, no `countTokens`, and answers `store` with a 400. Gemini is also the one widely used family that is neither Anthropic nor OpenAI shaped, and the owner wants no open decisions left on the epic.
+
+**Decision.** Build it. `aibus-provider-gemini` serves a fourth wire, `gemini-generate-content`, behind a `gemini` preset (`https://generativelanguage.googleapis.com`, `x-goog-api-key`, `GEMINI_API_KEY`). It depends on `aibus-provider` and `aibus-provider-http` only, so no new dependency and `deny.toml` is unchanged. `ContentBlock::ToolUse` gets an optional `signature` for the thought signature. `gemini-openai` stays for anyone who wants the shim. Vertex for Gemini stays under "Later" (it needs the gcloud token source and a different URL).
+
+**Alternatives.** Ship the shim preset only (rejected: it loses the signature on the second turn of any tool loop against Gemini 3, and the thinking and usage detail with it). Put the Gemini wire in `aibus-provider-openai` (rejected: it shares nothing with Chat Completions beyond SSE framing, and the crate boundary is how `cargo-deny` and the workspace tests reason about each wire).
+
+**Why.** The shim cannot do the part of Gemini that matters for an agent, and the adapter is about 400 lines on plumbing that already exists. Two small shared changes came with it: `Http::send` reads Google's `retryDelay` from the error body, and `ProviderError::from_http` knows Google's "input token count exceeds" and "API key not valid" messages. The prices in the table are list prices I wrote from Google's public pricing page without a live call, so they are the first thing the F8 sync should confirm.
+
+## F7 (2026-11-11): how `account add --oauth` is built
+
+**Context.** #115 asks for two login flows, an async `OAuthFlow` and a refresh that does not race, with OpenRouter first. A few calls were open, and the owner's rule is to take the recommended default.
+
+**Decision.** Credential resolution stays sync (`CredentialSource` is sync and the providers call it), so `resolve` keeps its shape and a refresh runs the async flow on a scoped thread with its own runtime; `resolve_async` is the entry for async callers. The per-account `tokio::sync::Mutex` re-reads the keychain after taking the lock, which is what makes the second caller reuse the first one's tokens. `OAuthFlow` gains `yields_key()` (default false), so a login that returns a durable key is stored as a plain keyring account. The definition lives in the binary (`oauth::definition`) and not on the provider definition, because #110 is changing those; it moves over when that lands. OpenRouter matches `--provider openrouter` and `openai-compatible` pointed at openrouter.ai, since the `openrouter` factory belongs to #110. The authorize URL uses `http://127.0.0.1:<port>/callback` (RFC 8252). The platform opener starts when a terminal is attached without asking first, because the address is printed before and the opener gets it as one argv element. Ctrl-C ends the process, which closes the listener.
+
+**Alternatives.** Make `CredentialSource` async (rejected: it ripples through every provider crate other lanes are editing). The `oauth2` crate (rejected: a second HTTP abstraction for two flows). Put the definition on `ProviderFactory` now (rejected: collides with #110).
+
+**Why.** It fixes the race and the blocking trait without touching what other lanes own, and OpenRouter proves the whole flow with nothing to refresh.
+## G2 (2026-11-11): where /model is resolved, and what the reducer keeps
+
+**Context.** The issue has the reducer validate a model reference through `AccountRegistry` and write `model:defaults:<role>`. The reducer is a pure function of the graph and has no accounts, and no `model:defaults:*` node exists; the lead's model lives in its run's `meta.model`, which the header already reads.
+
+**Decision.** `Command::SetModel` only queues the request in `model:session:assist.pending` (no new node, so the snapshot fixtures keep their shape). The effects executor hands it to the launcher, which picks the provider, credential, model and account the way a launch does, and answers with `Msg::ModelSwitched { id, target, to }`. That answer is what writes `meta.model` and `meta.account` (so the header and the card follow) and the log line `model: lead -> <id> (<account>)`; an `Err` is one `model: <why>` line and nothing else. A run takes the switch through its mailbox (`RunMail::Model`) and applies it at the next turn boundary, so the request in flight finishes on the old model. A seat is switched in `Assist` and read at its next consultation. With no lead running, `/model` is a logged `no lead is running yet`; a session that started without a seat cannot switch it on later, because it has no definition to speak from.
+
+**Alternatives.** Resolve in the reducer by copying the alias tables into the graph (rejected: a second copy of config that drifts). Add a `model:defaults:<role>` node (rejected: a node nothing reads, and it changes the snapshot fixtures).
+
+**Why.** It keeps the reducer pure and puts the choice where the accounts are. The cost is one extra message per switch, which is also what lets the log say which account answered.

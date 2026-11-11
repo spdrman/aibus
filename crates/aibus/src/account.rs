@@ -25,6 +25,7 @@ use zeroize::Zeroize;
 
 use crate::cli::{AccountAdd, AccountCmd};
 use crate::providers::provider_configs;
+use aibus_provider::presets::resolve;
 
 /// Everything the commands reach outside the process for, so a test can stand in for each.
 pub struct Io<'a> {
@@ -84,7 +85,8 @@ fn verify(
     account: &Account,
     cred: &Credential,
 ) -> Result<(AccountInfo, Duration), AibusError> {
-    let configs = provider_configs(std::slice::from_ref(account), &io.paths)?;
+    let defs = config::load(&io.paths.config_file(), None)?.config.providers;
+    let configs = provider_configs(std::slice::from_ref(account), &defs, &io.paths)?;
     let provider = ProviderRegistry::new(&io.factories, &configs)?.get(&account.provider)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -147,35 +149,58 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
 
     // `--env` and `--file` name where the key already is; nothing is stored for them.
     let cred = if a.oauth {
-        let offered = io
-            .factories
-            .iter()
-            .any(|f| f.id().0 == account.provider && f.auth_methods().contains(&AuthMethodKind::OAuth));
+        let offered = crate::oauth::definition(&account.provider, account.base_url.as_deref()).is_some()
+            || io
+                .factories
+                .iter()
+                .any(|f| f.id().0 == account.provider && f.auth_methods().contains(&AuthMethodKind::OAuth));
         let Some(flow) = io.oauth.clone().filter(|_| offered) else {
             return Err(AibusError::Usage(format!(
                 "provider {} has no OAuth login; use a key (--key-stdin, --env or --file)",
                 account.provider
             )));
         };
-        account.auth.oauth = true;
+        // A login that returns a durable key leaves a plain key account behind: the OAuth is
+        // only the way the key was obtained.
+        let key_only = flow.yields_key();
+        account.auth.oauth = !key_only;
+        account.auth.keyring = key_only;
         if let StoreHealth::Unavailable(why) = store.probe() {
             return Err(CredentialError::NoKeychain(why).into());
         }
-        let out = std::cell::RefCell::new(&mut *io.out);
-        let tokens = flow
-            .authorize(&|line| {
-                let _ = writeln!(out.borrow_mut(), "{line}");
-            })
-            .map_err(CredentialError::OAuth)?;
+        // The flow talks on its own tasks; its lines come back over a channel and are printed
+        // here, as they arrive, because `io.out` is not `Send`.
+        let (lines, mut shown) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let tokens = rt.block_on(async {
+            let notify = move |line: &str| {
+                let _ = lines.send(line.to_owned());
+            };
+            let login = flow.authorize(&notify, &cancel);
+            tokio::pin!(login);
+            loop {
+                tokio::select! {
+                    done = &mut login => break done,
+                    Some(line) = shown.recv() => { let _ = writeln!(io.out, "{line}"); }
+                }
+            }
+        });
+        while let Ok(line) = shown.try_recv() {
+            let _ = writeln!(io.out, "{line}");
+        }
+        let tokens = tokens.map_err(CredentialError::OAuth)?;
         io.redactor.register(&name, tokens.access.expose());
         let cred = Credential {
             account: name.clone(),
             secret: Secret::new(tokens.access.expose().clone()),
-            kind: AuthMethodKind::OAuth,
+            kind: if key_only { AuthMethodKind::ApiKey } else { AuthMethodKind::OAuth },
             resolved_at: Instant::now(),
         };
-        verify(io, &account, &cred)?;
-        store.store_oauth(&name, &tokens)?;
+        if !key_only {
+            verify(io, &account, &cred)?;
+            store.store_oauth(&name, &tokens)?;
+        }
         cred
     } else if let Some(var) = &a.env {
         account.auth.env = Some(var.clone());
@@ -188,6 +213,19 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         // Before asking for a key that has nowhere to go.
         if let StoreHealth::Unavailable(why) = store.probe() {
             return Err(CredentialError::NoKeychain(why).into());
+        }
+        // A preset knows what the vendor's key is usually called: offer the environment as the
+        // alternative to typing it in, since an env account keeps it out of the keychain.
+        let defs = config::load(file, None)?.config.providers;
+        let def = resolve(&account.provider, defs.iter().find(|d| d.id == account.provider));
+        if let (Ok(Some(def)), false) = (def, a.key_stdin) {
+            if let Some(var) = def.env_vars.first() {
+                writeln!(
+                    io.out,
+                    "Enter the {} key. To read it from the environment instead, run: aibus account add {} --provider {} --env {var}",
+                    account.provider, a.name, account.provider
+                )?;
+            }
         }
         let key = read_key(a.key_stdin, io)?;
         io.redactor.register(&name, key.expose());

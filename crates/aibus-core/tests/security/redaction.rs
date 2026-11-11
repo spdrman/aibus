@@ -36,7 +36,7 @@ struct Case {
 
 fn cassettes() -> Vec<(PathBuf, String)> {
     let mut all = Vec::new();
-    for krate in ["aibus-provider-anthropic", "aibus-provider-openai"] {
+    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini"] {
         let dir = root().join("crates").join(krate).join("tests/cassettes");
         for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
             let path = entry.unwrap().path();

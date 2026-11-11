@@ -1,0 +1,292 @@
+//! #115: the two login flows against a scripted authorization server and a browser played by
+//! the test. No network beyond 127.0.0.1, no real browser. Time is paused, so the five minute
+//! timeout and the 5 s device interval cost nothing.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use aibus_core::OAuthFlow;
+use aibus_provider_http::reqwest::{Client, Url};
+use aibus_testkit::oauth::FakeAuthServer;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use serde_json::json;
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+use super::{Def, Kind, Login, Outcome, StateMode};
+
+const KEY: &str = "sk-or-v1-test-key-0123456789abcdef";
+
+fn pkce_def(auth: &FakeAuthServer, state: StateMode) -> Def {
+    Def {
+        kind: Kind::PkceLoopback,
+        authorize_url: auth.url("/auth"),
+        token_url: auth.url("/api/v1/auth/keys"),
+        device_url: None,
+        client_id: None,
+        scopes: vec![],
+        callback_port: None,
+        port_pinned: false,
+        redirect_param: "callback_url",
+        state,
+        result: Outcome::ApiKey,
+    }
+}
+
+/// Runs the login with a task that plays the browser: `visit` gets the authorize URL and the
+/// callback address it names and returns whatever it wants to send there.
+async fn login_with<F, Fut>(
+    login: Login,
+    visit: F,
+) -> (Result<aibus_core::OAuthTokens, String>, Url)
+where
+    F: FnOnce(Url, String) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let cancel = CancellationToken::new();
+    let notify = move |line: &str| {
+        let _ = tx.send(line.to_owned());
+    };
+    let flow = async { login.authorize(&notify, &cancel).await };
+    let browser = async {
+        let url = loop {
+            let line = rx.recv().await.expect("a line with the URL");
+            if let Some(u) = line.split_whitespace().find(|w| w.starts_with("http")) {
+                break Url::parse(u).unwrap();
+            }
+        };
+        let param = url.query_pairs().find(|(k, _)| k == "callback_url" || k == "redirect_uri");
+        let cb = param.map(|(_, v)| v.into_owned()).expect("a callback in the URL");
+        visit(url.clone(), cb).await;
+        url
+    };
+    let (out, url) = tokio::join!(flow, browser);
+    (out, url)
+}
+
+fn http() -> Client {
+    Client::new()
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_openrouter_style_flow_trades_the_code_and_the_verifier_for_a_key() {
+    let auth = FakeAuthServer::start().await;
+    auth.token_status(200, json!({ "key": KEY })).await;
+    let login = Login::new(pkce_def(&auth, StateMode::None));
+    let (out, url) = login_with(login, |_, cb| async move {
+        let r = http().get(format!("{cb}?code=the-code")).send().await.unwrap();
+        assert_eq!(r.status(), 200);
+        assert!(r.text().await.unwrap().contains("return to"));
+    })
+    .await;
+    let tokens = out.unwrap();
+    // The key comes back as the access token, with nothing to refresh.
+    assert_eq!((tokens.access.expose().as_str(), tokens.refresh.is_none(), tokens.expires_at), (KEY, true, None));
+
+    let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(q["code_challenge_method"], "S256");
+    let sent = auth.bodies().await;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["code"], "the-code");
+    let verifier = sent[0]["code_verifier"].as_str().unwrap();
+    assert!(verifier.len() >= 43, "RFC 7636 wants 43 to 128 characters");
+    assert_eq!(URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())), q["code_challenge"]);
+    assert!(!url.as_str().contains(verifier), "the verifier never travels in the URL");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_listener_refuses_a_wrong_state_a_wrong_path_and_a_foreign_host_then_takes_the_real_one() {
+    let auth = FakeAuthServer::start().await;
+    auth.token_status(200, json!({ "access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600 })).await;
+    let mut def = pkce_def(&auth, StateMode::Echoed);
+    def.result = Outcome::Tokens;
+    def.redirect_param = "redirect_uri";
+    let (out, url) = login_with(Login::new(def), |url, cb| async move {
+        let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1.into_owned();
+        let c = http();
+        let bad_state = c.get(format!("{cb}?code=x&state=not-it")).send().await.unwrap();
+        assert_eq!(bad_state.status(), 400);
+        let base = cb.trim_end_matches("/callback").to_owned();
+        let wrong_path = c.get(format!("{base}/elsewhere?code=x&state={state}")).send().await.unwrap();
+        assert_eq!(wrong_path.status(), 404);
+        // A raw request with a Host that is not loopback.
+        let addr = Url::parse(&cb).unwrap();
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", addr.port().unwrap())).await.unwrap();
+        let req = format!("GET /callback?code=x&state={state} HTTP/1.1\r\nHost: evil.example\r\n\r\n");
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut reply = String::new();
+        s.read_to_string(&mut reply).await.unwrap();
+        assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+        let ok = c.get(format!("{cb}?code=real&state={state}")).send().await.unwrap();
+        assert_eq!(ok.status(), 200);
+        // One request completes the login; the listener is gone for a second.
+        assert!(c.get(format!("{cb}?code=again&state={state}")).send().await.is_err());
+    })
+    .await;
+    let t = out.unwrap();
+    assert_eq!(t.access.expose(), "at-1");
+    assert_eq!(t.refresh.as_ref().map(|r| r.expose().as_str()), Some("rt-1"));
+    assert!(t.expires_at.is_some());
+    let sent = auth.bodies().await;
+    assert_eq!(sent.len(), 1, "only the accepted callback reached the token endpoint");
+    assert_eq!(sent[0]["code"], "real");
+    assert!(url.as_str().contains("state="));
+}
+
+#[tokio::test(start_paused = true)]
+async fn nobody_calling_back_times_out_after_five_minutes_with_a_clear_message() {
+    let auth = FakeAuthServer::start().await;
+    let t0 = tokio::time::Instant::now();
+    let (out, _) = login_with(Login::new(pkce_def(&auth, StateMode::None)), |_, _| async {}).await;
+    let e = out.unwrap_err();
+    assert!(e.contains("timed out after 5 minutes") && e.contains("run the command again"), "{e}");
+    assert_eq!(t0.elapsed(), Duration::from_secs(300));
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelling_ends_the_wait_and_frees_the_port() {
+    let auth = FakeAuthServer::start().await;
+    let login = Login::new(pkce_def(&auth, StateMode::None));
+    let cancel = CancellationToken::new();
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let notify = move |l: &str| {
+        let _ = tx.send(l.to_owned());
+    };
+    let run = login.authorize(&notify, &cancel);
+    let stop = async {
+        let mut cb = None;
+        while cb.is_none() {
+            let line = rx.recv().await.unwrap();
+            cb = line.split_whitespace().find(|w| w.starts_with("http")).map(str::to_owned);
+        }
+        cancel.cancel();
+        cb.unwrap()
+    };
+    let (out, url) = tokio::join!(run, stop);
+    assert_eq!(out.unwrap_err(), "cancelled");
+    let cb = Url::parse(&url).unwrap().query_pairs().find(|(k, _)| k == "callback_url").unwrap().1.into_owned();
+    assert!(http().get(format!("{cb}?code=late")).send().await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_busy_preferred_port_falls_back_unless_the_definition_pins_it() {
+    let auth = FakeAuthServer::start().await;
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port();
+    auth.token_status(200, json!({ "key": KEY })).await;
+
+    let mut def = pkce_def(&auth, StateMode::None);
+    def.callback_port = Some(port);
+    let (out, _) = login_with(Login::new(def.clone()), |_, cb| async move {
+        assert_ne!(Url::parse(&cb).unwrap().port(), Some(port));
+        http().get(format!("{cb}?code=c")).send().await.unwrap();
+    })
+    .await;
+    assert!(out.is_ok());
+
+    def.port_pinned = true;
+    let cancel = CancellationToken::new();
+    let e = Login::new(def).authorize(&|_| {}, &cancel).await.unwrap_err();
+    assert!(e.contains(&port.to_string()) && e.contains("in use"), "{e}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_token_endpoint_refusal_is_an_error_that_does_not_echo_the_code_or_the_verifier() {
+    let auth = FakeAuthServer::start().await;
+    auth.token_status(400, json!({ "error": "invalid_grant" })).await;
+    let (out, _) = login_with(Login::new(pkce_def(&auth, StateMode::None)), |_, cb| async move {
+        http().get(format!("{cb}?code=secret-code")).send().await.unwrap();
+    })
+    .await;
+    let e = out.unwrap_err();
+    assert!(e.contains("400") && e.contains("invalid_grant"), "{e}");
+    let sent = auth.bodies().await;
+    assert!(!e.contains("secret-code") && !e.contains(sent[0]["code_verifier"].as_str().unwrap()), "{e}");
+}
+
+fn device_def(auth: &FakeAuthServer) -> Def {
+    Def {
+        kind: Kind::DeviceCode,
+        authorize_url: String::new(),
+        token_url: auth.url("/token"),
+        device_url: Some(auth.url("/device")),
+        client_id: Some("aibus-test".into()),
+        scopes: vec!["read".into()],
+        callback_port: None,
+        port_pinned: false,
+        redirect_param: "redirect_uri",
+        state: StateMode::None,
+        result: Outcome::Tokens,
+    }
+}
+
+async fn device_run(auth: &FakeAuthServer) -> (Result<aibus_core::OAuthTokens, String>, Duration, Vec<String>) {
+    let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = lines.clone();
+    let notify = move |l: &str| sink.lock().unwrap().push(l.to_owned());
+    let t0 = tokio::time::Instant::now();
+    let out = Login::new(device_def(auth)).authorize(&notify, &CancellationToken::new()).await;
+    let seen = lines.lock().unwrap().clone();
+    (out, t0.elapsed(), seen)
+}
+
+#[tokio::test(start_paused = true)]
+async fn device_code_waits_through_pending_and_slow_down_then_returns_tokens() {
+    let auth = FakeAuthServer::start().await;
+    auth.device_start(json!({
+        "device_code": "dev-123", "user_code": "WDJB-MJHT",
+        "verification_uri": "https://auth.invalid/activate", "expires_in": 900, "interval": 5
+    }))
+    .await;
+    auth.token_script(vec![
+        (400, json!({ "error": "authorization_pending" })),
+        (400, json!({ "error": "slow_down" })),
+        (200, json!({ "access_token": "at-d", "refresh_token": "rt-d", "expires_in": 600 })),
+    ])
+    .await;
+    let (out, took, lines) = device_run(&auth).await;
+    let t = out.unwrap();
+    assert_eq!(t.access.expose(), "at-d");
+    // 5 s, pending, 5 s, slow_down (+5 s from now on), 10 s, done.
+    assert_eq!(took, Duration::from_secs(20));
+    let shown = lines.join("\n");
+    assert!(shown.contains("WDJB-MJHT") && shown.contains("https://auth.invalid/activate"), "{shown}");
+    assert!(!shown.contains("dev-123"), "the device code stays private");
+    let sent = auth.bodies().await;
+    assert_eq!(sent[1]["grant_type"], "urn:ietf:params:oauth:grant-type:device_code");
+}
+
+#[tokio::test(start_paused = true)]
+async fn device_code_stops_on_expired_token_and_access_denied() {
+    for (code, wants) in [("expired_token", "expired"), ("access_denied", "denied")] {
+        let auth = FakeAuthServer::start().await;
+        auth.device_start(json!({
+            "device_code": "d", "user_code": "U", "verification_uri": "https://auth.invalid/a",
+            "expires_in": 900
+        }))
+        .await;
+        auth.token_script(vec![(400, json!({ "error": code }))]).await;
+        let (out, took, _) = device_run(&auth).await;
+        let e = out.unwrap_err();
+        assert!(e.contains(wants), "{code}: {e}");
+        // No `interval` in the reply: the documented 5 s.
+        assert_eq!(took, Duration::from_secs(5));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn device_code_gives_up_when_the_code_lifetime_runs_out() {
+    let auth = FakeAuthServer::start().await;
+    auth.device_start(json!({
+        "device_code": "d", "user_code": "U", "verification_uri": "https://auth.invalid/a",
+        "expires_in": 12, "interval": 5
+    }))
+    .await;
+    auth.token_status(400, json!({ "error": "authorization_pending" })).await;
+    let (out, _, _) = device_run(&auth).await;
+    assert!(out.unwrap_err().contains("expired"));
+}

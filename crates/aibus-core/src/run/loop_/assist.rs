@@ -111,13 +111,13 @@ impl<'a> LeadAssist<'a> {
     /// One router question. `None` when the router is off, the turn's cap is used up, or it
     /// could not answer (the lead then carries on without it).
     async fn consult(&mut self, t: &Task<'_>, q: RouterQuestion) -> Option<crate::msg::RouterAnswer> {
-        let router = self.assist.router.as_ref()?;
+        let router = self.assist.router_now()?;
         if self.used >= router.max_per_turn {
             return None;
         }
         self.used += 1;
         let fork = self.assist.next_fork();
-        match router::ask(router, &q, t.cancel).await {
+        match router::ask(&router, &q, t.cancel).await {
             Ok(answer) => {
                 self.spent += answer.latency;
                 let _span = tracing::trace_span!(
@@ -149,7 +149,7 @@ impl<'a> LeadAssist<'a> {
 
     /// `which_file`: the newest message names a symbol that more than one file has.
     async fn which_file(&mut self, t: &Task<'_>, conv: &Conversation) {
-        if self.assist.router.is_none() || conv.messages.len() <= self.seen {
+        if self.assist.router_now().is_none() || conv.messages.len() <= self.seen {
             return;
         }
         self.seen = conv.messages.len();
@@ -256,7 +256,7 @@ impl<'a> LeadAssist<'a> {
     /// tool choice of the next request, split puts the guess in front of the lead. Either way
     /// the lead gets another turn.
     async fn which_tool(&mut self, t: &Task<'_>, conv: &Conversation, tools: &[ToolSpec]) -> bool {
-        if self.nudged || self.assist.router.is_none() || tools.is_empty() {
+        if self.nudged || self.assist.router_now().is_none() || tools.is_empty() {
             return false;
         }
         let said = last_text(conv);
@@ -356,7 +356,7 @@ impl<'a> LeadAssist<'a> {
         cp: Checkpoint,
         detail: String,
     ) {
-        let Some(adv) = &self.assist.advisor else {
+        let Some(adv) = self.assist.advisor_now() else {
             return;
         };
         let extra = Map::from_iter([
@@ -376,7 +376,7 @@ impl<'a> LeadAssist<'a> {
              concrete advice. Say nothing if there is nothing worth saying.",
             cp.name()
         );
-        let advice = match advise(t, adv, &prompt).await {
+        let advice = match advise(t, &adv, &prompt).await {
             Ok(advice) => advice,
             Err(error) => {
                 t.send(Msg::IoError { context: "advisor".into(), error }).await;
@@ -444,7 +444,7 @@ async fn advise(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input } => Some((*id, name.clone(), input.clone())),
+                ContentBlock::ToolUse { id, name, input, .. } => Some((*id, name.clone(), input.clone())),
                 _ => None,
             })
             .collect();

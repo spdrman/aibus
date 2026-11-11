@@ -15,13 +15,14 @@ use smol_str::SmolStr;
 
 use crate::agent::Isolation;
 use crate::ids::{AccountName, AgentName, RunId, ToolCallId};
+use crate::msg::ModelTarget;
 use crate::orchestrator::{Launcher, Orchestrator};
 use crate::run::RunStatus;
 use crate::state::store::Store;
 use crate::state::value::{as_i64, as_list, as_str, get};
 use crate::state::{
     run_key, CHECKPOINT_PENDING, HOOKS_DUE, LIMITS, ORCH_COUNTS, ORCH_RUNNABLE, PERSIST_DUE,
-    ROUTER_QUEUE, RUNS_ORDER, TOOLS_PENDING,
+    ROUTER_QUEUE, RUNS_ORDER, SESSION_ASSIST, TOOLS_PENDING,
 };
 
 #[derive(Clone, PartialEq, Debug)]
@@ -70,6 +71,13 @@ pub enum Effect {
     Detach(RunId),
     /// The run's status says `compacting` (`/compact`): it is told to at its next turn.
     Compact(RunId),
+    /// A `/model` request the reducer queued in `model:session:assist.pending`. The executor
+    /// picks the model and answers with `Msg::ModelSwitched` carrying the same `id`.
+    SetModel {
+        id: u64,
+        target: ModelTarget,
+        model: String,
+    },
 }
 
 /// What starts runs when the executor is wired to an orchestrator.
@@ -174,6 +182,16 @@ impl Effects {
                 },
             ));
         }
+        let pending = graph.read_key(SESSION_ASSIST).and_then(|a| get(a, "pending")).map_or(&[][..], as_list);
+        for p in pending {
+            let id = get(p, "id").and_then(as_i64).and_then(|i| u64::try_from(i).ok());
+            let target = get(p, "target").and_then(as_str).and_then(ModelTarget::parse);
+            let model = get(p, "model").and_then(as_str);
+            if let (Some(id), Some(target), Some(model)) = (id, target, model) {
+                let effect = Effect::SetModel { id, target, model: model.to_owned() };
+                found.push((format!("model:{id}").into(), effect));
+            }
+        }
         if graph.read_key(PERSIST_DUE) == Some(&Value::Bool(true)) {
             found.push(("persist".into(), Effect::Persist));
         }
@@ -219,6 +237,7 @@ impl Effects {
                 Effect::Cancel(_) => "cancel",
                 Effect::Detach(_) => "detach",
                 Effect::Compact(_) => "compact",
+                Effect::SetModel { .. } => "set_model",
             };
             let _span = tracing::trace_span!(target: "aibus_trace", "effect", kind);
             match (effect, &orch) {
@@ -226,6 +245,11 @@ impl Effects {
                 (Effect::Cancel(run), Some(o)) => o.cancel(run),
                 (Effect::Detach(run), Some(o)) => o.detach(run),
                 (Effect::Compact(run), Some(o)) => o.compact(run),
+                (Effect::SetModel { id, target, model }, Some(o)) => {
+                    if let Some(w) = &self.wired {
+                        o.switch_model(&w.launcher, id, target, &model);
+                    }
+                }
                 // Nothing to detach or compact without an orchestrator.
                 (Effect::Detach(_) | Effect::Compact(_), None) => {}
                 (other, _) => (self.sink)(other),

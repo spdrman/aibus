@@ -50,6 +50,8 @@ actions! {
     TimeForward "time_forward" "step time forward";
     OpenAgents "open_agents" "agents screen";
     OpenAccounts "open_accounts" "accounts screen";
+    OpenRunStatus "open_run_status" "run status";
+    OpenCost "open_cost" "session cost";
     OpenHelp "open_help" "this help";
     CancelRun "cancel_run" "cancel run, twice quits";
     Quit "quit" "quit";
@@ -213,6 +215,8 @@ const DEFAULTS: &[(Action, &str, &[Scope])] = &[
     (TimeForward, "]", &[Transcript, Dashboard]),
     (OpenAgents, "A", &[Global]),
     (OpenAccounts, "K", &[Global]),
+    (OpenRunStatus, "i", &[Cards, Transcript]),
+    (OpenCost, "$", &[Dashboard, Transcript]),
     (OpenHelp, "?", &[Global]),
     (CancelRun, "ctrl+c", &[Global]),
     (Quit, "q", &[Dashboard]),
@@ -538,7 +542,7 @@ mod tests {
             );
         }
         assert_eq!(map.conflicts(), Vec::<String>::new());
-        assert_eq!(ACTIONS.len(), 40);
+        assert_eq!(ACTIONS.len(), 42);
     }
 
     #[test]
@@ -600,6 +604,11 @@ mod tests {
             assert_eq!(at("[", c), Some(TimeBack));
             assert_eq!(at("]", c), Some(TimeForward));
         }
+        assert_eq!(at("i", Ctx::Cards), Some(OpenRunStatus));
+        assert_eq!(at("i", Ctx::Transcript), Some(OpenRunStatus));
+        assert_eq!(at("$", Ctx::Cards), Some(OpenCost));
+        assert_eq!(at("$", Ctx::Transcript), Some(OpenCost));
+        assert_eq!(at("$", Ctx::Prompt), None, "a dollar sign in the prompt is typing");
         assert_eq!(at("A", Ctx::Cards), Some(OpenAgents));
         assert_eq!(at("K", Ctx::Cards), Some(OpenAccounts));
         assert_eq!(at("?", Ctx::Cards), Some(OpenHelp));

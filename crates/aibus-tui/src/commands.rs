@@ -5,19 +5,10 @@
 //! `run` writes into the same `Out` the key handling fills, so a slash line, a palette row and a
 //! menu item are three ways into one function and cannot drift apart.
 
-use aibus_core::{AgentName, Command, Isolation, Msg, Pane, RunId, Screen, UiIntent};
+use aibus_core::{AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
-
-/// Who a command applies to (the `@target` of a `Run` command).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Lead,
-    Advisor,
-    Router,
-    Run(RunId),
-}
 
 /// What a command takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +28,10 @@ pub const ACCOUNTS: u8 = 4;
 /// A workflow with the command's own name exists (the `/fix` family).
 pub const WORKFLOWS: u8 = 8;
 pub const MCP: u8 = 16;
+/// The resolved run is `Failed` or `Partial`.
+pub const RETRYABLE: u8 = 32;
+/// The resolved run has finished.
+pub const FINISHED: u8 = 64;
 
 /// Where a command is listed: a 1-based position on that surface, 0 for not listed. The three
 /// numbers vary together per command, which is why they are one struct.
@@ -65,6 +60,8 @@ pub struct Env<'a> {
     pub focused: Option<RunId>,
     /// Every run, oldest first, with its agent.
     pub runs: &'a [(RunId, String)],
+    /// Where each run stands.
+    pub states: &'a [(RunId, RunStatus)],
     /// The graph does not tell the dashboard about these two yet, so `Context::env` says yes.
     pub accounts: bool,
     pub mcp: bool,
@@ -74,7 +71,7 @@ impl<'a> Env<'a> {
     /// No session at all: only the agents and workflows given.
     #[cfg(test)]
     pub fn bare(agents: &'a [String], workflows: &'a [String]) -> Self {
-        Self { agents, workflows, lead: None, focused: None, runs: &[], accounts: true, mcp: true }
+        Self { agents, workflows, lead: None, focused: None, runs: &[], states: &[], accounts: true, mcp: true }
     }
 }
 
@@ -87,7 +84,7 @@ pub struct Call<'a> {
     /// What follows the command word (and the `@target`, for a `Run` command).
     pub args: &'a str,
     /// Set for a `Run` command, and by the menu for the run it was opened on.
-    pub target: Option<Target>,
+    pub target: Option<ModelTarget>,
     pub env: &'a Env<'a>,
 }
 
@@ -117,8 +114,18 @@ fn need(c: &Call, what: &str) -> Result<(), String> {
 
 fn menu_run(c: &Call) -> Option<RunId> {
     match c.target {
-        Some(Target::Run(r)) => Some(r),
+        Some(ModelTarget::Run(r)) => Some(r),
         _ => None,
+    }
+}
+
+/// The run a `Run` command acts on. The seats have no run, so a command that needs one says so.
+fn run_of(c: &Call) -> Result<RunId, String> {
+    match c.target {
+        Some(ModelTarget::Run(run)) => Ok(run),
+        Some(ModelTarget::Lead) => c.env.lead.ok_or_else(|| "no lead is running".to_owned()),
+        Some(ModelTarget::Advisor | ModelTarget::Router) => Err(format!("/{} takes a run, not a seat", c.name)),
+        None => Err(format!("/{} needs a run", c.name)),
     }
 }
 
@@ -245,25 +252,51 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "model",
-        args: "<alias>",
-        help: "change the lead's model",
+        args: "[@target] <ref>",
+        help: "change the model of the lead, a run or a seat",
         label: "",
         hint: "",
-        scope: Scope::Global,
+        scope: Scope::Run,
         needs: 0,
         surfaces: at(7, 0, 0),
-        run: |c, out| if c.args.is_empty() { need(c, "an alias") } else { prompt_line(c, out) },
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a model");
+            }
+            command(out, Command::SetModel { target: c.target.unwrap_or(ModelTarget::Lead), model: c.args.to_owned() })
+        },
     },
     Spec {
         name: "advisor",
-        args: "<alias>",
-        help: "change the advisor's model",
+        args: "<ref|off>",
+        help: "change the advisor's model, or turn it off",
         label: "",
         hint: "",
         scope: Scope::Global,
         needs: 0,
         surfaces: at(8, 0, 0),
-        run: |c, out| if c.args.is_empty() { need(c, "an alias") } else { prompt_line(c, out) },
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a model or off");
+            }
+            command(out, Command::SetModel { target: ModelTarget::Advisor, model: c.args.to_owned() })
+        },
+    },
+    Spec {
+        name: "router",
+        args: "<ref|off>",
+        help: "change the router's model, or turn it off",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(9, 0, 0),
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a model or off");
+            }
+            command(out, Command::SetModel { target: ModelTarget::Router, model: c.args.to_owned() })
+        },
     },
     Spec {
         name: "workflow",
@@ -273,7 +306,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: 0,
-        surfaces: at(9, 0, 0),
+        surfaces: at(10, 0, 0),
         run: |c, out| match c.args.split_once(char::is_whitespace) {
             Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
             None if !c.args.is_empty() => {
@@ -290,7 +323,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "A",
         scope: Scope::Screen,
         needs: 0,
-        surfaces: at(10, 1, 0),
+        surfaces: at(11, 1, 0),
         run: |_, out| command(out, Command::OpenScreen(Screen::Agents)),
     },
     Spec {
@@ -301,7 +334,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "K",
         scope: Scope::Screen,
         needs: 0,
-        surfaces: at(11, 2, 0),
+        surfaces: at(12, 2, 0),
         run: |_, out| command(out, Command::OpenScreen(Screen::Accounts)),
     },
     Spec {
@@ -312,7 +345,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "?",
         scope: Scope::Screen,
         needs: 0,
-        surfaces: at(12, 3, 0),
+        surfaces: at(13, 3, 0),
         run: |_, out| command(out, Command::OpenHelp),
     },
     Spec {
@@ -323,7 +356,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(13, 0, 0),
+        surfaces: at(14, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -334,7 +367,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(14, 0, 0),
+        surfaces: at(15, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -345,7 +378,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(15, 0, 0),
+        surfaces: at(16, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -356,7 +389,7 @@ pub const REGISTRY: &[Spec] = &[
         hint: "",
         scope: Scope::Global,
         needs: WORKFLOWS,
-        surfaces: at(16, 0, 0),
+        surfaces: at(17, 0, 0),
         run: shorthand,
     },
     Spec {
@@ -433,25 +466,34 @@ pub const REGISTRY: &[Spec] = &[
     Spec {
         name: "cancel",
         args: "",
-        help: "cancel the run",
+        help: "cancel the run (asks first on the lead)",
         label: "Cancel",
         hint: "",
         scope: Scope::Run,
         needs: RUNS,
-        surfaces: at(0, 0, 2),
-        run: |c, out| menu_run(c).map_or(Ok(()), |run| command(out, Command::Cancel { run })),
+        surfaces: at(21, 0, 2),
+        run: |c, out| {
+            let run = run_of(c)?;
+            // Typed against the lead, it asks first; on a worker, or from the menu, it does not.
+            if c.via == Via::Slash && c.env.lead == Some(run) {
+                return command(out, Command::OpenScreen(Screen::ConfirmCancel(run)));
+            }
+            command(out, Command::Cancel { run })
+        },
     },
     Spec {
         name: "resume",
-        args: "",
-        help: "resume a partial run",
+        args: "<text>",
+        help: "resume a finished run with a message",
         label: "Resume",
         hint: "",
         scope: Scope::Run,
-        needs: RUNS,
-        surfaces: at(0, 0, 4),
+        needs: RUNS | FINISHED,
+        surfaces: at(24, 0, 4),
         run: |c, out| {
-            menu_run(c).map_or(Ok(()), |run| command(out, Command::Resume { run, message: "continue".into(), parent: None }))
+            let run = run_of(c)?;
+            let message = if c.args.is_empty() { "continue".to_owned() } else { c.args.to_owned() };
+            command(out, Command::Resume { run, message, parent: None })
         },
     },
     Spec {
@@ -482,7 +524,95 @@ pub const REGISTRY: &[Spec] = &[
             Ok(())
         },
     },
+    Spec {
+        name: "status",
+        args: "[@target]",
+        help: "a run's numbers, or a seat's (@advisor, @router)",
+        label: "Status",
+        hint: "",
+        scope: Scope::Run,
+        needs: RUNS,
+        surfaces: at(18, 0, 7),
+        run: |c, out| open_status(c, c.target, out),
+    },
+    Spec {
+        name: "cost",
+        args: "[@target]",
+        help: "the session's cost per run, or one target's status",
+        label: "Cost",
+        hint: "",
+        // Not `Run`: with no `@target` it is the session table, not the focused card.
+        scope: Scope::Global,
+        needs: RUNS,
+        surfaces: at(19, 0, 8),
+        run: |c, out| {
+            if c.via == Via::Slash && c.args.starts_with('@') && !c.args.starts_with("@agent-") {
+                let (target, _) = parse_target(c.args, c.env)?;
+                return open_status(c, Some(target), out);
+            }
+            command(out, Command::OpenScreen(Screen::Cost))
+        },
+    },
+    Spec {
+        name: "log",
+        args: "[@target]",
+        help: "open the run's transcript",
+        label: "",
+        hint: "",
+        scope: Scope::Run,
+        needs: RUNS,
+        surfaces: at(20, 0, 0),
+        run: |c, out| command(out, Command::OpenTranscript(run_of(c)?)),
+    },
+    Spec {
+        name: "retry",
+        args: "[@target]",
+        help: "retry a failed or partial run",
+        label: "",
+        hint: "",
+        scope: Scope::Run,
+        needs: RUNS | RETRYABLE,
+        surfaces: at(22, 0, 0),
+        run: |c, out| command(out, Command::Retry { run: run_of(c)? }),
+    },
+    Spec {
+        name: "message",
+        args: "@target <text>",
+        help: "send a message to a run",
+        label: "",
+        hint: "",
+        scope: Scope::Run,
+        needs: RUNS,
+        surfaces: at(23, 0, 0),
+        run: |c, out| {
+            if c.args.is_empty() {
+                return need(c, "a message");
+            }
+            command(out, Command::SendMessage { run: run_of(c)?, text: c.args.to_owned() })
+        },
+    },
+    Spec {
+        name: "background",
+        args: "[@target]",
+        help: "move the run's wait to the background",
+        label: "",
+        hint: "",
+        scope: Scope::Run,
+        needs: RUNS,
+        surfaces: at(25, 0, 0),
+        run: |c, out| command(out, Command::Background { run: run_of(c)? }),
+    },
 ];
+
+/// `/status` and `/cost @t`: the modal of a run or of a seat.
+fn open_status(c: &Call, target: Option<ModelTarget>, out: &mut Out) -> Result<(), String> {
+    let screen = match target {
+        Some(ModelTarget::Advisor) => Screen::AdvisorStatus,
+        Some(ModelTarget::Router) => Screen::RouterStatus,
+        _ => Screen::RunStatus(run_of(&Call { target, ..*c })?),
+    };
+    command(out, Command::OpenScreen(screen))
+}
 
 /// `/fix <input>` and the other three are `/workflow <name> <input>`.
 fn shorthand(c: &Call, out: &mut Out) -> Result<(), String> {
@@ -501,8 +631,9 @@ fn listed(pos: fn(&Surfaces) -> u8) -> Vec<&'static Spec> {
 }
 
 impl Env<'_> {
-    /// Why `spec` is not available right now, or `None` when it is.
-    fn unmet(&self, spec: &Spec) -> Option<String> {
+    /// Why `spec` is not available right now, or `None` when it is. `run` is the run it would act
+    /// on, when that is known yet: the state needs are only judged against one.
+    fn unmet(&self, spec: &Spec, run: Option<RunId>) -> Option<String> {
         let missing = |bit: u8| spec.needs & bit != 0;
         if missing(LEAD) && self.lead.is_none() {
             return Some("no lead is running".into());
@@ -512,6 +643,13 @@ impl Env<'_> {
         }
         if missing(WORKFLOWS) && !self.workflows.iter().any(|w| w == spec.name) {
             return Some(format!("no workflow named {}", spec.name));
+        }
+        let state = run.and_then(|r| self.states.iter().find(|(id, _)| *id == r)).map(|(_, st)| *st);
+        if let Some(st) = state {
+            let retryable = matches!(st, RunStatus::Failed | RunStatus::Partial);
+            if (missing(RETRYABLE) && !retryable) || (missing(FINISHED) && !st.is_terminal()) {
+                return Some(format!("the run is {}", st.as_value()));
+            }
         }
         if missing(ACCOUNTS) && !self.accounts {
             return Some("no account is set up".into());
@@ -525,7 +663,13 @@ impl Env<'_> {
 
 /// The slash commands the popup offers right now: `(/name, args)` in order.
 pub fn slash_offered(env: &Env) -> Vec<(String, &'static str)> {
-    listed(|s| s.slash).into_iter().filter(|s| env.unmet(s).is_none()).map(|s| (format!("/{}", s.name), s.args)).collect()
+    // What a bare `/retry` would act on: the focused card, else the lead.
+    let fallback = env.focused.or(env.lead);
+    listed(|s| s.slash)
+        .into_iter()
+        .filter(|s| env.unmet(s, if s.scope == Scope::Run { fallback } else { None }).is_none())
+        .map(|s| (format!("/{}", s.name), s.args))
+        .collect()
 }
 
 /// The palette's command rows: `(id, label, hint)`, the id being the command's name.
@@ -550,7 +694,7 @@ pub fn help_lines() -> Vec<(String, &'static str)> {
 /// the menu. Unknown names do nothing.
 pub fn pick(name: &str, via: Via, run: Option<RunId>, env: &Env, out: &mut Out) {
     let Some(spec) = find(name) else { return };
-    let call = Call { name: spec.name, via, line: "", args: "", target: run.map(Target::Run), env };
+    let call = Call { name: spec.name, via, line: "", args: "", target: run.map(ModelTarget::Run), env };
     // A pick has no way to show a notice, and none of the picked commands has a bad shape.
     let _ = (spec.run)(&call, out);
 }
@@ -566,7 +710,7 @@ pub fn send(line: &str, env: &Env) -> Sent {
     let Some(spec) = REGISTRY.iter().find(|s| s.surfaces.slash > 0 && s.name == word) else {
         return Sent::Bad(format!("no command /{word} (try /help)"));
     };
-    if let Some(why) = env.unmet(spec) {
+    if let Some(why) = env.unmet(spec, None) {
         return Sent::Bad(format!("/{word} is not available: {why}"));
     }
     let (target, args) = if spec.scope == Scope::Run {
@@ -577,6 +721,15 @@ pub fn send(line: &str, env: &Env) -> Sent {
     } else {
         (None, args)
     };
+    // A command that only fits a run in some state is judged against the run it resolved to.
+    let run = match target {
+        Some(ModelTarget::Run(r)) => Some(r),
+        Some(ModelTarget::Lead) => env.lead,
+        _ => None,
+    };
+    if let Some(why) = env.unmet(spec, run) {
+        return Sent::Bad(format!("/{word} is not available: {why}"));
+    }
     let mut out = Out::default();
     match (spec.run)(&Call { name: spec.name, via: Via::Slash, line, args, target, env }, &mut out) {
         Ok(()) => Sent::Msgs(out.msgs),
@@ -587,25 +740,25 @@ pub fn send(line: &str, env: &Env) -> Sent {
 /// The `@target` that starts `args`, and the rest. `@lead`, `@advisor` and `@router` are the
 /// seats; otherwise the word is an agent (its newest run) or a unique prefix of a run id. No
 /// target means the focused card, else the lead. `@agent-<name>` is a mention, not a target.
-pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(Target, &'a str), String> {
+pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(ModelTarget, &'a str), String> {
     let args = args.trim_start();
-    let fallback = env.focused.map_or(Target::Lead, Target::Run);
+    let fallback = env.focused.map_or(ModelTarget::Lead, ModelTarget::Run);
     let Some(word) = args.split_whitespace().next().filter(|w| w.starts_with('@') && !w.starts_with("@agent-")) else {
         return Ok((fallback, args));
     };
     let rest = args[word.len()..].trim_start();
     let name = &word[1..];
     let target = match name {
-        "lead" => Target::Lead,
-        "advisor" => Target::Advisor,
-        "router" => Target::Router,
+        "lead" => ModelTarget::Lead,
+        "advisor" => ModelTarget::Advisor,
+        "router" => ModelTarget::Router,
         _ => match env.runs.iter().rev().find(|(_, agent)| agent == name) {
-            Some((run, _)) => Target::Run(*run),
+            Some((run, _)) => ModelTarget::Run(*run),
             None => {
                 let up = name.to_uppercase();
                 let hits: Vec<&RunId> = env.runs.iter().map(|(r, _)| r).filter(|r| r.to_string().starts_with(&up)).collect();
                 match hits[..] {
-                    [one] => Target::Run(*one),
+                    [one] => ModelTarget::Run(*one),
                     [] => return Err(format!("no agent or run matches @{name}")),
                     _ => {
                         let list: Vec<String> = hits.iter().map(|r| r.to_string()).collect();
@@ -673,7 +826,7 @@ mod tests {
         );
         assert_eq!(palette_rows()[5], ("handoff", "write a handoff", "/handoff"));
         let menu: Vec<&str> = menu_items().iter().map(|r| r.0).collect();
-        assert_eq!(menu, ["open", "cancel", "fork", "resume", "copy_id", "copy_result"]);
+        assert_eq!(menu, ["open", "cancel", "fork", "resume", "copy_id", "copy_result", "status", "cost"]);
         assert_eq!(menu_items()[0], ("open", "Open transcript"));
     }
 
@@ -697,9 +850,13 @@ mod tests {
         assert_eq!(m("/handoff"), "Command(CreateHandoff { outcome: None })");
         assert!(m("/ledger now ship it").contains("LedgerUpdate { section: \"now\", text: \"ship it\" }"));
         assert!(m("/ledger now").starts_with("BAD"));
-        assert!(m("/model opus").contains("/model opus"));
-        assert_eq!(m("/model"), "BAD /model needs an alias");
-        assert!(m("/advisor opus").contains("/advisor opus"));
+        assert_eq!(m("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
+        assert_eq!(m("/model"), "BAD /model needs a model");
+        assert_eq!(m("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
+        assert_eq!(m("/advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
+        assert_eq!(m("/router fast"), "Command(SetModel { target: Router, model: \"fast\" })");
+        assert_eq!(m("/advisor"), "BAD /advisor needs a model or off");
+        assert_eq!(m("/model @advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
         assert!(m("/workflow review the diff").contains("Workflow { name: \"review\", input: \"the diff\" }"));
         assert!(m("/fix the bug").contains("Workflow { name: \"fix\", input: \"the bug\" }"));
         assert_eq!(m("/build x"), "BAD /build is not available: no workflow named build");
@@ -722,19 +879,39 @@ mod tests {
         let mut env = Env { runs: &rs, lead: Some(lead), ..Env::bare(&[], &[]) };
         let t = |env: &Env, s: &str| parse_target(s, env).map(|(t, rest)| (t, rest.to_owned()));
         // The newest run of the agent.
-        assert_eq!(t(&env, "@grep haiku"), Ok((Target::Run(rs[2].0), "haiku".into())));
-        assert_eq!(t(&env, "@search haiku"), Ok((Target::Run(rs[1].0), "haiku".into())));
+        assert_eq!(t(&env, "@grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));
+        assert_eq!(t(&env, "@search haiku"), Ok((ModelTarget::Run(rs[1].0), "haiku".into())));
         // A run id prefix.
         let id = rs[0].0.to_string();
-        assert_eq!(t(&env, &format!("@{} x", &id[..20])), Ok((Target::Run(rs[0].0), "x".into())));
-        assert_eq!(t(&env, "@lead x"), Ok((Target::Lead, "x".into())));
-        assert_eq!(t(&env, "@advisor off"), Ok((Target::Advisor, "off".into())));
-        assert_eq!(t(&env, "@router fast"), Ok((Target::Router, "fast".into())));
+        assert_eq!(t(&env, &format!("@{} x", &id[..20])), Ok((ModelTarget::Run(rs[0].0), "x".into())));
+        assert_eq!(t(&env, "@lead x"), Ok((ModelTarget::Lead, "x".into())));
+        assert_eq!(t(&env, "@advisor off"), Ok((ModelTarget::Advisor, "off".into())));
+        assert_eq!(t(&env, "@router fast"), Ok((ModelTarget::Router, "fast".into())));
         // No target: the lead, or the focused card.
-        assert_eq!(t(&env, "opus"), Ok((Target::Lead, "opus".into())));
+        assert_eq!(t(&env, "opus"), Ok((ModelTarget::Lead, "opus".into())));
         env.focused = Some(card);
-        assert_eq!(t(&env, "opus"), Ok((Target::Run(card), "opus".into())));
+        assert_eq!(t(&env, "opus"), Ok((ModelTarget::Run(card), "opus".into())));
         assert!(t(&env, "@nobody x").is_err());
+    }
+
+    #[test]
+    fn model_at_agent_changes_that_run_and_a_focused_card_is_the_default() {
+        let rs = runs();
+        let card = rs[1].0;
+        let mut env = Env { runs: &rs, ..Env::bare(&[], &[]) };
+        let line = |env: &Env, l: &str| match send(l, env) {
+            Sent::Msgs(m) => match &m[..] {
+                [Msg::Command(Command::SetModel { target, model })] => Ok((*target, model.clone())),
+                other => panic!("{other:?}"),
+            },
+            Sent::Bad(why) => Err(why),
+        };
+        assert_eq!(line(&env, "/model @grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));
+        assert_eq!(line(&env, "/model @lead haiku"), Ok((ModelTarget::Lead, "haiku".into())));
+        assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Lead, "haiku".into())));
+        env.focused = Some(card);
+        assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Run(card), "haiku".into())));
+        assert_eq!(line(&env, "/model @grep"), Err("/model needs a model".into()));
     }
 
     #[test]
@@ -753,7 +930,7 @@ mod tests {
         let agents = vec!["grep".to_owned()];
         assert_eq!(msgs("@agent-grep find it", &agents, &[]), "SubmitPrompt { text: \"@agent-grep find it\" }");
         let env = Env::bare(&agents, &[]);
-        assert_eq!(parse_target("@agent-grep x", &env), Ok((Target::Lead, "@agent-grep x")));
+        assert_eq!(parse_target("@agent-grep x", &env), Ok((ModelTarget::Lead, "@agent-grep x")));
     }
 
     #[test]
@@ -762,8 +939,105 @@ mod tests {
         assert!(slash_offered(&env).iter().all(|(n, _)| n != "/fix"));
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 12);
+        assert_eq!(slash_offered(&env).len(), 13);
         let spec = find("open").unwrap();
-        assert_eq!(env.unmet(spec).as_deref(), Some("no run yet"));
+        assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
+    }
+
+    /// A session with a lead and three workers in different states, for the per-run commands.
+    struct Session {
+        runs: Vec<(RunId, String)>,
+        states: Vec<(RunId, RunStatus)>,
+    }
+
+    fn session() -> Session {
+        let rows = [("lead", RunStatus::Running), ("grep", RunStatus::Running), ("search", RunStatus::Failed), ("review", RunStatus::Completed)];
+        let runs: Vec<(RunId, String)> = rows.iter().map(|(a, _)| (RunId::new(), (*a).to_owned())).collect();
+        let states = runs.iter().zip(rows).map(|((id, _), (_, st))| (*id, st)).collect();
+        Session { runs, states }
+    }
+
+    fn env(s: &Session) -> Env<'_> {
+        Env { runs: &s.runs, states: &s.states, lead: Some(s.runs[0].0), ..Env::bare(&[], &[]) }
+    }
+
+    fn sent(line: &str, env: &Env) -> String {
+        match send(line, env) {
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Bad(why) => format!("BAD {why}"),
+        }
+    }
+
+    #[test]
+    fn every_run_command_resolves_the_target_the_same_way() {
+        let s = session();
+        let (lead, grep, search) = (s.runs[0].0, s.runs[1].0, s.runs[2].0);
+        let prefix = grep.to_string();
+        let mut e = env(&s);
+        // (line, what the command sends for the run it resolves to, with `{}` for the run)
+        let rows = [
+            ("/background", "Command(Background { run: {} })"),
+            ("/log", "Command(OpenTranscript({}))"),
+            ("/status", "Command(OpenScreen(RunStatus({})))"),
+            ("/message hi", "Command(SendMessage { run: {}, text: \"hi\" })"),
+        ];
+        for (line, want) in rows {
+            let (word, rest) = line.split_once(' ').map_or((line, ""), |(w, r)| (w, r));
+            let with = |t: &str| format!("{word} {t} {rest}").trim().to_owned();
+            e.focused = None;
+            assert_eq!(sent(&with("@grep"), &e), want.replace("{}", &format!("{grep:?}")), "{line} @agent");
+            assert_eq!(sent(&with(&format!("@{prefix}")), &e), want.replace("{}", &format!("{grep:?}")), "{line} @runprefix");
+            assert_eq!(sent(&with("@lead"), &e), want.replace("{}", &format!("{lead:?}")), "{line} @lead");
+            assert_eq!(sent(&with(""), &e), want.replace("{}", &format!("{lead:?}")), "{line} lead fallback");
+            e.focused = Some(search);
+            assert_eq!(sent(&with(""), &e), want.replace("{}", &format!("{search:?}")), "{line} focused card");
+        }
+    }
+
+    #[test]
+    fn cancel_asks_on_the_lead_and_not_on_a_worker() {
+        let s = session();
+        let e = env(&s);
+        assert_eq!(sent("/cancel @lead", &e), format!("Command(OpenScreen(ConfirmCancel({:?})))", s.runs[0].0));
+        assert_eq!(sent("/cancel @grep", &e), format!("Command(Cancel {{ run: {:?} }})", s.runs[1].0));
+    }
+
+    #[test]
+    fn retry_and_resume_are_notices_in_the_wrong_state() {
+        let s = session();
+        let e = env(&s);
+        assert_eq!(sent("/retry @grep", &e), "BAD /retry is not available: the run is running");
+        assert_eq!(sent("/retry @search", &e), format!("Command(Retry {{ run: {:?} }})", s.runs[2].0));
+        assert_eq!(sent("/resume @grep go on", &e), "BAD /resume is not available: the run is running");
+        assert!(sent("/resume @review go on", &e).contains("message: \"go on\""));
+        assert!(sent("/resume @review", &e).contains("message: \"continue\""));
+        let offered: Vec<String> = slash_offered(&e).into_iter().map(|(n, _)| n).collect();
+        assert!(offered.contains(&"/status".to_owned()) && !offered.contains(&"/retry".to_owned()), "{offered:?}");
+        let focused = Env { focused: Some(s.runs[2].0), ..e };
+        assert!(slash_offered(&focused).iter().any(|(n, _)| n == "/retry"));
+    }
+
+    #[test]
+    fn status_takes_a_seat_and_cost_without_a_target_is_the_session_table() {
+        let s = session();
+        let e = env(&s);
+        assert_eq!(sent("/status @advisor", &e), "Command(OpenScreen(AdvisorStatus))");
+        assert_eq!(sent("/status @router", &e), "Command(OpenScreen(RouterStatus))");
+        assert_eq!(sent("/cancel @advisor", &e), "BAD /cancel takes a run, not a seat");
+        assert_eq!(sent("/cost", &e), "Command(OpenScreen(Cost))");
+        let focused = Env { focused: Some(s.runs[1].0), ..e };
+        assert_eq!(sent("/cost", &focused), "Command(OpenScreen(Cost))", "a focused card does not turn it into a status");
+        assert_eq!(sent("/cost @grep", &e), format!("Command(OpenScreen(RunStatus({:?})))", s.runs[1].0));
+        assert_eq!(sent("/message @grep", &e), "BAD /message needs a message");
+    }
+
+    #[test]
+    fn the_run_commands_send_the_existing_variants() {
+        // No new `Command` variant: each row maps onto one the keys already use.
+        let s = session();
+        let e = env(&s);
+        for (line, variant) in [("/cancel @grep", "Cancel"), ("/retry @search", "Retry"), ("/message @grep x", "SendMessage"), ("/resume @review", "Resume"), ("/background @grep", "Background"), ("/log @grep", "OpenTranscript")] {
+            assert!(sent(line, &e).starts_with(&format!("Command({variant}")), "{line}");
+        }
     }
 }

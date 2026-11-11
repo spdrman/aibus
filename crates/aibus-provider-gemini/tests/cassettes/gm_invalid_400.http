@@ -1,0 +1,11 @@
+HTTP 400
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "error": {
+    "code": 400,
+    "message": "Invalid JSON payload received. Unknown name \"thinkingBudgett\" at 'generation_config.thinking_config': Cannot find field.",
+    "status": "INVALID_ARGUMENT"
+  }
+}

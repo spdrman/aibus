@@ -29,7 +29,7 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, PALETTE, PERMISSION, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, PALETTE, PERMISSION, RUN_STATUS, TRANSCRIPT};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -53,6 +53,8 @@ pub struct Views<'a> {
     agents: &'a Value,
     accounts: &'a Value,
     transcript: &'a Value,
+    run_status: &'a Value,
+    cost: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -75,6 +77,8 @@ impl<'a> Views<'a> {
             agents: at(AGENTS),
             accounts: at(ACCOUNTS_VIEW),
             transcript: at(TRANSCRIPT),
+            run_status: at(RUN_STATUS),
+            cost: at(COST),
         }
     }
 }
@@ -684,7 +688,12 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             "agents" => screens::agents(buf, full, v.agents, th, &sc.pointer, sc.entry, sc.note),
             "accounts" => screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note),
             "outcome" => screens::outcome(buf, full, th, &sc.pointer),
-            "confirm:clear" => screens::confirm_clear(buf, full, th, &sc.pointer),
+            "confirm:clear" => screens::confirm(buf, full, th, &sc.pointer, "clear", "Clear the session log?", ("clear_yes", "Clear")),
+            c if c.starts_with("confirm:cancel:") => {
+                screens::confirm(buf, full, th, &sc.pointer, "cancel", "Cancel the lead run?", ("cancel_yes", "Cancel the lead"))
+            }
+            t if t.starts_with("status:") => screens::run_status(buf, full, v.run_status, th, &sc.pointer),
+            "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
                 let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
                 for (id, r, kind) in &g.hits {

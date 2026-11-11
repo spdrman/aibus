@@ -1,0 +1,11 @@
+HTTP 429
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "error": {
+    "code": 429,
+    "message": "Resource has been exhausted (e.g. check quota).",
+    "status": "RESOURCE_EXHAUSTED"
+  }
+}

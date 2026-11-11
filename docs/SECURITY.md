@@ -18,6 +18,7 @@ Paths are relative to `crates/`. `security/` is `aibus-core/tests/security/`.
 | Malicious dependency | `cargo deny`, `cargo audit`, locked builds | no test in the tree: the `supply-chain` job in `.github/workflows/ci.yml` and the gate list in the PR. `aibus-testkit/tests/workspace.rs::every_crate_forbids_unsafe_code` and `provider_crates_use_rustls_and_never_openssl` pin what a dependency may bring in |
 | Two aibus processes corrupt shared files | advisory file locks, atomic writes | `aibus-core/src/persist/fs.rs` unit test `locked_writers_in_two_threads_never_interleave`, `aibus-core/tests/persist.rs::a_snapshot_survives_a_write_and_a_read` |
 | Hook hangs | timeouts, fail closed where the event can block | `aibus-core/tests/hooks.rs::a_timeout_blocks_a_blocking_event_and_is_an_error_for_the_rest` |
+| A client or a model gets a secret out through `aibus mcp` | the server never reads the keychain, config or accounts for a tool; every result, error message, audit line and stderr line goes through the redactor; the audit file is 0600 and arguments are capped at 4 KiB; stdout carries JSON-RPC only | `aibus/tests/mcp_security.rs::no_secret_leaves_over_stdio` (a key-shaped string sent as an argument, a tool name and a cursor; stdout, stderr and the audit file are searched, and `xdg_temp` searches the tree again), `aibus-mcp/tests/audit.rs::every_call_leaves_one_redacted_line_with_the_client_name`, `aibus/tests/mcp_server.rs::every_stdout_line_is_json_rpc_even_with_trace_logging` |
 | Runaway spend | `max_tokens_total`, `max_cost_usd`, `max_turns`, concurrency caps; exit 8 | `aibus-core/tests/run_loop.rs::max_tokens_total_ends_the_run_partial_before_the_next_tool_runs`, `aibus-core/tests/run_loop.rs::max_cost_usd_ends_the_run_with_a_budget_error`, `aibus-core/tests/delegation.rs::past_the_concurrent_limit_the_tool_result_is_the_error`, `aibus/tests/exit_codes.rs::eight_is_a_budget_and_ten_is_everything_else_that_ended_early` |
 
 ## The redactor
@@ -39,6 +40,12 @@ docker run --rm -v "$PWD":/work -w /work rust:1.89 sh tools/fuzz.sh 60
 ```
 
 The local run on MARS is the real gate. `.github/workflows/fuzz.yml` is the same thing, manual only (120 seconds per target, crash artifacts uploaded).
+
+## Identity and logins
+
+aibus never sends another product's client id, user agent, fingerprint, attestation or billing header, and never claims to be a first-party client. A vendor login lands in aibus only when the vendor documents a flow for third-party applications. A subscription plan that is only reachable by posing as the vendor's own CLI is out, whatever the demand. Every request aibus makes says `aibus/<version>`.
+
+The two login flows (`crates/aibus/src/oauth/`) keep to the same rules as a key. The PKCE verifier, the state, the authorization code and every token live in memory only: tokens are `Secret`, the verifier is never printed or put in a URL, and an error from the token endpoint names the status and the server's `error` code and nothing else from the body. The loopback listener binds 127.0.0.1 only, accepts one exact path, requires a loopback `Host` header and (when the server echoes it) the matching `state`, closes after the first good request and gives up after five minutes. Tests: `crates/aibus/src/oauth/tests.rs` (listener, state, path, Host, timeout, device responses), `crates/aibus/src/account/tests.rs` (the keychain and file grep for the key and both tokens), `crates/aibus-core/tests/oauth_single_flight.rs`.
 
 ## The optional shell sandbox
 

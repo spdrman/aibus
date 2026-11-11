@@ -3,7 +3,7 @@
 //! Each file is checked on its own first, so a mistake is reported against the file and line that
 //! hold it: a syntax or type error, a `key = "..."` under `auth`, and unknown keys (warnings).
 //! The merge works on the TOML tables before they become a `Config`: tables merge, arrays
-//! replace, `[[account]]` comes from the user file only and `[hooks]` arrays concatenate.
+//! replace, `[[account]]` and `[[provider]]` come from the user file only and `[hooks]` arrays concatenate.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -108,7 +108,7 @@ fn merge(user: Table, project: Table) -> Table {
     let mut out = user;
     for (key, value) in project {
         match (key.as_str(), value) {
-            ("account", _) => {}
+            ("account" | "provider", _) => {}
             ("hooks", Value::Table(hooks)) => {
                 let slot = out
                     .entry("hooks")
@@ -147,12 +147,14 @@ pub fn load(user: &Path, project: Option<&Path>) -> Result<Loaded, ConfigFileErr
     }
     if let Some(path) = project {
         if let Some((t, w, text)) = read(path)? {
-            if t.contains_key("account") {
-                warnings.push(format!(
-                    "{}:{}: [[account]] is user-only, ignored here",
-                    path.display(),
-                    find_line(&text, "account").unwrap_or(1)
-                ));
+            for table in ["account", "provider"] {
+                if t.contains_key(table) {
+                    warnings.push(format!(
+                        "{}:{}: [[{table}]] is user-only, ignored here",
+                        path.display(),
+                        find_line(&text, table).unwrap_or(1)
+                    ));
+                }
             }
             table = merge(table, t);
             warnings.extend(w);
@@ -386,5 +388,68 @@ mod tests {
         assert_eq!(find_line(text, "acct.0.auth.keyring"), Some(5));
         assert_eq!(find_line(text, "w.q.r"), Some(7));
         assert_eq!(find_line(text, "nope"), None);
+    }
+
+    #[test]
+    fn a_provider_table_parses_and_merges_over_its_preset() {
+        let text = r#"
+            [[provider]]
+            id = "ollama-home"
+            api = "openai-chat"
+            base_url = "http://10.0.0.5:11434/v1"
+            headers = { "x-team" = "home" }
+
+            [[provider]]
+            id = "groq"
+            base_url = "https://gw.example/openai/v1"
+
+            [[account]]
+            name = "home"
+            provider = "ollama-home"
+            auth = { none = true }
+        "#;
+        let (table, warnings) = parse_file(p(), text).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let c: Config = Value::Table(table).try_into().unwrap();
+        assert!(c.problems().is_empty(), "{:?}", c.problems());
+        assert_eq!(c.providers.len(), 2);
+        let home = aibus_provider::presets::resolve("ollama-home", Some(&c.providers[0])).unwrap().unwrap();
+        assert_eq!(home.headers["x-team"], "home");
+        let groq = aibus_provider::presets::resolve("groq", Some(&c.providers[1])).unwrap().unwrap();
+        assert_eq!(groq.base_url.as_deref(), Some("https://gw.example/openai/v1"));
+        assert_eq!(groq.env_vars, ["GROQ_API_KEY"]);
+    }
+
+    #[test]
+    fn a_provider_table_is_rejected_for_an_unknown_api_a_bad_url_a_credential_header_and_a_repeat() {
+        let problem = |text: &str| -> String {
+            match parse_file(p(), text) {
+                Err(e) => e.message,
+                Ok((table, _)) => {
+                    let c: Config = Value::Table(table).try_into().unwrap();
+                    let (key, why) = c.problems().into_iter().next().expect("a problem");
+                    format!("{key}: {why}")
+                }
+            }
+        };
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"grpc\"\n").contains("grpc"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"ftp://x\"\n").contains("base_url"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nheaders = { Authorization = \"Bearer x\" }\n")
+            .starts_with("provider.headers:"));
+        assert!(problem("[[provider]]\nid = \"p\"\n").contains("no api"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\n[[provider]]\nid = \"p\"\napi = \"openai-chat\"\n")
+            .contains("defined twice"));
+    }
+
+    #[test]
+    fn a_project_file_cannot_add_providers() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("config.toml");
+        let project = dir.path().join("settings.toml");
+        std::fs::write(&user, "").unwrap();
+        std::fs::write(&project, "[[provider]]\nid = \"evil\"\napi = \"openai-chat\"\nbase_url = \"http://evil.example\"\n").unwrap();
+        let l = load(&user, Some(&project)).unwrap();
+        assert!(l.config.providers.is_empty());
+        assert!(l.warnings[0].contains("[[provider]] is user-only"), "{:?}", l.warnings);
     }
 }

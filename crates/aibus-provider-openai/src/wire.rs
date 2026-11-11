@@ -17,6 +17,8 @@ pub struct Opts {
     pub keep_reasoning: bool,
     /// Ask for token logprobs.
     pub logprobs: bool,
+    /// Ask the gateway to report what the request cost (`usage: {include: true}`, OpenRouter).
+    pub include_cost: bool,
 }
 
 /// The id the API sees for a call, derived from ours so a result finds its call.
@@ -98,7 +100,7 @@ fn chat_assistant(m: &Message, o: Opts) -> Option<Value> {
         match b {
             ContentBlock::Text(t) => text.push_str(t),
             ContentBlock::Thinking { text, redacted: false, .. } => thinking.push_str(text),
-            ContentBlock::ToolUse { id, name, input } => calls.push(json!({
+            ContentBlock::ToolUse { id, name, input, .. } => calls.push(json!({
                 "id": wire_id(*id),
                 "type": "function",
                 "function": {"name": name, "arguments": input.to_string()},
@@ -135,6 +137,9 @@ pub fn chat_body(req: &ChatRequest, o: Opts) -> Value {
     body.insert("messages".into(), Value::Array(chat_messages(req, o)));
     body.insert("stream".into(), json!(true));
     body.insert("stream_options".into(), json!({"include_usage": true}));
+    if o.include_cost {
+        body.insert("usage".into(), json!({"include": true}));
+    }
     let key = if o.completion_tokens { "max_completion_tokens" } else { "max_tokens" };
     body.insert(key.into(), json!(req.max_output_tokens));
     if o.reasoning {
@@ -174,7 +179,7 @@ pub fn responses_body(req: &ChatRequest, o: Opts) -> Value {
                 for b in &m.blocks {
                     match b {
                         ContentBlock::Text(t) => text.push_str(t),
-                        ContentBlock::ToolUse { id, name, input: args } => {
+                        ContentBlock::ToolUse { id, name, input: args, .. } => {
                             if !text.is_empty() {
                                 input.push(json!({"role": "assistant", "content": [{"type": "output_text", "text": std::mem::take(&mut text)}]}));
                             }
@@ -253,7 +258,7 @@ mod tests {
     use aibus_provider::{CacheHint, ModelId, RequestMetadata, ToolSpec};
     use ulid::Ulid;
 
-    const PLAIN: Opts = Opts { completion_tokens: false, reasoning: false, user: false, keep_reasoning: false, logprobs: false };
+    const PLAIN: Opts = Opts { completion_tokens: false, reasoning: false, user: false, keep_reasoning: false, logprobs: false, include_cost: false };
 
     fn req() -> ChatRequest {
         ChatRequest {
@@ -280,7 +285,7 @@ mod tests {
             blocks: vec![
                 ContentBlock::Thinking { text: "hmm".into(), redacted: false, signature: None },
                 ContentBlock::Text("looking".into()),
-                ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}) },
+                ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}), signature: None },
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
@@ -348,7 +353,7 @@ mod tests {
         let mut r = req();
         r.messages.push(Message {
             role: MessageRole::Assistant,
-            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({}) }],
+            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({}), signature: None }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         r.messages.push(Message::text(MessageRole::Assistant, ""));
@@ -376,6 +381,13 @@ mod tests {
         assert_eq!(chat_body(&r, PLAIN)["tool_choice"], "required");
         r.tools.clear();
         assert!(chat_body(&r, PLAIN).get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn the_cost_is_only_asked_for_when_the_gateway_reports_it() {
+        assert!(chat_body(&req(), PLAIN).get("usage").is_none());
+        let o = Opts { include_cost: true, ..PLAIN };
+        assert_eq!(chat_body(&req(), o)["usage"], json!({"include": true}));
     }
 
     #[test]

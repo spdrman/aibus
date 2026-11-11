@@ -16,6 +16,7 @@ aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
 aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
 aibus config path | show | init | validate | edit
+aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]...   MCP server over stdio (docs/DECISIONS.md D-13, E4)
 aibus doctor
 aibus completions <bash|zsh|fish|powershell>
 aibus version

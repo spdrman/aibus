@@ -19,7 +19,7 @@ the same command, started by hand.
 | TUI snapshots | `cargo test --locked -p aibus-tui` | every push |
 | CLI | `cargo test --locked -p aibus --tests` | every push |
 | Replay | `cargo test --locked -p aibus-testkit --test replay --test session` and `-p aibus-core --test replay` | every push |
-| Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai` (cassettes) | every push |
+| Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini` (cassettes) | every push |
 | Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |
 | Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1`; `-p aibus-tui --features flow-diagram` is the rataflow path, gated under its own `render_dashboard_flow` baselines | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
 | Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
@@ -171,6 +171,16 @@ AIBUS_RECORD=1 AIBUS_LIVE_ACCOUNT=work AIBUS_LIVE_KEY_WORK=... \
 The answers land in `tests/cassettes/live/<case>.http` with the key and the account's ids
 stripped. Read them, then move the ones you want up into `tests/cassettes/` and add a `Case` for
 them in the crate's `tests/conformance.rs`.
+
+## The MCP conformance harness
+
+`crates/aibus/tests/common/mcp_client.rs` is a scripted MCP client: it starts `aibus mcp <args>` in the `xdg_temp()` home, speaks newline JSON-RPC, and keeps every stdout line so a test can check that nothing but JSON-RPC came out. `McpClient::v2026_07_28` sends `_meta` (protocol version, client capabilities, client info) on every request and has no handshake, `McpClient::v2025_11_25` runs `initialize` and `notifications/initialized`. `discover`, `list_tools` (it follows cursors), `call`, `read_resource`, `list_prompts`, `get_prompt` and `raw` cover the rest. A server that exits before it answers is reported with its exit status and its stderr, so a binary without the subcommand fails every test with "unrecognized subcommand".
+
+`common/transcript.rs` records the exchanges and compares them with `fixtures/mcp-server/<scenario>.jsonl`. It drops ids, the request `_meta`, and the `resultType`, `ttlMs` and `cacheScope` framing, and turns ULIDs, timestamps and the temp home into `<ulid>`, `<time>` and `<home>`, so one golden file serves both protocols. `AIBUS_UPDATE_TRANSCRIPTS=1` rewrites the file; read the diff before you commit it.
+
+`common/schema.rs` gained the 2020-12 keywords the tool schemas use (see its header) and `lint_2020_12`, which checks a whole schema rather than the branches a value reaches.
+
+`tests/mcp_server.rs` is the suite the server has to pass, `tests/mcp_harness.rs` tests the harness itself against `fixtures/mcp/server.sh` and needs no server. Both run in the `cargo test --locked -p aibus --tests` row.
 
 ## Frame snapshots
 

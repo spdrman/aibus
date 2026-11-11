@@ -1,0 +1,13 @@
+HTTP 200
+content-type: text/event-stream; charset=utf-8
+cache-control: no-cache
+x-request-id: req_openrouter_without_cost
+
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1730000000,"model":"openai/gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1730000000,"model":"openai/gpt-4.1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","created":1730000000,"model":"openai/gpt-4.1","choices":[],"usage":{"prompt_tokens":125,"completion_tokens":15,"total_tokens":140}}
+
+data: [DONE]
+

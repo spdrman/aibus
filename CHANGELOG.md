@@ -5,6 +5,22 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ## [0.2.0] - unreleased
 
+### Added
+
+* `aibus mcp`: an MCP server over stdio, in a new `aibus-mcp` crate on `rmcp` 3.9 (D-13). It answers `2026-07-28` (`server/discover`) and `2025-11-25` (`initialize`) as `aibus` plus the crate version, starts read-only, and lists one tool for now, `workflow_list`. `--allow write|gates|run` and `--allow-tool` are parsed (`gates` needs `write`, exit 2 otherwise; the run budget flags are refused as not available yet). Every call leaves one redacted line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (0600), 60 calls a minute are allowed and arguments are capped at 256 KiB. stdout carries JSON-RPC only; the log goes to stderr. `aibus doctor` lists the audit directory.
+
+### Providers
+
+* Gemini has a native adapter, `aibus-provider-gemini`, behind a new `gemini` preset (`api = "gemini-generate-content"`, key in `x-goog-api-key`, `GEMINI_API_KEY`). It keeps thought signatures across tool turns, streams thought summaries, reports reasoning and cached tokens, counts tokens through `countTokens`, and has a priced model table. `gemini-openai` (the OpenAI shim) is unchanged. See `docs/PROVIDERS.md` and D-14.
+* `ContentBlock::ToolUse` has an optional `signature`; the other providers leave it empty.
+
+### Models
+
+* The built-in model tables moved from the provider crates to `catalog/<provider>.json`, and every priced row now writes all four buckets (`null` for none). Nothing about `models()` or `price()` changes.
+* `catalog-sync` (in `aibus-testkit`) refreshes the catalog from a saved models.dev snapshot as a reviewable diff. It never fetches and never writes without `--write`.
+* A model row can carry `price_from`, so an announced price sits beside the current one and starts on its date.
+* For OpenRouter the response's `usage.cost` replaces the estimate, and `Usage.cost_source` says which one it was.
+
 ### Build
 
 * The TUI is on ratatui 0.30 and crossterm 0.29, and `deny.toml` has no ignored advisories any more: `paste` (RUSTSEC-2024-0436) left the tree with ratatui 0.29. `crossterm` joins `ratatui` in the one-version-only ban list.
@@ -32,7 +48,6 @@ First release. What is in it:
 
 ### Known issues
 
-* `aibus account add --oauth` is refused until a provider offers an OAuth login; none does yet.
 * The Bedrock and Vertex transports exist as constructors, but `auth = "sigv4"` and
   `auth = "gcloud"` cannot be selected from the config file yet.
 

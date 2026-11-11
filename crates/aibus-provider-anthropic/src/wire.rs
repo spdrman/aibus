@@ -29,7 +29,7 @@ fn block(b: &ContentBlock) -> Option<Value> {
         }
         // Without its signature the API would refuse the block, so it stays out.
         ContentBlock::Thinking { .. } => return None,
-        ContentBlock::ToolUse { id, name, input } => {
+        ContentBlock::ToolUse { id, name, input, .. } => {
             json!({"type": "tool_use", "id": wire_id(*id), "name": name, "input": input})
         }
         ContentBlock::ToolResult { id, content, is_error } => {
@@ -280,7 +280,7 @@ mod tests {
         let mut r = req();
         r.messages.push(Message {
             role: MessageRole::Assistant,
-            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}) }],
+            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}), signature: None }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         r.messages.push(Message {

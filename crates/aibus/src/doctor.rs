@@ -6,6 +6,8 @@
 use aibus_core::config::{self, Config};
 use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::{AibusError, KeyRef, Keychain, Redactor, Sandbox, SessionId, StoreHealth};
+use aibus_provider::presets::{preset, resolve};
+use aibus_provider::Api;
 use serde_json::{json, Value};
 
 use crate::cli::Global;
@@ -163,12 +165,16 @@ fn dirs_check(paths: &Paths) -> Check {
             }
         }
     }
+    // The MCP server's audit files (`aibus mcp`), one per process.
+    let mcp = paths.state.join("logs").join("mcp");
+    let audits = std::fs::read_dir(&mcp).map_or(0, |d| d.flatten().count());
     let list = format!(
-        "config {}, data {}, state {}, cache {}",
+        "config {}, data {}, state {}, cache {}, mcp audit {} ({audits} files)",
         paths.config.display(),
         paths.data.display(),
         paths.state.display(),
-        paths.cache.display()
+        paths.cache.display(),
+        mcp.display()
     );
     if problems.is_empty() {
         check("xdg dirs", true, list)
@@ -192,6 +198,55 @@ fn session_check(paths: &Paths, id: &str) -> Check {
     }
 }
 
+/// Each provider an enabled account uses (and each `[[provider]]` table): the wire it speaks,
+/// the URL it will be sent to, and whether that came from a preset, a `[[provider]]` or both.
+/// An old-style `openai-compatible` account with a `base_url` gets the new form suggested.
+fn providers_check(cfg: Option<&Config>) -> Check {
+    let Some(cfg) = cfg else {
+        return check("providers", true, "no config");
+    };
+    let ids: std::collections::BTreeSet<&str> = cfg
+        .accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .map(|a| a.provider.as_str())
+        .chain(cfg.providers.iter().map(|d| d.id.as_str()))
+        .filter(|id| *id != "fake")
+        .collect();
+    let (mut rows, mut bad) = (Vec::new(), Vec::new());
+    for id in ids {
+        let user = cfg.providers.iter().find(|d| d.id == id);
+        match resolve(id, user) {
+            Ok(Some(def)) => {
+                let from = match (preset(id).is_some(), user.is_some()) {
+                    (true, false) => format!("preset {id}"),
+                    (true, true) => format!("preset {id} + [[provider]]"),
+                    (false, _) => "[[provider]]".to_owned(),
+                };
+                let legacy = cfg.accounts.iter().find(|a| a.enabled && a.provider == id && a.base_url.is_some());
+                let url = legacy.and_then(|a| a.base_url.as_deref()).or(def.base_url.as_deref());
+                let api = def.api.map_or("?", Api::as_str);
+                let mut row = format!("{id} ({api}, {}, {from})", url.unwrap_or("no base_url"));
+                if let (Some(a), "openai-compatible") = (legacy, id) {
+                    row.push_str(&format!(
+                        "; account {} could use [[provider]] id = \"{}\", api = \"openai-chat\", base_url = \"{}\"",
+                        a.name,
+                        a.name,
+                        a.base_url.as_deref().unwrap_or_default()
+                    ));
+                }
+                rows.push(row);
+            }
+            Ok(None) => rows.push(format!("{id} (no definition)")),
+            Err(e) => bad.push(e),
+        }
+    }
+    match bad.is_empty() {
+        true => check("providers", true, if rows.is_empty() { "none configured".to_owned() } else { rows.join("; ") }),
+        false => check("providers", false, bad.join("; ")),
+    }
+}
+
 pub fn doctor(
     g: &Global,
     session: Option<&str>,
@@ -204,6 +259,7 @@ pub fn doctor(
     let mut checks = vec![
         check("build", true, format!("{} on {os}", build_id())),
         config,
+        providers_check(cfg.as_ref()),
         store_check(keychain, cfg.as_ref()),
         sandbox_check(cfg.as_ref()),
         worktree_check(&paths),
@@ -260,6 +316,25 @@ mod tests {
         let c = store_check(&gone, Some(&cfg));
         assert!(!c.ok, "{}", c.detail);
         assert!(c.detail.contains("work"));
+    }
+
+    #[test]
+    fn providers_are_listed_with_their_api_url_and_source_and_an_old_compatible_account_gets_a_hint() {
+        let account = |name: &str, provider: &str, url: Option<&str>| config::Account {
+            name: name.into(),
+            provider: provider.into(),
+            base_url: url.map(Into::into),
+            ..Default::default()
+        };
+        let mut cfg = Config::default();
+        cfg.accounts.push(account("g", "groq", None));
+        cfg.accounts.push(account("home", "openai-compatible", Some("http://10.0.0.5:11434/v1")));
+        cfg.accounts.push(account("f", "fake", None));
+        let c = providers_check(Some(&cfg));
+        assert!(c.ok, "{}", c.detail);
+        assert!(c.detail.contains("groq (openai-chat, https://api.groq.com/openai/v1, preset groq)"), "{}", c.detail);
+        assert!(c.detail.contains("[[provider]] id = \"home\""), "{}", c.detail);
+        assert!(!c.detail.contains("fake"), "{}", c.detail);
     }
 
     #[test]

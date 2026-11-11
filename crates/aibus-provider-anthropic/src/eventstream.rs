@@ -114,7 +114,7 @@ impl Frames {
                     .and_then(|v| v["message"].as_str().map(str::to_owned))
                     .unwrap_or_else(|| text.into_owned());
                 let status = status_of(header(":exception-type").unwrap_or(""));
-                return Err(ProviderError::from_http(status, &message, None, None));
+                return Err(ProviderError::from_http(status, &message, None, None, header(":exception-type").unwrap_or("")));
             }
             if header(":event-type") != Some("chunk") {
                 continue;

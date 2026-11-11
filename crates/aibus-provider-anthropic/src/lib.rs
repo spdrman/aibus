@@ -23,7 +23,7 @@ use aibus_provider::{
     ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk, SystemRole,
 };
 use aibus_provider_http::reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use aibus_provider_http::{cancelled, chunk, emit, json, request_id, sensitive, Events, Http};
+use aibus_provider_http::{cancelled, chunk, emit, json, rate_limit, request_id, sensitive, Events, Http};
 use async_trait::async_trait;
 use cloud::Transport;
 use tokio::sync::mpsc;
@@ -208,6 +208,7 @@ impl Provider for Anthropic {
         let (url, headers, body) = self.prepare(creds, &req.model, body, beta).await?;
         let mut resp = self.http.send(&cancel, |c| c.post(&url).headers(headers).body(body)).await?;
         let request_id = request_id(&resp);
+        let window = rate_limit(resp.headers(), SystemTime::now());
 
         let mut turn = stream::Turn::new(price);
         if matches!(self.transport, Transport::Bedrock { .. }) {
@@ -234,7 +235,9 @@ impl Provider for Anthropic {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
-        turn.finish(request_id)
+        let mut done = turn.finish(request_id)?;
+        done.rate_limit = window;
+        Ok(done)
     }
 
     async fn count_tokens(

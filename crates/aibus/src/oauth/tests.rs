@@ -75,7 +75,7 @@ fn http() -> Client {
 #[tokio::test(start_paused = true)]
 async fn the_openrouter_style_flow_trades_the_code_and_the_verifier_for_a_key() {
     let auth = FakeAuthServer::start().await;
-    auth.token_ok(json!({ "key": KEY })).await;
+    auth.token_status(200, json!({ "key": KEY })).await;
     let login = Login::new(pkce_def(&auth, StateMode::None));
     let (out, url) = login_with(login, |_, cb| async move {
         let r = http().get(format!("{cb}?code=the-code")).send().await.unwrap();
@@ -101,7 +101,7 @@ async fn the_openrouter_style_flow_trades_the_code_and_the_verifier_for_a_key() 
 #[tokio::test(start_paused = true)]
 async fn the_listener_refuses_a_wrong_state_a_wrong_path_and_a_foreign_host_then_takes_the_real_one() {
     let auth = FakeAuthServer::start().await;
-    auth.token_ok(json!({ "access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600 })).await;
+    auth.token_status(200, json!({ "access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600 })).await;
     let mut def = pkce_def(&auth, StateMode::Echoed);
     def.result = Outcome::Tokens;
     def.redirect_param = "redirect_uri";
@@ -177,7 +177,7 @@ async fn a_busy_preferred_port_falls_back_unless_the_definition_pins_it() {
     let auth = FakeAuthServer::start().await;
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = taken.local_addr().unwrap().port();
-    auth.token_ok(json!({ "key": KEY })).await;
+    auth.token_status(200, json!({ "key": KEY })).await;
 
     let mut def = pkce_def(&auth, StateMode::None);
     def.callback_port = Some(port);
@@ -286,7 +286,7 @@ async fn device_code_gives_up_when_the_code_lifetime_runs_out() {
         "expires_in": 12, "interval": 5
     }))
     .await;
-    auth.token_always(400, json!({ "error": "authorization_pending" })).await;
+    auth.token_status(400, json!({ "error": "authorization_pending" })).await;
     let (out, _, _) = device_run(&auth).await;
     assert!(out.unwrap_err().contains("expired"));
 }

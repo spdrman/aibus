@@ -457,12 +457,13 @@ fn add_oauth_is_refused_for_a_provider_that_does_not_offer_it() {
     assert!(matches!(none.result, Err(AibusError::Usage(_))));
 }
 
-#[tokio::test]
-async fn a_rejected_oauth_token_is_not_stored_or_written() {
+#[test]
+fn a_rejected_oauth_token_is_not_stored_or_written() {
     let rig = Rig { oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))), offers_oauth: true, ..Rig::new() };
     // Burn the first token so the login hands out `-2`, which the provider does not accept.
     let flow = rig.oauth.clone().unwrap();
-    let _ = flow.authorize(&|_| {}, &tokio_util::sync::CancellationToken::new()).await;
+    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let _ = rt.block_on(flow.authorize(&|_| {}, &tokio_util::sync::CancellationToken::new()));
     let ran = rig.run(&oauth_cmd(), "", None);
     assert_eq!(exit(&ran.result), 4, "{:?}", ran.result);
     assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none());

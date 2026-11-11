@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use aibus_provider::{AuthMethodKind, Credential, Secret};
 use smol_str::SmolStr;
+use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::error::CredentialError;
@@ -97,6 +98,9 @@ pub struct CredentialStore {
     wall: Box<dyn Fn() -> u64 + Send + Sync>,
     oauth: Option<Arc<dyn OAuthFlow>>,
     cache: Mutex<HashMap<AccountName, Cached>>,
+    /// One lock per OAuth account, so two requests that both find an expired token do one
+    /// refresh: the second waits, then reads what the first stored.
+    refreshing: Mutex<HashMap<AccountName, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 fn user(name: &AccountName) -> String {
@@ -113,6 +117,7 @@ impl CredentialStore {
             wall: Box::new(oauth::unix_now),
             oauth: None,
             cache: Mutex::new(HashMap::new()),
+            refreshing: Mutex::new(HashMap::new()),
         }
     }
 
@@ -203,45 +208,110 @@ impl CredentialStore {
         })
     }
 
-    /// The stored tokens, refreshed first when they expire within a minute. A refresh that
-    /// fails is an auth error and the old tokens stay where they were.
-    fn resolve_oauth(&self, name: &AccountName) -> Result<Credential, CredentialError> {
+    /// The stored tokens and whether they expire within a minute.
+    fn load_oauth(&self, name: &AccountName) -> Result<(OAuthTokens, bool), CredentialError> {
         const SKEW: u64 = 60;
         let raw = self
             .keychain
             .get(KEYCHAIN_SERVICE, &user(name))?
             .ok_or_else(|| CredentialError::Missing(name.clone()))?;
-        let mut tokens = OAuthTokens::decode(raw.expose())
+        let tokens = OAuthTokens::decode(raw.expose())
             .ok_or_else(|| CredentialError::OAuth("the stored tokens are unreadable".into()))?;
-        if tokens.expires_at.is_some_and(|e| e <= (self.wall)() + SKEW) {
-            let fail = |m: &str| {
-                CredentialError::OAuth(format!("{m}; run: aibus account add {name} --oauth"))
-            };
-            let refresh = tokens
-                .refresh
-                .as_ref()
-                .ok_or_else(|| fail("the token expired and there is no refresh token"))?;
-            let flow = self
-                .oauth
-                .as_ref()
-                .ok_or_else(|| fail("the token expired and no OAuth flow is available"))?;
-            let mut fresh = flow
-                .refresh(refresh.expose())
-                .map_err(|e| CredentialError::OAuth(format!("refresh failed: {e}")))?;
-            // A refresh may leave the refresh token out: the old one still stands.
-            if fresh.refresh.is_none() {
-                fresh.refresh = tokens.refresh.take();
-            }
-            self.store_oauth(name, &fresh)?;
-            tokens = fresh;
+        let stale = tokens.expires_at.is_some_and(|e| e <= (self.wall)() + SKEW);
+        Ok((tokens, stale))
+    }
+
+    /// The stored tokens, refreshed first when they expire within a minute. A refresh that
+    /// fails is an auth error and the old tokens stay where they were. This is the sync entry
+    /// (`CredentialSource` is sync): a fresh token costs one keychain read, and only a refresh
+    /// runs the async flow, on a scoped thread with its own runtime so it never parks the
+    /// caller's reactor. `resolve_async` is the entry for async callers.
+    fn resolve_oauth(&self, name: &AccountName) -> Result<Credential, CredentialError> {
+        let (tokens, stale) = self.load_oauth(name)?;
+        if !stale {
+            return Ok(self.oauth_credential(name, &tokens));
         }
-        self.register_oauth(name, &tokens);
-        Ok(Credential {
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_time()
+                    .build()
+                    .map_err(|e| CredentialError::OAuth(format!("no runtime for the refresh: {e}")))?;
+                rt.block_on(self.refresh_once(name, &CancellationToken::new()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err(CredentialError::OAuth("the refresh panicked".into())))
+        })
+    }
+
+    /// `resolve` for async callers: an expired OAuth token is refreshed without blocking the
+    /// runtime, and `cancel` stops the exchange.
+    pub async fn resolve_async(
+        &self,
+        account: &config::Account,
+        cancel: &CancellationToken,
+    ) -> Result<Credential, CredentialError> {
+        if !account.auth.oauth {
+            return self.resolve(account);
+        }
+        let name = account.account_name();
+        let (tokens, stale) = self.load_oauth(&name)?;
+        if !stale {
+            return Ok(self.oauth_credential(&name, &tokens));
+        }
+        self.refresh_once(&name, cancel).await
+    }
+
+    /// The single-flight refresh: take the account's lock, read the tokens again (the holder
+    /// before us may have refreshed them), and only exchange when they are still stale.
+    async fn refresh_once(
+        &self,
+        name: &AccountName,
+        cancel: &CancellationToken,
+    ) -> Result<Credential, CredentialError> {
+        let lock = self
+            .refreshing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(name.clone())
+            .or_default()
+            .clone();
+        let _held = lock.lock().await;
+        let (mut tokens, stale) = self.load_oauth(name)?;
+        if !stale {
+            return Ok(self.oauth_credential(name, &tokens));
+        }
+        let fail = |m: &str| {
+            CredentialError::OAuth(format!("{m}; run: aibus account add {name} --oauth"))
+        };
+        let refresh = tokens
+            .refresh
+            .as_ref()
+            .ok_or_else(|| fail("the token expired and there is no refresh token"))?;
+        let flow = self
+            .oauth
+            .as_ref()
+            .ok_or_else(|| fail("the token expired and no OAuth flow is available"))?;
+        let mut fresh = flow
+            .refresh(refresh.expose(), cancel)
+            .await
+            .map_err(|e| CredentialError::OAuth(format!("refresh failed: {e}")))?;
+        // A refresh may leave the refresh token out: the old one still stands.
+        if fresh.refresh.is_none() {
+            fresh.refresh = tokens.refresh.take();
+        }
+        self.store_oauth(name, &fresh)?;
+        Ok(self.oauth_credential(name, &fresh))
+    }
+
+    fn oauth_credential(&self, name: &AccountName, tokens: &OAuthTokens) -> Credential {
+        self.register_oauth(name, tokens);
+        Credential {
             account: name.clone(),
             secret: Secret::new(tokens.access.expose().clone()),
             kind: AuthMethodKind::OAuth,
             resolved_at: (self.now)(),
-        })
+        }
     }
 
     fn register_oauth(&self, name: &AccountName, tokens: &OAuthTokens) {

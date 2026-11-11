@@ -226,3 +226,13 @@ Gated calls, taken at the recommended default:
 **Alternatives.** A hand-rolled stdio server in the style of `aibus-core/src/mcp.rs` (rejected for now: it would own both protocol lifecycles and the schema generation for good; it stays the fallback if rmcp stops fitting the MSRV or a duplicate becomes a `deny` hit). Putting the handler in `aibus-core` or `aibus` (rejected: rmcp's tokio, schemars and chrono would reach every crate, or the handler would only be testable through the binary).
 
 **Why.** The two protocol lifecycles and paging are the expensive part to get right and they work on the first try. A separate crate keeps the new dependencies and the closure test local, and makes the fallback a swap rather than a rewrite.
+
+## D-F3: Capabilities per model, a closed compat enum, and the leftover provider fields
+
+**Context.** Issue #111. `Capabilities` was per provider, which is wrong for a preset table where one model reasons and its neighbour does not, and `ProviderDef.compat` was a struct that mixed capabilities (`logprobs`, `effort`, ...) with wire quirks and with three things that are neither (`user`, `open_aliases`, `responses`, `auth_header`).
+
+**Decision.** `ModelEntry` gains `capabilities` (a `CapabilityOverrides`, every field optional) and `reasoning`. `ProviderDef` gains `default_capabilities`, and `compat` becomes a list over the closed `CompatFlag` enum from the issue (twelve names, two of them carrying a value). `Provider::capabilities_for(&ModelId)` has a default that answers like `capabilities()`, so providers without per-model data need nothing. The compat flags that are capabilities seen from the wire (`no_system_role`, `strip_images`) apply last, after the model layers. Layers of a model entry merge field by field instead of replacing the whole entry, so a 0.1.0 override file that only names sizes keeps the built-in capabilities. `user`, `open_aliases`, `responses` and `auth_header` are not wire quirks in the issue's list and not capabilities, so they moved up to plain optional fields on `ProviderDef` instead of being invented as flags. `reasoning` is `Option<bool>` on the entry (the issue says `bool`) so that "the file did not say" survives a layer merge; in a file it reads the same.
+
+**Alternatives.** Keeping `Compat` as a struct next to the new list (rejected: two things called compat). Replacing a model entry whole per layer (rejected: a size-only override would drop its capabilities). Adding `user` and friends to the enum (rejected: the issue says anything not named goes on the "Later" list).
+
+**Why.** One place says what a model can do, one small closed set says how the server deviates, and `degrade` stays a pure function of resolved capabilities.

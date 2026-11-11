@@ -35,6 +35,8 @@ pub struct RecordedRequest {
 pub struct FakeProvider {
     script: Arc<Mutex<Script>>,
     caps: Capabilities,
+    /// Per model, laid over `caps` by `capabilities_for`.
+    model_caps: BTreeMap<String, CapabilityOverrides>,
     /// Account name to its key. Empty means any credential is accepted.
     accounts: BTreeMap<AccountName, String>,
     recorded: Mutex<Vec<RecordedRequest>>,
@@ -57,6 +59,7 @@ impl FakeProvider {
         Self {
             script: Arc::new(Mutex::new(script)),
             caps,
+            model_caps: BTreeMap::new(),
             accounts: BTreeMap::new(),
             recorded: Mutex::new(vec![]),
         }
@@ -64,6 +67,12 @@ impl FakeProvider {
 
     pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
         self.caps = caps;
+        self
+    }
+
+    /// What `model` can do differently from the rest of this fake.
+    pub fn with_model_capabilities(mut self, model: &str, over: CapabilityOverrides) -> Self {
+        self.model_caps.insert(model.to_owned(), over);
         self
     }
 
@@ -164,6 +173,13 @@ impl Provider for FakeProvider {
 
     fn capabilities(&self) -> Capabilities {
         self.caps.clone()
+    }
+
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        match self.model_caps.get(model.0.as_str()) {
+            Some(over) => self.caps.clone().with(over),
+            None => self.caps.clone(),
+        }
     }
 
     fn models(&self) -> Vec<ModelInfo> {

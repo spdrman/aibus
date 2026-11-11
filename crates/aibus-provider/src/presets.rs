@@ -15,7 +15,9 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-/// The wire dialects the adapters speak. Gemini, Bedrock and Vertex come later in the epic.
+use crate::provider::CapabilityOverrides;
+
+/// The wire dialects the adapters speak. Gemini comes later in the epic.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Api {
     #[serde(rename = "anthropic-messages")]
@@ -45,45 +47,52 @@ pub enum ModelTableSpec {
     Inline(serde_json::Value),
 }
 
-/// The ways an OpenAI-shaped server differs from OpenAI. These vary together per vendor.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Compat {
-    /// `max_completion_tokens` instead of `max_tokens`.
-    pub completion_tokens: bool,
-    /// Send the run and session ids as `user`.
-    pub user: bool,
-    /// Send earlier reasoning back as `reasoning_content`.
-    pub keep_reasoning: bool,
-    pub logprobs: bool,
-    pub effort: bool,
-    pub images: bool,
-    pub prompt_cache: bool,
-    pub max_tools: Option<u32>,
-    /// An alias target resolves whatever it is: the server names its own models.
-    pub open_aliases: bool,
-    /// The server has a Responses API; `api = "openai-responses"` is refused when it does not.
-    pub responses: bool,
-    /// The key goes in this header as it is, instead of `Authorization: Bearer` (Azure's `api-key`).
-    pub auth_header: Option<String>,
+/// Which key carries the output limit in a Chat Completions body.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaxTokensField {
+    MaxTokens,
+    MaxCompletionTokens,
 }
 
-impl Default for Compat {
-    fn default() -> Self {
-        Self {
-            completion_tokens: false,
-            user: false,
-            keep_reasoning: false,
-            logprobs: false,
-            effort: false,
-            images: false,
-            prompt_cache: false,
-            max_tools: None,
-            open_aliases: false,
-            responses: true,
-            auth_header: None,
-        }
-    }
+/// Which key carries the reasoning effort in a Chat Completions body: `reasoning_effort`
+/// (OpenAI) or `reasoning: { effort }` (OpenRouter and friends).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningField {
+    ReasoningEffort,
+    Reasoning,
+}
+
+/// The wire quirks a server can have that are not capabilities. This is the whole set: a
+/// quirk nobody has named here goes on the epic's "Later" list, not into this enum. A flag is
+/// a bare name in a config file (`"no_store"`), or a one-key table where it takes a value
+/// (`{ max_tokens_field = "max_completion_tokens" }`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatFlag {
+    /// Tool definitions go out without a `strict` key.
+    NoStrictTools,
+    /// The `developer` role is sent as `system`.
+    NoDeveloperRole,
+    MaxTokensField(MaxTokensField),
+    ReasoningField(ReasoningField),
+    /// Earlier thinking goes back to the server as `reasoning_content` (Kimi).
+    ReasoningContentReplay,
+    /// No `stream_options.include_usage` on a streaming call.
+    NoUsageInStream,
+    /// `tool_choice` is never sent.
+    NoToolChoice,
+    /// A named `tool_choice` is sent as "any tool" instead.
+    NoNamedToolChoice,
+    /// `store` is left out of a Responses body.
+    NoStore,
+    /// `temperature` is left out.
+    NoSamplingParams,
+    /// No system role: the prompt is folded into the first user message.
+    NoSystemRole,
+    /// Pictures are replaced by a note.
+    StripImages,
 }
 
 /// One provider. In a preset or a `[[provider]]` table every field but `id` may be left out;
@@ -102,7 +111,19 @@ pub struct ProviderDef {
     pub model_table: Option<ModelTableSpec>,
     /// A full model id with one of these prefixes resolves even when no table lists it.
     pub prefixes: Vec<String>,
-    pub compat: Option<Compat>,
+    /// What every model of this provider can do unless its own table entry says otherwise.
+    pub default_capabilities: CapabilityOverrides,
+    /// The wire quirks. `None` leaves a preset's list alone; a list replaces it whole.
+    pub compat: Option<Vec<CompatFlag>>,
+    /// Send the run and session ids as `user`.
+    pub user: Option<bool>,
+    /// An alias target resolves whatever it is: the server names its own models.
+    pub open_aliases: Option<bool>,
+    /// The server has a Responses API (the default); `api = "openai-responses"` is refused when
+    /// this is `false`.
+    pub responses: Option<bool>,
+    /// The key goes in this header as it is, instead of `Authorization: Bearer` (Azure's `api-key`).
+    pub auth_header: Option<String>,
     /// Extra request headers. Never a secret.
     pub headers: BTreeMap<String, String>,
     /// Extra query parameters on every request (`api-version` on Azure).
@@ -110,8 +131,9 @@ pub struct ProviderDef {
 }
 
 impl ProviderDef {
-    pub fn compat(&self) -> Compat {
-        self.compat.clone().unwrap_or_default()
+    /// The definition's compat flags, none when it names none.
+    pub fn compat_flags(&self) -> &[CompatFlag] {
+        self.compat.as_deref().unwrap_or_default()
     }
 
     /// The id as a `&'static str`, which `ProviderId` needs. A config names a handful of
@@ -148,6 +170,13 @@ impl ProviderDef {
         }
         if user.compat.is_some() {
             self.compat.clone_from(&user.compat);
+        }
+        self.default_capabilities = self.default_capabilities.over(&user.default_capabilities);
+        self.user = user.user.or(self.user);
+        self.open_aliases = user.open_aliases.or(self.open_aliases);
+        self.responses = user.responses.or(self.responses);
+        if user.auth_header.is_some() {
+            self.auth_header.clone_from(&user.auth_header);
         }
         self.headers.extend(user.headers.clone());
         self.query.extend(user.query.clone());

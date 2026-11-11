@@ -76,7 +76,7 @@ fn mark(v: &mut Value) {
 }
 
 /// The body for `POST /v1/messages`. `effort` says the model takes the effort parameter.
-pub fn messages_body(req: &ChatRequest, effort_ok: bool) -> Value {
+pub fn messages_body(req: &ChatRequest, effort_ok: bool, compat: &[CompatFlag]) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(req.model.0));
     body.insert("max_tokens".into(), json!(req.max_output_tokens));
@@ -133,15 +133,16 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool) -> Value {
         .filter(|b| *b >= 1024);
     if let Some(budget) = thinking {
         body.insert("thinking".into(), json!({"type": "enabled", "budget_tokens": budget}));
-    } else if let Some(t) = req.temperature {
+    } else if let (Some(t), false) = (req.temperature, compat.contains(&CompatFlag::NoSamplingParams)) {
         body.insert("temperature".into(), json!(t));
     }
-    if !req.tools.is_empty() {
+    if !req.tools.is_empty() && !compat.contains(&CompatFlag::NoToolChoice) {
         // Forcing a tool is not allowed while thinking.
         let choice = match (&req.tool_choice, thinking) {
             (ToolChoice::Auto, _) | (_, Some(_)) => json!({"type": "auto"}),
             (ToolChoice::None, _) => json!({"type": "none"}),
             (ToolChoice::Required, _) => json!({"type": "any"}),
+            (ToolChoice::Named(_), _) if compat.contains(&CompatFlag::NoNamedToolChoice) => json!({"type": "any"}),
             (ToolChoice::Named(n), _) => json!({"type": "tool", "name": n}),
         };
         body.insert("tool_choice".into(), choice);

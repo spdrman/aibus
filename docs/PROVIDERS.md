@@ -4,7 +4,7 @@ What the real providers (B1.5) read from the config and from disk. The account f
 
 ## Providers are data
 
-A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `openai-chat` or `openai-responses`, and that is the only part that is code (`aibus-provider-anthropic` serves the first, `aibus-provider-openai` the other two). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
+A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, default_capabilities, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `openai-chat` or `openai-responses`, and that is the only part that is code (`aibus-provider-anthropic` serves the first, `aibus-provider-openai` the other two). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
 
 An account says `provider = "<id>"`. The registry builds one instance per id, so an id carries its URL: two Ollama servers are two ids, and nothing conflicts.
 
@@ -57,9 +57,9 @@ auth = { none = true }
 
 Rules:
 
-* A `[[provider]]` with the id of a preset overrides that preset field by field: what you leave out stays the preset's. `headers` and `query` merge; `compat`, if you give it, replaces the preset's whole.
+* A `[[provider]]` with the id of a preset overrides that preset field by field: what you leave out stays the preset's. `headers`, `query` and `default_capabilities` merge (a field you name replaces the preset's, the rest stays); `compat`, if you give it, replaces the preset's list whole.
 * A new id with an OpenAI `api` starts from `openai-compatible` (open aliases, logprobs on, no cache or effort claims), so `id`, `api` and `base_url` are enough.
-* `headers` and `query` are checked like `auth.key` is: a name that looks like a credential (`authorization`, `api-key`, anything with `auth`, `key`, `token`, `secret`, `cookie`) is rejected, because credentials do not go in config. Azure's `api-key` header is the preset's `compat.auth_header`, not a header you write.
+* `headers` and `query` are checked like `auth.key` is: a name that looks like a credential (`authorization`, `api-key`, anything with `auth`, `key`, `token`, `secret`, `cookie`) is rejected, because credentials do not go in config. Azure's `api-key` header is the preset's `auth_header`, not a header you write.
 * `[[provider]]` is read from the user file only, like `[[account]]`: a project file cannot point a key at another server. It is ignored there with a warning.
 * `base_url` must start with `http://` or `https://`, and `api` must be one of the three.
 
@@ -68,6 +68,47 @@ Rules:
 ### Old configs
 
 A 0.1.0 config loads unchanged (`fixtures/config/` has one per id). `base_url` and `api` on an account still work and are laid over the provider's definition. `provider = "openai-compatible"` with a `base_url` keeps working, and `aibus doctor` suggests the `[[provider]]` form. `api = "responses"` on an `openai` account is the same as `provider = "openai"` with `api = "openai-responses"`. Two accounts of one id that set different `base_url`s or `api`s in the old form are still an error, since one instance cannot serve both; the fix is two `[[provider]]` ids.
+
+### What a model can do, and the wire quirks
+
+Capabilities live on the model, with the provider definition supplying the default. A `[[provider]]` (or a preset) says what its models do unless told otherwise, and a model entry overrides only the fields it names:
+
+```toml
+[[provider]]
+id = "home"
+api = "openai-chat"
+base_url = "http://10.0.0.5:8000/v1"
+default_capabilities = { tools = true, logprobs = true }
+compat = ["no_store", { max_tokens_field = "max_completion_tokens" }]
+```
+
+```json
+{ "models": [
+  { "id": "gpt-5", "context_window": 400000, "max_output": 128000, "family": "gpt-5", "deprecated": false,
+    "reasoning": true, "capabilities": { "effort": true, "logprobs": false } }
+] }
+```
+
+`capabilities` has `tools`, `parallel_tool_calls`, `thinking`, `effort`, `images`, `prompt_cache`, `logprobs`, `max_tools` and `system_role` (`separate` or `first_message`), each optional. `reasoning` says the model emits thinking or reasoning tokens at all; `capabilities.thinking` says a request may ask for a thinking budget, which is a different thing. The older `effort: true` on an entry still works and means `capabilities.effort`. A model's capabilities resolve in the same order as its table: the provider's `default_capabilities`, then the built-in table, then the cache, then your `models.json`, field by field, so an override file that only fixes a context window keeps what the built-in table said about tools. `degrade` and the router's "prefers logprobs" rule both read the resolved per-model capabilities (`Provider::capabilities_for`).
+
+`compat` is the closed list of wire quirks that are not capabilities. A flag is a bare name, or a one-key table where it takes a value. Anything not in this list is not supported yet; it goes on the epic's "Later" list, never into the enum.
+
+| Flag | What it changes in the request |
+|---|---|
+| `no_strict_tools` | Responses tools go out without the `strict` key. |
+| `no_developer_role` | The `developer` role is sent as `system`. |
+| `max_tokens_field` | `{ max_tokens_field = "max_tokens" }` or `"max_completion_tokens"`: the key the output limit goes in. |
+| `reasoning_field` | `{ reasoning_field = "reasoning_effort" }` or `"reasoning"` (sent as `reasoning: { effort }`): where the effort goes. |
+| `reasoning_content_replay` | Earlier thinking goes back to the server as `reasoning_content` (Kimi). |
+| `no_usage_in_stream` | No `stream_options.include_usage`. |
+| `no_tool_choice` | `tool_choice` is never sent. |
+| `no_named_tool_choice` | A named tool choice goes out as "any tool" (`required`, or `any` on the Messages wire). |
+| `no_store` | `store` is left out of a Responses body. |
+| `no_sampling_params` | `temperature` is left out. |
+| `no_system_role` | No system role: the prompt is folded into the first user message. |
+| `strip_images` | Pictures are replaced by a note. |
+
+Every flag has a fixture under `tests/fixtures/compat/` in the crate that honours it (`aibus-provider-openai` and `aibus-provider-anthropic`) recording the request with the flag and without. A preset that claims a flag is run against that fixture.
 
 ## Claude on Bedrock and Vertex
 

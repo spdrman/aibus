@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::error::ConfigError;
-use crate::provider::{ModelInfo, Price, ProviderConfig};
+use crate::provider::{Capabilities, CapabilityOverrides, ModelInfo, Price, ProviderConfig};
 use crate::tokens::CHARS_PER_TOKEN;
 use crate::types::{AliasTable, ModelId, ModelRef};
 
@@ -35,9 +35,22 @@ pub struct ModelEntry {
     pub info: ModelInfo,
     #[serde(default)]
     pub price: Option<Price>,
-    /// The model accepts the `effort` parameter.
+    /// The model accepts the `effort` parameter. Older tables say it here; `capabilities.effort`
+    /// says the same and wins when both are given.
     #[serde(default)]
     pub effort: bool,
+    /// What this model can do differently from its provider's default. Only the named fields
+    /// count, and a later layer names over an earlier one field by field.
+    #[serde(default, skip_serializing_if = "is_unset")]
+    pub capabilities: CapabilityOverrides,
+    /// The model emits thinking or reasoning tokens at all (`capabilities.thinking` is whether
+    /// a request may ask for a budget). `None` means the table did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<bool>,
+}
+
+fn is_unset(c: &CapabilityOverrides) -> bool {
+    *c == CapabilityOverrides::default()
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -104,9 +117,16 @@ impl ModelTable {
     }
 
     fn layer(&mut self, f: File) {
-        for e in f.models {
+        for mut e in f.models {
             match self.entries.iter_mut().find(|x| x.info.id == e.info.id) {
-                Some(slot) => *slot = e,
+                Some(slot) => {
+                    // A layer that only knows sizes (a 0.1.0 file, the API list) keeps what the
+                    // layer below said the model can do.
+                    e.capabilities = slot.capabilities.over(&e.capabilities);
+                    e.reasoning = e.reasoning.or(slot.reasoning);
+                    e.effort |= slot.effort;
+                    *slot = e;
+                }
                 None => self.entries.push(e),
             }
         }
@@ -138,6 +158,19 @@ impl ModelTable {
         }
         let find = |s: &str| self.entries.iter().find(|e| e.info.id.0 == s);
         find(&id.0).or_else(|| find(undated(&id.0)))
+    }
+
+    /// What `id` can do: `base` (the provider's capabilities from its definition) with the
+    /// model's entry laid over it. The layers of the entry itself (built-in, cache, user file)
+    /// were merged field by field when the table was loaded. A model with no entry gets `base`.
+    pub fn capabilities_for(&self, base: Capabilities, id: &ModelId) -> Capabilities {
+        match self.entry(id) {
+            Some(e) => {
+                let legacy = CapabilityOverrides { effort: e.effort.then_some(true), ..CapabilityOverrides::default() };
+                base.with(&legacy.over(&e.capabilities))
+            }
+            None => base,
+        }
     }
 
     pub fn price(&self, id: &ModelId) -> Option<Price> {
@@ -184,6 +217,8 @@ impl ModelTable {
                     info: defaults(id),
                     price: None,
                     effort: false,
+                    capabilities: CapabilityOverrides::default(),
+                    reasoning: None,
                 })
             })
             .collect();

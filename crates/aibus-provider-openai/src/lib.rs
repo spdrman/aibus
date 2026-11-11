@@ -17,7 +17,7 @@ use std::time::SystemTime;
 use aibus_provider::models::ModelTable;
 use aibus_provider::presets::resolve;
 use aibus_provider::{
-    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, Compat,
+    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, CompatFlag,
     ConfigError, Credential, ModelId, ModelInfo, ModelRef, ModelTableSpec, Price, Provider,
     ProviderConfig, ProviderDef, ProviderError, ProviderFactory, ProviderId,
     StreamChunk, SystemRole,
@@ -104,7 +104,12 @@ impl ProviderFactory for Factory {
 pub struct OpenAi {
     id: &'static str,
     wire: Wire,
-    compat: Compat,
+    /// The provider's capabilities from its definition, before any model's entry and before
+    /// the compat flags that are capabilities.
+    base_caps: Capabilities,
+    compat: Vec<CompatFlag>,
+    send_user: bool,
+    open_aliases: bool,
     /// No trailing slash; `/chat/completions` and friends go after it.
     base: String,
     /// From the definition: sent on every request, and added to every URL.
@@ -119,10 +124,11 @@ pub struct OpenAi {
 impl OpenAi {
     fn new(def: ProviderDef, cfg: &ProviderConfig) -> Result<Self, ConfigError> {
         let id = def.static_id();
-        let compat = def.compat();
+        let compat = def.compat_flags().to_vec();
+        let open_aliases = def.open_aliases.unwrap_or(false);
         let wire = match def.api {
             Some(Api::OpenaiChat) => Wire::Chat,
-            Some(Api::OpenaiResponses) if compat.responses => Wire::Responses,
+            Some(Api::OpenaiResponses) if def.responses.unwrap_or(true) => Wire::Responses,
             Some(Api::OpenaiResponses) => {
                 return Err(ConfigError::Invalid(id.into(), format!("{id} has no Responses API; use api = \"chat\"")))
             }
@@ -147,10 +153,10 @@ impl OpenAi {
             let name = HeaderName::from_bytes(k.as_bytes()).map_err(|e| bad("headers", format!("{k}: {e}")))?;
             extra_headers.insert(name, HeaderValue::from_str(v).map_err(|e| bad("headers", format!("{k}: {e}")))?);
         }
-        let auth_header = compat
+        let auth_header = def
             .auth_header
             .as_deref()
-            .map(|h| HeaderName::from_bytes(h.as_bytes()).map_err(|e| bad("compat.auth_header", e.to_string())))
+            .map(|h| HeaderName::from_bytes(h.as_bytes()).map_err(|e| bad("auth_header", e.to_string())))
             .transpose()?;
         let query = def.query.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&");
         let empty = r#"{"models": []}"#;
@@ -172,8 +178,23 @@ impl OpenAi {
             extra_headers,
             query,
             auth_header,
-            table: Mutex::new(ModelTable::load(id, &builtin, cfg, &prefixes, compat.open_aliases)?),
+            table: Mutex::new(ModelTable::load(id, &builtin, cfg, &prefixes, open_aliases)?),
+            base_caps: Capabilities {
+                tools: true,
+                parallel_tool_calls: true,
+                streaming: true,
+                thinking: false,
+                prompt_cache: false,
+                logprobs: false,
+                effort: false,
+                images: false,
+                system_role: SystemRole::Separate,
+                max_tools: None,
+            }
+            .with(&def.default_capabilities),
             compat,
+            send_user: def.user.unwrap_or(false),
+            open_aliases,
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
         })
@@ -237,18 +258,11 @@ impl Provider for OpenAi {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            tools: true,
-            parallel_tool_calls: true,
-            streaming: true,
-            thinking: false,
-            prompt_cache: self.compat.prompt_cache,
-            logprobs: self.compat.logprobs,
-            effort: self.compat.effort,
-            images: self.compat.images,
-            system_role: SystemRole::Separate,
-            max_tools: self.compat.max_tools,
-        }
+        self.base_caps.clone().with_compat(&self.compat)
+    }
+
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        self.table().capabilities_for(self.base_caps.clone(), model).with_compat(&self.compat)
     }
 
     fn models(&self) -> Vec<ModelInfo> {
@@ -259,7 +273,7 @@ impl Provider for OpenAi {
         let (ids, _) = self.list_models(creds).await?;
         // A local server lists what it has and says nothing of sizes; these are only a start,
         // and `providers/<id>/models.json` is where to put the real numbers.
-        let (context_window, max_output) = if self.compat.open_aliases { (32_768, 4_096) } else { (128_000, 8_192) };
+        let (context_window, max_output) = if self.open_aliases { (32_768, 4_096) } else { (128_000, 8_192) };
         Ok(self.table().refreshed(
             self.id,
             ids,
@@ -286,24 +300,20 @@ impl Provider for OpenAi {
         out: mpsc::Sender<StreamChunk>,
         cancel: CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let req = self.capabilities().degrade(req);
+        let caps = self.capabilities_for(&req.model);
+        let req = caps.degrade(req);
         let (price, reasoning) = {
             let t = self.table();
-            // A model that reasons takes `reasoning_effort` and refuses `temperature`. The table
-            // says so for the ones it lists, the name for the ones released since.
+            // A model that reasons takes the effort parameter and refuses `temperature`. The
+            // table says so for the ones it lists (`reasoning`, or the older `effort`), the
+            // name for the ones released since.
             let reasoning = t.entry(&req.model).map_or_else(
                 || ["gpt-5", "o1", "o3", "o4"].iter().any(|p| req.model.0.starts_with(p)),
-                |e| e.effort,
+                |e| e.reasoning.unwrap_or(e.effort),
             );
             (t.price(&req.model), reasoning)
         };
-        let opts = wire::Opts {
-            completion_tokens: self.compat.completion_tokens,
-            reasoning,
-            user: self.compat.user,
-            keep_reasoning: self.compat.keep_reasoning,
-            logprobs: req.logprobs,
-        };
+        let opts = wire::Opts { reasoning, user: self.send_user, logprobs: req.logprobs, compat: &self.compat };
         let (path, body) = match self.wire {
             Wire::Chat => ("chat/completions", wire::chat_body(&req, opts)),
             Wire::Responses => ("responses", wire::responses_body(&req, opts)),

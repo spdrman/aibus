@@ -16,9 +16,7 @@
    "prefixes": [
     "claude-"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "openai",
@@ -40,15 +38,19 @@
     "o3",
     "o4"
    ],
-   "compat": {
-    "completion_tokens": true,
-    "user": true,
+   "user": true,
+   "default_capabilities": {
     "logprobs": true,
     "effort": true,
     "images": true,
     "prompt_cache": true,
     "max_tools": 128
-   }
+   },
+   "compat": [
+    {
+     "max_tokens_field": "max_completion_tokens"
+    }
+   ]
   },
   {
    "id": "kimi",
@@ -67,13 +69,15 @@
     "kimi-",
     "moonshot-"
    ],
-   "compat": {
-    "user": true,
-    "keep_reasoning": true,
+   "user": true,
+   "responses": false,
+   "default_capabilities": {
     "prompt_cache": true,
-    "max_tools": 128,
-    "responses": false
-   }
+    "max_tools": 128
+   },
+   "compat": [
+    "reasoning_content_replay"
+   ]
   },
   {
    "id": "openai-compatible",
@@ -87,9 +91,9 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "logprobs": true,
-    "open_aliases": true
+   "open_aliases": true,
+   "default_capabilities": {
+    "logprobs": true
    }
   },
   {
@@ -123,9 +127,7 @@
     "moonshotai/",
     "deepseek-r1"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "mistral",
@@ -158,9 +160,7 @@
     "open-mistral-",
     "open-mixtral-"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "deepseek",
@@ -195,9 +195,7 @@
    "prefixes": [
     "deepseek-"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "xai",
@@ -225,9 +223,7 @@
    "prefixes": [
     "grok-"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "together",
@@ -258,9 +254,7 @@
     "deepseek-ai/",
     "mistralai/"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "fireworks",
@@ -288,9 +282,7 @@
    "prefixes": [
     "accounts/fireworks/"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "cerebras",
@@ -320,9 +312,7 @@
     "qwen-",
     "gpt-oss-"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "deepinfra",
@@ -353,9 +343,7 @@
     "deepseek-ai/",
     "mistralai/"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "perplexity",
@@ -390,9 +378,7 @@
    "prefixes": [
     "sonar"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "openrouter",
@@ -427,9 +413,7 @@
     "x-ai/",
     "qwen/"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   },
   {
    "id": "azure-openai",
@@ -444,15 +428,17 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "completion_tokens": true,
-    "open_aliases": true,
-    "auth_header": "api-key",
-    "responses": false
-   },
    "query": {
     "api-version": "2024-10-21"
-   }
+   },
+   "open_aliases": true,
+   "auth_header": "api-key",
+   "responses": false,
+   "compat": [
+    {
+     "max_tokens_field": "max_completion_tokens"
+    }
+   ]
   },
   {
    "id": "ollama",
@@ -467,10 +453,10 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "logprobs": true,
-    "open_aliases": true,
-    "responses": false
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
    }
   },
   {
@@ -486,10 +472,10 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "logprobs": true,
-    "open_aliases": true,
-    "responses": false
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
    }
   },
   {
@@ -507,10 +493,10 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "logprobs": true,
-    "open_aliases": true,
-    "responses": false
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
    }
   },
   {
@@ -526,10 +512,10 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "logprobs": true,
-    "open_aliases": true,
-    "responses": false
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
    }
   },
   {
@@ -547,10 +533,10 @@
    ],
    "model_table": "empty",
    "prefixes": [],
-   "compat": {
-    "logprobs": true,
-    "open_aliases": true,
-    "responses": false
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
    }
   },
   {
@@ -586,9 +572,7 @@
    "prefixes": [
     "gemini-"
    ],
-   "compat": {
-    "responses": false
-   }
+   "responses": false
   }
  ]
 }

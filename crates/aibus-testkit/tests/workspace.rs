@@ -144,3 +144,28 @@ fn msrv_is_pinned_to_1_89() {
     let manifest = std::fs::read_to_string(root().join("Cargo.toml")).unwrap();
     assert!(manifest.contains("rust-version = \"1.89\""));
 }
+
+#[test]
+fn tui_is_on_ratatui_030_and_crossterm_029() {
+    let out = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--locked"])
+        .current_dir(root())
+        .output()
+        .expect("run cargo metadata");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let meta: Value = serde_json::from_slice(&out.stdout).expect("metadata json");
+    let versions = |name: &str| -> Vec<String> {
+        meta["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["name"] == name)
+            .map(|p| p["version"].as_str().unwrap().to_string())
+            .collect()
+    };
+    for (name, line) in [("ratatui", "0.30."), ("crossterm", "0.29.")] {
+        let got = versions(name);
+        assert_eq!(got.len(), 1, "{name} must appear once in Cargo.lock, got {got:?}");
+        assert!(got[0].starts_with(line), "{name} is {}, want {line}x", got[0]);
+    }
+}

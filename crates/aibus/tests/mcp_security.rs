@@ -163,3 +163,34 @@ fn no_credential_reaches_stdout_or_the_audit_log_during_a_run() {
         assert!(!text.contains(KEY), "{}", f.path().display());
     }
 }
+
+/// G9: every tool `aibus mcp --allow write` adds to the read-only set is one the author's session
+/// asks about every time and never offers "always" for. The list comes from the server itself, so
+/// a write tool added later fails here until `mcp::asks_every_time` knows it.
+#[test]
+fn every_mcp_write_tool_asks_and_hides_always() {
+    let home = xdg_temp();
+    let read: Vec<String> = McpClient::start(home.path(), Protocol::V2026_07_28, &[])
+        .list_tools()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect();
+    let mut c = McpClient::start(home.path(), Protocol::V2026_07_28, &["--allow", "write"]);
+    let writes: Vec<String> = c
+        .list_tools()
+        .iter()
+        .filter(|t| t["annotations"]["readOnlyHint"] != true)
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(writes.iter().any(|n| n == "workflow_create") && writes.iter().any(|n| n == "workflow_update"), "{writes:?}");
+    for name in &writes {
+        assert!(!read.contains(name), "{name} is a write tool and was listed without the flag");
+        let wire = format!("mcp__{}__{}", aibus_core::mcp::WRITE_SERVER, name);
+        assert!(aibus_core::mcp::asks_every_time(&wire), "{wire} does not ask every time");
+    }
+    // And the read tools are not in the set, so a read-only session never asks about them.
+    for name in &read {
+        let wire = format!("mcp__{}__{}", aibus_core::mcp::WRITE_SERVER, name);
+        assert!(!aibus_core::mcp::asks_every_time(&wire), "{wire} would ask for a read");
+    }
+}

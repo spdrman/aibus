@@ -1,0 +1,5 @@
+HTTP 403
+content-type: application/json
+x-request-id: req_oa_403
+
+{"error":{"message":"You are not allowed to sample from this model","type":"invalid_request_error","param":null,"code":"model_not_allowed"}}

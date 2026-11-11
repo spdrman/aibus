@@ -1,0 +1,5 @@
+HTTP 413
+content-type: application/json
+x-request-id: req_oa_413
+
+{"error":{"message":"Request too large for gpt-4.1 in organization org-TestOrg on tokens per min (TPM): Limit 30000, Requested 45000. The input or output tokens must be reduced in order to run successfully.","type":"tokens","param":null,"code":"rate_limit_exceeded"}}

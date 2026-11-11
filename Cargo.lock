@@ -130,6 +130,7 @@ version = "0.1.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
+ "aibus-testkit",
  "async-trait",
  "base64 0.22.1",
  "bytes",
@@ -165,6 +166,7 @@ version = "0.1.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
+ "aibus-testkit",
  "async-trait",
  "base64 0.22.1",
  "bytes",

@@ -16,7 +16,8 @@ base64 = "0.22"
 ratatui = "0.29"
 serde_json = "1"
 tempfile = "3"
-tokio = { version = "1", features = ["time", "test-util", "rt"] }
+tokio = { version = "1", features = ["time", "test-util", "rt", "net", "io-util", "sync"] }
+tokio-util = "0.7"
 ulid = "1"
 zstd = "0.13"
 tracing = "0.1"
@@ -28,4 +29,3 @@ aibus-provider-openai.workspace = true
 async-trait = "0.1"
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time", "test-util"] }
-tokio-util = "0.7"

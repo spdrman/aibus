@@ -155,16 +155,6 @@ async fn thinking_streams_and_keeps_its_signature_for_the_next_request() {
     assert_eq!(body(&sent(&server).await)["thinking"], json!({"type": "enabled", "budget_tokens": 2048}));
 }
 
-#[tokio::test]
-async fn refusal_and_max_tokens_are_stop_reasons() {
-    for (name, stop) in [("refusal", StopReason::Refusal), ("max_tokens", StopReason::MaxTokens)] {
-        let server = server_with("POST", "/v1/messages", name).await;
-        let (result, chunks) = collect(&*provider(&server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-        assert_eq!(result.unwrap().stop, stop, "{name}");
-        assert_eq!(chunks.last(), Some(&StreamChunk::Done(stop)));
-    }
-}
-
 /// The mapping table of 04 section 2, one row per recorded error.
 #[tokio::test]
 async fn http_errors_map_to_provider_errors() {
@@ -199,34 +189,6 @@ async fn the_providers_own_words_are_the_message() {
 }
 
 #[tokio::test]
-async fn malformed_sse_is_an_error_not_a_panic() {
-    let server = server_with("POST", "/v1/messages", "malformed_sse").await;
-    let (result, chunks) = collect(&*provider(&server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-    let e = result.unwrap_err();
-    assert_eq!(e.kind, ProviderErrorKind::Unknown);
-    assert!(!e.retryable);
-    assert!(e.message.starts_with("malformed SSE"), "{}", e.message);
-    assert!(!chunks.iter().any(|c| matches!(c, StreamChunk::Done(_))));
-}
-
-#[tokio::test]
-async fn a_stream_cut_before_message_stop_is_a_retryable_network_error() {
-    let server = server_with("POST", "/v1/messages", "truncated").await;
-    let (result, chunks) = collect(&*provider(&server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-    let e = result.unwrap_err();
-    assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Network, true));
-    assert!(chunks.contains(&StreamChunk::TextDelta("Hello".into())), "what arrived was still delivered");
-}
-
-#[tokio::test]
-async fn an_error_event_mid_stream_maps_like_the_http_error() {
-    let server = server_with("POST", "/v1/messages", "stream_error_overloaded").await;
-    let (result, _) = collect(&*provider(&server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-    let e = result.unwrap_err();
-    assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Overloaded, true));
-}
-
-#[tokio::test]
 async fn a_cache_hint_puts_one_breakpoint_on_the_wire() {
     for (hint, at) in [
         (CacheHint::AfterSystem, "/system/0"),
@@ -257,40 +219,6 @@ async fn effort_goes_out_only_for_a_model_that_takes_it() {
     assert!(body(&reqs[0]).get("output_config").is_none() && reqs[0].headers.get("anthropic-beta").is_none());
     assert_eq!(body(&reqs[1])["output_config"], json!({"effort": "medium"}));
     assert_eq!(reqs[1].headers.get("anthropic-beta").unwrap(), "effort-2025-11-24");
-}
-
-/// Waits until the mock server has seen `n` requests, so a cancel is sent while the provider is
-/// really waiting on the server and not before it started. No clock bound on the cancel itself:
-/// the guard timeout only turns a hang into a failure.
-async fn requests_seen(server: &MockServer, n: usize) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while server.received_requests().await.unwrap().len() < n {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("the request reached the server");
-}
-
-#[tokio::test]
-async fn cancel_ends_a_call_waiting_for_the_server() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(cassette("stream_text").template().set_delay(Duration::from_secs(600)))
-        .mount(&server)
-        .await;
-    let p = provider(&server);
-    let cancel = CancellationToken::new();
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    let run = tokio::spawn({
-        let cancel = cancel.clone();
-        async move { p.stream(&cred(AuthMethodKind::ApiKey), request("x"), tx, cancel).await }
-    });
-    requests_seen(&server, 1).await;
-    cancel.cancel();
-    // The server will not answer for ten minutes, so only the cancel can end this.
-    let e = tokio::time::timeout(Duration::from_secs(30), run).await.expect("cancel ends the call").unwrap().unwrap_err();
-    assert_eq!(e.kind, ProviderErrorKind::Cancelled);
 }
 
 #[tokio::test]

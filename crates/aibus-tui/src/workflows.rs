@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use aibus_core::state::value::{as_list, as_str, get};
 use aibus_core::state::{AGENTS_DEFS, WORKFLOW_DRAFT};
-use aibus_core::workflow::{self, SaveError, Workflow};
+use aibus_core::workflow::{self, SaveError};
 use aibus_core::{AgentName, App, Command, Msg, Redactor, Screen, WorkflowFile, WorkflowShown};
 use aibus_graph::{Graph, Value};
 
@@ -34,18 +34,6 @@ fn draft<G: Graph>(app: &App<G>) -> Option<String> {
     }
 }
 
-/// The line under a workflow text: `valid, 3 steps, 1 warning` or `2 errors, 0 warnings`.
-fn summary(text: &str, name: &str, roster: &[AgentName]) -> String {
-    let found = workflow::validate(text, name, roster);
-    let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
-    if found.ok {
-        let steps = Workflow::parse(name, text).map_or(0, |w| w.steps.len());
-        format!("valid, {}, {}", plural(steps, "step"), plural(found.warnings.len(), "warning"))
-    } else {
-        format!("{}, {}", plural(found.errors.len(), "error"), plural(found.warnings.len(), "warning"))
-    }
-}
-
 /// What `op` does, as messages for the loop to step. `at` stamps a saved file.
 pub fn apply<G: Graph>(op: &WorkflowFile, app: &App<G>, files: &WorkflowFiles, at: SystemTime) -> Vec<Msg> {
     let loaded = |shown: Option<WorkflowShown>, said: Option<String>| Msg::WorkflowsLoaded {
@@ -67,7 +55,7 @@ pub fn apply<G: Graph>(op: &WorkflowFile, app: &App<G>, files: &WorkflowFiles, a
                 Ok(t) => t,
                 Err(e) => return vec![refused(format!("{}: {e}", path.display()))],
             };
-            let line = summary(&raw, name, &roster);
+            let (_, line) = workflow::summarise(&raw, name, &roster);
             let mut text = files.redactor.redact(&raw).into_owned();
             if text.len() > files.cap {
                 let mut cut = files.cap;

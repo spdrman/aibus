@@ -265,6 +265,19 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
     out
 }
 
+/// Whether `text` validates, and the line that says so under a shown or drafted workflow:
+/// `valid, 3 steps, 1 warning` or `2 errors, 0 warnings`.
+pub fn summarise(text: &str, stem: &str, roster: &[AgentName]) -> (bool, String) {
+    let found = validate(text, stem, roster);
+    let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+    if found.ok {
+        let steps = Workflow::parse(stem, text).map_or(0, |w| w.steps.len());
+        (true, format!("valid, {}, {}", plural(steps, "step"), plural(found.warnings.len(), "warning")))
+    } else {
+        (false, format!("{}, {}", plural(found.errors.len(), "error"), plural(found.warnings.len(), "warning")))
+    }
+}
+
 /// Where workflows are looked for, project first: `<project>/.aibus/workflows` and then
 /// `<config>/workflows`. A name in the project hides the same name in the user's directory.
 pub fn dirs(project: &Path, config: Option<&Path>) -> Vec<PathBuf> {

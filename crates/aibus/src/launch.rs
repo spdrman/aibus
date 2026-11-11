@@ -70,6 +70,8 @@ pub struct ChildLauncher {
     pub assist: OnceLock<Arc<Assist>>,
     /// Where workflow files are looked for (`.aibus/workflows`, then the user's).
     pub workflow_dirs: Vec<PathBuf>,
+    /// The binary added `[mcp.aibus]` itself, for the workflow author: nobody else is offered it.
+    pub author_server: bool,
 }
 
 /// What was remembered for `run`.
@@ -371,9 +373,16 @@ impl Launcher for ChildLauncher {
                     .cloned()
                     .ok_or_else(|| format!("no agent named {}", spec.agent))?;
                 def.tools.deny.extend(self.deny.iter().cloned());
+                if self.author_server && def.name.as_str() != "workflow-author" {
+                    def.tools.deny.push(ToolPattern { tool: "mcp:aibus:*".into(), spec: None });
+                }
                 def
             }
         };
+        // The author gets a quarter of the session's cost cap unless its definition names one.
+        if def.name.as_str() == "workflow-author" && def.max_cost_usd.is_none() {
+            def.max_cost_usd = Some(self.budgets.max_cost_usd / 4.0);
+        }
         if spec.fork {
             // The same agent as the parent, so it is not offered what only a definition's own
             // name could reach.

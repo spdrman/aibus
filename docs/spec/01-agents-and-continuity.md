@@ -94,6 +94,7 @@ aibus --agents '{"reviewer":{"description":"...","prompt":"...","tools":["read",
 | `search` | worker | `inherit` or `defaults.swarm_model` | `read, grep, glob, ls` | Maps the repo (the first card in the recording). |
 | `grep` | worker | same | `grep, read` | Finds call sites (second card). |
 | `audit` | worker | same, `isolation: worktree` | `read, grep, glob, bash(git *), bash(cargo *), bash(npm *)` | Runs checks in a worktree (third card). |
+| `workflow-author` | worker | `inherit` | `read, glob, grep, mcp:aibus:*` | Drafts a workflow for a goal over `aibus mcp` on stdio (read-only: validate and dry run, never a write), for `/workflow new`. Its `max_cost_usd` is a quarter of `limits.max_cost_usd`. |
 
 Built-ins can be overridden by a project or user definition with the same name. `aibus agent show explore` prints the built-in's effective definition so you can copy it.
 

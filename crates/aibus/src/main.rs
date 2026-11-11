@@ -19,6 +19,7 @@ mod launch;
 mod logfile;
 mod logging;
 mod net;
+mod oauth;
 mod plain;
 mod providers;
 mod session_cmd;

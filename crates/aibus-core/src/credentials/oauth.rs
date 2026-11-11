@@ -4,7 +4,10 @@
 
 use std::fmt;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
 
 use aibus_provider::Secret;
 use serde::{Deserialize, Serialize};
@@ -56,13 +59,30 @@ impl OAuthTokens {
     }
 }
 
-/// The device or loopback exchange with the provider. The real one lives in the binary.
+/// The device or loopback exchange with the provider. The real one lives in the binary. Async,
+/// so a login waiting on a browser never holds a runtime thread, and every call takes a cancel
+/// token that ends the wait.
+#[async_trait]
 pub trait OAuthFlow: Send + Sync {
     /// The interactive login. `notify` shows the user a line to act on (the device code and
     /// URL, or the address the browser was sent to).
-    fn authorize(&self, notify: &dyn Fn(&str)) -> Result<OAuthTokens, String>;
+    async fn authorize(
+        &self,
+        notify: &(dyn for<'n> Fn(&'n str) + Send + Sync),
+        cancel: &CancellationToken,
+    ) -> Result<OAuthTokens, String>;
     /// Trades a refresh token for new tokens.
-    fn refresh(&self, refresh_token: &str) -> Result<OAuthTokens, String>;
+    async fn refresh(
+        &self,
+        refresh_token: &str,
+        cancel: &CancellationToken,
+    ) -> Result<OAuthTokens, String>;
+    /// `true` when the login hands back one durable API key (in `access`) instead of tokens to
+    /// refresh. The account is then stored like any key account and the OAuth is only the
+    /// login step.
+    fn yields_key(&self) -> bool {
+        false
+    }
 }
 
 pub(super) fn unix_now() -> u64 {
@@ -78,6 +98,10 @@ pub struct FakeOAuth {
     pub refresh_error: Option<String>,
     /// Hand out no new refresh token on a refresh.
     pub keep_refresh: bool,
+    /// How long a refresh takes, so a test can have two callers overlap.
+    pub refresh_delay: Duration,
+    /// Act like a login that returns a key.
+    pub yields_key: bool,
     pub refreshes: Mutex<Vec<String>>,
     issued: Mutex<u32>,
 }
@@ -89,6 +113,8 @@ impl FakeOAuth {
             lifetime,
             refresh_error: None,
             keep_refresh: false,
+            refresh_delay: Duration::ZERO,
+            yields_key: false,
             refreshes: Mutex::new(Vec::new()),
             issued: Mutex::new(0),
         }
@@ -105,18 +131,35 @@ impl FakeOAuth {
     }
 }
 
+#[async_trait]
 impl OAuthFlow for FakeOAuth {
-    fn authorize(&self, notify: &dyn Fn(&str)) -> Result<OAuthTokens, String> {
+    async fn authorize(
+        &self,
+        notify: &(dyn for<'n> Fn(&'n str) + Send + Sync),
+        _cancel: &CancellationToken,
+    ) -> Result<OAuthTokens, String> {
         notify("open https://auth.invalid/device and enter code ABCD-1234");
         Ok(self.issue(true))
     }
 
-    fn refresh(&self, refresh_token: &str) -> Result<OAuthTokens, String> {
+    async fn refresh(
+        &self,
+        refresh_token: &str,
+        cancel: &CancellationToken,
+    ) -> Result<OAuthTokens, String> {
         self.refreshes.lock().unwrap_or_else(|e| e.into_inner()).push(refresh_token.to_owned());
+        tokio::select! {
+            () = cancel.cancelled() => return Err("cancelled".into()),
+            () = tokio::time::sleep(self.refresh_delay) => {}
+        }
         match &self.refresh_error {
             Some(e) => Err(e.clone()),
             None => Ok(self.issue(!self.keep_refresh)),
         }
+    }
+
+    fn yields_key(&self) -> bool {
+        self.yields_key
     }
 }
 
@@ -144,7 +187,7 @@ mod tests {
         account: config::Account,
     }
 
-    fn rig(flow: FakeOAuth) -> Rig {
+    async fn rig(flow: FakeOAuth) -> Rig {
         let kc = Arc::new(MemoryKeychain::default());
         let flow = Arc::new(flow);
         let clock = Arc::new(AtomicU64::new(1_000));
@@ -160,22 +203,22 @@ mod tests {
             ..Default::default()
         };
         let r = Rig { kc, store, flow, clock, redactor, account };
-        r.store.store_oauth(&r.account.account_name(), &r.flow.authorize(&|_| {}).unwrap()).unwrap();
+        r.store.store_oauth(&r.account.account_name(), &r.flow.authorize(&|_| {}, &CancellationToken::new()).await.unwrap()).unwrap();
         r
     }
 
-    #[test]
-    fn a_fresh_token_is_used_as_it_is_and_marked_oauth() {
-        let r = rig(FakeOAuth::new(1_000, 3_600));
+    #[tokio::test]
+    async fn a_fresh_token_is_used_as_it_is_and_marked_oauth() {
+        let r = rig(FakeOAuth::new(1_000, 3_600)).await;
         let c = r.store.resolve(&r.account).unwrap();
         assert_eq!((c.secret.expose().as_str(), c.kind), ("oauth-access-1-abcdef", AuthMethodKind::OAuth));
         assert!(r.flow.refreshes.lock().unwrap().is_empty());
         assert_eq!(r.account.key_ref().unwrap().to_string(), "keyring:aibus/work");
     }
 
-    #[test]
-    fn a_token_about_to_expire_is_refreshed_before_use_and_the_new_one_is_stored() {
-        let r = rig(FakeOAuth::new(1_000, 3_600));
+    #[tokio::test]
+    async fn a_token_about_to_expire_is_refreshed_before_use_and_the_new_one_is_stored() {
+        let r = rig(FakeOAuth::new(1_000, 3_600)).await;
         // 61 seconds left: still fine. 60 left: refreshed.
         r.clock.store(1_000 + 3_600 - 61, Ordering::SeqCst);
         assert_eq!(r.store.resolve(&r.account).unwrap().secret.expose(), "oauth-access-1-abcdef");
@@ -187,22 +230,22 @@ mod tests {
         assert!(kept.expose().contains("oauth-access-2-abcdef"));
     }
 
-    #[test]
-    fn a_refresh_without_a_new_refresh_token_keeps_the_old_one() {
+    #[tokio::test]
+    async fn a_refresh_without_a_new_refresh_token_keeps_the_old_one() {
         let mut flow = FakeOAuth::new(1_000, 3_600);
         flow.keep_refresh = true;
-        let r = rig(flow);
+        let r = rig(flow).await;
         r.clock.store(10_000, Ordering::SeqCst);
         r.store.resolve(&r.account).unwrap();
         let kept = r.kc.get(KEYCHAIN_SERVICE, "account:work").unwrap().unwrap();
         assert!(kept.expose().contains("oauth-refresh-1-abcdef"));
     }
 
-    #[test]
-    fn a_failed_refresh_is_an_auth_error_and_the_stored_tokens_stay() {
+    #[tokio::test]
+    async fn a_failed_refresh_is_an_auth_error_and_the_stored_tokens_stay() {
         let mut flow = FakeOAuth::new(1_000, 3_600);
         flow.refresh_error = Some("invalid_grant".into());
-        let r = rig(flow);
+        let r = rig(flow).await;
         r.clock.store(10_000, Ordering::SeqCst);
         let e = r.store.resolve(&r.account).unwrap_err();
         assert!(matches!(&e, CredentialError::OAuth(m) if m.contains("invalid_grant")), "{e}");
@@ -211,8 +254,8 @@ mod tests {
         assert!(kept.expose().contains("oauth-access-1-abcdef"));
     }
 
-    #[test]
-    fn an_expired_token_with_no_flow_or_no_refresh_token_asks_for_a_login() {
+    #[tokio::test]
+    async fn an_expired_token_with_no_flow_or_no_refresh_token_asks_for_a_login() {
         let mut account = config::Account { name: "w".into(), provider: "fake".into(), ..Default::default() };
         account.auth.oauth = true;
         let store = CredentialStore::new(Arc::new(MemoryKeychain::default()), Redactor::new())
@@ -230,9 +273,9 @@ mod tests {
         assert!(store.resolve(&account).unwrap_err().to_string().contains("no refresh token"));
     }
 
-    #[test]
-    fn tokens_never_show_in_debug_or_in_redacted_output() {
-        let r = rig(FakeOAuth::new(1_000, 3_600));
+    #[tokio::test]
+    async fn tokens_never_show_in_debug_or_in_redacted_output() {
+        let r = rig(FakeOAuth::new(1_000, 3_600)).await;
         let text = format!("{:?}", r.store.resolve(&r.account).unwrap());
         assert!(!text.contains("oauth-access"), "{text}");
         let t = OAuthTokens::decode(r#"{"access":"oauth-access-9-abcdef","refresh":"oauth-refresh-9-abcdef","expires_at":1}"#).unwrap();

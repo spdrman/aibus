@@ -226,6 +226,16 @@ Gated calls, taken at the recommended default:
 **Alternatives.** A hand-rolled stdio server in the style of `aibus-core/src/mcp.rs` (rejected for now: it would own both protocol lifecycles and the schema generation for good; it stays the fallback if rmcp stops fitting the MSRV or a duplicate becomes a `deny` hit). Putting the handler in `aibus-core` or `aibus` (rejected: rmcp's tokio, schemars and chrono would reach every crate, or the handler would only be testable through the binary).
 
 **Why.** The two protocol lifecycles and paging are the expensive part to get right and they work on the first try. A separate crate keeps the new dependencies and the closure test local, and makes the fallback a swap rather than a rewrite.
+
+## F7 (2026-11-11): how `account add --oauth` is built
+
+**Context.** #115 asks for two login flows, an async `OAuthFlow` and a refresh that does not race, with OpenRouter first. A few calls were open, and the owner's rule is to take the recommended default.
+
+**Decision.** Credential resolution stays sync (`CredentialSource` is sync and the providers call it), so `resolve` keeps its shape and a refresh runs the async flow on a scoped thread with its own runtime; `resolve_async` is the entry for async callers. The per-account `tokio::sync::Mutex` re-reads the keychain after taking the lock, which is what makes the second caller reuse the first one's tokens. `OAuthFlow` gains `yields_key()` (default false), so a login that returns a durable key is stored as a plain keyring account. The definition lives in the binary (`oauth::definition`) and not on the provider definition, because #110 is changing those; it moves over when that lands. OpenRouter matches `--provider openrouter` and `openai-compatible` pointed at openrouter.ai, since the `openrouter` factory belongs to #110. The authorize URL uses `http://127.0.0.1:<port>/callback` (RFC 8252). The platform opener starts when a terminal is attached without asking first, because the address is printed before and the opener gets it as one argv element. Ctrl-C ends the process, which closes the listener.
+
+**Alternatives.** Make `CredentialSource` async (rejected: it ripples through every provider crate other lanes are editing). The `oauth2` crate (rejected: a second HTTP abstraction for two flows). Put the definition on `ProviderFactory` now (rejected: collides with #110).
+
+**Why.** It fixes the race and the blocking trait without touching what other lanes own, and OpenRouter proves the whole flow with nothing to refresh.
 ## G2 (2026-11-11): where /model is resolved, and what the reducer keeps
 
 **Context.** The issue has the reducer validate a model reference through `AccountRegistry` and write `model:defaults:<role>`. The reducer is a pure function of the graph and has no accounts, and no `model:defaults:*` node exists; the lead's model lives in its run's `meta.model`, which the header already reads.

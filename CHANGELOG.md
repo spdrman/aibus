@@ -32,7 +32,6 @@ First release. What is in it:
 
 ### Known issues
 
-* `aibus account add --oauth` is refused until a provider offers an OAuth login; none does yet.
 * The Bedrock and Vertex transports exist as constructors, but `auth = "sigv4"` and
   `auth = "gcloud"` cannot be selected from the config file yet.
 

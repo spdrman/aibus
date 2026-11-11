@@ -126,3 +126,17 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Flip now because the numbers are fine (rejected: causl is 1.4x to 2.4x mini at p50 on `commit_stream` and far under the 4 ms p99 budget, so speed is not the blocker, the supply chain is). Drop the second backend (rejected: it is cheap to keep and the differential keeps `mini` honest).
 
 **Why.** Flipping would make the default build depend on a source nobody but the owner can fetch. The gate is re-evaluated at each release (Q12): flip once the crate is public or vendored under a confirmed licence and the differential has been green across a release.
+
+## F4 error taxonomy (2026-11-11): body code first, reset as a span
+
+**Context.** Issue #112 (epic #108) adds `Quota` and `ContentFilter` to `ProviderErrorKind` and feeds the rate-limit headers to the `Limiter`. Three choices were open.
+
+**Decision.**
+
+1. `ProviderError::from_http` takes the body's `error.code` (else `error.type`) as a fifth argument and checks it before the status: `insufficient_quota`, `usage_limit_reached`, `billing_error` and a 402 are `Quota`, `content_filter*` and `content_policy*` are `ContentFilter`. Anthropic's 400 "credit balance is too low" is the one message match left, because that shape has no code of its own. The OpenAI message sniff is gone.
+2. `RateLimitInfo.resets_in` is a span from receipt, not a wall-clock `resets_at`. OpenAI sends spans and Anthropic sends RFC 3339 timestamps, and the limiter runs on tokio's clock, so a span is the one form its paused-clock tests can drive. Zero requests or tokens remaining blocks until `resets_in` without halving the limits; `tighten` stays for the 429 case.
+3. A run that ends on `Quota` is exit 4, the same as a rejected credential (the account has to act). `ContentFilter` is exit 5, a provider failure, and never names the account. `StopReason::ContentFilter` replaces `Refusal` for `finish_reason = content_filter`; the run loop does nothing special with it yet.
+
+**Alternatives.** A `Quota` exit code of its own (rejected: 06 section 3 has no spare code and the remedy is the same as for auth). Storing `resets_at` as `SystemTime` (rejected for the clock reason above). Sniffing messages for the content filter too (rejected: it is the sniff this issue removes).
+
+**Why.** The run loop needs to act differently on a spent quota, a refused prompt and a busy minute, and the provider's own code is the only signal that tells them apart.

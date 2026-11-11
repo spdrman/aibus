@@ -178,6 +178,8 @@ async fn http_errors_map_to_provider_errors() {
         ("context_too_long_400", ContextTooLong, false, None, "req_011CTx2nQ2HdYa5Cw8Lt6VnE"),
         ("not_found_404", ModelNotFound, false, None, "req_011CTx2nU6BrZf3Gx7Ks1PmW"),
         ("too_large_413", ContextTooLong, false, None, "req_011CTx2nY4NtAg8Hv2Jw5RqD"),
+        ("billing_402", Quota, false, None, "req_ant_billing"),
+        ("credit_balance_400", Quota, false, None, "req_ant_credit"),
     ];
     for (name, kind, retryable, retry_after, id) in rows {
         let server = server_with("POST", "/v1/messages", name).await;
@@ -189,6 +191,36 @@ async fn http_errors_map_to_provider_errors() {
         assert!(!e.message.is_empty() && !e.message.contains(KEY), "{name}");
         assert!(chunks.is_empty(), "{name}: nothing streamed before an HTTP error");
     }
+}
+
+/// Every recorded error answer has a row in the table above (the cloud ones are asserted in
+/// tests/cloud.rs), so a new cassette cannot land without saying which kind it maps to.
+#[test]
+fn every_error_cassette_has_an_expected_kind() {
+    let known = [
+        "auth_401", "rate_limit_429", "overloaded_529", "server_500", "context_too_long_400", "not_found_404",
+        "too_large_413", "billing_402", "credit_balance_400", "bedrock_denied_403", "vertex_unauthenticated_401",
+    ];
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let status: u16 = text.lines().next().unwrap().trim_start_matches("HTTP ").parse().unwrap();
+        let name = path.file_stem().unwrap().to_str().unwrap();
+        assert!(status < 400 || known.contains(&name), "{name} answers {status} but has no row");
+    }
+}
+
+#[tokio::test]
+async fn window_headers_land_in_rate_limit_info_on_a_success() {
+    let server = server_with("POST", "/v1/messages", "stream_text_windows").await;
+    let (result, _) = collect(&*provider(&server), &cred(AuthMethodKind::ApiKey), request("x")).await;
+    let info = result.unwrap().rate_limit.expect("the headers were there");
+    assert_eq!((info.requests_remaining, info.tokens_remaining), (Some(0), Some(48_000)));
+    assert!(info.resets_in.is_some(), "the exhausted window's reset parses from a timestamp");
+    let server = server_with("POST", "/v1/messages", "stream_text").await;
+    let (result, _) = collect(&*provider(&server), &cred(AuthMethodKind::ApiKey), request("x")).await;
+    assert_eq!(result.unwrap().rate_limit, None);
 }
 
 #[tokio::test]

@@ -325,6 +325,7 @@ impl Provider for FakeProvider {
             usage,
             stop,
             request_id: Some(format!("fake-req-{}", self.recorded.lock().unwrap().len())),
+            rate_limit: None,
         })
     }
 

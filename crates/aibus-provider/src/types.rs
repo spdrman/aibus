@@ -166,6 +166,10 @@ pub struct Usage {
     pub output_tokens: u64,
     pub cache_read: u64,
     pub cache_write: u64,
+    /// Part of `output_tokens` the model spent thinking; `None` when the provider does not say.
+    /// Charged as output, which is what the providers do.
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
     pub cost_usd: f64,
 }
 

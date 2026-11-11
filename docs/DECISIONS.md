@@ -547,6 +547,24 @@ Gated calls, taken at the recommended default:
 
 **Why.** The page can only say what the code says, and the same test that keeps it honest is the one that writes it.
 
+## R-B (2026-11-11): the first full gate on cut/0.2.0, aibus-core and aibus-testkit (#172)
+
+**Context.** The first full gate on `cut/0.2.0` was red in my area. I read each failure against the code and the change that introduced it, to decide whether the product or the test was wrong.
+
+**Decision.** Most of it was tests that had counted things that moved:
+
+1. `agent_def` and `agent_validate` hard-coded nine or eleven agents. The workflow author made it ten built-ins, so they now count `BUILTINS.len()` and the next built-in cannot break them again.
+2. `oauth_single_flight` was a test bug, not a race. `FakeOAuth` stamps every token it issues with `now + lifetime`, and the test's wall clock sat past that, so the token from the first refresh was already stale and the second caller (correctly) refreshed again. The per-account lock in `CredentialStore::refresh_once` is fine: the second caller finds the stored tokens, reads them again under the lock and only exchanges if they are still stale. I moved the fake's `now` on after the first login, so a refreshed token outlives the clock and the test now says what it always meant.
+3. `security/commands` expected the lead to still be `Starting` after a model stream. A stream or a tool result is the lead working, and the reducer sets `Running` on it, so `assert_nothing_dispatched` takes the status the lead should have. What the test guards (no effect, no queued model request, no modal) is unchanged.
+4. `every_crate_forbids_unsafe_code` counted crates by hand (11, then 12 with the Gemini and MCP crates). It counts the directories under `crates/` now.
+5. "rataflow pulls in termwiz" was the guard being wrong, not the dependency. `cargo metadata`'s resolve lists a crate's optional dependencies whether or not a feature turns them on, so `ratatui` 0.30 shows `ratatui-termwiz` and `ratatui-termina` under every user. `cargo tree --target all -p rataflow -i termwiz` finds nothing, and `ratatui` is built with `crossterm` and the default features only. The guard's `closure()` runs `cargo tree -e normal --target all` now, so it reports what is linked. The banned list stays as it was.
+6. `Assist` kept the advisor and the router choice in one tuple behind one mutex, which is what clippy's `type_complexity` objected to. They are two mutexes now, one per seat, so there is no new type.
+
+**Alternatives.** Making the oauth test pass by serialising callers harder, or by relaxing it to "at most two refreshes" (rejected: the lock is right and the test was the one asking the wrong question). A `#[allow(clippy::type_complexity)]` in `assist.rs` (rejected: two fields were simpler than an allow). Dropping `termwiz` from the banned list (rejected: the guard is worth having, it only needed the right graph).
+
+**Why.** Each test now fails for the reason it names, and not for a number somebody had to remember to bump.
+
+
 ## D-0.2.0-C: The dashboard stabilisation, what I changed in the code and what in the tests (#172)
 
 **Context.** The first full gate on `cut/0.2.0` was red for 17 tests, 2 clippy lints, 1 test-module lint and 1 rustc warning in `aibus-tui`. For each one I read the issue that introduced the behaviour and decided which side was wrong.

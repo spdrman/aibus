@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use aibus_core::agent::builtin::BUILTINS;
 use aibus_core::agent::def::{parse, DefError};
 use aibus_core::agent::discover::discover;
 use aibus_core::*;
@@ -441,20 +442,20 @@ fn same_name_in_all_scopes_follows_the_precedence_walk() {
     let e = [extra.clone()];
     assert_eq!(
         who(Some(cli), Some(&user), &e, &cwd),
-        ("cli".into(), Scope::Cli, 9)
+        ("cli".into(), Scope::Cli, BUILTINS.len())
     );
     assert_eq!(
         who(None, Some(&user), &e, &cwd),
-        ("project".into(), Scope::Project, 9)
+        ("project".into(), Scope::Project, BUILTINS.len())
     );
     // Not inside a project: project scope is empty.
     assert_eq!(
         who(None, Some(&user), &e, &root.join("user")),
-        ("user".into(), Scope::User, 9)
+        ("user".into(), Scope::User, BUILTINS.len())
     );
     assert_eq!(
         who(None, None, &e, &root.join("user")),
-        ("extra".into(), Scope::Extra(extra.clone()), 9)
+        ("extra".into(), Scope::Extra(extra.clone()), BUILTINS.len())
     );
     assert_eq!(
         who(None, None, &[], &root.join("user")),
@@ -462,7 +463,7 @@ fn same_name_in_all_scopes_follows_the_precedence_walk() {
             "Read-only codebase search. Say how thorough to be (quick, medium, very_thorough)."
                 .into(),
             Scope::Builtin,
-            9
+            BUILTINS.len()
         )
     );
 

@@ -8,8 +8,10 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-# The centre column drawn through rataflow (docs/spikes/D1.1-rataflow.md). Off by default, so a
-# release build is the classic one. `sugiyama` stays out: positions come from our row budget.
+# The centre column drawn through rataflow (docs/spikes/D1.1-rataflow.md). On by default since
+# 0.2.0; `--no-default-features` is the way back to the hand-drawn connectors for a build from
+# source. `sugiyama` stays out: positions come from our row budget.
+default = ["flow-diagram"]
 flow-diagram = ["dep:rataflow"]
 
 [dependencies]

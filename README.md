@@ -1,6 +1,6 @@
 ![aibus — AI agent orchestration](assets/aibus-logo.svg)
 
-A terminal app for running AI agents with sub-agents, an advisor and continuity across sessions. Rust, ratatui, crossterm.
+A terminal app for running AI agents with sub-agents, an advisor and continuity across sessions. Rust, ratatui, rataflow, crossterm.
 
 ![The aibus dashboard in a 10 second session: a lead plans, the advisor rail speaks, the router answers, three workers fill their cards one after the other, then a card is selected and its menu opens](docs/media/aibus-ui.gif)
 

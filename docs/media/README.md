@@ -21,13 +21,8 @@ $tools clean aibus-r3
 
 The text frames and the cast are deterministic; the GIF pixels depend on agg and the font version the image's Debian ships.
 
-## Recording the rataflow path
+## The rataflow path
 
-`AIBUS_FEATURES` goes straight to `cargo build --features` in `tools/record-demo.sh`, so the same script records the centre column drawn through rataflow. A plain call still records the default build, and nothing else in the script changes (the agg pin, the font, `demo-cast.py` and `demo-gif-check.py` are the same):
+Since 0.2.0 the default build draws the centre column through rataflow, so `tools/record-demo.sh all` records it with no extra variable, and the committed GIF came from that build. `AIBUS_FEATURES` still goes straight to `cargo build --features` in the script, for any other feature you want in a recording (the build is the default one plus those); nothing else in the script changes, and the agg pin, the font, `demo-cast.py` and `demo-gif-check.py` are the same.
 
-```sh
-$tools run aibus-r3 rust:1.89-bookworm@sha256:<digest of the image you pulled> \
-  'CARGO_TARGET_DIR=/tmp/target AIBUS_FEATURES=flow-diagram tools/record-demo.sh gif'
-```
-
-The two plays inside that run still have to agree byte for byte (`cmp` on the casts and on the text frames), which is what proves the rataflow path is as deterministic as the classic one. `frames.classic.txt` next to `script.ron` is `aibus demo --text` from the default build, and `the_demo_text_frames_match_classic` (in `crates/aibus/tests/demo.rs`, only with `--features flow-diagram`) asserts the feature build draws those same 100 frames. Re-record the file with `aibus demo --text > docs/media/demo/frames.classic.txt` from a build without the feature, and only when the demo or the classic drawing changes on purpose.
+The two plays inside a run still have to agree byte for byte (`cmp` on the casts and on the text frames), which is what proves the rataflow path is as deterministic as the hand-drawn one. `frames.classic.txt` next to `script.ron` is `aibus demo --text` from the hand-drawn build (re-taken at the flip, when the card menu had grown its Status and Cost entries), and `the_demo_text_frames_match_classic` in `crates/aibus/tests/demo.rs` asserts the rataflow build draws those same 100 frames. Re-record the file only when the demo or the drawing changes on purpose, with `aibus demo --text > docs/media/demo/frames.classic.txt` from a build with `--no-default-features`.

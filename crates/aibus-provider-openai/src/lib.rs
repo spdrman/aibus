@@ -63,11 +63,11 @@ impl Flavor {
     fn table(self) -> (&'static str, &'static [&'static str], bool) {
         match self {
             Self::OpenAi => (
-                include_str!("openai.json"),
+                include_str!("../../../catalog/openai.json"),
                 &["gpt-", "chatgpt-", "o1", "o3", "o4"],
                 false,
             ),
-            Self::Kimi => (include_str!("kimi.json"), &["kimi-", "moonshot-"], false),
+            Self::Kimi => (include_str!("../../../catalog/kimi.json"), &["kimi-", "moonshot-"], false),
             Self::Compatible => (r#"{"models": []}"#, &[], true),
         }
     }
@@ -137,6 +137,9 @@ pub struct OpenAi {
     table: Mutex<ModelTable>,
     cache_dir: Option<PathBuf>,
     http: Http,
+    /// The gateway puts what a request cost in `usage.cost` (OpenRouter), and that replaces the
+    /// table's estimate.
+    reports_cost: bool,
 }
 
 impl OpenAi {
@@ -174,6 +177,7 @@ impl OpenAi {
             table: Mutex::new(ModelTable::load(id, builtin, cfg, prefixes, open_aliases)?),
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
+            reports_cost: flavor == Flavor::Compatible && base.contains("openrouter.ai"),
         })
     }
 
@@ -274,6 +278,7 @@ impl Provider for OpenAi {
             user: self.flavor != Flavor::Compatible,
             keep_reasoning: self.flavor == Flavor::Kimi,
             logprobs: req.logprobs,
+            include_cost: self.reports_cost,
         };
         let (path, body) = match self.api {
             Api::Chat => ("chat/completions", wire::chat_body(&req, opts)),
@@ -297,7 +302,7 @@ impl Provider for OpenAi {
         let window = rate_limit(resp.headers(), SystemTime::now());
 
         let mut events = Events::new(resp, cancel.clone());
-        let mut turn = stream::Turn::new(price);
+        let mut turn = stream::Turn::new(price, self.reports_cost);
         while let Some(ev) = events.next().await? {
             let chunks = match self.api {
                 Api::Chat => turn.chat_event(&ev.data)?,

@@ -81,7 +81,7 @@ impl Anthropic {
             base: base.to_owned(),
             table: Mutex::new(ModelTable::load(
                 "anthropic",
-                include_str!("models.json"),
+                include_str!("../../../catalog/anthropic.json"),
                 cfg,
                 prefixes,
                 false,

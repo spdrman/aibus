@@ -1020,6 +1020,9 @@ async fn drive(
             total.output_tokens += turn.output_tokens;
             total.cache_read += turn.cache_read;
             total.cache_write += turn.cache_write;
+            if turn.cost_source == aibus_provider::CostSource::Provider {
+                total.cost_source = aibus_provider::CostSource::Provider;
+            }
             // The provider's own figure when it has one, otherwise the price table's.
             total.cost_usd += match price {
                 Some(p) if turn.cost_usd == 0.0 => {

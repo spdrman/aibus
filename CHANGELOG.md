@@ -5,6 +5,13 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ## [0.2.0] - unreleased
 
+### Models
+
+* The built-in model tables moved from the provider crates to `catalog/<provider>.json`, and every priced row now writes all four buckets (`null` for none). Nothing about `models()` or `price()` changes.
+* `catalog-sync` (in `aibus-testkit`) refreshes the catalog from a saved models.dev snapshot as a reviewable diff. It never fetches and never writes without `--write`.
+* A model row can carry `price_from`, so a announced price sits beside the current one and starts on its date.
+* For OpenRouter the response's `usage.cost` replaces the estimate, and `Usage.cost_source` says which one it was.
+
 ### Build
 
 * The TUI is on ratatui 0.30 and crossterm 0.29, and `deny.toml` has no ignored advisories any more: `paste` (RUSTSEC-2024-0436) left the tree with ratatui 0.29. `crossterm` joins `ratatui` in the one-version-only ban list.

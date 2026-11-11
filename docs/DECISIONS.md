@@ -169,3 +169,19 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Draw the section now and update the two snapshots by hand (rejected: I cannot run the suites on this lane, and a hand-edited frame is a guess). Derive the shape check from the `args` hint (rejected: `/x needs <section> <text>` is a different notice from the current one).
 
 **Why.** Behaviour first, frames with the suites.
+
+## F8 (2026-11-11): the model catalog, the sync tool and reported cost
+
+**Context.** #116 moves the three built-in tables to `catalog/`, adds a reviewed sync tool, dated prices and the gateway-reported cost. The epic's open decision 2 (catalog source) gates it, and two other issues (#110 provider definitions, #111 per-model capabilities) are not in the tree yet.
+
+**Decision.**
+
+1. The source is a models.dev snapshot that I save by hand and pass with `--snapshot`. The tool has no network code at all, so "no fetch without review" is true by construction. I did not confirm models.dev's licence here, so the first real sync waits for that; the fixture snapshot in `fixtures/catalog-sync/` is made up.
+2. The tool is a bin in `aibus-testkit` (`catalog-sync`), with the logic in a pure function (`catalog_sync::plan`) that the tests call. Dry run is the default and `--write` applies. It updates the models already in a catalog and only adds new ones with `--add-new`, because models.dev lists embeddings, audio and retired models we do not want in a table.
+3. Capabilities are written as `capabilities: {tool_call, reasoning, input_modalities}` using models.dev's names, and `ModelEntry` ignores them for now. #111 can rename or consume them. The `price_of` alias column is not added: no alias column exists in the tree yet, and snapshots already resolve through the undated id.
+4. `price_from` is a second row with the same `id`. `layer()` keys on `(id, price_from)`, and an undated row from the user's `models.json` also drops the earlier dated rows of that id, so your override is not undone when a built-in future price starts. `price()` uses the wall clock; `price_at` takes a time so tests need no clock.
+5. Gateway cost is recognised for `openai-compatible` accounts whose `base_url` contains `openrouter.ai`, since the `openrouter` preset arrives with #110. When #110 lands the check should move to the preset. A run total is marked `provider` as soon as one turn was.
+
+**Alternatives.** Fetching the snapshot inside the tool (rejected: it is the fetch we said we would not do). Adding every model of a provider by default (rejected, above). A separate file for dated prices (rejected: one model, one place).
+
+**Why.** One source for the tables, a diff to review for every price change, and nothing in the binary that talks to a third party.

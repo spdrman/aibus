@@ -316,6 +316,8 @@ enum Drag {
     Text,
     /// Selecting prompt text.
     Prompt,
+    /// Panning the card row from empty canvas: where the press was and which card was first then.
+    Pan { col: u16, first: usize },
 }
 
 /// The screens' own actions: a key and a button with the same meaning both come here.
@@ -668,7 +670,13 @@ impl Input {
             out.redraw = true;
         }
         match id {
-            HitId::Pane(p) => out.msgs.push(ui(UiIntent::Focus(p))),
+            HitId::Pane(p) => {
+                out.msgs.push(ui(UiIntent::Focus(p)));
+                // Empty canvas between the cards: a drag from here pans the row, a card at a time.
+                if p == Pane::Cards {
+                    self.drag = Some(Drag::Pan { col, first: cx.chrome.cards_x });
+                }
+            }
             HitId::PromptRow(i) => {
                 out.msgs.push(ui(UiIntent::Focus(Pane::Input)));
                 if let Some((rect, start)) = drawn.prompt_rows.get(i) {
@@ -867,6 +875,18 @@ impl Input {
                 let lines = now as i64 - target as i64;
                 if lines != 0 {
                     out.msgs.push(tr(TrOp::Scroll(i32::try_from(lines).unwrap_or(0))));
+                }
+            }
+            Drag::Pan { col: down, first } => {
+                // Dragging left brings the later cards in. The row moves a card (one card and a
+                // gap wide) per step, never past the first or the last card.
+                let step = i64::from(crate::widgets::CARD_W) + 1;
+                let last = i64::try_from(cx.cards.len().saturating_sub(3)).unwrap_or(0);
+                let moved = (i64::from(down) - i64::from(col)) / step;
+                let target = (i64::try_from(first).unwrap_or(0) + moved).clamp(0, last);
+                let lines = target - i64::try_from(cx.chrome.cards_x).unwrap_or(0).min(last);
+                if lines != 0 {
+                    out.msgs.push(ui(UiIntent::Scroll { pane: Pane::Cards, lines: i32::try_from(lines).unwrap_or(0), sideways: true }));
                 }
             }
             Drag::Text => {

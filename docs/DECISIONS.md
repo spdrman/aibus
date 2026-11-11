@@ -509,3 +509,20 @@ Gated calls, taken at the recommended default:
 **Alternatives.** The AWS SDK and Google auth crates (rejected in the issue: dozens of crates and a second TLS stack for `cargo deny`). One factory with an optional token source (rejected: `Factory` is a unit struct used in many places). Caching the gcloud token under the provider id (rejected: the issue says the account name). A model-name rule for the price instead of table rows (rejected: the issue asks for the `price_of` column, and a rule cannot be corrected by a user file).
 
 **Why.** The static-key paths cover the people who asked for this; SSO, `credential_process` and instance metadata stay on the epic's "Later" list.
+
+## G9 and G10 (2026-11-11): the command tests and the generated command table (#128, #129)
+
+**Context.** G9 asks for cross-cutting security tests and G10 for a command table written once. Three things in the code did not match what the two issues assume: the `?` screen draws the key map and never the commands (`help_lines()` had no caller), `Spec` had nothing that says whether a command asks first, and `aibus-core`'s tests cannot call `send()`, which lives in `aibus-tui`.
+
+**Decision.**
+
+1. The table is `commands::table_markdown()`, a pure function of `REGISTRY`, and a golden test (`aibus-tui/tests/docs_commands.rs`) splices it into the README and `docs/spec/05-ui.md` between two marker comments, failing with the diff and rewriting under `AIBUS_UPDATE_DOCS=1`. There is no `aibus docs` subcommand. The committed blocks were produced by running that test once in a container on MARS.
+2. `Spec` gets `asks`, a phrase or empty, so "asks first" is declared next to the command and not in the docs. It is set for `/clear`, `/logout`, `/cancel` (on the lead) and `/workflow` (`new --write` and `edit` ask in the permission modal).
+3. "Same help line in `/help`" is read as `help_lines()`, the registry's own list, which the completion popup and the docs share. The `?` screen stays the key map (it has to fit 80x24 and the commands do not), so the `help` row now says "the key map (type / to list the commands)" instead of promising the commands. Drawing the help lines on a second page of the screen is a follow-up; it changes snapshots, which I do not hand-edit.
+4. The `commands_send` fuzz target has its body in `fuzz/commands_checks.rs` and is replayed by `aibus-tui/tests/security_commands.rs`, because the core tests cannot depend on the dashboard crate. Every slash command needs a seed in `fuzz/corpus/commands_send/`, and a test fails when one is missing.
+5. G9 found no hole that needed a fix first. Two things I left as they are: `/logout <text>` echoes the text in its notice when no account has that name (and the history keeps the line), and the card menu's Cancel on the lead does not ask (only the typed command does, as the registry says).
+
+**Alternatives.** A `docs commands` subcommand (rejected: the issue's non-goal). A generator script outside the tree (rejected: a second place that knows the registry). Putting the `commands_send` check into `fuzz/checks.rs` and making the core tests depend on `aibus-tui` (rejected: a dev-dependency cycle and a layering test that exists to stop it). Drawing the commands on the `?` screen now (rejected: does not fit 80x24 without paging, and every help snapshot changes).
+
+**Why.** The registry stays the only place that knows a command, and the docs fail loudly when they stop agreeing with it.
+

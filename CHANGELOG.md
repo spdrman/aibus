@@ -18,6 +18,13 @@ uses as the release notes, so every release needs its entry before it is merged 
 * `aibus mcp --allow run` adds the run resources (E10, #105): `aibus://runs/{run}` is the `run_status` body without the tail and `aibus://runs/{run}/log` the run's output, redacted, wrapped as data and cut at the result cap. Only runs the server started are readable; the `explain_run` prompt points at them.
 * A built-in `workflow-author` agent and `/workflow new <goal>` (G6, #125). The agent is read-only (`read`, `glob`, `grep` and `mcp:aibus:*`) and talks to this program's own `aibus mcp` over stdio, which the binary adds as `[mcp.aibus]` when you have none (no `--allow`, so no write or run tool exists for it; only the author is offered those tools). `/workflow new` makes the lead delegate the goal to it in the foreground, so the report comes back as data and the card shows the author like any worker. Its last fenced `toml` block that validates against your agents is kept as the draft `/workflow save` writes. It has a cost cap of a quarter of `limits.max_cost_usd` unless its definition names one, and `aibus doctor` has a `workflow author` row. See `docs/MCP.md`.
 
+### Commands in the session
+
+* One registry declares every command (G1, #120): the slash line, the palette, the card menu, the completion popup and the help text read the same table, and `@target` (`@lead`, `@advisor`, `@router`, an agent name, a run id prefix) is parsed in one place. The README and `docs/spec/05-ui.md` carry that table, generated from it (G10, #129).
+* Fixed: `/model` and `/advisor` did nothing. The line was sent to the lead as words, or dropped. They are `Command::SetModel` now, for the lead, a seat (`@advisor`, `@router`, or `/advisor` and `/router`) or one run (`/model @grep haiku`), and the change takes effect from the next request and lasts for the session (G2, #121).
+* Per-agent commands (G5, #124): `/status`, `/cost`, `/log`, `/cancel` (asks first on the lead), `/retry`, `/message`, `/resume` and `/background`, with `i` and `$` on a card and `Status` and `Cost` in its menu. A command on a run in the wrong state is a notice naming the state.
+* Security tests for the commands (G9, #128): a slash line in a hook's output, a model's or tool's result, a message or a resumed run never runs as a command; no key from `/login` reaches a file, a frame or a notice; the workflow author's child never gets `gates` or `run` and starts from the scrubbed environment; every write tool of `aibus mcp --allow write` asks every time. A new `commands_send` fuzz target covers `send()` and is seeded with every documented command.
+
 ### Accounts and models in the terminal
 
 * `/model` with no reference opens a picker of what the connected accounts serve, with context window, prices (`n/a` when the table has none) and capabilities; it filters by the target's role and sets the lead, a run or a seat (G3, #122).
@@ -45,6 +52,11 @@ uses as the release notes, so every release needs its entry before it is merged 
 * The dashboard's centre column (lead box, fork layer, connectors, cards, return box) is drawn with rataflow 0.1 now. It is a plain dependency of `aibus-tui` and adds one crate to the lock (+0.6 % binary size). The hand-drawn connectors are gone, and so is the `flow-diagram` feature, so a build from source has no way to turn rataflow off. See `docs/spikes/D1.1-rataflow.md`.
 * The frames are the ones the hand-drawn path drew, cell for cell: the same boxes, the same dotted connectors with their travelling dots and pulsing arrow head, the same card hit rects. The 100 frames of the README demo were byte-identical between the two paths when the hand-drawn one was removed.
 * With more than three cards the row pans: a drag from empty space in the centre column moves it a card at a time, Shift plus the wheel still does, and the row stops at the first and the last card. The cards beside the window are on the canvas too (their edge and connector show) and come in as it pans.
+
+### Known issues
+
+* The `?` screen shows the key map and not the commands; type `/` for the list, or read the table in the README. Drawing the commands there needs a second page, which changes every help snapshot (see G10 in `docs/DECISIONS.md`).
+* `/logout <text>` repeats the text in its notice when no account has that name, and the prompt history keeps the line. `/login` has no such echo.
 
 ## [0.1.0] - 2026-11-09
 

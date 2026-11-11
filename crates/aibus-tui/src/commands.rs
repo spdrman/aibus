@@ -97,6 +97,8 @@ pub struct Spec {
     pub args: &'static str,
     /// One line for `/help`.
     pub help: &'static str,
+    /// Whether the command asks before it acts, in words, for the table in the docs. Empty is no.
+    pub asks: &'static str,
     /// The palette row's or the menu item's label.
     pub label: &'static str,
     /// The palette row's hint: the key or the slash form.
@@ -148,6 +150,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "fork",
         args: "<task>",
         help: "fork the lead with a new task",
+        asks: "",
         label: "Fork",
         hint: "",
         scope: Scope::Global,
@@ -165,6 +168,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "delegate",
         args: "<agent> <task>",
         help: "start a background run of an agent",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -194,6 +198,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "compact",
         args: "",
         help: "compact the lead's context",
+        asks: "",
         label: "compact the lead",
         hint: "/compact",
         scope: Scope::Global,
@@ -214,6 +219,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "clear",
         args: "",
         help: "clear the session log (asks first)",
+        asks: "yes, before it clears",
         label: "clear the session log",
         hint: "/clear",
         scope: Scope::Global,
@@ -225,6 +231,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "handoff",
         args: "",
         help: "write a handoff",
+        asks: "",
         label: "write a handoff",
         hint: "/handoff",
         scope: Scope::Global,
@@ -241,6 +248,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "ledger",
         args: "<section> <text>",
         help: "add text to a ledger section",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -257,6 +265,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "model",
         args: "[@target] [ref]",
         help: "pick a model from the connected accounts, or set one by name",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Run,
@@ -274,6 +283,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "advisor",
         args: "<ref|off>",
         help: "change the advisor's model, or turn it off",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -290,6 +300,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "router",
         args: "<ref|off>",
         help: "change the router's model, or turn it off",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -304,8 +315,9 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "workflow",
-        args: "new [--write] <goal> | edit <name> <change> | list | show <name> | save <name> | run <name> <input>",
+        args: "new [--write] <goal> | edit <name> <change> | list | show <name> | save <name> [--user] [--force] | run <name> <input>",
         help: "draft (new, edit), list, show, save and run workflows (/workflow <name> <input> runs one too)",
+        asks: "`new --write` and `edit` ask in the permission modal before each save",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -317,6 +329,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "agents",
         args: "",
         help: "the agents screen",
+        asks: "",
         label: "agents screen",
         hint: "A",
         scope: Scope::Screen,
@@ -328,6 +341,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "accounts",
         args: "",
         help: "the accounts screen",
+        asks: "",
         label: "accounts screen",
         hint: "K",
         scope: Scope::Screen,
@@ -339,6 +353,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "login",
         args: "[provider]",
         help: "add an account: pick a provider, name it, type the key",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Screen,
@@ -360,6 +375,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "logout",
         args: "<account>",
         help: "remove an account and its key (asks first)",
+        asks: "yes, before it removes the key",
         label: "",
         hint: "",
         scope: Scope::Screen,
@@ -374,7 +390,8 @@ pub const REGISTRY: &[Spec] = &[
     Spec {
         name: "help",
         args: "",
-        help: "the key map and the commands",
+        help: "the key map (type / to list the commands)",
+        asks: "",
         label: "help: the key map",
         hint: "?",
         scope: Scope::Screen,
@@ -386,6 +403,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "fix",
         args: "<input>",
         help: "shorthand for /workflow fix",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -397,6 +415,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "build",
         args: "<input>",
         help: "shorthand for /workflow build",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -408,6 +427,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "review",
         args: "<input>",
         help: "shorthand for /workflow review",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -419,6 +439,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "explore",
         args: "<input>",
         help: "shorthand for /workflow explore",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -430,6 +451,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "lead",
         args: "",
         help: "open the lead's transcript",
+        asks: "",
         label: "lead transcript",
         hint: "t",
         scope: Scope::Screen,
@@ -444,6 +466,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "permission",
         args: "",
         help: "jump to the oldest permission prompt",
+        asks: "",
         label: "oldest permission prompt",
         hint: "p",
         scope: Scope::Screen,
@@ -458,6 +481,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "rail",
         args: "",
         help: "focus the advisor rail",
+        asks: "",
         label: "advisor rail",
         hint: "a",
         scope: Scope::Screen,
@@ -476,6 +500,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "quit",
         args: "",
         help: "quit",
+        asks: "",
         label: "quit",
         hint: "q",
         scope: Scope::Global,
@@ -490,6 +515,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "open",
         args: "",
         help: "open the run's transcript",
+        asks: "",
         label: "Open transcript",
         hint: "",
         scope: Scope::Run,
@@ -499,8 +525,9 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "cancel",
-        args: "",
+        args: "[@target]",
         help: "cancel the run (asks first on the lead)",
+        asks: "on the lead, yes",
         label: "Cancel",
         hint: "",
         scope: Scope::Run,
@@ -517,8 +544,9 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "resume",
-        args: "<text>",
+        args: "[@target] [text]",
         help: "resume a finished run with a message",
+        asks: "",
         label: "Resume",
         hint: "",
         scope: Scope::Run,
@@ -534,6 +562,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "copy_id",
         args: "",
         help: "copy the run's id",
+        asks: "",
         label: "Copy id",
         hint: "",
         scope: Scope::Run,
@@ -548,6 +577,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "copy_result",
         args: "",
         help: "copy the run's result",
+        asks: "",
         label: "Copy result",
         hint: "",
         scope: Scope::Run,
@@ -562,6 +592,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "status",
         args: "[@target]",
         help: "a run's numbers, or a seat's (@advisor, @router)",
+        asks: "",
         label: "Status",
         hint: "",
         scope: Scope::Run,
@@ -573,6 +604,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "cost",
         args: "[@target]",
         help: "the session's cost per run, or one target's status",
+        asks: "",
         label: "Cost",
         hint: "",
         // Not `Run`: with no `@target` it is the session table, not the focused card.
@@ -591,6 +623,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "log",
         args: "[@target]",
         help: "open the run's transcript",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Run,
@@ -602,6 +635,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "retry",
         args: "[@target]",
         help: "retry a failed or partial run",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Run,
@@ -613,6 +647,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "message",
         args: "@target <text>",
         help: "send a message to a run",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Run,
@@ -629,6 +664,7 @@ pub const REGISTRY: &[Spec] = &[
         name: "background",
         args: "[@target]",
         help: "move the run's wait to the background",
+        asks: "",
         label: "",
         hint: "",
         scope: Scope::Run,
@@ -792,6 +828,23 @@ pub fn help_lines() -> Vec<(String, &'static str)> {
         .collect()
 }
 
+/// The commands on the slash line as a Markdown table, in the slash order: name, arguments, the
+/// `/help` line, and whether the command asks first. The README and `docs/spec/05-ui.md` carry
+/// this text between `<!-- aibus:commands:start -->` and `<!-- aibus:commands:end -->`, and
+/// `tests/docs_commands.rs` fails with the diff when either one drifts from the registry (and
+/// rewrites them under `AIBUS_UPDATE_DOCS=1`). A `|` inside a cell is escaped, because the
+/// `/workflow` arguments have several.
+pub fn table_markdown() -> String {
+    let cell = |text: &str| text.replace('|', "\\|");
+    let mut out = String::from("| Command | Arguments | What it does | Asks first |\n|---|---|---|---|\n");
+    for s in listed(|s| s.slash) {
+        let args = if s.args.is_empty() { String::new() } else { format!("`{}`", cell(s.args)) };
+        let asks = if s.asks.is_empty() { "no" } else { s.asks };
+        out.push_str(&format!("| `/{}` | {args} | {} | {} |\n", s.name, cell(s.help), cell(asks)));
+    }
+    out
+}
+
 /// Runs a command that was picked on the palette or the card menu. `run` is the card's run for
 /// the menu. Unknown names do nothing.
 pub fn pick(name: &str, via: Via, run: Option<RunId>, env: &Env, out: &mut Out) {
@@ -885,16 +938,16 @@ pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(ModelTarget, &'a st
 mod tests {
     use super::*;
 
-    /// The command names on the spec's slash line (05 section 4), without the slash.
+    /// The command names in the table of 05 section 4 (the block between the markers), without
+    /// the slash.
     fn spec_slash_names() -> Vec<String> {
         let spec = include_str!("../../../docs/spec/05-ui.md");
-        let line = spec.lines().find(|l| l.starts_with("Slash commands in the prompt:")).expect("the slash line");
-        let mut names: Vec<String> = line
-            .split('`')
-            .skip(1)
-            .step_by(2)
-            .filter_map(|t| t.strip_prefix('/'))
-            .filter_map(|t| t.split_whitespace().next())
+        let start = spec.find("<!-- aibus:commands:start -->").expect("the start marker");
+        let end = spec.find("<!-- aibus:commands:end -->").expect("the end marker");
+        let mut names: Vec<String> = spec[start..end]
+            .lines()
+            .filter_map(|l| l.strip_prefix("| `/"))
+            .filter_map(|l| l.split('`').next())
             .map(str::to_owned)
             .collect();
         names.sort();

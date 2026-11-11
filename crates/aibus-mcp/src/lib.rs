@@ -288,11 +288,7 @@ impl ServerHandler for Server {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let client = context.client_info();
-        let addr = context
-            .extensions
-            .get::<http::request::Parts>()
-            .and_then(|p| p.extensions.get::<ClientAddr>())
-            .map(|a| a.0);
+        let addr = peer_addr(&context);
         self.call_from(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
             .map(CallToolResponse::from)
     }
@@ -323,6 +319,7 @@ impl ServerHandler for Server {
         let uri = self.redactor.redact(&request.uri).into_owned();
         self.audit.record(
             context.client_info().as_ref(),
+            peer_addr(&context),
             "resources/read",
             None,
             &json!({ "uri": uri }),
@@ -352,6 +349,7 @@ impl ServerHandler for Server {
         let name = self.redactor.redact(&request.name).into_owned();
         self.audit.record(
             context.client_info().as_ref(),
+            peer_addr(&context),
             "prompts/get",
             Some(&name),
             &Value::Object(args),
@@ -360,6 +358,12 @@ impl ServerHandler for Server {
         );
         got.map(GetPromptResponse::from)
     }
+}
+
+/// The peer address the HTTP host recorded for this request, if it came over a socket.
+fn peer_addr(context: &RequestContext<RoleServer>) -> Option<SocketAddr> {
+    let parts = context.extensions.get::<http::request::Parts>()?;
+    parts.extensions.get::<ClientAddr>().map(|a| a.0)
 }
 
 /// Serves `server` on stdin and stdout until the client closes stdin. Nothing else writes to

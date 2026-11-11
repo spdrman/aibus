@@ -156,6 +156,16 @@ impl SessionWriter {
         }
     }
 
+    /// `value` with every string run through the redactor, as the messages and transcripts are.
+    /// The graph holds what the user typed (a run's prompt, a workflow's input), so the snapshot
+    /// and the commit log need it too: a key pasted into a prompt is not a registered credential,
+    /// only the patterns catch it.
+    fn redacted<T: Serialize + serde::de::DeserializeOwned>(&self, value: &T) -> io::Result<T> {
+        let mut json = serde_json::to_value(value).map_err(io::Error::other)?;
+        self.redactor.redact_json(&mut json);
+        serde_json::from_value(json).map_err(io::Error::other)
+    }
+
     /// Records `msg` in `msgs.jsonl.zst` (redacted) and in its run's transcript.
     pub fn msg(&mut self, msg: &Msg, at: SystemTime) -> io::Result<()> {
         if let Some(mut line) = msg_to_json(msg) {
@@ -202,7 +212,7 @@ impl SessionWriter {
     pub fn after_step<G: Graph>(&mut self, app: &mut App<G>) -> Result<(), AibusError> {
         let now = Instant::now();
         for rec in app.take_journal() {
-            self.commits.append(&rec, now)?;
+            self.commits.append(&self.redacted(&rec)?, now)?;
         }
         self.commits.flush_if_stale(now)?;
         self.msgs.flush_if_stale(now)?;
@@ -215,10 +225,10 @@ impl SessionWriter {
     /// Writes the snapshot now and records it in the graph.
     fn snapshot<G: Graph>(&mut self, app: &mut App<G>) -> Result<(), AibusError> {
         let now = Instant::now();
-        write_snapshot(&self.dir, &app.graph.snapshot())?;
+        write_snapshot(&self.dir, &self.redacted(&app.graph.snapshot())?)?;
         app.step(Msg::Persisted)?;
         for rec in app.take_journal() {
-            self.commits.append(&rec, now)?;
+            self.commits.append(&self.redacted(&rec)?, now)?;
         }
         self.commits.flush(now)?;
         Ok(())

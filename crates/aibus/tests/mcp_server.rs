@@ -121,6 +121,7 @@ fn tools_list_is_deterministic_and_pages_when_asked() {
 
 #[test]
 fn every_tool_schema_is_valid_2020_12_and_every_result_matches_its_output_schema() {
+    let legal_name = regex::Regex::new(r"^[A-Za-z0-9_.-]{1,128}$").unwrap();
     for p in Protocol::BOTH {
         let home = xdg_temp();
         let mut c = client(home.path(), p, &[]);
@@ -129,7 +130,7 @@ fn every_tool_schema_is_valid_2020_12_and_every_result_matches_its_output_schema
         for tool in &tools {
             let name = tool["name"].as_str().unwrap();
             assert!(
-                regex::Regex::new(r"^[A-Za-z0-9_.-]{1,128}$").unwrap().is_match(name),
+                legal_name.is_match(name),
                 "{p:?}: {name} is not a legal tool name"
             );
             let (input, output) = (&tool["inputSchema"], &tool["outputSchema"]);
@@ -149,7 +150,13 @@ fn every_tool_schema_is_valid_2020_12_and_every_result_matches_its_output_schema
             if input.get("required").and_then(Value::as_array).is_some_and(|r| !r.is_empty()) {
                 continue;
             }
-            let result = c.call(name, json!({})).unwrap_or_else(|e| panic!("{p:?}: {name}: {e:?}"));
+            // `workflow_validate` takes `name` or `toml` and the schema cannot say "one of", so
+            // it gets a draft; every other tool here takes nothing.
+            let args = match name {
+                "workflow_validate" => json!({ "toml": "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n" }),
+                _ => json!({}),
+            };
+            let result = c.call(name, args).unwrap_or_else(|e| panic!("{p:?}: {name}: {e:?}"));
             assert_ne!(result["isError"], true, "{p:?}: {name}: {result}");
             let structured = &result["structuredContent"];
             assert_eq!(schema::check_against(output, structured), Vec::<String>::new(), "{p:?}: {name}: {structured}");
@@ -322,13 +329,15 @@ fn the_create_update_conflict_scenario_matches_its_golden_transcript() {
     }
 }
 
-/// Polls `run_status` until the run has an exit code.
+/// Polls `run_status` until the run has an exit code and has left `running`: the exit code is
+/// read off the child's last event, a moment before the process is reaped and the status settles.
 fn finished(c: &mut McpClient, run: &str) -> Value {
     for _ in 0..120 {
         let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).expect("run_status");
         assert_ne!(r["isError"], true, "{r}");
-        if !r["structuredContent"]["exit_code"].is_null() {
-            return r["structuredContent"].clone();
+        let body = &r["structuredContent"];
+        if !body["exit_code"].is_null() && !matches!(body["status"].as_str(), Some("starting" | "running")) {
+            return body.clone();
         }
     }
     panic!("the run never finished");

@@ -205,7 +205,8 @@ fn mcp_run_status_exit_codes_follow_06_section_3() {
     for _ in 0..120 {
         let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).unwrap();
         let body = &r["structuredContent"];
-        if !body["exit_code"].is_null() {
+        // The exit code comes off the child's last event, a moment before the status settles.
+        if !body["exit_code"].is_null() && !matches!(body["status"].as_str(), Some("starting" | "running")) {
             assert_eq!(body["exit_code"], 0, "{body}");
             assert_eq!(body["status"], "completed", "{body}");
             return;

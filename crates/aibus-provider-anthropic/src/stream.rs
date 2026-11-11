@@ -41,6 +41,7 @@ fn status_of(error_type: &str) -> u16 {
         "authentication_error" => 401,
         "permission_error" => 403,
         "not_found_error" => 404,
+        "billing_error" => 402,
         "request_too_large" => 413,
         "rate_limit_error" => 429,
         "overloaded_error" => 529,
@@ -165,7 +166,7 @@ impl Turn {
                     } else {
                         serde_json::from_str(&json).map_err(|e| malformed(&format!("tool input: {e}")))?
                     };
-                    self.blocks.push(ContentBlock::ToolUse { id, name, input });
+                    self.blocks.push(ContentBlock::ToolUse { id, name, input, signature: None });
                     out.push(StreamChunk::ToolUseEnd { id });
                 }
                 None => {}
@@ -190,6 +191,7 @@ impl Turn {
                     e["message"].as_str().unwrap_or(kind),
                     None,
                     self.message_id.clone(),
+                    kind,
                 ));
             }
             _ => {}
@@ -216,6 +218,7 @@ impl Turn {
             usage: self.usage(),
             stop: self.stop.unwrap_or(StopReason::EndTurn),
             request_id: request_id.or(self.message_id),
+            rate_limit: None,
             message: Message { role: MessageRole::Assistant, blocks: self.blocks, at: SystemTime::now() },
         })
     }

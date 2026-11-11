@@ -2,7 +2,6 @@
 //! drawing (6.1), the help screen, and the draw gate that redraws only when `view:dirty` names a
 //! widget, a piece of UI state changed, or the size changed (08 section 1).
 
-use std::io;
 
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{
@@ -30,7 +29,7 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, PALETTE, PERMISSION, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, PROVIDERS, RUN_STATUS, TRANSCRIPT, WORKFLOWS_VIEW};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -40,11 +39,11 @@ static NULL: Value = Value::Null;
 pub struct Views<'a> {
     header: &'a Value,
     rail: &'a Value,
-    lead: &'a Value,
-    delegate: &'a Value,
-    fork: &'a Value,
-    cards: &'a Value,
-    ret: &'a Value,
+    pub(crate) lead: &'a Value,
+    pub(crate) delegate: &'a Value,
+    pub(crate) fork: &'a Value,
+    pub(crate) cards: &'a Value,
+    pub(crate) ret: &'a Value,
     log: &'a Value,
     status: &'a Value,
     tips: &'a Value,
@@ -53,7 +52,12 @@ pub struct Views<'a> {
     palette: &'a Value,
     agents: &'a Value,
     accounts: &'a Value,
+    models: &'a Value,
+    providers: &'a Value,
     transcript: &'a Value,
+    run_status: &'a Value,
+    cost: &'a Value,
+    workflows: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -75,7 +79,12 @@ impl<'a> Views<'a> {
             palette: at(PALETTE),
             agents: at(AGENTS),
             accounts: at(ACCOUNTS_VIEW),
+            models: at(MODELS),
+            providers: at(PROVIDERS),
             transcript: at(TRANSCRIPT),
+            run_status: at(RUN_STATUS),
+            cost: at(COST),
+            workflows: at(WORKFLOWS_VIEW),
         }
     }
 }
@@ -209,110 +218,10 @@ fn dotted(buf: &mut Buffer, path: &[(u16, u16)], at: Option<usize>, dim: Style, 
 }
 
 /// Where the centre column put things, for the connectors and the hit map.
-struct Centre {
-    cards: Vec<(usize, Rect)>,
-    lead: Rect,
-    ret: Rect,
-}
-
-/// The centre column: lead box, fork layer, delegate row, cards, return box. Items that do
-/// not fit are dropped from the bottom up.
-fn centre(
-    buf: &mut Buffer,
-    area: Rect,
-    v: &Views,
-    th: &Theme,
-    (compact, first_card, tick): (bool, usize, i64),
-) -> Centre {
-    const W: u16 = 40;
-    let narrow = |r: Rect| Rect {
-        x: r.x + r.width.saturating_sub(W) / 2,
-        width: r.width.min(W),
-        ..r
-    };
-    let roomy = area.height >= 28;
-    let fork_h = if compact { 5 } else { 6 };
-    let y = std::cell::Cell::new(area.y);
-    let place = |h: u16, buf: &mut Buffer, draw: &mut dyn FnMut(&mut Buffer, Rect)| {
-        let room = area.bottom().saturating_sub(y.get());
-        let r = Rect { y: y.get(), height: h.min(room), ..area };
-        if r.height > 0 {
-            draw(buf, r);
-        }
-        y.set(y.get() + h);
-    };
-    let dim = Style::new().fg(th.dim);
-    let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("").to_owned();
-    let mut c = Centre { cards: Vec::new(), lead: Rect::default(), ret: Rect::default() };
-    place(4, buf, &mut |b, r| {
-        c.lead = narrow(r);
-        widgets::lead_box(b, c.lead, v.lead, th);
-    });
-    if roomy {
-        // The lead's orange dot travels down to the fork layer.
-        place(2, buf, &mut |b, r| {
-            let n = narrow(r);
-            let x = n.x + n.width / 2;
-            let path = [(x, r.y), (x, r.y + 1)];
-            let at = usize::try_from(tick.rem_euclid(2)).unwrap_or(0);
-            dotted(b, &path, Some(at), dim, Style::new().fg(th.lead), th);
-        });
-    }
-    place(fork_h, buf, &mut |b, r| widgets::fork_layer(b, narrow(r), v.fork, th, !compact, &lead_label));
-    if roomy {
-        place(1, buf, &mut |b, r| widgets::delegate_label(b, r, v.delegate, th));
-    }
-    let connector_y = y.get();
-    if roomy {
-        y.set(connector_y + 2);
-    }
-    let cards_h = area.bottom().saturating_sub(y.get()).min(8);
-    let cards_top = y.get();
-    place(cards_h, buf, &mut |b, r| {
-        c.cards = widgets::cards(b, r, v.cards, th, first_card);
-    });
-    if roomy && !c.cards.is_empty() {
-        // The fork splits into one dotted path per card, a dot travelling down each working one.
-        let mid = narrow(Rect { y: connector_y, height: 1, ..area });
-        let xc = mid.x + mid.width / 2;
-        let offsets = as_list(get(v.delegate, "connectors").unwrap_or(&NULL));
-        for (i, r) in &c.cards {
-            let xi = r.x + r.width / 2;
-            let mut path = vec![(xc, connector_y), (xc, connector_y + 1)];
-            let across: Vec<u16> = if xi >= xc { (xc + 1..=xi).collect() } else { (xi..xc).rev().collect() };
-            path.extend(across.into_iter().map(|x| (x, connector_y + 1)));
-            let at = offsets
-                .get(*i)
-                .and_then(as_i64)
-                .filter(|o| *o >= 0)
-                .map(|o| usize::try_from(o).unwrap_or(0) % path.len());
-            dotted(buf, &path, at, dim, Style::new().fg(th.swarm), th);
-        }
-        // Below the cards the paths merge into one arrow at the return box; its head pulses
-        // while a result is on its way.
-        let merge = cards_top + cards_h;
-        if merge + 3 <= area.bottom() {
-            let xs: Vec<u16> = c.cards.iter().map(|(_, r)| r.x + r.width / 2).collect();
-            let (lo, hi) = (xs.iter().copied().min().unwrap_or(xc), xs.iter().copied().max().unwrap_or(xc));
-            let row: Vec<(u16, u16)> = (lo..=hi).map(|x| (x, merge)).collect();
-            dotted(buf, &row, None, dim, dim, th);
-            let pulse = matches!(get(v.ret, "pulse"), Some(Value::Bool(true)));
-            let head = if pulse && (tick / 4) % 2 != 0 {
-                Style::new().fg(th.dim_text)
-            } else {
-                Style::new().fg(th.lead).add_modifier(Modifier::BOLD)
-            };
-            buf.set_string(xc, merge + 1, th.g("▾"), head);
-        }
-    }
-    if roomy {
-        y.set(y.get().max(cards_top + cards_h + 2));
-        place(3, buf, &mut |b, r| {
-            c.ret = narrow(r);
-            widgets::return_box(b, c.ret, v.ret, th);
-        });
-    }
-    c
+pub(crate) struct Centre {
+    pub(crate) cards: Vec<(usize, Rect)>,
+    pub(crate) lead: Rect,
+    pub(crate) ret: Rect,
 }
 
 /// The checkpoint that is active now and where it was drawn on the rail, with the box it is
@@ -394,9 +303,11 @@ fn help(buf: &mut Buffer, full: Rect, sc: &Scene) -> Rect {
     let th = sc.theme;
     let rows = sc.keys.help_rows();
     let per_col = rows.len().div_ceil(2).max(1);
-    let area = centred(full, 76, per_col as u16 + 4);
+    // Two columns of every key take the whole of 80x24 now, so "any key closes" is in the title
+    // and not on a row of its own.
+    let area = centred(full, 76, per_col as u16 + 2);
     Clear.render(area, buf);
-    let inner = panel(buf, area, "help · key map", th.focus, th);
+    let inner = panel(buf, area, "help · key map · any key closes", th.focus, th);
     let half = inner.width / 2;
     for (i, row) in rows.iter().enumerate() {
         let (col, y) = ((i / per_col) as u16, (i % per_col) as u16);
@@ -408,7 +319,6 @@ fn help(buf: &mut Buffer, full: Rect, sc: &Scene) -> Rect {
         let x = put(buf, cell, 0, y, &row.keys, Style::new().fg(th.swarm).add_modifier(Modifier::BOLD));
         put(buf, cell, x.max(11) + 1, y, row.text, Style::new().fg(th.fg));
     }
-    put(buf, inner, 0, per_col as u16 + 1, "any key closes", Style::new().fg(th.dim_text));
     area
 }
 
@@ -509,7 +419,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     widgets::header(buf, a.header, v.header, th);
     widgets::legend(buf, a.legend, v.header, th);
     let marks = widgets::rail(buf, a.rail, v.rail, th);
-    let cen = centre(buf, a.centre, v, th, (a.compact, c.cards_x, c.tick));
+    let cen = crate::diagram::centre(buf, a.centre, v, th, (a.compact, c.cards_x, c.tick));
     advisor_link(buf, a.rail, &marks, &cen, v, th, c.tick);
     let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("");
     let filter = (c.filter.as_str(), sc.filter_edit, c.follow);
@@ -679,8 +589,26 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             "palette" => screens::palette(buf, full, v.palette, th, &sc.pointer),
             "agents" => screens::agents(buf, full, v.agents, th, &sc.pointer, sc.entry, sc.note),
             "accounts" => screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note),
+            m if m.starts_with("models:") => screens::models(buf, full, v.models, th, &sc.pointer, sc.entry, sc.note),
+            "providers" => screens::providers(buf, full, v.providers, th, &sc.pointer),
             "outcome" => screens::outcome(buf, full, th, &sc.pointer),
-            "confirm:clear" => screens::confirm_clear(buf, full, th, &sc.pointer),
+            "confirm:clear" => screens::confirm(buf, full, th, &sc.pointer, "clear", "Clear the session log?", ("clear_yes", "Clear")),
+            c if c.starts_with("confirm:logout:") => screens::confirm(
+                buf,
+                full,
+                th,
+                &sc.pointer,
+                "log out",
+                &format!("Log out of {}?", &c["confirm:logout:".len()..]),
+                ("logout_yes", "Log out"),
+            ),
+            c if c.starts_with("confirm:cancel:") => {
+                screens::confirm(buf, full, th, &sc.pointer, "cancel", "Cancel the lead run?", ("cancel_yes", "Cancel the lead"))
+            }
+            t if t.starts_with("status:") => screens::run_status(buf, full, v.run_status, th, &sc.pointer),
+            "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
+            "workflows" => screens::workflows(buf, full, v.workflows, th, &sc.pointer),
+            "workflow_show" => screens::workflow_show(buf, full, v.workflows, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
                 let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
                 for (id, r, kind) in &g.hits {
@@ -794,7 +722,7 @@ impl Ui {
 
     /// Draws if a widget is dirty, the size, the UI state, the pointer or the prompt changed, or
     /// nothing was drawn yet. Returns whether it did.
-    pub fn draw<G: Graph, B: Backend>(&mut self, term: &mut Terminal<B>, g: &G) -> io::Result<bool> {
+    pub fn draw<G: Graph, B: Backend>(&mut self, term: &mut Terminal<B>, g: &G) -> Result<bool, B::Error> {
         let size = term.size()?;
         let now = (size.width, size.height);
         let chrome = Chrome::read(g);

@@ -17,6 +17,7 @@ fn call(name: &str) -> Message {
             id: ToolCallId(ulid::Ulid::new()),
             name: name.into(),
             input: serde_json::json!({}),
+            signature: None,
         }],
         at: std::time::SystemTime::UNIX_EPOCH,
     }
@@ -101,7 +102,7 @@ fn session(l: &Ledger, big: usize) -> (RunId, RunId) {
             role: MessageRole::Assistant,
             blocks: vec![
                 ContentBlock::Text("L".repeat(1000)),
-                ContentBlock::ToolUse { id, name: "grep".into(), input: serde_json::json!({"p": "x"}) },
+                ContentBlock::ToolUse { id, name: "grep".into(), input: serde_json::json!({"p": "x"}), signature: None },
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         },

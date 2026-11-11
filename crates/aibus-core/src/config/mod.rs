@@ -22,6 +22,10 @@ pub struct Config {
     pub models: AliasTable,
     #[serde(rename = "account")]
     pub accounts: Vec<Account>,
+    /// `[[provider]]`: a server the presets do not know, or a preset's fields overridden. User
+    /// file only, like `[[account]]`: a project must not be able to redirect a key.
+    #[serde(rename = "provider")]
+    pub providers: Vec<aibus_provider::ProviderDef>,
     pub agents: Agents,
     pub limits: Limits,
     pub router: Router,
@@ -48,6 +52,33 @@ pub struct Defaults {
     pub swarm_model: Option<String>,
     pub permission_mode: String,
     pub effort: String,
+    /// Which failures move a run to the next account of `[[account]] fallback` (F9). `rate_limit`
+    /// is not in the default, because waiting usually wins.
+    pub fallback_on: Vec<FallbackKind>,
+}
+
+/// The failures an account fallback can answer to (04 section 4.3). Only these four kinds can
+/// move a run; every other `ProviderErrorKind` ends it or retries in place as before.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackKind {
+    Quota,
+    Auth,
+    Overloaded,
+    RateLimit,
+}
+
+impl FallbackKind {
+    pub fn of(kind: aibus_provider::ProviderErrorKind) -> Option<Self> {
+        use aibus_provider::ProviderErrorKind as K;
+        match kind {
+            K::Quota => Some(Self::Quota),
+            K::Auth => Some(Self::Auth),
+            K::Overloaded => Some(Self::Overloaded),
+            K::RateLimit => Some(Self::RateLimit),
+            _ => None,
+        }
+    }
 }
 
 impl Default for Defaults {
@@ -60,6 +91,7 @@ impl Default for Defaults {
             swarm_model: None,
             permission_mode: "default".into(),
             effort: "high".into(),
+            fallback_on: vec![FallbackKind::Quota, FallbackKind::Auth, FallbackKind::Overloaded],
         }
     }
 }
@@ -83,6 +115,13 @@ pub struct Account {
     pub tags: Vec<SmolStr>,
     pub enabled: bool,
     pub auth: Auth,
+    /// The cloud region of a Bedrock or Vertex account; the `[[provider]]`'s is the default.
+    pub region: Option<String>,
+    /// The Google Cloud project of a Vertex account; the `[[provider]]`'s is the default.
+    pub project: Option<String>,
+    /// The accounts to try, in order, when this one fails before the first token of a turn and
+    /// the failure is in `defaults.fallback_on`. Empty means the run stays put.
+    pub fallback: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -98,6 +137,17 @@ pub struct Auth {
     pub none: bool,
     /// OAuth tokens in the keychain, refreshed before use. Off unless asked for.
     pub oauth: bool,
+    /// Claude on Bedrock, signed with the `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]` the
+    /// keychain holds. Only for an `anthropic-bedrock` provider.
+    pub sigv4: bool,
+    /// Claude on Vertex with the access token `gcloud` prints. Only for an `anthropic-vertex`
+    /// provider.
+    pub gcloud: bool,
+    /// Bedrock, signed with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`
+    /// read at request time and never stored.
+    pub aws_env: bool,
+    /// Bedrock, signed with the static keys of this profile in `~/.aws/credentials`.
+    pub aws_profile: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -424,6 +474,9 @@ impl Default for Account {
             tags: Vec::new(),
             enabled: true,
             auth: Auth::default(),
+            region: None,
+            project: None,
+            fallback: Vec::new(),
         }
     }
 }
@@ -437,9 +490,15 @@ impl Account {
     /// key is read from `AIBUS_ACCOUNT_<NAME>_KEY` (06 section 7).
     pub fn key_ref(&self) -> Option<KeyRef> {
         let a = &self.auth;
-        if a.none {
+        if a.none || a.gcloud {
+            // A gcloud account stores no key: the access token comes from `gcloud` and is
+            // cached in the credential store for fifty minutes.
             None
-        } else if a.keyring || a.oauth {
+        } else if a.aws_env {
+            Some(KeyRef::AwsEnv)
+        } else if let Some(profile) = &a.aws_profile {
+            Some(KeyRef::AwsProfile { profile: profile.clone() })
+        } else if a.keyring || a.oauth || a.sigv4 {
             Some(KeyRef::Keyring {
                 service: KEYCHAIN_SERVICE.into(),
                 name: self.account_name(),
@@ -520,8 +579,24 @@ impl Config {
         if self.ui.tick_hz == 0 {
             bad("ui.tick_hz", "must be at least 1".into());
         }
+        let mut defined = std::collections::BTreeSet::new();
+        for d in &self.providers {
+            if !defined.insert(d.id.as_str()) {
+                bad("provider.id", format!("provider {} is defined twice", d.id));
+            } else if let Err(why) = aibus_provider::presets::resolve(&d.id, Some(d)) {
+                bad(if why.contains(": headers:") { "provider.headers" } else { "provider" }, why);
+            }
+        }
         let mut seen = std::collections::BTreeSet::new();
-        for a in &self.accounts {
+        for (i, a) in self.accounts.iter().enumerate() {
+            for to in &a.fallback {
+                let path = format!("account.{i}.fallback");
+                if *to == a.name {
+                    bad(&path, format!("account {} lists itself as its own fallback", a.name));
+                } else if !self.accounts.iter().any(|b| b.name == *to) {
+                    bad(&path, format!("account {}: fallback names {to}, which is not an account", a.name));
+                }
+            }
             if a.name.is_empty() || a.provider.is_empty() {
                 bad("account.name", "every account needs a name and a provider".into());
             } else if !seen.insert(a.name.as_str()) {
@@ -532,12 +607,42 @@ impl Config {
                 a.auth.env.is_some(),
                 a.auth.file.is_some(),
                 a.auth.none,
+                a.auth.sigv4,
+                a.auth.gcloud,
+                a.auth.aws_env,
+                a.auth.aws_profile.is_some(),
             ];
             if sources.into_iter().filter(|s| *s).count() > 1 {
                 bad(
                     "account.auth",
-                    format!("account {}: pick one of keyring, env, file, none", a.name),
+                    format!("account {}: pick one of keyring, env, file, none, sigv4, gcloud, aws_env, aws_profile", a.name),
                 );
+            }
+            // The cloud auth forms only make sense for their own api, and name the line.
+            let user = self.providers.iter().find(|d| d.id == a.provider);
+            let def = aibus_provider::presets::resolve(&a.provider, user).ok().flatten();
+            let api = def.as_ref().and_then(|d| d.api);
+            let bedrock = api == Some(aibus_provider::Api::AnthropicBedrock);
+            let vertex = api == Some(aibus_provider::Api::AnthropicVertex);
+            for (key, on, ok, wants) in [
+                ("sigv4", a.auth.sigv4, bedrock, "anthropic-bedrock"),
+                ("aws_env", a.auth.aws_env, bedrock, "anthropic-bedrock"),
+                ("aws_profile", a.auth.aws_profile.is_some(), bedrock, "anthropic-bedrock"),
+                ("gcloud", a.auth.gcloud, vertex, "anthropic-vertex"),
+            ] {
+                if on && !ok {
+                    bad(
+                        &format!("account.auth.{key}"),
+                        format!("account {}: auth {key} needs a provider whose api is {wants}, and {} is {}", a.name, a.provider, api.map_or("not defined", aibus_provider::Api::as_str)),
+                    );
+                }
+            }
+            let region = a.region.as_ref().or(def.as_ref().and_then(|d| d.region.as_ref()));
+            if (bedrock || vertex) && region.is_none() {
+                bad("account.region", format!("account {}: region is required for {}; set it here or on the [[provider]]", a.name, a.provider));
+            }
+            if vertex && a.project.is_none() && def.as_ref().is_none_or(|d| d.project.is_none()) {
+                bad("account.project", format!("account {}: project is required for {}; set it here or on the [[provider]]", a.name, a.provider));
             }
             if a.rate.max_concurrent == 0 {
                 bad("account.rate", format!("account {}: max_concurrent must be at least 1", a.name));
@@ -584,5 +689,27 @@ mod tests {
             assert_eq!((t.sandbox, t.sandbox.as_str()), (want, text));
         }
         assert!(toml::from_str::<Tools>("sandbox = \"docker\"").is_err());
+    }
+
+    #[test]
+    fn a_provider_table_takes_the_closed_compat_list_and_default_capabilities() {
+        use aibus_provider::presets::{CompatFlag, MaxTokensField};
+        let c: Config = toml::from_str(
+            r#"
+[[provider]]
+id = "gw"
+api = "openai-chat"
+base_url = "http://10.0.0.5:8000/v1"
+compat = ["no_store", { max_tokens_field = "max_completion_tokens" }]
+default_capabilities = { logprobs = false, max_tools = 16 }
+"#,
+        )
+        .unwrap();
+        let d = &c.providers[0];
+        assert_eq!(d.compat, Some(vec![CompatFlag::NoStore, CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)]));
+        assert_eq!((d.default_capabilities.logprobs, d.default_capabilities.max_tools), (Some(false), Some(16)));
+        assert!(c.problems().is_empty());
+        // A flag nobody named is a parse error, so a typo cannot pass for a quirk.
+        assert!(toml::from_str::<Config>("[[provider]]\nid = \"gw\"\ncompat = [\"no_such_quirk\"]\n").is_err());
     }
 }

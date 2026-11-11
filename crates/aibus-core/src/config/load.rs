@@ -3,7 +3,7 @@
 //! Each file is checked on its own first, so a mistake is reported against the file and line that
 //! hold it: a syntax or type error, a `key = "..."` under `auth`, and unknown keys (warnings).
 //! The merge works on the TOML tables before they become a `Config`: tables merge, arrays
-//! replace, `[[account]]` comes from the user file only and `[hooks]` arrays concatenate.
+//! replace, `[[account]]` and `[[provider]]` come from the user file only and `[hooks]` arrays concatenate.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -108,7 +108,7 @@ fn merge(user: Table, project: Table) -> Table {
     let mut out = user;
     for (key, value) in project {
         match (key.as_str(), value) {
-            ("account", _) => {}
+            ("account" | "provider", _) => {}
             ("hooks", Value::Table(hooks)) => {
                 let slot = out
                     .entry("hooks")
@@ -147,12 +147,14 @@ pub fn load(user: &Path, project: Option<&Path>) -> Result<Loaded, ConfigFileErr
     }
     if let Some(path) = project {
         if let Some((t, w, text)) = read(path)? {
-            if t.contains_key("account") {
-                warnings.push(format!(
-                    "{}:{}: [[account]] is user-only, ignored here",
-                    path.display(),
-                    find_line(&text, "account").unwrap_or(1)
-                ));
+            for table in ["account", "provider"] {
+                if t.contains_key(table) {
+                    warnings.push(format!(
+                        "{}:{}: [[{table}]] is user-only, ignored here",
+                        path.display(),
+                        find_line(&text, table).unwrap_or(1)
+                    ));
+                }
             }
             table = merge(table, t);
             warnings.extend(w);
@@ -178,7 +180,52 @@ pub fn load(user: &Path, project: Option<&Path>) -> Result<Loaded, ConfigFileErr
             message: format!("{key}: {message}"),
         });
     }
+    // A key sent over plain http to an address that is neither this machine nor a private
+    // network can be read on the way. A warning, not an error: a lab VPN is a legitimate case.
+    let user_text = texts.first().filter(|(p, _)| p == user).map(|(p, t)| (p.as_path(), t.as_str()));
+    let urls = config
+        .providers
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| Some((format!("provider.{i}.base_url"), d.id.as_str(), d.base_url.as_deref()?)))
+        .chain(
+            config
+                .accounts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, a)| Some((format!("account.{i}.base_url"), a.name.as_str(), a.base_url.as_deref()?))),
+        );
+    for (key, who, url) in urls.filter(|(_, _, url)| is_open_http(url)) {
+        let at = user_text.map_or(String::new(), |(path, text)| {
+            format!("{}:{}: ", path.display(), find_line(text, &key).unwrap_or(1))
+        });
+        warnings.push(format!(
+            "{at}{who}: base_url {url} is plain http to an address that is not loopback or a private network, so a key sent there can be read on the way"
+        ));
+    }
     Ok(Loaded { config, warnings })
+}
+
+/// `http://` to a host that is not `localhost`, a loopback address or an RFC 1918 address. A
+/// name other than `localhost` counts as public, since it could resolve anywhere.
+fn is_open_http(url: &str) -> bool {
+    let Some(rest) = url.trim().strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => host.split(':').next().unwrap_or_default(),
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return false;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => !(ip.is_loopback() || ip.is_private()),
+        Ok(std::net::IpAddr::V6(ip)) => !ip.is_loopback(),
+        Err(_) => true,
+    }
 }
 
 fn split_key(k: &str) -> Vec<String> {
@@ -191,6 +238,25 @@ fn split_key(k: &str) -> Vec<String> {
 /// (array indexes are skipped). A header that names the path, or a table below it, counts, and
 /// so does the line of an inline table that holds the last part.
 pub fn find_line(text: &str, dotted: &str) -> Option<usize> {
+    // An index after an array of tables (`account.1.fallback`) picks that table's block, so the
+    // line is the second `[[account]]`'s and not the first one that has the key.
+    let segs: Vec<&str> = dotted.split('.').collect();
+    if let Some(at) = segs.iter().position(|s| s.parse::<usize>().is_ok()).filter(|at| *at > 0) {
+        let (head, n) = (segs[..at].join("."), segs[at].parse::<usize>().unwrap_or(0));
+        let header = format!("[[{head}]]");
+        let lines: Vec<&str> = text.lines().collect();
+        let starts: Vec<usize> = (0..lines.len()).filter(|i| lines[*i].trim() == header).collect();
+        if let Some(&from) = starts.get(n) {
+            let to = starts.get(n + 1).copied().unwrap_or(lines.len());
+            let block = lines[from..to].join("\n");
+            let rest = std::iter::once(head.as_str()).chain(segs[at + 1..].iter().copied()).collect::<Vec<_>>().join(".");
+            return find_line_flat(&block, &rest).map(|l| from + l);
+        }
+    }
+    find_line_flat(text, dotted)
+}
+
+fn find_line_flat(text: &str, dotted: &str) -> Option<usize> {
     let want: Vec<String> = dotted
         .split('.')
         .filter(|s| s.parse::<usize>().is_err())
@@ -386,5 +452,222 @@ mod tests {
         assert_eq!(find_line(text, "acct.0.auth.keyring"), Some(5));
         assert_eq!(find_line(text, "w.q.r"), Some(7));
         assert_eq!(find_line(text, "nope"), None);
+    }
+
+    #[test]
+    fn plain_http_to_a_public_address_warns_with_its_line_and_loopback_and_private_do_not() {
+        let provider = |url: &str| format!("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"{url}\"\n");
+        for ok in [
+            "https://api.example.com/v1",
+            "http://127.0.0.1:11434/v1",
+            "http://localhost:8000/v1",
+            "http://[::1]:8000/v1",
+            "http://10.0.0.5:8000/v1",
+            "http://172.16.3.4/v1",
+            "http://192.168.1.20:8080/v1",
+        ] {
+            assert!(load_text(&provider(ok)).unwrap().warnings.is_empty(), "{ok}");
+        }
+        for bad in ["http://203.0.113.9/v1", "http://api.example.com/v1", "http://172.32.0.1/v1", "http://user@8.8.8.8/v1"] {
+            let w = load_text(&provider(bad)).unwrap().warnings;
+            assert_eq!(w.len(), 1, "{bad}: {w:?}");
+            assert!(w[0].contains(":4: p: base_url") && w[0].contains("plain http"), "{}", w[0]);
+        }
+        // The old account-level form is checked too.
+        let w = load_text("[[account]]\nname = \"old\"\nprovider = \"openai-compatible\"\nbase_url = \"http://203.0.113.9/v1\"\n").unwrap().warnings;
+        assert!(w.len() == 1 && w[0].contains(":4: old: base_url"), "{w:?}");
+    }
+
+    #[test]
+    fn an_index_picks_the_nth_table_of_an_array() {
+        let text = "[[account]]\nname = \"a\"\nfallback = [\"b\"]\n[[account]]\nname = \"b\"\nfallback = [\"zz\"]\n";
+        assert_eq!(find_line(text, "account.0.fallback"), Some(3));
+        assert_eq!(find_line(text, "account.1.fallback"), Some(6));
+    }
+
+    fn fallback_config(second: &str) -> String {
+        format!("[[account]]\nname = \"a\"\nprovider = \"fake\"\nfallback = [\"b\"]\n[[account]]\nname = \"b\"\nprovider = \"fake\"\n{second}\n")
+    }
+
+    #[test]
+    fn fallback_and_fallback_on_parse_with_their_defaults() {
+        use super::super::FallbackKind::*;
+        let c = load_text(&fallback_config("")).unwrap().config;
+        assert_eq!(c.accounts[0].fallback, ["b"]);
+        assert!(c.accounts[1].fallback.is_empty());
+        assert_eq!(c.defaults.fallback_on, [Quota, Auth, Overloaded]);
+        let c = load_text("[defaults]\nfallback_on = [\"quota\", \"rate_limit\"]\n").unwrap().config;
+        assert_eq!(c.defaults.fallback_on, [Quota, RateLimit]);
+    }
+
+    #[test]
+    fn a_fallback_that_names_no_account_or_itself_is_a_config_error_with_its_line() {
+        let e = load_text(&fallback_config("fallback = [\"nope\"]")).unwrap_err();
+        assert_eq!(e.line, Some(8));
+        assert!(e.message.contains("nope"), "{}", e.message);
+        let e = load_text(&fallback_config("fallback = [\"b\"]")).unwrap_err();
+        assert_eq!(e.line, Some(8));
+        assert!(e.message.contains("itself"), "{}", e.message);
+    }
+
+    #[test]
+    fn a_provider_table_parses_and_merges_over_its_preset() {
+        let text = r#"
+            [[provider]]
+            id = "ollama-home"
+            api = "openai-chat"
+            base_url = "http://10.0.0.5:11434/v1"
+            headers = { "x-team" = "home" }
+
+            [[provider]]
+            id = "groq"
+            base_url = "https://gw.example/openai/v1"
+
+            [[account]]
+            name = "home"
+            provider = "ollama-home"
+            auth = { none = true }
+        "#;
+        let (table, warnings) = parse_file(p(), text).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let c: Config = Value::Table(table).try_into().unwrap();
+        assert!(c.problems().is_empty(), "{:?}", c.problems());
+        assert_eq!(c.providers.len(), 2);
+        let home = aibus_provider::presets::resolve("ollama-home", Some(&c.providers[0])).unwrap().unwrap();
+        assert_eq!(home.headers["x-team"], "home");
+        let groq = aibus_provider::presets::resolve("groq", Some(&c.providers[1])).unwrap().unwrap();
+        assert_eq!(groq.base_url.as_deref(), Some("https://gw.example/openai/v1"));
+        assert_eq!(groq.env_vars, ["GROQ_API_KEY"]);
+    }
+
+    #[test]
+    fn a_provider_table_is_rejected_for_an_unknown_api_a_bad_url_a_credential_header_and_a_repeat() {
+        let problem = |text: &str| -> String {
+            match parse_file(p(), text) {
+                Err(e) => e.message,
+                Ok((table, _)) => {
+                    let c: Config = Value::Table(table).try_into().unwrap();
+                    let (key, why) = c.problems().into_iter().next().expect("a problem");
+                    format!("{key}: {why}")
+                }
+            }
+        };
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"grpc\"\n").contains("grpc"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"ftp://x\"\n").contains("base_url"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nheaders = { Authorization = \"Bearer x\" }\n")
+            .starts_with("provider.headers:"));
+        assert!(problem("[[provider]]\nid = \"p\"\n").contains("no api"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\n[[provider]]\nid = \"p\"\napi = \"openai-chat\"\n")
+            .contains("defined twice"));
+    }
+
+    #[test]
+    fn a_project_file_cannot_add_providers() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("config.toml");
+        let project = dir.path().join("settings.toml");
+        std::fs::write(&user, "").unwrap();
+        std::fs::write(&project, "[[provider]]\nid = \"evil\"\napi = \"openai-chat\"\nbase_url = \"http://evil.example\"\n").unwrap();
+        let l = load(&user, Some(&project)).unwrap();
+        assert!(l.config.providers.is_empty());
+        assert!(l.warnings[0].contains("[[provider]] is user-only"), "{:?}", l.warnings);
+    }
+
+    fn load_text(text: &str) -> Result<Loaded, ConfigFileError> {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.toml");
+        std::fs::write(&file, text).unwrap();
+        load(&file, None)
+    }
+
+    #[test]
+    fn the_bedrock_and_vertex_forms_load_with_region_and_project() {
+        let text = r#"
+[[account]]
+name = "bedrock"
+provider = "bedrock"
+auth = { sigv4 = true }
+region = "us-east-1"
+
+[[account]]
+name = "vertex"
+provider = "vertex"
+auth = { gcloud = true }
+project = "my-project"
+region = "us-east5"
+
+[[account]]
+name = "bedrock-env"
+provider = "bedrock"
+auth = { aws_env = true }
+region = "eu-west-1"
+
+[[account]]
+name = "bedrock-profile"
+provider = "bedrock"
+auth = { aws_profile = "work" }
+region = "us-west-2"
+"#;
+        let c = load_text(text).unwrap().config;
+        let [b, v, e, p] = &c.accounts[..] else { panic!("four accounts") };
+        assert!(b.auth.sigv4 && b.region.as_deref() == Some("us-east-1"));
+        assert!(v.auth.gcloud && v.project.as_deref() == Some("my-project") && v.region.as_deref() == Some("us-east5"));
+        assert!(e.auth.aws_env && p.auth.aws_profile.as_deref() == Some("work"));
+    }
+
+    #[test]
+    fn the_wrong_auth_for_an_api_is_a_config_error_that_names_the_line() {
+        let cases = [
+            ("anthropic", "auth = { sigv4 = true }", "sigv4", "anthropic-bedrock"),
+            ("vertex", "auth = { sigv4 = true }", "sigv4", "anthropic-bedrock"),
+            ("bedrock", "auth = { gcloud = true }", "gcloud", "anthropic-vertex"),
+            ("openai", "auth = { gcloud = true }", "gcloud", "anthropic-vertex"),
+            ("vertex", "auth = { aws_env = true }", "aws_env", "anthropic-bedrock"),
+            ("anthropic", "auth = { aws_profile = \"work\" }", "aws_profile", "anthropic-bedrock"),
+        ];
+        for (provider, auth, key, api) in cases {
+            let text = format!("[[account]]\nname = \"x\"\nprovider = \"{provider}\"\n{auth}\n");
+            let e = load_text(&text).unwrap_err();
+            assert_eq!(e.line, Some(4), "{provider} {auth}: {e}");
+            assert!(e.message.contains(key) && e.message.contains(api), "{provider} {auth}: {}", e.message);
+        }
+    }
+
+    #[test]
+    fn two_credential_sources_on_one_cloud_account_are_refused() {
+        let text = "[[account]]\nname = \"x\"\nprovider = \"bedrock\"\nauth = { sigv4 = true, aws_env = true }\nregion = \"us-east-1\"\n";
+        let e = load_text(text).unwrap_err();
+        assert!(e.message.contains("pick one"), "{}", e.message);
+    }
+
+    #[test]
+    fn a_region_or_project_on_the_provider_table_is_the_default_and_the_account_wins() {
+        let text = r#"
+[[provider]]
+id = "bedrock"
+region = "eu-central-1"
+
+[[account]]
+name = "a"
+provider = "bedrock"
+auth = { sigv4 = true }
+
+[[account]]
+name = "b"
+provider = "bedrock"
+auth = { sigv4 = true }
+region = "us-east-1"
+"#;
+        let c = load_text(text).unwrap().config;
+        assert_eq!(c.providers[0].region.as_deref(), Some("eu-central-1"));
+        assert_eq!(c.accounts[1].region.as_deref(), Some("us-east-1"));
+    }
+
+    #[test]
+    fn a_cloud_account_needs_its_region_and_vertex_its_project() {
+        let bedrock = "[[account]]\nname = \"x\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\n";
+        assert!(load_text(bedrock).unwrap_err().message.contains("region"));
+        let vertex = "[[account]]\nname = \"x\"\nprovider = \"vertex\"\nauth = { gcloud = true }\nregion = \"us-east5\"\n";
+        assert!(load_text(vertex).unwrap_err().message.contains("project"));
     }
 }

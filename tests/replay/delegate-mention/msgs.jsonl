@@ -1,11 +1,11 @@
-{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N6PX6A2XJS6HDBJ13TM3"}
-{"msg":"UsageUpdate","run":"01M6Z6N6PX6A2XJS6HDBJ13TM3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"01M6Z6N6Q5JKKPQJ5E2D05FV8T","input":{"agent":"explore","background":false,"prompt":"map the repo"},"msg":"ToolCallRequested","name":"delegate","needs_permission":false,"run":"01M6Z6N6PX6A2XJS6HDBJ13TM3"}
-{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":"01M6Z6N6PX6A2XJS6HDBJ13TM3","role":"worker","run":"01M6Z6N6Q659F6DYJ9VK09C9ZN"}
-{"chunks":[{"k":"text","v":"the child report"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6Q659F6DYJ9VK09C9ZN"}
-{"msg":"UsageUpdate","run":"01M6Z6N6Q659F6DYJ9VK09C9ZN","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":1505083,"secs":0},"error":null,"run_id":"01M6Z6N6Q659F6DYJ9VK09C9ZN","status":"Completed","summary":"","summary_file":null,"summary_len":16,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6Q659F6DYJ9VK09C9ZN"}
-{"call":"01M6Z6N6Q5JKKPQJ5E2D05FV8T","content_len":192,"is_error":false,"ms":3,"msg":"ToolCallFinished","run":"01M6Z6N6PX6A2XJS6HDBJ13TM3"}
-{"chunks":[{"k":"text","v":"all done"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6PX6A2XJS6HDBJ13TM3"}
-{"msg":"UsageUpdate","run":"01M6Z6N6PX6A2XJS6HDBJ13TM3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":6854422,"secs":0},"error":null,"run_id":"01M6Z6N6PX6A2XJS6HDBJ13TM3","status":"Completed","summary":"","summary_file":null,"summary_len":8,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6PX6A2XJS6HDBJ13TM3"}
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M769A5QNCZZH208K9PTPW83T"}
+{"msg":"UsageUpdate","run":"01M769A5QNCZZH208K9PTPW83T","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"01M769A5RFB489W1HP44ZE2CTS","input":{"agent":"explore","background":false,"prompt":"map the repo"},"msg":"ToolCallRequested","name":"delegate","needs_permission":false,"run":"01M769A5QNCZZH208K9PTPW83T"}
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":"01M769A5QNCZZH208K9PTPW83T","role":"worker","run":"01M769A5RGWPASJCM3P84F6N0H"}
+{"chunks":[{"k":"text","v":"the child report"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A5RGWPASJCM3P84F6N0H"}
+{"msg":"UsageUpdate","run":"01M769A5RGWPASJCM3P84F6N0H","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":22001424,"secs":0},"error":null,"run_id":"01M769A5RGWPASJCM3P84F6N0H","status":"Completed","summary":"","summary_file":null,"summary_len":16,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A5RGWPASJCM3P84F6N0H"}
+{"call":"01M769A5RFB489W1HP44ZE2CTS","content_len":192,"is_error":false,"ms":25,"msg":"ToolCallFinished","run":"01M769A5QNCZZH208K9PTPW83T"}
+{"chunks":[{"k":"text","v":"all done"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A5QNCZZH208K9PTPW83T"}
+{"msg":"UsageUpdate","run":"01M769A5QNCZZH208K9PTPW83T","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":39228547,"secs":0},"error":null,"run_id":"01M769A5QNCZZH208K9PTPW83T","status":"Completed","summary":"","summary_file":null,"summary_len":8,"turns":1,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A5QNCZZH208K9PTPW83T"}

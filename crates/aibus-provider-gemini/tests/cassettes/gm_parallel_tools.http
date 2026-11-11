@@ -1,0 +1,7 @@
+HTTP 200
+content-type: text/event-stream
+cache-control: no-cache
+x-request-id: req_gm_0001
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":{"path":"a"}}},{"functionCall":{"name":"read_file","args":{"path":"b"}}}]},"finishReason":"STOP"}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001","usageMetadata":{"promptTokenCount":60,"candidatesTokenCount":18,"totalTokenCount":78}}
+

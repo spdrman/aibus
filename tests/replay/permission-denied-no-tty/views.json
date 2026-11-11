@@ -66,6 +66,7 @@
   "view:cards": {
     "List": []
   },
+  "view:cost": "Null",
   "view:delegate_row": {
     "Map": {
       "connectors": {
@@ -176,8 +177,10 @@
     }
   },
   "view:menu": "Null",
+  "view:models": "Null",
   "view:palette": "Null",
   "view:permission": "Null",
+  "view:providers": "Null",
   "view:return_box": {
     "Map": {
       "highlight": {
@@ -191,6 +194,7 @@
       }
     }
   },
+  "view:run_status": "Null",
   "view:run_tips": {
     "List": [
       {
@@ -211,7 +215,7 @@
             "Str": "lead"
           },
           "run_id": {
-            "Str": "01M6Z6N6JER9BAJ16V9Q6PYVAA"
+            "Str": "01M769A592F2WC77HZTB0KNA4X"
           }
         }
       }
@@ -229,7 +233,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N6JER9BAJ16V9Q6PYVAA"
+            "Str": "01M769A592F2WC77HZTB0KNA4X"
           },
           "text": {
             "Str": "started"
@@ -270,7 +274,7 @@
           "p": "Null",
           "run": "Null",
           "text": {
-            "Str": "tool failed 2 ms"
+            "Str": "tool failed 5 ms"
           },
           "time": {
             "Str": "00:00:00"
@@ -288,7 +292,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N6JER9BAJ16V9Q6PYVAA"
+            "Str": "01M769A592F2WC77HZTB0KNA4X"
           },
           "text": {
             "Str": "finished completed"
@@ -315,6 +319,9 @@
       },
       "alerts": {
         "List": []
+      },
+      "cost": {
+        "Str": "$0.0000"
       },
       "ledger": "Null",
       "mem": "Null",
@@ -353,5 +360,6 @@
       }
     }
   },
-  "view:transcript": "Null"
+  "view:transcript": "Null",
+  "view:workflows": "Null"
 }

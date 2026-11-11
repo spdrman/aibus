@@ -27,7 +27,7 @@ pub const MENU_VIEW: &str = "view:menu";
 pub const DIRTY: &str = "view:dirty";
 
 /// Widget name and the one `view:` node it draws. `view:dirty` lists the names.
-pub const WIDGETS: [(&str, &str); 16] = [
+pub const WIDGETS: [(&str, &str); 21] = [
     ("header", HEADER),
     ("rail", RAIL),
     ("lead_box", LEAD_BOX),
@@ -43,11 +43,16 @@ pub const WIDGETS: [(&str, &str); 16] = [
     ("palette", crate::views::PALETTE),
     ("agents", crate::views::AGENTS),
     ("accounts", crate::views::ACCOUNTS_VIEW),
+    ("models", crate::views::MODELS),
+    ("providers", crate::views::PROVIDERS),
     ("transcript", crate::views::TRANSCRIPT),
+    ("run_status", crate::views::RUN_STATUS),
+    ("cost", crate::views::COST),
+    ("workflows", crate::views::WORKFLOWS_VIEW),
 ];
 
 /// The router questions the fork layer shows, as `(kind, row label)`.
-const FORK_KINDS: [(&str, &str); 3] = [
+pub(crate) const FORK_KINDS: [(&str, &str); 3] = [
     ("which_file", "which file"),
     ("which_tool", "which tool"),
     ("retry_or_stop", "retry or stop"),
@@ -58,16 +63,6 @@ const LOG_LINES_KEPT: usize = 128;
 
 /// A result that reached the lead this recently (ms) still counts as in flight.
 const IN_FLIGHT_MS: i64 = 3000;
-
-/// The menu's items, in order: `(id, label)`.
-pub const MENU_ITEMS: [(&str, &str); 6] = [
-    ("open", "Open transcript"),
-    ("cancel", "Cancel"),
-    ("fork", "Fork"),
-    ("resume", "Resume"),
-    ("copy_id", "Copy id"),
-    ("copy_result", "Copy result"),
-];
 
 fn runs<'a>(t: &mut Tracker<'a>, role: &str) -> Vec<(&'a str, &'a Value)> {
     let Some(order) = t.get_key(RUNS_ORDER) else {
@@ -362,6 +357,7 @@ fn status_bar(store: &Store, t: &mut Tracker) -> Value {
         ("ledger", ledger),
         ("alerts", list(alerts)),
         ("mem", mem),
+        ("cost", s(&crate::views::dollars(crate::views::session_cost(t)))),
     ])
 }
 
@@ -556,7 +552,7 @@ fn menu(t: &mut Tracker) -> Value {
         .unwrap_or("")
         .to_owned();
     let live = st.is_some_and(|x| x.is_active() || x == RunStatus::Queued);
-    let items = MENU_ITEMS.map(|(item, label)| {
+    let items: Vec<Value> = crate::commands::menu_items().into_iter().map(|(item, label)| {
         let enabled = match item {
             "cancel" => live,
             "resume" => st == Some(RunStatus::Partial),
@@ -565,14 +561,14 @@ fn menu(t: &mut Tracker) -> Value {
             _ => true,
         };
         map([("id", s(item)), ("label", s(label)), ("enabled", Value::Bool(enabled))])
-    });
+    }).collect();
     map([
         ("run_id", s(&id)),
         ("title", s(&name)),
         ("col", get(&m, "col").cloned().unwrap_or(n(0))),
         ("row", get(&m, "row").cloned().unwrap_or(n(0))),
         ("selected", get(&m, "selected").cloned().unwrap_or(n(0))),
-        ("items", list(items.to_vec())),
+        ("items", list(items)),
     ])
 }
 
@@ -618,7 +614,12 @@ pub fn register<G: Graph>(g: &mut G, store: Store) -> Vec<NodeKey> {
             "palette" => Box::new(crate::views::palette),
             "agents" => Box::new(move |t| crate::views::agents(&st, t)),
             "accounts" => Box::new(crate::views::accounts),
+            "models" => Box::new(crate::views::models),
+            "providers" => Box::new(crate::views::providers),
             "transcript" => Box::new(move |t| crate::views::transcript(&st, t)),
+            "run_status" => Box::new(crate::views::run_status),
+            "cost" => Box::new(crate::views::cost),
+            "workflows" => Box::new(move |t| crate::views::workflows(&st, t)),
             _ => Box::new(move |t| status_bar(&st, t)),
         };
         let key = NodeKey::from(key);

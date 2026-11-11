@@ -85,12 +85,12 @@
                 "Str": "indeterminate"
               },
               "value": {
-                "I64": 7
+                "I64": 5
               }
             }
           },
           "run_id": {
-            "Str": "01M6Z6N6B2VV0D78ED62QAWA2Q"
+            "Str": "01M769A4NRWFPNVXD5GVB5AMPN"
           },
           "selected": {
             "Bool": true
@@ -105,6 +105,7 @@
       }
     ]
   },
+  "view:cost": "Null",
   "view:delegate_row": {
     "Map": {
       "connectors": {
@@ -203,8 +204,10 @@
   },
   "view:lead_box": "Null",
   "view:menu": "Null",
+  "view:models": "Null",
   "view:palette": "Null",
   "view:permission": "Null",
+  "view:providers": "Null",
   "view:return_box": {
     "Map": {
       "highlight": {
@@ -218,6 +221,7 @@
       }
     }
   },
+  "view:run_status": "Null",
   "view:run_tips": {
     "List": [
       {
@@ -238,7 +242,7 @@
             "Str": "explore"
           },
           "run_id": {
-            "Str": "01M6Z6N6B2VV0D78ED62QAWA2Q"
+            "Str": "01M769A4NRWFPNVXD5GVB5AMPN"
           }
         }
       }
@@ -256,7 +260,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N6B2VV0D78ED62QAWA2Q"
+            "Str": "01M769A4NRWFPNVXD5GVB5AMPN"
           },
           "text": {
             "Str": "started"
@@ -277,7 +281,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N6B2VV0D78ED62QAWA2Q"
+            "Str": "01M769A4NRWFPNVXD5GVB5AMPN"
           },
           "text": {
             "Str": "failed: provider"
@@ -298,7 +302,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N6B2VV0D78ED62QAWA2Q"
+            "Str": "01M769A4NRWFPNVXD5GVB5AMPN"
           },
           "text": {
             "Str": "finished failed"
@@ -325,6 +329,9 @@
       },
       "alerts": {
         "List": []
+      },
+      "cost": {
+        "Str": "$0.0000"
       },
       "ledger": "Null",
       "mem": "Null",
@@ -363,5 +370,6 @@
       }
     }
   },
-  "view:transcript": "Null"
+  "view:transcript": "Null",
+  "view:workflows": "Null"
 }

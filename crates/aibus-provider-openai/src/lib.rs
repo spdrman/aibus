@@ -15,198 +15,228 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use aibus_provider::models::ModelTable;
+use aibus_provider::presets::resolve;
 use aibus_provider::{
-    AccountInfo, AliasTable, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, ConfigError,
-    Credential, ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig, ProviderError,
-    ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk, SystemRole,
+    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, CompatFlag,
+    ConfigError, Credential, ModelId, ModelInfo, ModelRef, ModelTableSpec, Price, Provider,
+    ProviderConfig, ProviderDef, ProviderError, ProviderFactory, ProviderId,
+    StreamChunk, SystemRole,
 };
-use aibus_provider_http::reqwest::header::{HeaderMap, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use aibus_provider_http::{cancelled, emit, json, request_id, sensitive, Events, Http};
+use aibus_provider_http::reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE,
+};
+use aibus_provider_http::{cancelled, emit, json, rate_limit, request_id, sensitive, Events, Http};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Flavor {
-    OpenAi,
-    Kimi,
-    Compatible,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Api {
+enum Wire {
     Chat,
     Responses,
 }
 
-impl Flavor {
-    fn id(self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Kimi => "kimi",
-            Self::Compatible => "openai-compatible",
-        }
-    }
-
-    /// `None` for a server only the account can name.
-    fn default_base(self) -> Option<&'static str> {
-        match self {
-            Self::OpenAi => Some("https://api.openai.com/v1"),
-            Self::Kimi => Some("https://api.moonshot.ai/v1"),
-            Self::Compatible => None,
-        }
-    }
-
-    /// The built-in table, the ids that resolve without being listed, and whether any alias
-    /// target does.
-    fn table(self) -> (&'static str, &'static [&'static str], bool) {
-        match self {
-            Self::OpenAi => (
-                include_str!("openai.json"),
-                &["gpt-", "chatgpt-", "o1", "o3", "o4"],
-                false,
-            ),
-            Self::Kimi => (include_str!("kimi.json"), &["kimi-", "moonshot-"], false),
-            Self::Compatible => (r#"{"models": []}"#, &[], true),
-        }
-    }
-
-    fn capabilities(self) -> Capabilities {
-        let openai = self == Self::OpenAi;
-        Capabilities {
-            tools: true,
-            parallel_tool_calls: true,
-            streaming: true,
-            thinking: false,
-            // OpenAI and Moonshot cache prefixes on their own; a local server does not.
-            prompt_cache: self != Self::Compatible,
-            logprobs: self != Self::Kimi,
-            effort: openai,
-            images: openai,
-            system_role: SystemRole::Separate,
-            max_tools: (self != Self::Compatible).then_some(128),
-        }
-    }
+/// Builds an instance for each OpenAI-shaped api from a provider definition (`presets.json`
+/// or a `[[provider]]` table). The constructors below name the three vendors this crate has
+/// always had; built without a definition, a factory builds its own preset from the account's
+/// `base_url` and `api`.
+pub struct Factory {
+    id: &'static str,
 }
-
-pub struct Factory(Flavor);
 
 impl Factory {
     pub fn openai() -> Self {
-        Self(Flavor::OpenAi)
+        Self { id: "openai" }
     }
 
     pub fn kimi() -> Self {
-        Self(Flavor::Kimi)
+        Self { id: "kimi" }
     }
 
     /// Needs a `base_url` on the account; `auth = none` is allowed.
     pub fn compatible() -> Self {
-        Self(Flavor::Compatible)
+        Self { id: "openai-compatible" }
+    }
+
+    /// The definition to build from: the one the registry resolved, or this factory's preset
+    /// with the account-level `base_url` and `api` laid over it.
+    fn definition(&self, cfg: &ProviderConfig) -> Result<ProviderDef, ConfigError> {
+        if let Some(def) = &cfg.def {
+            return Ok(def.clone());
+        }
+        let mut user = ProviderDef { id: self.id.into(), base_url: cfg.base_url.clone(), ..ProviderDef::default() };
+        match cfg.api.as_deref() {
+            None | Some("chat") => {}
+            Some("responses") => user.api = Some(Api::OpenaiResponses),
+            Some(other) => {
+                return Err(ConfigError::Invalid(self.id.into(), format!("api \"{other}\" is not \"chat\" or \"responses\"")))
+            }
+        }
+        resolve(self.id, Some(&user))
+            .map_err(|e| ConfigError::Invalid(self.id.into(), e))?
+            .ok_or_else(|| ConfigError::UnknownProvider(self.id.into()))
     }
 }
 
 impl ProviderFactory for Factory {
     fn id(&self) -> ProviderId {
-        ProviderId(self.0.id())
+        ProviderId(self.id)
     }
 
     fn build(&self, cfg: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
-        Ok(Arc::new(OpenAi::new(self.0, cfg)?))
+        Ok(Arc::new(OpenAi::new(self.definition(cfg)?, cfg)?))
     }
 
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
-        match self.0 {
-            Flavor::Compatible => &[
-                AuthMethodKind::ApiKey,
-                AuthMethodKind::Bearer,
-                AuthMethodKind::Env,
-                AuthMethodKind::None,
-            ],
-            _ => &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env],
+        if self.id == "openai-compatible" {
+            &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env, AuthMethodKind::None]
+        } else {
+            &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env]
         }
+    }
+
+    fn apis(&self) -> &'static [&'static str] {
+        &["openai-chat", "openai-responses"]
     }
 }
 
 pub struct OpenAi {
-    flavor: Flavor,
-    api: Api,
+    id: &'static str,
+    wire: Wire,
+    /// The provider's capabilities from its definition, before any model's entry and before
+    /// the compat flags that are capabilities.
+    base_caps: Capabilities,
+    compat: Vec<CompatFlag>,
+    send_user: bool,
+    open_aliases: bool,
     /// No trailing slash; `/chat/completions` and friends go after it.
     base: String,
+    /// From the definition: sent on every request, and added to every URL.
+    extra_headers: HeaderMap,
+    query: String,
+    auth_header: Option<HeaderName>,
     table: Mutex<ModelTable>,
     cache_dir: Option<PathBuf>,
     http: Http,
+    /// The gateway puts what a request cost in `usage.cost` (OpenRouter), and that replaces the
+    /// table's estimate.
+    reports_cost: bool,
 }
 
 impl OpenAi {
-    fn new(flavor: Flavor, cfg: &ProviderConfig) -> Result<Self, ConfigError> {
-        let id = flavor.id();
-        let base = match (cfg.base_url.as_deref(), flavor.default_base()) {
-            (Some(url), _) => url,
-            (None, Some(url)) => url,
-            (None, None) => {
-                return Err(ConfigError::NotConfigured(
-                    id.into(),
-                    "base_url is required: set it on the account, e.g. http://127.0.0.1:11434/v1".into(),
-                ))
+    fn new(def: ProviderDef, cfg: &ProviderConfig) -> Result<Self, ConfigError> {
+        let id = def.static_id();
+        let compat = def.compat_flags().to_vec();
+        let open_aliases = def.open_aliases.unwrap_or(false);
+        let wire = match def.api {
+            Some(Api::OpenaiChat) => Wire::Chat,
+            Some(Api::OpenaiResponses) if def.responses.unwrap_or(true) => Wire::Responses,
+            Some(Api::OpenaiResponses) => {
+                return Err(ConfigError::Invalid(id.into(), format!("{id} has no Responses API; use api = \"chat\"")))
             }
-        }
-        .trim_end_matches('/');
+            other => return Err(ConfigError::Invalid(id.into(), format!("api {other:?} is not an OpenAI api"))),
+        };
+        let base = def
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                ConfigError::NotConfigured(
+                    id.into(),
+                    "base_url is required: set it on the account or the provider, e.g. http://127.0.0.1:11434/v1".into(),
+                )
+            })?
+            .trim_end_matches('/');
         if !(base.starts_with("https://") || base.starts_with("http://")) {
             return Err(ConfigError::Invalid(id.into(), "base_url must start with https:// or http://".into()));
         }
-        let api = match (cfg.api.as_deref(), flavor) {
-            (None | Some("chat"), _) => Api::Chat,
-            (Some("responses"), Flavor::Kimi) => {
-                return Err(ConfigError::Invalid(id.into(), "kimi has no Responses API; use api = \"chat\"".into()))
-            }
-            (Some("responses"), _) => Api::Responses,
-            (Some(other), _) => {
-                return Err(ConfigError::Invalid(id.into(), format!("api \"{other}\" is not \"chat\" or \"responses\"")))
-            }
+        let bad = |what: &str, e: String| ConfigError::Invalid(id.into(), format!("{what}: {e}"));
+        let mut extra_headers = HeaderMap::new();
+        for (k, v) in &def.headers {
+            let name = HeaderName::from_bytes(k.as_bytes()).map_err(|e| bad("headers", format!("{k}: {e}")))?;
+            extra_headers.insert(name, HeaderValue::from_str(v).map_err(|e| bad("headers", format!("{k}: {e}")))?);
+        }
+        let auth_header = def
+            .auth_header
+            .as_deref()
+            .map(|h| HeaderName::from_bytes(h.as_bytes()).map_err(|e| bad("auth_header", e.to_string())))
+            .transpose()?;
+        let query = def.query.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&");
+        let builtin = match &def.model_table {
+            Some(ModelTableSpec::Inline(v)) => v.to_string(),
+            Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
+                .ok_or_else(|| bad("model_table", format!("no built-in table called {n}")))?
+                .to_owned(),
+            None => aibus_provider::catalog::table("empty").unwrap_or_default().to_owned(),
         };
-        let (builtin, prefixes, open_aliases) = flavor.table();
+        let prefixes: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
         Ok(Self {
-            flavor,
-            api,
+            id,
+            wire,
             base: base.to_owned(),
-            table: Mutex::new(ModelTable::load(id, builtin, cfg, prefixes, open_aliases)?),
+            extra_headers,
+            query,
+            auth_header,
+            table: Mutex::new(ModelTable::load(id, &builtin, cfg, &prefixes, open_aliases)?),
+            base_caps: Capabilities {
+                tools: true,
+                parallel_tool_calls: true,
+                streaming: true,
+                thinking: false,
+                prompt_cache: false,
+                logprobs: false,
+                effort: false,
+                images: false,
+                system_role: SystemRole::Separate,
+                max_tools: None,
+            }
+            .with(&def.default_capabilities),
+            compat,
+            send_user: def.user.unwrap_or(false),
+            open_aliases,
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
+            reports_cost: id == "openrouter" || base.contains("openrouter.ai"),
         })
+    }
+
+    /// `base/path`, plus the definition's query parameters.
+    fn url(&self, path: &str) -> String {
+        match self.query.is_empty() {
+            true => format!("{}/{path}", self.base),
+            false => format!("{}/{path}?{}", self.base, self.query),
+        }
     }
 
     fn table(&self) -> std::sync::MutexGuard<'_, ModelTable> {
         self.table.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// `Authorization: Bearer`, unless the account needs no key.
-    fn headers(creds: &Credential) -> Result<HeaderMap, ProviderError> {
-        let mut h = HeaderMap::new();
+    /// The definition's headers, then the key: `Authorization: Bearer`, or the definition's own
+    /// header (`api-key` on Azure), unless the account needs no key.
+    fn headers(&self, creds: &Credential) -> Result<HeaderMap, ProviderError> {
+        let mut h = self.extra_headers.clone();
         if creds.kind != AuthMethodKind::None {
-            let value = Zeroizing::new(format!("Bearer {}", creds.secret.expose()));
-            h.insert(AUTHORIZATION, sensitive(&value)?);
+            match &self.auth_header {
+                Some(name) => {
+                    h.insert(name.clone(), sensitive(creds.secret.expose())?);
+                }
+                None => {
+                    let value = Zeroizing::new(format!("Bearer {}", creds.secret.expose()));
+                    h.insert(AUTHORIZATION, sensitive(&value)?);
+                }
+            }
         }
         Ok(h)
     }
 
-    /// A 429 that is a spent quota will not pass by waiting.
-    fn not_retryable_quota(mut e: ProviderError) -> ProviderError {
-        if e.kind == ProviderErrorKind::RateLimit && e.message.contains("exceeded your current quota") {
-            e.retryable = false;
-        }
-        e
-    }
-
     async fn list_models(&self, creds: &Credential) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
-        let url = format!("{}/models", self.base);
-        let headers = Self::headers(creds)?;
+        let url = self.url("models");
+        let headers = self.headers(creds)?;
         let resp = self
             .http
             .send(&CancellationToken::new(), |c| c.get(&url).headers(headers))
-            .await
-            .map_err(Self::not_retryable_quota)?;
+            .await?;
         let org = resp
             .headers()
             .get("openai-organization")
@@ -224,11 +254,15 @@ impl OpenAi {
 #[async_trait]
 impl Provider for OpenAi {
     fn id(&self) -> ProviderId {
-        ProviderId(self.flavor.id())
+        ProviderId(self.id)
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.flavor.capabilities()
+        self.base_caps.clone().with_compat(&self.compat)
+    }
+
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        self.table().capabilities_for(self.base_caps.clone(), model).with_compat(&self.compat)
     }
 
     fn models(&self) -> Vec<ModelInfo> {
@@ -239,9 +273,9 @@ impl Provider for OpenAi {
         let (ids, _) = self.list_models(creds).await?;
         // A local server lists what it has and says nothing of sizes; these are only a start,
         // and `providers/<id>/models.json` is where to put the real numbers.
-        let (context_window, max_output) = if self.flavor == Flavor::Compatible { (32_768, 4_096) } else { (128_000, 8_192) };
+        let (context_window, max_output) = if self.open_aliases { (32_768, 4_096) } else { (128_000, 8_192) };
         Ok(self.table().refreshed(
-            self.flavor.id(),
+            self.id,
             ids,
             |id| ModelInfo {
                 id: id.clone(),
@@ -266,32 +300,28 @@ impl Provider for OpenAi {
         out: mpsc::Sender<StreamChunk>,
         cancel: CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let req = self.capabilities().degrade(req);
+        let caps = self.capabilities_for(&req.model);
+        let req = caps.degrade(req);
         let (price, reasoning) = {
             let t = self.table();
-            // A model that reasons takes `reasoning_effort` and refuses `temperature`. The table
-            // says so for the ones it lists, the name for the ones released since.
+            // A model that reasons takes the effort parameter and refuses `temperature`. The
+            // table says so for the ones it lists (`reasoning`, or the older `effort`), the
+            // name for the ones released since.
             let reasoning = t.entry(&req.model).map_or_else(
                 || ["gpt-5", "o1", "o3", "o4"].iter().any(|p| req.model.0.starts_with(p)),
-                |e| e.effort,
+                |e| e.reasoning.unwrap_or(e.effort),
             );
             (t.price(&req.model), reasoning)
         };
-        let opts = wire::Opts {
-            completion_tokens: self.flavor == Flavor::OpenAi,
-            reasoning,
-            user: self.flavor != Flavor::Compatible,
-            keep_reasoning: self.flavor == Flavor::Kimi,
-            logprobs: req.logprobs,
+        let opts = wire::Opts { reasoning, user: self.send_user, logprobs: req.logprobs, include_cost: self.reports_cost, compat: &self.compat };
+        let (path, body) = match self.wire {
+            Wire::Chat => ("chat/completions", wire::chat_body(&req, opts)),
+            Wire::Responses => ("responses", wire::responses_body(&req, opts)),
         };
-        let (path, body) = match self.api {
-            Api::Chat => ("chat/completions", wire::chat_body(&req, opts)),
-            Api::Responses => ("responses", wire::responses_body(&req, opts)),
-        };
-        tracing::debug!(account = %creds.account, model = %req.model, provider = self.flavor.id(), "openai: stream");
+        tracing::debug!(account = %creds.account, model = %req.model, provider = self.id, "openai: stream");
 
-        let url = format!("{}/{path}", self.base);
-        let headers = Self::headers(creds)?;
+        let url = self.url(path);
+        let headers = self.headers(creds)?;
         let resp = self
             .http
             .send(&cancel, |c| {
@@ -301,16 +331,16 @@ impl Provider for OpenAi {
                     .header(ACCEPT, "text/event-stream")
                     .body(body.to_string())
             })
-            .await
-            .map_err(Self::not_retryable_quota)?;
+            .await?;
         let request_id = request_id(&resp);
+        let window = rate_limit(resp.headers(), SystemTime::now());
 
         let mut events = Events::new(resp, cancel.clone());
-        let mut turn = stream::Turn::new(price);
+        let mut turn = stream::Turn::new(price, self.reports_cost);
         while let Some(ev) = events.next().await? {
-            let chunks = match self.api {
-                Api::Chat => turn.chat_event(&ev.data)?,
-                Api::Responses => turn.responses_event(&ev.data)?,
+            let chunks = match self.wire {
+                Wire::Chat => turn.chat_event(&ev.data)?,
+                Wire::Responses => turn.responses_event(&ev.data)?,
             };
             for chunk in chunks {
                 emit(&out, &cancel, chunk).await?;
@@ -322,7 +352,9 @@ impl Provider for OpenAi {
         for chunk in turn.close()? {
             emit(&out, &cancel, chunk).await?;
         }
-        turn.into_response(request_id)
+        let mut done = turn.into_response(request_id)?;
+        done.rate_limit = window;
+        Ok(done)
     }
 
     /// OpenAI has no counting endpoint: the caller uses `estimate_tokens`.
@@ -336,7 +368,7 @@ impl Provider for OpenAi {
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
         let (models, org) = self.list_models(creds).await?;
-        Ok(AccountInfo { label: creds.account.to_string(), org, models })
+        Ok(AccountInfo { label: creds.account.to_string(), org, models, cost_usd: None })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

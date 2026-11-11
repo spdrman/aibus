@@ -123,7 +123,7 @@ struct Token;
 
 #[async_trait::async_trait]
 impl aibus_provider_anthropic::TokenSource for Token {
-    async fn token(&self) -> Result<aibus_provider::Secret<String>, aibus_provider::ProviderError> {
+    async fn token(&self, _: &aibus_provider::Credential) -> Result<aibus_provider::Secret<String>, aibus_provider::ProviderError> {
         Ok(aibus_provider::Secret::new("ya29.fake-token-5c0e91".to_owned()))
     }
 }

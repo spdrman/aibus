@@ -9,40 +9,85 @@ use aibus_core::config::Account;
 use aibus_core::persist::paths::Paths;
 use aibus_core::CredentialStore;
 use aibus_provider::models::cache_is_stale;
-use aibus_provider::{ConfigError, ProviderConfig, ProviderFactory, ProviderRegistry};
+use crate::gcloud::{run_gcloud, GcloudTokens};
+use aibus_provider::presets::resolve;
+use aibus_provider::{
+    Api, ConfigError, ProviderConfig, ProviderDef, ProviderFactory, ProviderRegistry,
+};
 
-pub fn builtin_factories() -> Vec<Box<dyn ProviderFactory>> {
+/// Fake, plus one adapter per wire: the Messages API (direct, and on Bedrock and Vertex), the two
+/// OpenAI ones and Gemini's. Which vendors use them is data (`aibus_provider::presets`,
+/// `[[provider]]`), not another line here. `store` is where Vertex's access token is cached.
+pub fn builtin_factories(store: Arc<CredentialStore>) -> Vec<Box<dyn ProviderFactory>> {
+    let gcloud = GcloudTokens::new(
+        store,
+        Arc::new(|v| std::env::var(v).ok()),
+        Arc::new(|| run_gcloud("gcloud", Duration::from_secs(10))),
+    );
     vec![
         Box::new(aibus_provider::fake::Factory),
         Box::new(aibus_provider_anthropic::Factory),
+        Box::new(aibus_provider_anthropic::CloudFactory { tokens: Arc::new(gcloud) }),
         Box::new(aibus_provider_openai::Factory::openai()),
-        Box::new(aibus_provider_openai::Factory::kimi()),
-        Box::new(aibus_provider_openai::Factory::compatible()),
+        Box::new(aibus_provider_gemini::Factory),
     ]
 }
 
-/// What each provider id is built from: the settings of the enabled accounts that use it, and
-/// where the model tables live. A provider is one instance for all its accounts, so accounts of
-/// one provider that disagree on `base_url` or `api` are an error: taking one of them would send
-/// the other account's key to the wrong server.
+/// The built-in factories with the real keychain behind Vertex's token cache.
+pub fn os_factories(redactor: &aibus_core::Redactor) -> Vec<Box<dyn ProviderFactory>> {
+    builtin_factories(Arc::new(CredentialStore::new(Arc::new(crate::keychain::OsKeychain), redactor.clone())))
+}
+
+/// What each provider id is built from: its definition (the preset of that id, the user's
+/// `[[provider]]` of that id, or both), the settings of the enabled accounts that use it, and
+/// where the model tables live. A provider is one instance per id, so an id carries its URL:
+/// two local servers are two ids. The old form, `base_url` and `api` on the account, still
+/// works and is laid over the definition; two accounts of one id that disagree there are an
+/// error, since taking one of them would send the other account's key to the wrong server.
 pub fn provider_configs(
     accounts: &[Account],
+    defs: &[ProviderDef],
     paths: &Paths,
 ) -> Result<BTreeMap<String, ProviderConfig>, ConfigError> {
     let mut out: BTreeMap<String, (ProviderConfig, &str)> = BTreeMap::new();
     for a in accounts.iter().filter(|a| a.enabled) {
-        let cfg = ProviderConfig {
-            base_url: a.base_url.clone(),
-            api: a.api.clone(),
+        let invalid = |why: String| ConfigError::Invalid(a.provider.clone(), why);
+        let mut cfg = ProviderConfig {
+            def: resolve(&a.provider, defs.iter().find(|d| d.id == a.provider)).map_err(invalid)?,
             cache_dir: Some(paths.cache.join("models")),
             overrides_dir: Some(paths.config.join("providers")),
+            ..ProviderConfig::default()
         };
+        match &mut cfg.def {
+            Some(def) => {
+                if let Some(url) = &a.base_url {
+                    def.base_url = Some(url.clone());
+                }
+                // The account's region and project win over the provider's.
+                def.region = a.region.clone().or(def.region.take());
+                def.project = a.project.clone().or(def.project.take());
+                // `api = "responses"` on an account is `api = "openai-responses"` on its provider.
+                if matches!(def.api, Some(Api::OpenaiChat | Api::OpenaiResponses)) {
+                    match a.api.as_deref() {
+                        None | Some("chat") => {}
+                        Some("responses") => def.api = Some(Api::OpenaiResponses),
+                        Some(other) => {
+                            return Err(invalid(format!("api \"{other}\" is not \"chat\" or \"responses\"")));
+                        }
+                    }
+                }
+            }
+            None => {
+                cfg.base_url.clone_from(&a.base_url);
+                cfg.api.clone_from(&a.api);
+            }
+        }
         match out.get(&a.provider) {
             Some((first, by)) if *first != cfg => {
                 return Err(ConfigError::Invalid(
                     a.provider.clone(),
                     format!(
-                        "accounts {by} and {} set a different base_url or api; use one provider id per server",
+                        "accounts {by} and {} set a different base_url, api, region or project; define one [[provider]] id per server",
                         a.name
                     ),
                 ));
@@ -103,6 +148,13 @@ pub fn refresh_stale_models(
 mod tests {
     use super::*;
 
+    fn builtin() -> Vec<Box<dyn ProviderFactory>> {
+        builtin_factories(Arc::new(CredentialStore::new(
+            Arc::new(aibus_core::MemoryKeychain::default()),
+            aibus_core::Redactor::new(),
+        )))
+    }
+
     fn account(name: &str, provider: &str, base_url: Option<&str>) -> Account {
         Account {
             name: name.into(),
@@ -122,12 +174,10 @@ mod tests {
             account("a", "anthropic", None),
             account("l", "openai-compatible", Some("http://127.0.0.1:11434/v1")),
         ];
-        let configs = provider_configs(&accounts, &paths()).unwrap();
-        assert_eq!(
-            configs["openai-compatible"].base_url.as_deref(),
-            Some("http://127.0.0.1:11434/v1")
-        );
-        assert_eq!(configs["anthropic"].base_url, None);
+        let configs = provider_configs(&accounts, &[], &paths()).unwrap();
+        let url = |id: &str| configs[id].def.as_ref().unwrap().base_url.clone();
+        assert_eq!(url("openai-compatible").as_deref(), Some("http://127.0.0.1:11434/v1"));
+        assert_eq!(url("anthropic").as_deref(), Some("https://api.anthropic.com"));
         assert_eq!(
             configs["anthropic"].cache_dir.as_deref(),
             Some(std::path::Path::new("/home/u/.cache/aibus/models"))
@@ -141,16 +191,16 @@ mod tests {
     #[test]
     fn two_accounts_of_one_provider_may_agree_but_not_disagree() {
         let same = [account("a", "anthropic", None), account("b", "anthropic", None)];
-        assert!(provider_configs(&same, &paths()).is_ok());
+        assert!(provider_configs(&same, &[], &paths()).is_ok());
         let differ = [
             account("a", "anthropic", None),
             account("b", "anthropic", Some("https://gw.example")),
         ];
-        let err = provider_configs(&differ, &paths()).unwrap_err().to_string();
+        let err = provider_configs(&differ, &[], &paths()).unwrap_err().to_string();
         assert!(err.contains("accounts a and b"), "{err}");
         let mut off = account("b", "anthropic", Some("https://gw.example"));
         off.enabled = false;
-        assert!(provider_configs(&[account("a", "anthropic", None), off], &paths()).is_ok());
+        assert!(provider_configs(&[account("a", "anthropic", None), off], &[], &paths()).is_ok());
     }
 
     #[test]
@@ -182,14 +232,110 @@ mod tests {
         assert_eq!(names, ["o1", "k"]);
     }
 
+    fn local(id: &str, url: &str) -> ProviderDef {
+        ProviderDef {
+            id: id.into(),
+            api: Some(Api::OpenaiChat),
+            base_url: Some(url.into()),
+            ..ProviderDef::default()
+        }
+    }
+
     #[test]
-    fn lists_the_fake_and_each_id_once() {
-        let mut ids: Vec<_> = builtin_factories().iter().map(|f| f.id().0).collect();
-        for id in ["fake", "anthropic", "openai", "kimi", "openai-compatible"] {
+    fn two_local_servers_with_two_ids_build_two_instances() {
+        let defs = [local("ollama-home", "http://10.0.0.5:11434/v1"), local("ollama-work", "http://10.0.0.6:11434/v1")];
+        let accounts = [account("home", "ollama-home", None), account("work", "ollama-work", None)];
+        let configs = provider_configs(&accounts, &defs, &paths()).unwrap();
+        let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
+        for id in ["ollama-home", "ollama-work"] {
+            assert_eq!(registry.get(id).unwrap().id().0, id);
+        }
+    }
+
+    #[test]
+    fn a_provider_table_with_a_preset_id_overrides_the_preset() {
+        let defs = [ProviderDef { id: "groq".into(), base_url: Some("https://gw.example/openai/v1".into()), ..ProviderDef::default() }];
+        let configs = provider_configs(&[account("g", "groq", None)], &defs, &paths()).unwrap();
+        let def = configs["groq"].def.as_ref().unwrap();
+        assert_eq!(def.base_url.as_deref(), Some("https://gw.example/openai/v1"));
+        assert_eq!(def.env_vars, ["GROQ_API_KEY"]);
+        assert!(ProviderRegistry::new(&builtin(), &configs).unwrap().get("groq").is_ok());
+    }
+
+    #[test]
+    fn a_preset_needs_no_provider_table_and_an_unknown_id_is_left_for_the_registry() {
+        let accounts = [account("g", "groq", None), account("o", "ollama", None), account("x", "nobody", None)];
+        let configs = provider_configs(&accounts, &[], &paths()).unwrap();
+        assert_eq!(configs["groq"].def.as_ref().unwrap().base_url.as_deref(), Some("https://api.groq.com/openai/v1"));
+        assert!(configs["nobody"].def.is_none());
+        let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
+        assert!(registry.get("ollama").is_ok() && registry.get("nobody").is_err());
+    }
+
+    #[test]
+    fn api_responses_on_an_openai_account_is_the_responses_api_of_that_provider() {
+        let mut a = account("o", "openai", None);
+        a.api = Some("responses".into());
+        let configs = provider_configs(&[a.clone()], &[], &paths()).unwrap();
+        assert_eq!(configs["openai"].def.as_ref().unwrap().api, Some(Api::OpenaiResponses));
+        a.api = Some("grpc".into());
+        assert!(provider_configs(&[a], &[], &paths()).unwrap_err().to_string().contains("grpc"));
+    }
+
+    /// The 0.1.0 corpus: one config per id that existed then. Each loads with no edits, as the
+    /// accounts it always meant,, and builds a provider.
+    #[test]
+    fn every_0_1_0_config_still_loads_and_builds() {
+        let corpus = [
+            ("fake", include_str!("../../../fixtures/config/0.1.0-fake.toml")),
+            ("anthropic", include_str!("../../../fixtures/config/0.1.0-anthropic.toml")),
+            ("openai", include_str!("../../../fixtures/config/0.1.0-openai.toml")),
+            ("kimi", include_str!("../../../fixtures/config/0.1.0-kimi.toml")),
+            ("openai-compatible", include_str!("../../../fixtures/config/0.1.0-openai-compatible.toml")),
+        ];
+        for (id, text) in corpus {
+            let (table, warnings) = aibus_core::config::parse_file(Path::new("0.1.0.toml"), text).unwrap();
+            assert!(warnings.is_empty(), "{id}: {warnings:?}");
+            let cfg: aibus_core::config::Config = toml::Value::Table(table).try_into().unwrap();
+            assert!(cfg.problems().is_empty(), "{id}: {:?}", cfg.problems());
+            assert!(cfg.providers.is_empty(), "{id}");
+            let [a] = &cfg.accounts[..] else { panic!("{id}: one account") };
+            assert_eq!(a.provider, id);
+            assert!(a.enabled, "{id}");
+
+            let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths()).unwrap();
+            let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
+            assert_eq!(registry.get(id).unwrap().id().0, id, "{id}");
+        }
+    }
+
+    #[test]
+    fn the_old_account_settings_still_reach_the_provider() {
+        let base = |id: &str, text: &str| {
+            let (table, _) = aibus_core::config::parse_file(Path::new("c.toml"), text).unwrap();
+            let cfg: aibus_core::config::Config = toml::Value::Table(table).try_into().unwrap();
+            let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths()).unwrap();
+            configs[id].def.clone().unwrap()
+        };
+        let gw = base("anthropic", include_str!("../../../fixtures/config/0.1.0-anthropic.toml"));
+        assert_eq!(gw.base_url.as_deref(), Some("https://gw.example.com"));
+        let oa = base("openai", include_str!("../../../fixtures/config/0.1.0-openai.toml"));
+        assert_eq!(oa.api, Some(Api::OpenaiResponses));
+        let local = base("openai-compatible", include_str!("../../../fixtures/config/0.1.0-openai-compatible.toml"));
+        assert_eq!(local.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
+    }
+
+    #[test]
+    fn lists_the_fake_and_one_adapter_per_wire_and_every_old_id_is_a_preset() {
+        let mut ids: Vec<_> = builtin().iter().map(|f| f.id().0).collect();
+        for id in ["fake", "anthropic", "openai"] {
             assert!(ids.contains(&id), "{id}");
         }
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), builtin_factories().len());
+        assert_eq!(ids.len(), builtin().len());
+        for id in ["anthropic", "openai", "kimi", "openai-compatible"] {
+            assert!(aibus_provider::presets::preset(id).is_some(), "{id}");
+        }
     }
 }

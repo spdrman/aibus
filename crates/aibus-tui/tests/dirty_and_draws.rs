@@ -1,8 +1,9 @@
 use aibus_core::state::value::{as_list, as_str};
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
-use aibus_graph::Graph;
-use aibus_testkit::tui::replay_app;
+use aibus_graph::{Graph, Value};
+use aibus_core::state::ANIMATING;
+use aibus_testkit::tui::{poke, replay_app, run_id};
 use aibus_tui::view::{DIRTY, WIDGETS};
 use aibus_tui::{Theme, Ui};
 use ratatui::backend::TestBackend;
@@ -111,4 +112,16 @@ fn a_dirty_widget_draws_once_and_a_resize_draws() {
     term.backend_mut().resize(80, 24);
     assert!(ui.draw(&mut term, &app.graph).unwrap(), "resize redraws");
     assert_eq!(ui.draws, 4);
+}
+
+/// The flag that keeps the 30 Hz ticker going is up while a card runs, and down once the last one
+/// has stopped.
+#[test]
+fn animating_clears_when_the_last_run_stops() {
+    let mut app = replay_app();
+    assert_eq!(app.graph.read_key(ANIMATING), Some(&Value::Bool(true)), "three runs are going");
+    for seq in 1..=3 {
+        poke(&mut app, &format!("model:run:{}:status", run_id(seq)), Value::Str("completed".into()));
+    }
+    assert_eq!(app.graph.read_key(ANIMATING), Some(&Value::Bool(false)), "every run is done");
 }

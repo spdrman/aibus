@@ -12,6 +12,7 @@ use crate::agent::{AgentDef, Isolation, Role};
 use crate::ids::{AccountName, AgentName, ForkId, ModelId, PermissionId, RunId, ToolCallId};
 use crate::run::{Progress, RunError, RunResult, Usage};
 use crate::tool::Artifact;
+use crate::workflow::WorkflowRow;
 use crate::state::value::{map, n, s};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -387,13 +388,35 @@ impl Checkpoint {
 
 /// What the graph may know about an account. There is deliberately no secret-shaped field:
 /// `key_ref` is `keyring:aibus/<name>`, `env:AIBUS_ACCOUNT_<NAME>_KEY`, `file:<path>` or `none`.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct AccountView {
     pub name: AccountName,
     pub provider: SmolStr,
     pub label: String,
     pub default_model: Option<ModelId>,
     pub key_ref: String,
+    /// What the account's provider serves, read from the tables at startup (the `/model` picker
+    /// draws from this; it never asks the network). Empty when the table lists nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelView>,
+}
+
+/// One model of an account as the picker shows it. The fields vary together per model: the price
+/// and the capability flags come from the provider's tables for this id.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ModelView {
+    pub id: ModelId,
+    /// The `[models]` or account alias that names this model, when there is one.
+    pub alias: Option<String>,
+    pub context_window: u32,
+    /// USD per million tokens; `None` when the table has no price (shown as `n/a`).
+    pub input_per_mtok: Option<f64>,
+    pub output_per_mtok: Option<f64>,
+    pub tools: bool,
+    pub thinking: bool,
+    pub images: bool,
+    pub cache: bool,
+    pub logprobs: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -415,12 +438,63 @@ impl ShutdownReason {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Screen {
     Agents,
     Accounts,
+    /// `/model` with no reference: the models of the connected accounts, for this target.
+    Models(ModelTarget),
+    /// `/login` with no provider: the providers an account can be added for.
+    Providers,
+    /// `/logout <account>` asks first.
+    ConfirmLogout(AccountName),
     /// `/clear` asks first.
     ConfirmClear,
+    /// `/cancel` on the lead asks first.
+    ConfirmCancel(RunId),
+    /// `/status`: one run's numbers.
+    RunStatus(RunId),
+    /// `/status @advisor` and `/status @router`: the seat's checkpoints or answers so far.
+    AdvisorStatus,
+    RouterStatus,
+    /// `/cost` with no target: the per-run table and the session total.
+    Cost,
+    /// `/workflow list`: the workflows of the project and the user, from `model:workflows`.
+    Workflows,
+    /// `/workflow show <name>` and a refused `/workflow save`: one text and its summary line,
+    /// from `model:workflow:shown`.
+    WorkflowShow,
+}
+
+/// What `Command::SetModel` changes: the lead's model, a seat's, or one run's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ModelTarget {
+    Lead,
+    Advisor,
+    Router,
+    Run(RunId),
+}
+
+impl ModelTarget {
+    /// The word the graph and the log use for it (`lead`, `advisor`, `router`, `run <id>`).
+    pub fn label(self) -> String {
+        match self {
+            ModelTarget::Lead => "lead".into(),
+            ModelTarget::Advisor => "advisor".into(),
+            ModelTarget::Router => "router".into(),
+            ModelTarget::Run(r) => format!("run {r}"),
+        }
+    }
+
+    /// The inverse of `label`, for what the graph holds.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "lead" => Some(ModelTarget::Lead),
+            "advisor" => Some(ModelTarget::Advisor),
+            "router" => Some(ModelTarget::Router),
+            _ => s.strip_prefix("run ")?.parse().ok().map(ModelTarget::Run),
+        }
+    }
 }
 
 /// The user-facing verb set the TUI and CLI both produce.
@@ -502,6 +576,44 @@ pub enum Command {
     Quit {
         force: bool,
     },
+    /// Changes the model of `target` from its next request on. `model` is an alias or a full id,
+    /// or `off` for a seat. The reducer cannot resolve it (it has no accounts), so it queues the
+    /// request and the executor answers with `Msg::ModelSwitched`.
+    SetModel {
+        target: ModelTarget,
+        model: String,
+    },
+    /// A filesystem step of `/workflow list`, `show` or `save`. The reducer does nothing with it:
+    /// the terminal loop does the step (it owns the directories) and answers with
+    /// `Msg::WorkflowsLoaded`.
+    WorkflowFile(WorkflowFile),
+    /// `/workflow new <goal>`, `/workflow new --write <goal>` and `/workflow edit <name> <change>`:
+    /// the lead delegates to the `workflow-author` in the foreground. With `write` the author's
+    /// server is started with `--allow write` for this run, and `edit` names the workflow to
+    /// change (`goal` is then the change). The reducer does nothing with it; the binary sends
+    /// the lead the call, because it holds the connections to the servers the author talks to.
+    WorkflowAuthor {
+        goal: String,
+        write: bool,
+        edit: Option<String>,
+    },
+}
+
+/// What `Command::WorkflowFile` asks the loop to do with the workflow files.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum WorkflowFile {
+    List,
+    Show(String),
+    /// Writes `model:workflow:draft` as `name`, in the user's directory with `user`.
+    Save { name: String, user: bool, force: bool },
+}
+
+/// The text `/workflow show` opens: the file (or the validator's findings), and one line under it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct WorkflowShown {
+    pub name: String,
+    pub text: String,
+    pub summary: String,
 }
 
 #[derive(Clone, Debug)]
@@ -608,6 +720,44 @@ pub enum Msg {
     Shutdown {
         reason: ShutdownReason,
     },
+    /// An account operation the terminal ran off the UI thread has finished. `op` is `add`,
+    /// `test`, `disable` or `remove`; `text` is the line the Accounts screen shows. The graph
+    /// logs the outcome only, never the text.
+    AccountOpDone {
+        op: String,
+        account: String,
+        ok: bool,
+        text: String,
+    },
+    /// A browser login the terminal started has something to show: the authorization address, or
+    /// the device code. `line` is for the modal only; the graph and the logs never keep it.
+    AccountPrompt {
+        account: String,
+        line: String,
+    },
+    /// The executor's answer to a queued `Command::SetModel` (`id` is the request's). `Ok(None)`
+    /// is a seat turned off; `Err` is why nothing changed.
+    ModelSwitched {
+        id: u64,
+        target: ModelTarget,
+        to: Result<Option<(ModelId, AccountName)>, String>,
+    },
+    /// A fallback moved the run to another account before the first token of a turn (F9). The
+    /// card shows `↷ <to>` and `model:run:<id>:meta` carries the final account.
+    RunSwitched {
+        run: RunId,
+        from: AccountName,
+        to: AccountName,
+        model: ModelId,
+    },
+    /// The workflow files as the loop found them, after a list, a show or a save. `rows` replaces
+    /// `model:workflows` (the prompt's `/fix` family reads the names), `shown` replaces
+    /// `model:workflow:shown` when there is one, and `said` goes to the session log.
+    WorkflowsLoaded {
+        rows: Vec<WorkflowRow>,
+        shown: Option<WorkflowShown>,
+        said: Option<String>,
+    },
     /// The persist effect finished a snapshot. Not in 02 section 3.1: something has to reset
     /// `model:persist:due`, and only a commit can do it.
     Persisted,
@@ -641,8 +791,13 @@ impl Msg {
             Msg::HandoffWritten { .. } => "HandoffWritten",
             Msg::AgentsReloaded { .. } => "AgentsReloaded",
             Msg::AccountsReloaded { .. } => "AccountsReloaded",
+            Msg::AccountOpDone { .. } => "AccountOpDone",
+            Msg::AccountPrompt { .. } => "AccountPrompt",
             Msg::IoError { .. } => "IoError",
             Msg::Shutdown { .. } => "Shutdown",
+            Msg::ModelSwitched { .. } => "ModelSwitched",
+            Msg::RunSwitched { .. } => "RunSwitched",
+            Msg::WorkflowsLoaded { .. } => "WorkflowsLoaded",
             Msg::Persisted => "Persisted",
         }
     }
@@ -660,7 +815,7 @@ impl Msg {
             }
             Msg::SubmitPrompt { text } => map([("msg", name), ("len", len(text))]),
             Msg::Command(c) => map([("msg", name), ("command", s(command_name(c)))]),
-            Msg::RunStarted { run, .. } => map([("msg", name), ("run", s(&run.to_string()))]),
+            Msg::RunStarted { run, .. } | Msg::RunSwitched { run, .. } => map([("msg", name), ("run", s(&run.to_string()))]),
             Msg::Stream { run, chunks } => {
                 let bytes: usize = chunks
                     .iter()
@@ -771,12 +926,18 @@ impl Msg {
             Msg::AccountsReloaded { accounts } => {
                 map([("msg", name), ("accounts", n(accounts.len()))])
             }
+            Msg::AccountPrompt { line, .. } => map([("msg", name), ("line_len", len(line))]),
+            Msg::AccountOpDone { ok, text, .. } => map([("msg", name), ("ok", Value::Bool(*ok)), ("text_len", len(text))]),
             Msg::IoError { context, error } => map([
                 ("msg", name),
                 ("context_len", len(context)),
                 ("error_len", len(error)),
             ]),
             Msg::Shutdown { reason } => map([("msg", name), ("reason", s(reason.as_str()))]),
+            Msg::ModelSwitched { id, to, .. } => map([("msg", name), ("id", n(*id)), ("ok", Value::Bool(to.is_ok()))]),
+            Msg::WorkflowsLoaded { rows, shown, .. } => {
+                map([("msg", name), ("rows", n(rows.len())), ("shown", Value::Bool(shown.is_some()))])
+            }
         }
     }
 }
@@ -808,5 +969,8 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::LogFilter(_) => "log_filter",
         Command::Clear => "clear",
         Command::Quit { .. } => "quit",
+        Command::SetModel { .. } => "set_model",
+        Command::WorkflowFile(_) => "workflow_file",
+        Command::WorkflowAuthor { .. } => "workflow_author",
     }
 }

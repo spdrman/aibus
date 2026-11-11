@@ -90,7 +90,7 @@
             }
           },
           "run_id": {
-            "Str": "01M6Z6N76GENCM7D4YRYA8QE5R"
+            "Str": "01M769A77HMTESPXA2T8A1594H"
           },
           "selected": {
             "Bool": true
@@ -105,6 +105,7 @@
       }
     ]
   },
+  "view:cost": "Null",
   "view:delegate_row": {
     "Map": {
       "connectors": {
@@ -212,8 +213,10 @@
   },
   "view:lead_box": "Null",
   "view:menu": "Null",
+  "view:models": "Null",
   "view:palette": "Null",
   "view:permission": "Null",
+  "view:providers": "Null",
   "view:return_box": {
     "Map": {
       "highlight": {
@@ -227,6 +230,7 @@
       }
     }
   },
+  "view:run_status": "Null",
   "view:run_tips": {
     "List": [
       {
@@ -247,7 +251,7 @@
             "Str": "compacting"
           },
           "run_id": {
-            "Str": "01M6Z6N76GENCM7D4YRYA8QE5R"
+            "Str": "01M769A77HMTESPXA2T8A1594H"
           }
         }
       }
@@ -265,7 +269,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N76GENCM7D4YRYA8QE5R"
+            "Str": "01M769A77HMTESPXA2T8A1594H"
           },
           "text": {
             "Str": "started"
@@ -306,7 +310,7 @@
           "p": "Null",
           "run": "Null",
           "text": {
-            "Str": "ls ok 1 ms"
+            "Str": "ls ok 3 ms"
           },
           "time": {
             "Str": "00:00:00"
@@ -343,7 +347,7 @@
           },
           "p": "Null",
           "run": {
-            "Str": "01M6Z6N76GENCM7D4YRYA8QE5R"
+            "Str": "01M769A77HMTESPXA2T8A1594H"
           },
           "text": {
             "Str": "finished completed"
@@ -370,6 +374,9 @@
       },
       "alerts": {
         "List": []
+      },
+      "cost": {
+        "Str": "$0.0005"
       },
       "ledger": "Null",
       "mem": "Null",
@@ -408,5 +415,6 @@
       }
     }
   },
-  "view:transcript": "Null"
+  "view:transcript": "Null",
+  "view:workflows": "Null"
 }

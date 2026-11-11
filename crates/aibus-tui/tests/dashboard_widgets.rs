@@ -878,3 +878,28 @@ fn a_new_run_of_the_same_agent_replaces_a_finished_card() {
     worker(&mut app, 3, "audit", "runs it again", Some(0.2), "running");
     assert_eq!(rig(app, (98, 46)).ui.drawn.cards, 2);
 }
+
+/// The card rects, and with them the hit map, come from `widgets::card_rects` whichever way the
+/// column is drawn.
+#[test]
+fn the_card_hit_rects_are_the_ones_the_window_gives_for_1_3_and_8_cards() {
+    for size in [(98, 46), (98, 29)] {
+        for n in [1usize, 3, 8] {
+            let mut app = session();
+            for k in 0..n {
+                worker(&mut app, 2 + k as u128, &format!("w{k}"), "does a thing", Some(0.5), "running");
+            }
+            let r = rig(app, size);
+            let centre = r.ui.drawn.areas.centre;
+            let want = aibus_tui::widgets::card_rects(centre, n, 0);
+            assert_eq!(want.len(), n.min(3));
+            for (i, w) in want {
+                let got = r.rect(HitId::Card(i));
+                assert_eq!((got.x, got.width), (w.x, w.width), "{size:?} {n} cards, card {i}");
+                assert_eq!(got.height, 7, "{size:?} {n} cards, card {i}");
+            }
+            // The fourth card's left edge is on the canvas beside the window and is hit-testable too (#89).
+            assert_eq!(r.ui.drawn.hits.find(HitId::Card(3)).is_some(), n > 3, "{size:?} {n} cards, card 3");
+        }
+    }
+}

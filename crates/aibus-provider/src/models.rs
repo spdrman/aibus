@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::error::ConfigError;
-use crate::provider::{ModelInfo, Price, ProviderConfig};
+use crate::provider::{Capabilities, CapabilityOverrides, ModelInfo, Price, ProviderConfig};
 use crate::tokens::CHARS_PER_TOKEN;
 use crate::types::{AliasTable, ModelId, ModelRef};
 
@@ -35,9 +35,31 @@ pub struct ModelEntry {
     pub info: ModelInfo,
     #[serde(default)]
     pub price: Option<Price>,
-    /// The model accepts the `effort` parameter.
+    /// The model accepts the `effort` parameter. Older tables say it here; `capabilities.effort`
+    /// says the same and wins when both are given.
     #[serde(default)]
     pub effort: bool,
+    /// What this model can do differently from its provider's default. Only the named fields
+    /// count, and a later layer names over an earlier one field by field.
+    #[serde(default, skip_serializing_if = "is_unset")]
+    pub capabilities: CapabilityOverrides,
+    /// The model emits thinking or reasoning tokens at all (`capabilities.thinking` is whether
+    /// a request may ask for a budget). `None` means the table did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<bool>,
+    /// Epoch seconds from which this row applies. A row with the same `id` and no `price_from`
+    /// is the current one; a row with a later `price_from` is a price that has been announced
+    /// but has not started yet. `None` means "always".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_from: Option<u64>,
+    /// This model is priced like the one with this id (a Bedrock inference profile, `us.anthropic.
+    /// claude-...`, costs what the plain Claude model does). A `price` on the row itself wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_of: Option<String>,
+}
+
+fn is_unset(c: &CapabilityOverrides) -> bool {
+    *c == CapabilityOverrides::default()
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -55,7 +77,7 @@ pub struct ModelTable {
     families: BTreeMap<SmolStr, f64>,
     /// A full id with one of these prefixes resolves even when the table has not heard of it,
     /// so a model released after the table was written still works (without a price).
-    prefixes: &'static [&'static str],
+    prefixes: Vec<String>,
     /// An alias target resolves whatever it is: a local server names its own models.
     open_aliases: bool,
 }
@@ -78,7 +100,7 @@ impl ModelTable {
         provider: &str,
         builtin: &str,
         cfg: &ProviderConfig,
-        prefixes: &'static [&'static str],
+        prefixes: &[&str],
         open_aliases: bool,
     ) -> Result<Self, ConfigError> {
         let bad = |e: String| ConfigError::Invalid(provider.to_owned(), e);
@@ -86,26 +108,48 @@ impl ModelTable {
         let mut t = Self {
             entries: Vec::new(),
             families: BTreeMap::new(),
-            prefixes,
+            prefixes: prefixes.iter().map(|p| (*p).to_owned()).collect(),
             open_aliases,
         };
-        t.layer(base);
+        t.layer(base, false);
         if let Some(dir) = &cfg.cache_dir {
             if let Ok(Some(cached)) = read(&dir.join(format!("{provider}.json"))) {
-                t.layer(cached);
+                t.layer(cached, false);
             }
         }
         if let Some(dir) = &cfg.overrides_dir {
             if let Some(over) = read(&dir.join(provider).join("models.json")).map_err(bad)? {
-                t.layer(over);
+                t.layer(over, true);
             }
         }
         Ok(t)
     }
 
-    fn layer(&mut self, f: File) {
-        for e in f.models {
-            match self.entries.iter_mut().find(|x| x.info.id == e.info.id) {
+    /// A row replaces the one with the same id and the same `price_from`. With `exclusive` (the
+    /// user's overrides) an undated row also drops every dated row of that id from the earlier
+    /// layers, so an override of a price is not undone when a built-in future price starts.
+    /// What a model can do is merged field by field instead: a layer that only knows sizes or a
+    /// price (a 0.1.0 file, the API list) keeps what the layer below said the model can do.
+    fn layer(&mut self, f: File, exclusive: bool) {
+        for mut e in f.models {
+            let below = self
+                .entries
+                .iter()
+                .filter(|x| x.info.id == e.info.id)
+                .fold((CapabilityOverrides::default(), None, false), |(c, r, eff), x| {
+                    (c.over(&x.capabilities), x.reasoning.or(r), eff | x.effort)
+                });
+            e.capabilities = below.0.over(&e.capabilities);
+            e.reasoning = e.reasoning.or(below.1);
+            e.effort |= below.2;
+            if exclusive && e.price_from.is_none() {
+                self.entries.retain(|x| x.info.id != e.info.id || x.price_from.is_none());
+            }
+            match self
+                .entries
+                .iter_mut()
+                .find(|x| x.info.id == e.info.id && x.price_from == e.price_from)
+            {
                 Some(slot) => *slot = e,
                 None => self.entries.push(e),
             }
@@ -113,15 +157,40 @@ impl ModelTable {
         self.families.extend(f.families);
     }
 
+    /// One info per model, from the row that applies now.
     pub fn models(&self) -> Vec<ModelInfo> {
-        self.entries.iter().map(|e| e.info.clone()).collect()
+        let now = SystemTime::now();
+        let mut seen = Vec::new();
+        for e in &self.entries {
+            if !seen.contains(&&e.info.id) {
+                seen.push(&e.info.id);
+            }
+        }
+        seen.into_iter()
+            .filter_map(|id| self.entry_at(id, now))
+            .map(|e| e.info.clone())
+            .collect()
     }
 
     /// The entry for `id`, or for the model a dated snapshot of it (`x-20250929`,
     /// `x-2025-09-29`) is a copy of.
     pub fn entry(&self, id: &ModelId) -> Option<&ModelEntry> {
+        self.entry_at(id, SystemTime::now())
+    }
+
+    /// The same for the wall clock `at`: of the rows for the model, the one with the latest
+    /// `price_from` that has started. When none has started yet the earliest row is returned,
+    /// and `price_at` finds it has no price to give.
+    pub fn entry_at(&self, id: &ModelId, at: SystemTime) -> Option<&ModelEntry> {
+        let at = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         // `name-20250929` and `name-2025-09-29` are snapshots of `name`.
         fn undated(id: &str) -> &str {
+            // Vertex spells a snapshot `name@20250929`.
+            if let Some((head, d)) = id.rsplit_once('@') {
+                if d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()) {
+                    return head;
+                }
+            }
             let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
             if let Some((head, d)) = id.rsplit_once('-') {
                 if digits(d, 8) {
@@ -136,12 +205,53 @@ impl ModelTable {
             }
             id
         }
-        let find = |s: &str| self.entries.iter().find(|e| e.info.id.0 == s);
+        let find = |s: &str| {
+            let rows = || self.entries.iter().filter(|e| e.info.id.0 == s);
+            rows()
+                .filter(|e| e.price_from.unwrap_or(0) <= at)
+                .max_by_key(|e| e.price_from.unwrap_or(0))
+                .or_else(|| rows().min_by_key(|e| e.price_from.unwrap_or(0)))
+        };
         find(&id.0).or_else(|| find(undated(&id.0)))
     }
 
+    /// What `id` can do: `base` (the provider's capabilities from its definition) with the
+    /// model's entry laid over it. The layers of the entry itself (built-in, cache, user file)
+    /// were merged field by field when the table was loaded, and every row of the model (a
+    /// dated price row too) carries the merged value. A model with no entry gets `base`.
+    pub fn capabilities_for(&self, base: Capabilities, id: &ModelId) -> Capabilities {
+        match self.entry(id) {
+            Some(e) => {
+                let legacy = CapabilityOverrides { effort: e.effort.then_some(true), ..CapabilityOverrides::default() };
+                base.with(&legacy.over(&e.capabilities))
+            }
+            None => base,
+        }
+    }
+
+    /// The price now. Past usage is never repriced: it is already in the graph as `cost_usd`.
     pub fn price(&self, id: &ModelId) -> Option<Price> {
-        self.entry(id)?.price
+        self.price_at(id, SystemTime::now())
+    }
+
+    /// The price in force at `at`; `None` when the only rows start later.
+    pub fn price_at(&self, id: &ModelId, at: SystemTime) -> Option<Price> {
+        let e = self.entry_at(id, at)?;
+        let secs = at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let own = (e.price_from.unwrap_or(0) <= secs).then_some(e.price).flatten();
+        // One hop: the row it points at is priced by its own `price`, never by another pointer.
+        // The row is in this table (a profile of a model the table also lists) or, for the Bedrock
+        // and Vertex tables that only carry pointers, in the plain Anthropic table.
+        own.or_else(|| {
+            static PLAIN: std::sync::OnceLock<Option<ModelTable>> = std::sync::OnceLock::new();
+            let target = ModelId(e.price_of.as_deref()?.into());
+            let plain = PLAIN.get_or_init(|| {
+                let json = crate::catalog::table("anthropic")?;
+                Self::load("anthropic", json, &ProviderConfig::default(), &[], false).ok()
+            });
+            let row = self.entry_at(&target, at).or_else(|| plain.as_ref()?.entry_at(&target, at))?;
+            (row.price_from.unwrap_or(0) <= secs).then_some(row.price).flatten()
+        })
     }
 
     /// Characters per token for this model's family (Q20).
@@ -161,7 +271,7 @@ impl ModelTable {
         };
         let id = ModelId(id);
         let known = self.entry(&id).is_some()
-            || self.prefixes.iter().any(|p| id.0.starts_with(p))
+            || self.prefixes.iter().any(|p| id.0.starts_with(p.as_str()))
             || (aliased && self.open_aliases);
         known.then_some(id)
     }
@@ -184,13 +294,20 @@ impl ModelTable {
                     info: defaults(id),
                     price: None,
                     effort: false,
+                    capabilities: CapabilityOverrides::default(),
+                    reasoning: None,
+                    price_from: None,
+                    price_of: None,
                 })
             })
             .collect();
-        self.layer(File {
-            models: entries.clone(),
-            ..File::default()
-        });
+        self.layer(
+            File {
+                models: entries.clone(),
+                ..File::default()
+            },
+            false,
+        );
         if let Some(dir) = cache_dir {
             let file = File {
                 fetched_at: now.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs()),
@@ -226,6 +343,7 @@ pub fn cache_is_stale(cache_dir: &Path, provider: &str, now: SystemTime) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::{Capabilities, CapabilityOverrides, SystemRole};
 
     const BUILTIN: &str = r#"{
         "models": [
@@ -253,6 +371,60 @@ mod tests {
         assert_eq!(t.chars_per_token(&id("big")), 3.0);
         assert_eq!(t.chars_per_token(&id("old")), 4.0);
         assert_eq!(t.chars_per_token(&id("nope")), 4.0);
+    }
+
+    #[test]
+    fn a_future_price_waits_for_its_price_from_and_not_a_second_before() {
+        let from = 1_800_000_000;
+        let dated = format!(
+            r#"{{"models": [
+              {{"id": "big", "context_window": 1000, "max_output": 100, "family": "f", "deprecated": false,
+                "price": {{"input_per_mtok": 3.0, "output_per_mtok": 15.0}}}},
+              {{"id": "big", "context_window": 1000, "max_output": 100, "family": "f", "deprecated": false,
+                "price_from": {from}, "price": {{"input_per_mtok": 2.0, "output_per_mtok": 10.0}}}}
+            ]}}"#
+        );
+        let t = ModelTable::load("p", &dated, &ProviderConfig::default(), &[], false).unwrap();
+        let at = |s: u64| UNIX_EPOCH + Duration::from_secs(s);
+        let input = |s: u64| t.price_at(&id("big"), at(s)).unwrap().input_per_mtok;
+        assert_eq!(input(from - 1), 3.0);
+        assert_eq!(input(from), 2.0);
+        assert_eq!(input(from + 86_400), 2.0);
+        assert_eq!(t.models().len(), 1, "one model, however many price rows");
+        // A snapshot of the model follows the same rows.
+        assert_eq!(t.price_at(&id("big-20250929"), at(from)).unwrap().input_per_mtok, 2.0);
+    }
+
+    #[test]
+    fn a_model_whose_only_price_starts_later_has_none_until_then() {
+        let json = r#"{"models": [{"id": "soon", "context_window": 1, "max_output": 1, "family": "f",
+            "price_from": 1800000000, "price": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}}]}"#;
+        let t = ModelTable::load("p", json, &ProviderConfig::default(), &[], false).unwrap();
+        let at = |s: u64| UNIX_EPOCH + Duration::from_secs(s);
+        assert_eq!(t.price_at(&id("soon"), at(1_799_999_999)), None);
+        assert!(t.price_at(&id("soon"), at(1_800_000_000)).is_some());
+        assert_eq!(t.models().len(), 1);
+    }
+
+    #[test]
+    fn a_user_price_override_also_beats_a_builtin_future_price() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "big", "context_window": 1000, "max_output": 100, "family": "f",
+                "price": {"input_per_mtok": 9.0, "output_per_mtok": 9.0}}]}"#,
+        )
+        .unwrap();
+        let builtin = r#"{"models": [
+            {"id": "big", "context_window": 1000, "max_output": 100, "family": "f",
+             "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}},
+            {"id": "big", "context_window": 1000, "max_output": 100, "family": "f", "price_from": 1800000000,
+             "price": {"input_per_mtok": 2.0, "output_per_mtok": 10.0}}]}"#;
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", builtin, &cfg, &[], false).unwrap();
+        let later = UNIX_EPOCH + Duration::from_secs(1_900_000_000);
+        assert_eq!(t.price_at(&id("big"), later).unwrap().input_per_mtok, 9.0);
     }
 
     #[test]
@@ -366,5 +538,156 @@ mod tests {
         assert!(cache_is_stale(dir.path(), "other", now), "no file is stale");
         // The next process starts from the cache.
         assert_eq!(table(&cfg).models().len(), 3);
+    }
+
+    fn base_caps() -> Capabilities {
+        Capabilities {
+            tools: true,
+            parallel_tool_calls: true,
+            streaming: true,
+            thinking: false,
+            prompt_cache: false,
+            logprobs: true,
+            effort: false,
+            images: false,
+            system_role: SystemRole::Separate,
+            max_tools: None,
+        }
+    }
+
+    #[test]
+    fn an_entry_parses_capabilities_and_reasoning_and_defaults_both() {
+        let f: File = serde_json::from_str(
+            r#"{"models": [
+              {"id": "a", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false},
+              {"id": "b", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false,
+               "reasoning": true,
+               "capabilities": {"logprobs": false, "max_tools": 8, "system_role": "first_message"}}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(f.models[0].capabilities, CapabilityOverrides::default());
+        assert_eq!(f.models[0].reasoning, None);
+        assert_eq!(f.models[1].reasoning, Some(true));
+        assert_eq!(
+            f.models[1].capabilities,
+            CapabilityOverrides {
+                logprobs: Some(false),
+                max_tools: Some(8),
+                system_role: Some(SystemRole::FirstMessage),
+                ..CapabilityOverrides::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_0_1_0_override_file_loads_unchanged_and_keeps_what_the_builtin_said() {
+        // No capabilities, no reasoning: the shape every 0.1.0 `models.json` has.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "caps", "context_window": 5, "max_output": 5, "family": "f", "deprecated": false}]}"#,
+        )
+        .unwrap();
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap();
+        assert_eq!(t.models().iter().find(|m| m.id.0 == "caps").unwrap().context_window, 5);
+        assert!(!t.capabilities_for(base_caps(), &id("caps")).logprobs, "the built-in's claim survives a size-only override");
+    }
+
+    const CAPS: &str = r#"{"models": [
+      {"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false,
+       "capabilities": {"logprobs": false, "images": true}},
+      {"id": "legacy", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "effort": true}
+    ]}"#;
+
+    #[test]
+    fn capabilities_for_resolves_default_then_builtin_then_cache_then_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cache, over) = (dir.path().join("cache"), dir.path().join("providers"));
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(over.join("p")).unwrap();
+        let cfg = ProviderConfig { cache_dir: Some(cache.clone()), overrides_dir: Some(over.clone()), ..ProviderConfig::default() };
+
+        // Preset default only: the model is not in any table.
+        let t = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap();
+        assert_eq!(t.capabilities_for(base_caps(), &id("nope")), base_caps());
+
+        // Built-in names logprobs=false and images=true; the rest is the preset's.
+        let c = t.capabilities_for(base_caps(), &id("caps"));
+        assert!(!c.logprobs && c.images && c.tools);
+
+        // The cache names tools=false, and says nothing of images: images stays.
+        std::fs::write(
+            cache.join("p.json"),
+            r#"{"fetched_at": 1, "models": [{"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "capabilities": {"tools": false}}]}"#,
+        )
+        .unwrap();
+        let c = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap().capabilities_for(base_caps(), &id("caps"));
+        assert!(!c.tools && c.images && !c.logprobs);
+
+        // The user's file wins last: logprobs back on, tools still off.
+        std::fs::write(
+            over.join("p/models.json"),
+            r#"{"models": [{"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "capabilities": {"logprobs": true}}]}"#,
+        )
+        .unwrap();
+        let c = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap().capabilities_for(base_caps(), &id("caps"));
+        assert!(c.logprobs && !c.tools && c.images);
+    }
+
+    #[test]
+    fn the_old_effort_field_still_means_the_effort_capability() {
+        let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
+        assert!(t.capabilities_for(base_caps(), &id("legacy")).effort);
+        assert!(!t.capabilities_for(base_caps(), &id("caps")).effort);
+    }
+
+    #[test]
+    fn a_dated_snapshot_takes_its_models_capabilities() {
+        let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
+        assert!(!t.capabilities_for(base_caps(), &id("caps-20250929")).logprobs);
+    }
+
+    const PRICED: &str = r#"{"models": [
+      {"id": "claude-sonnet-4-5", "context_window": 1, "max_output": 1, "family": "sonnet", "deprecated": false,
+       "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0, "cache_read_per_mtok": 0.3, "cache_write_per_mtok": 3.75}},
+      {"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 1, "max_output": 1, "family": "sonnet",
+       "deprecated": false, "price_of": "claude-sonnet-4-5"},
+      {"id": "orphan", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "price_of": "nobody"}
+    ]}"#;
+
+    #[test]
+    fn price_of_gives_an_inference_profile_the_plain_models_price() {
+        let t = ModelTable::load("p", PRICED, &ProviderConfig::default(), &[], false).unwrap();
+        let profile = id("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+        assert_eq!(t.price(&profile), t.price(&id("claude-sonnet-4-5")));
+        assert_eq!(t.price(&profile).unwrap().output_per_mtok, 15.0);
+        // A pointer at nothing is "n/a", never a guess.
+        assert_eq!(t.price(&id("orphan")), None);
+    }
+
+    #[test]
+    fn a_price_a_row_has_itself_wins_over_its_price_of() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 1, "max_output": 1, "family": "sonnet",
+               "deprecated": false, "price_of": "claude-sonnet-4-5",
+               "price": {"input_per_mtok": 1.0, "output_per_mtok": 2.0, "cache_read_per_mtok": null, "cache_write_per_mtok": null}}]}"#,
+        )
+        .unwrap();
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", PRICED, &cfg, &[], false).unwrap();
+        assert_eq!(t.price(&id("us.anthropic.claude-sonnet-4-5-20250929-v1:0")).unwrap().output_per_mtok, 2.0);
+    }
+
+    #[test]
+    fn a_vertex_snapshot_with_an_at_sign_shares_its_models_entry() {
+        let t = ModelTable::load("p", PRICED, &ProviderConfig::default(), &[], false).unwrap();
+        assert_eq!(t.price(&id("claude-sonnet-4-5@20250929")).unwrap().input_per_mtok, 3.0);
+        assert_eq!(t.price(&id("claude-other@20250929")), None);
     }
 }

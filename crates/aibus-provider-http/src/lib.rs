@@ -10,11 +10,12 @@
 
 use std::collections::VecDeque;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use aibus_provider::sse::{SseEvent, SseParser};
-use aibus_provider::{ProviderError, ProviderErrorKind, StreamChunk};
-use reqwest::header::{HeaderValue, USER_AGENT};
+use aibus_provider::error::{parse_retry_after, parse_rfc3339};
+use aibus_provider::{ProviderError, ProviderErrorKind, RateLimitInfo, StreamChunk};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, RequestBuilder, Response};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -60,8 +61,10 @@ pub fn sensitive(value: &str) -> Result<HeaderValue, ProviderError> {
     Ok(v)
 }
 
-/// `error.message` (both providers' shape), else `message`, else the start of the body.
-fn message_of(body: &[u8]) -> String {
+/// The provider's message and its error code. The message is `error.message` (both providers'
+/// shape), else `message`, else the start of the body. The code is `error.code`, else
+/// `error.type` (Anthropic's shape), else empty.
+fn error_of(body: &[u8]) -> (String, String) {
     let json: Option<serde_json::Value> = serde_json::from_slice(body).ok();
     let found = json.as_ref().and_then(|j| {
         j.pointer("/error/message")
@@ -70,7 +73,96 @@ fn message_of(body: &[u8]) -> String {
             .and_then(|m| m.as_str())
             .map(str::to_owned)
     });
-    found.unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_owned())
+    let code = json
+        .as_ref()
+        .and_then(|j| j.pointer("/error/code").or_else(|| j.pointer("/error/type")))
+        .and_then(|c| c.as_str())
+        .unwrap_or_default()
+        .to_owned();
+    (found.unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_owned()), code)
+}
+
+/// `error.details[].retryDelay` of a Google error body.
+fn retry_delay(body: &[u8]) -> Option<Duration> {
+    let json: serde_json::Value = serde_json::from_slice(body).ok()?;
+    json.pointer("/error/details")?
+        .as_array()?
+        .iter()
+        .find_map(|d| parse_go_duration(d["retryDelay"].as_str()?))
+}
+
+/// A Go-style duration, as OpenAI writes its reset headers: `1s`, `6m0s`, `20ms`, `1h2m3.5s`.
+fn parse_go_duration(value: &str) -> Option<Duration> {
+    let mut rest = value.trim();
+    let mut total = Duration::ZERO;
+    if rest.is_empty() {
+        return None;
+    }
+    while !rest.is_empty() {
+        let digits = rest.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
+        let n: f64 = rest[..digits].parse().ok()?;
+        rest = &rest[digits..];
+        let unit = rest.find(|c: char| c.is_ascii_digit() || c == '.').unwrap_or(rest.len());
+        let secs = match &rest[..unit] {
+            "h" => 3600.0,
+            "m" => 60.0,
+            "s" => 1.0,
+            "ms" => 1e-3,
+            "us" | "\u{b5}s" => 1e-6,
+            "ns" => 1e-9,
+            _ => return None,
+        };
+        total += Duration::try_from_secs_f64(n * secs).ok()?;
+        rest = &rest[unit..];
+    }
+    Some(total)
+}
+
+/// What the response headers say about the account's windows: `retry-after` (seconds or date)
+/// and `retry-after-ms`, OpenAI's `x-ratelimit-remaining-*` and `x-ratelimit-reset-*`, and
+/// Anthropic's `anthropic-ratelimit-*` family. `None` when there is no such header at all.
+/// `now` anchors the date forms, so a test can pin it.
+pub fn rate_limit(headers: &HeaderMap, now: SystemTime) -> Option<RateLimitInfo> {
+    let get = |n: &str| headers.get(n).and_then(|v| v.to_str().ok());
+    let count = |names: &[&str]| names.iter().filter_map(|n| get(n)?.trim().parse::<u64>().ok()).min();
+    // Anthropic sends a timestamp, OpenAI a span.
+    let reset = |names: &[&str]| {
+        names
+            .iter()
+            .filter_map(|n| {
+                let v = get(n)?;
+                parse_go_duration(v).or_else(|| parse_rfc3339(v)?.duration_since(now).ok().or(Some(Duration::ZERO)))
+            })
+            .min()
+    };
+    let retry_after = get("retry-after-ms")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|ms| ms.is_finite() && *ms >= 0.0)
+        .map(|ms| Duration::from_secs_f64(ms.min(3_600_000.0) / 1000.0))
+        .or_else(|| get("retry-after").and_then(|v| parse_retry_after(v, now)));
+    let requests_remaining = count(&["x-ratelimit-remaining-requests", "anthropic-ratelimit-requests-remaining"]);
+    let tokens_remaining = count(&[
+        "x-ratelimit-remaining-tokens",
+        "anthropic-ratelimit-tokens-remaining",
+        "anthropic-ratelimit-input-tokens-remaining",
+        "anthropic-ratelimit-output-tokens-remaining",
+    ]);
+    let requests_reset = reset(&["x-ratelimit-reset-requests", "anthropic-ratelimit-requests-reset"]);
+    let tokens_reset = reset(&[
+        "x-ratelimit-reset-tokens",
+        "anthropic-ratelimit-tokens-reset",
+        "anthropic-ratelimit-input-tokens-reset",
+        "anthropic-ratelimit-output-tokens-reset",
+    ]);
+    // The reset that matters is the one of the window that ran out; both when both did.
+    let resets_in = match (requests_remaining == Some(0), tokens_remaining == Some(0)) {
+        (true, true) => requests_reset.max(tokens_reset),
+        (true, false) => requests_reset,
+        (false, true) => tokens_reset,
+        (false, false) => requests_reset.into_iter().chain(tokens_reset).min(),
+    };
+    let info = RateLimitInfo { retry_after, requests_remaining, tokens_remaining, resets_in };
+    (info != RateLimitInfo::default()).then_some(info)
 }
 
 pub fn request_id(resp: &Response) -> Option<String> {
@@ -122,11 +214,7 @@ impl Http {
             return Ok(resp);
         }
         let status = resp.status().as_u16();
-        let retry_after = resp
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .and_then(aibus_provider::error::parse_retry_after);
+        let info = rate_limit(resp.headers(), SystemTime::now());
         let id = request_id(&resp);
         let mut body = Vec::new();
         while body.len() < ERROR_BODY_MAX {
@@ -141,12 +229,12 @@ impl Http {
                 Ok(None) | Err(_) => break,
             }
         }
-        Err(ProviderError::from_http(
-            status,
-            &message_of(&body),
-            retry_after,
-            id,
-        ))
+        let (message, code) = error_of(&body);
+        // Google sends the wait in the body (`error.details[].retryDelay`, "33s"), not a header.
+        let retry_after = info.and_then(|i| i.retry_after).or_else(|| retry_delay(&body));
+        let mut e = ProviderError::from_http(status, &message, retry_after, id, &code);
+        e.rate_limit = info.map(Box::new);
+        Err(e)
     }
 }
 
@@ -297,6 +385,102 @@ mod tests {
         assert_eq!(e.retry_after, Some(Duration::from_secs(7)));
         assert_eq!(e.request_id.as_deref(), Some("req_1"));
         assert_eq!(e.message, "slow down");
+    }
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn google_puts_the_wait_in_the_error_body() {
+        let body = br#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"x/ErrorInfo"},{"@type":"x/RetryInfo","retryDelay":"33s"}]}}"#;
+        assert_eq!(retry_delay(body), Some(Duration::from_secs(33)));
+        assert_eq!(retry_delay(br#"{"error":{"message":"no details"}}"#), None);
+        assert_eq!(retry_delay(b"not json"), None);
+    }
+
+    #[test]
+    fn go_durations_parse() {
+        assert_eq!(parse_go_duration("1s"), Some(Duration::from_secs(1)));
+        assert_eq!(parse_go_duration("6m0s"), Some(Duration::from_secs(360)));
+        assert_eq!(parse_go_duration("20ms"), Some(Duration::from_millis(20)));
+        assert_eq!(parse_go_duration("1h2m3.5s"), Some(Duration::from_millis(3_723_500)));
+        assert_eq!(parse_go_duration(""), None);
+        assert_eq!(parse_go_duration("soon"), None);
+        assert_eq!(parse_go_duration("5"), None);
+    }
+
+    #[test]
+    fn retry_after_ms_wins_and_the_http_date_counts_from_now() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_567_590);
+        let both = rate_limit(&headers(&[("retry-after", "20"), ("retry-after-ms", "1500")]), now).unwrap();
+        assert_eq!(both.retry_after, Some(Duration::from_millis(1500)));
+        let date = rate_limit(&headers(&[("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT")]), now).unwrap();
+        assert_eq!(date.retry_after, Some(Duration::from_secs(90)));
+        assert_eq!(rate_limit(&headers(&[("content-type", "text/plain")]), now), None);
+    }
+
+    #[test]
+    fn openai_window_headers_land_in_the_info() {
+        let h = headers(&[
+            ("x-ratelimit-remaining-requests", "0"),
+            ("x-ratelimit-remaining-tokens", "29000"),
+            ("x-ratelimit-reset-requests", "6m0s"),
+            ("x-ratelimit-reset-tokens", "1s"),
+        ]);
+        let i = rate_limit(&h, SystemTime::now()).unwrap();
+        assert_eq!((i.requests_remaining, i.tokens_remaining), (Some(0), Some(29_000)));
+        assert_eq!(i.resets_in, Some(Duration::from_secs(360)), "the exhausted window's reset");
+    }
+
+    #[test]
+    fn anthropic_window_headers_land_in_the_info() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_567_680 - 45);
+        let h = headers(&[
+            ("anthropic-ratelimit-requests-remaining", "12"),
+            ("anthropic-ratelimit-tokens-remaining", "0"),
+            ("anthropic-ratelimit-input-tokens-remaining", "400"),
+            ("anthropic-ratelimit-tokens-reset", "2026-10-21T07:28:00Z"),
+            ("anthropic-ratelimit-requests-reset", "2026-10-21T07:27:20Z"),
+        ]);
+        let i = rate_limit(&h, now).unwrap();
+        assert_eq!(i.requests_remaining, Some(12));
+        assert_eq!(i.tokens_remaining, Some(0), "the smallest of the token counts");
+        assert_eq!(i.resets_in, Some(Duration::from_secs(45)));
+    }
+
+    #[tokio::test]
+    async fn the_window_headers_ride_on_the_error_and_the_body_code_picks_the_kind() {
+        let server = MockServer::start().await;
+        Mock::given(path("/quota"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("x-ratelimit-remaining-requests", "0")
+                    .insert_header("x-ratelimit-reset-requests", "9s")
+                    .set_body_string(r#"{"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}"#),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(path("/filter"))
+            .respond_with(ResponseTemplate::new(400).set_body_string(
+                r#"{"error":{"message":"blocked","type":"invalid_request_error","code":"content_policy_violation"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let http = Http::new();
+        let url = format!("{}/quota", server.uri());
+        let e = http.send(&token(), |c| c.get(&url)).await.unwrap_err();
+        assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Quota, false));
+        let info = e.rate_limit.unwrap();
+        assert_eq!((info.requests_remaining, info.resets_in), (Some(0), Some(Duration::from_secs(9))));
+        let url = format!("{}/filter", server.uri());
+        let e = http.send(&token(), |c| c.get(&url)).await.unwrap_err();
+        assert_eq!((e.kind, e.retryable), (ProviderErrorKind::ContentFilter, false));
+        assert_eq!(e.rate_limit, None);
     }
 
     #[tokio::test]

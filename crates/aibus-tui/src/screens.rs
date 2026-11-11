@@ -11,6 +11,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Clear, Widget};
 
+use aibus_provider::Secret;
+
 use crate::hit::HitId;
 use crate::theme::{Interact, Theme};
 use crate::ui::Pointer;
@@ -25,19 +27,58 @@ pub struct Placed {
 }
 
 /// A text field open over a modal: an edited tool input, a message to a run, an account being
-/// added. A key is masked while `secret`, and the text never leaves this struct except by Enter.
-#[derive(Clone, PartialEq, Eq)]
+/// added. `text` is what the field shows. A secret field (the key of an account) keeps what was
+/// typed in `key` from the first keystroke, as a `Secret`, and shows one dot per character in
+/// `text`; Enter hands the `Secret` on and nothing else ever reads it.
 pub struct Entry {
     pub kind: EntryKind,
     pub label: String,
     pub text: String,
-    pub secret: bool,
+    pub key: Option<Secret<String>>,
+}
+
+impl Entry {
+    /// A plain field.
+    pub fn plain(kind: EntryKind, label: &str, text: &str) -> Self {
+        Self { kind, label: label.to_owned(), text: text.to_owned(), key: None }
+    }
+
+    /// A field whose content is a secret: it starts empty.
+    pub fn secret(kind: EntryKind, label: &str) -> Self {
+        Self { kind, label: label.to_owned(), text: String::new(), key: Some(Secret::new(String::new())) }
+    }
+
+    /// The typed key with `edit` applied, which may add up to `room` bytes. The result is a new buffer sized so that it never grows
+    /// (a regrown `String` would leave the old allocation behind, un-zeroed), and the old
+    /// `Secret` is zeroised as it drops.
+    pub fn edit_key(&mut self, room: usize, edit: impl FnOnce(&mut String)) {
+        let Some(old) = self.key.take() else { return };
+        let mut next = String::with_capacity(old.expose().len() + room);
+        next.push_str(old.expose());
+        edit(&mut next);
+        self.text = next.chars().map(|_| '•').collect();
+        self.key = Some(Secret::new(next));
+    }
+}
+
+// What a frame depends on: the key is not part of it, and its dots are in `text`.
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.label == other.label && self.text == other.text
+    }
+}
+
+// A copy is for drawing: it has the dots and never the key.
+impl Clone for Entry {
+    fn clone(&self) -> Self {
+        Self { kind: self.kind.clone(), label: self.label.clone(), text: self.text.clone(), key: None }
+    }
 }
 
 // A key typed here must not reach a log through Debug.
 impl std::fmt::Debug for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let shown = if self.secret { "<hidden>" } else { self.text.as_str() };
+        let shown = if self.key.is_some() { "<hidden>" } else { self.text.as_str() };
         write!(f, "Entry({:?}, {:?}, {shown})", self.kind, self.label)
     }
 }
@@ -50,12 +91,15 @@ pub enum EntryKind {
     Message(RunId),
     /// `R` on a partial run.
     Resume(RunId),
-    /// The three steps of adding an account: its name, its provider, its key.
-    AccountName,
-    AccountProvider(String),
+    /// The browser login of an account (its name): the modal shows what the flow says.
+    Oauth(String),
+    /// The two steps of adding an account: its name (for the provider that was picked), its key.
+    AccountName(String),
     AccountKey(String, String),
     /// `n` on the agents screen: the new agent's name.
     AgentName,
+    /// `/` in the model picker: the text mirrors into the graph as it is typed.
+    ModelFilter,
 }
 
 pub fn centred(full: Rect, w: u16, h: u16) -> Rect {
@@ -120,13 +164,37 @@ pub fn buttons(
 
 /// The text field open over a modal: its label, then the text (dots for a secret) and a cursor.
 pub fn entry_line(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
-    let shown: String = if e.secret { e.text.chars().map(|_| '•').collect() } else { e.text.clone() };
+    let shown = e.text.clone();
     let x = put(buf, area, 0, y, &format!("{}: ", e.label), Style::new().fg(th.dim_text));
     let room = usize::from(area.width.saturating_sub(x + 2));
     let skip = shown.chars().count().saturating_sub(room);
     let tail: String = shown.chars().skip(skip).collect();
     let x = put(buf, area, x, y, &tail, Style::new().fg(th.fg));
     put(buf, area, x, y, th.g("▌"), Style::new().fg(th.router));
+}
+
+/// The browser login: its title, what the flow said (the address wraps over the rows it needs, a
+/// device code is a line of its own) and the two keys. Before the flow has said anything it waits.
+pub fn oauth_modal(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
+    put(buf, area, 0, y, &e.label, Style::new().fg(th.router).add_modifier(Modifier::BOLD));
+    let width = usize::from(area.width).max(1);
+    let mut row = y + 1;
+    let last = area.height.saturating_sub(2);
+    if e.text.is_empty() {
+        put(buf, area, 0, row, "waiting for the authorization address...", Style::new().fg(th.dim_text));
+        row += 1;
+    }
+    for line in e.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let cs: Vec<char> = line.chars().collect();
+        for chunk in cs.chunks(width) {
+            if row >= last {
+                break;
+            }
+            put(buf, area, 0, row, &chunk.iter().collect::<String>(), Style::new().fg(th.fg));
+            row += 1;
+        }
+    }
+    put(buf, area, 0, area.height.saturating_sub(1), "[o] open in the browser   [Esc] cancel", Style::new().fg(th.dim_text));
 }
 
 /// The permission modal (05 section 5): 60 columns, yellow, the tool, what it would do, who asked
@@ -162,13 +230,11 @@ pub fn permission(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: 
         let (b, _) = buttons(buf, inner, y + 4, &[("send_edit", "Enter", "Allow edited", true), ("cancel", "Esc", "Back", true)], th, pointer);
         hits.extend(b);
     } else {
-        let items = [
-            ("allow", "y", "Allow once", true),
-            ("always", "a", "Allow always", true),
-            ("deny", "n", "Deny", true),
-            ("edit", "e", "Edit", true),
-            ("cancel", "Esc", "Cancel", true),
-        ];
+        let mut items = vec![("allow", "y", "Allow once", true)];
+        if flag(v, "always") {
+            items.push(("always", "a", "Allow always", true));
+        }
+        items.extend([("deny", "n", "Deny", true), ("edit", "e", "Edit", true), ("cancel", "Esc", "Cancel", true)]);
         let (b, _) = buttons(buf, inner, y + 2, &items, th, pointer);
         hits.extend(b);
     }
@@ -331,7 +397,9 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
     column(buf, head, 32, 28, "default model", dim);
     column(buf, head, 61, 10, "key", dim);
     column(buf, head, 72, 10, "status", dim);
-    let shown = usize::from(inner.height.saturating_sub(5)).max(1);
+    let login = entry.filter(|e| matches!(e.kind, EntryKind::Oauth(_)));
+    let rows_below: u16 = if login.is_some() { 9 } else { 3 };
+    let shown = usize::from(inner.height.saturating_sub(rows_below + 2)).max(1);
     let first = sel.saturating_sub(shown.saturating_sub(1));
     let mut hits = Vec::new();
     if rows.is_empty() {
@@ -362,9 +430,11 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
         column(buf, r, 72, 10, text(row, "status"), Style::new().fg(if ready { th.ok } else { th.warn }));
         hits.push((hit, r));
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(3), height: 3, ..inner };
+    let bottom = Rect { y: inner.bottom().saturating_sub(rows_below), height: rows_below, ..inner };
     put(buf, bottom, 0, 0, &clip(note, usize::from(bottom.width)), dim);
-    if let Some(e) = entry {
+    if let Some(e) = login {
+        oauth_modal(buf, bottom, 1, e, th);
+    } else if let Some(e) = entry {
         entry_line(buf, bottom, 1, e, th);
     } else {
         let (b, _) = buttons(
@@ -377,6 +447,165 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
         );
         hits.extend(b);
     }
+    Placed { area, hits }
+}
+
+/// The `/model` picker: one row per `(account, model)` with the alias that names it, the context
+/// window, what a million tokens cost in and out (`n/a` when the table has no price) and four
+/// capability letters (T tools, R reasoning, I images, C cache). The row the target runs on now
+/// is marked; the columns share what the width leaves after the fixed ones.
+pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, entry: Option<&Entry>, note: &str) -> Placed {
+    let area = full;
+    Clear.render(area, buf);
+    let target = get(v, "target").and_then(|t| t.as_text()).unwrap_or("lead").to_owned();
+    let for_run = target.starts_with("run ");
+    let title = if for_run { "models for this run".to_owned() } else { format!("models for the {target}") };
+    let inner = {
+        let i = panel(buf, area, &title, th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let sel = int(v, "sel") as usize;
+    let dim = Style::new().fg(th.dim_text);
+    let fg = Style::new().fg(th.fg);
+    let text = get(v, "text").and_then(|t| t.as_text()).unwrap_or("");
+    match entry {
+        Some(e) => entry_line(buf, inner, 0, e, th),
+        None if text.is_empty() => {
+            put(buf, inner, 0, 0, "/ to filter", dim);
+        }
+        None => {
+            put(buf, inner, 0, 0, &format!("filter: {text}"), fg);
+        }
+    }
+    // alias, model, account, context, in, out, caps: the model and account columns take the slack.
+    let slack = inner.width.saturating_sub(67);
+    let (w_model, w_acct) = (20 + slack * 2 / 3, 10 + slack / 3);
+    let x_model = 11;
+    let x_acct = x_model + w_model + 1;
+    let x_ctx = x_acct + w_acct + 1;
+    let (x_in, x_out, x_caps) = (x_ctx + 6, x_ctx + 13, x_ctx + 20);
+    let head = Rect { y: inner.y + 1, height: 1, ..inner };
+    column(buf, head, 2, 8, "alias", dim);
+    column(buf, head, x_model, w_model, "model", dim);
+    column(buf, head, x_acct, w_acct, "account", dim);
+    column(buf, head, x_ctx, 5, "ctx", dim);
+    column(buf, head, x_in, 6, "in $/M", dim);
+    column(buf, head, x_out, 6, "out $/M", dim);
+    column(buf, head, x_caps, 4, "TRIC", dim);
+    let shown = usize::from(inner.height.saturating_sub(6)).max(1);
+    let first = sel.saturating_sub(shown.saturating_sub(1));
+    let mut hits = Vec::new();
+    if rows.is_empty() {
+        let hidden = int(v, "hidden");
+        let why = if !text.is_empty() {
+            "no model matches the filter".to_owned()
+        } else if hidden > 0 {
+            format!("{hidden} models have no tool calling, which this target needs")
+        } else {
+            "no account serves a model yet: /login adds one".to_owned()
+        };
+        put(buf, inner, 0, 2, &why, dim);
+    }
+    for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + 2 + k as u16, height: 1, ..inner };
+        let i = first + k;
+        let hit = HitId::ListRow(i);
+        let state = if pointer.pressed == Some(hit) {
+            Some(Interact::Pressed)
+        } else if pointer.hover == Some(hit) {
+            Some(Interact::Hover)
+        } else if i == sel {
+            Some(Interact::Selected)
+        } else {
+            None
+        };
+        if let Some(s) = state {
+            buf.set_style(r, th.interact(s));
+        }
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let faded = matches!(get(row, "dim"), Some(Value::Bool(true)));
+        let main = if faded { dim } else { fg };
+        let current = matches!(get(row, "current"), Some(Value::Bool(true)));
+        column(buf, r, 0, 2, if current { th.g("●") } else { "" }, Style::new().fg(th.ok));
+        column(buf, r, 2, 8, &word("alias"), dim);
+        column(buf, r, x_model, w_model, &word("id"), main);
+        column(buf, r, x_acct, w_acct, &word("account"), dim);
+        column(buf, r, x_ctx, 5, &word("context"), dim);
+        column(buf, r, x_in, 6, &word("input"), main);
+        column(buf, r, x_out, 6, &word("output"), main);
+        column(buf, r, x_caps, 4, &word("caps"), dim);
+        hits.push((hit, r));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(3), height: 3, ..inner };
+    put(buf, bottom, 0, 0, &clip(note, usize::from(bottom.width)), dim);
+    let any = !rows.is_empty();
+    let (b, _) = buttons(
+        buf,
+        bottom,
+        1,
+        &[
+            ("model_use", "Enter", "Use", any),
+            ("seat_advisor", "a", "Advisor", any),
+            ("seat_router", "r", "Router", any),
+            ("this_run", "s", "This run only", any && for_run),
+            ("filter", "/", "Filter", true),
+            ("cancel", "Esc", "Close", true),
+        ],
+        th,
+        pointer,
+    );
+    hits.extend(b);
+    Placed { area, hits }
+}
+
+
+/// The `/login` provider picker: the presets, one row each.
+pub fn providers(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, 78, full.height.min(22));
+    Clear.render(area, buf);
+    let inner = {
+        let i = panel(buf, area, "log in to a provider", th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let sel = int(v, "sel") as usize;
+    let dim = Style::new().fg(th.dim_text);
+    let fg = Style::new().fg(th.fg);
+    let head = Rect { height: 1, ..inner };
+    column(buf, head, 0, 18, "provider", dim);
+    column(buf, head, 19, 24, "wire", dim);
+    column(buf, head, 44, 5, "auth", dim);
+    column(buf, head, 50, 24, "address", dim);
+    let shown = usize::from(inner.height.saturating_sub(4)).max(1);
+    let first = sel.saturating_sub(shown.saturating_sub(1));
+    let mut hits = Vec::new();
+    for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let i = first + k;
+        let hit = HitId::ListRow(i);
+        let state = if pointer.pressed == Some(hit) {
+            Some(Interact::Pressed)
+        } else if pointer.hover == Some(hit) {
+            Some(Interact::Hover)
+        } else if i == sel {
+            Some(Interact::Selected)
+        } else {
+            None
+        };
+        if let Some(s) = state {
+            buf.set_style(r, th.interact(s));
+        }
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        column(buf, r, 0, 18, &word("id"), fg);
+        column(buf, r, 19, 24, &word("api"), dim);
+        column(buf, r, 44, 5, &word("auth"), dim);
+        column(buf, r, 50, 24, &word("url"), dim);
+        hits.push((hit, r));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    let (b, _) = buttons(buf, bottom, 0, &[("provider_pick", "Enter", "Choose", !rows.is_empty()), ("cancel", "Esc", "Close", true)], th, pointer);
+    hits.extend(b);
     Placed { area, hits }
 }
 
@@ -409,16 +638,146 @@ pub fn outcome(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer) -> P
     Placed { area, hits }
 }
 
-/// `/clear` asks first.
-pub fn confirm_clear(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer) -> Placed {
+/// `/clear` and `/cancel @lead` ask first: a title, the question and the id of the yes button.
+pub fn confirm(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer, title: &str, question: &str, yes: (&'static str, &str)) -> Placed {
     let area = centred(full, 44, 6);
     Clear.render(area, buf);
     let inner = {
-        let i = panel(buf, area, "clear", th.warn, th);
+        let i = panel(buf, area, title, th.warn, th);
         Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
     };
-    put(buf, inner, 0, 0, "Clear the session log?", Style::new().fg(th.fg));
-    let (hits, _) = buttons(buf, inner, 2, &[("clear_yes", "y", "Clear", true), ("cancel", "n", "Cancel", true)], th, pointer);
+    put(buf, inner, 0, 0, question, Style::new().fg(th.fg));
+    let (hits, _) = buttons(buf, inner, 2, &[(yes.0, "y", yes.1, true), ("cancel", "n", "Cancel", true)], th, pointer);
+    Placed { area, hits }
+}
+
+/// The `/status` modal: label and value rows from `view:run_status`.
+pub fn run_status(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let area = centred(full, 46, rows.len() as u16 + 5);
+    Clear.render(area, buf);
+    let title = get(v, "title").and_then(|t| t.as_text()).unwrap_or("status");
+    let inner = {
+        let i = panel(buf, area, title, th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    for (i, row) in rows.iter().enumerate() {
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let x = put(buf, inner, 0, i as u16, &format!("{:<14}", word("k")), Style::new().fg(th.dim_text));
+        put(buf, inner, x, i as u16, &clip(&word("v"), usize::from(inner.width.saturating_sub(x))), Style::new().fg(th.fg));
+    }
+    let (hits, _) = buttons(buf, inner, rows.len() as u16 + 1, &[("close", "Esc", "Close", true)], th, pointer);
+    Placed { area, hits }
+}
+
+/// The `/cost` modal: one row per run, dearest first, and the session total under them.
+pub fn cost(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let shown = rows.len().min(usize::from(full.height.saturating_sub(8)).max(1));
+    let area = centred(full, 56, shown as u16 + 7);
+    Clear.render(area, buf);
+    let inner = {
+        let i = panel(buf, area, "cost", th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let dim = Style::new().fg(th.dim_text);
+    let fg = Style::new().fg(th.fg);
+    let head = Rect { height: 1, ..inner };
+    column(buf, head, 0, 16, "agent", dim);
+    column(buf, head, 17, 10, "run", dim);
+    column(buf, head, 28, 14, "status", dim);
+    column(buf, head, 43, 10, "cost", dim);
+    for (i, row) in rows.iter().take(shown).enumerate() {
+        let r = Rect { y: inner.y + 1 + i as u16, height: 1, ..inner };
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        column(buf, r, 0, 16, &word("agent"), fg);
+        column(buf, r, 17, 10, &word("run"), fg);
+        column(buf, r, 28, 14, &word("status"), dim);
+        column(buf, r, 43, 10, &word("cost"), fg);
+    }
+    let total = get(v, "total").and_then(|x| x.as_text()).unwrap_or("").to_owned();
+    put(buf, inner, 0, shown as u16 + 1, &format!("{:<43}{total}", "session total"), fg.add_modifier(Modifier::BOLD));
+    let (hits, _) = buttons(buf, inner, shown as u16 + 3, &[("close", "Esc", "Close", true)], th, pointer);
+    Placed { area, hits }
+}
+
+/// `/workflow list`: name, scope, the agents of the steps and the description of each workflow, or
+/// the parse error of a file that is broken. `Enter` puts `/workflow run <name> ` in the prompt.
+pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, 100, 18);
+    Clear.render(area, buf);
+    let inner = {
+        let i = panel(buf, area, "workflows", th.swarm, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let sel = int(v, "sel") as usize;
+    let (dim, fg) = (Style::new().fg(th.dim_text), Style::new().fg(th.fg));
+    let head = Rect { height: 1, ..inner };
+    column(buf, head, 0, 18, "name", dim);
+    column(buf, head, 19, 8, "scope", dim);
+    column(buf, head, 28, inner.width.saturating_sub(28), "steps and description", dim);
+    let shown = usize::from(inner.height.saturating_sub(4)).max(1);
+    let first = sel.saturating_sub(shown - 1);
+    let mut hits = Vec::new();
+    if rows.is_empty() {
+        put(buf, inner, 0, 1, "no workflows yet: /workflow new <goal> drafts one, /workflow save keeps it", dim);
+    }
+    for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let i = first + k;
+        let hit = HitId::ListRow(i);
+        let state = if pointer.pressed == Some(hit) {
+            Some(Interact::Pressed)
+        } else if pointer.hover == Some(hit) {
+            Some(Interact::Hover)
+        } else if i == sel {
+            Some(Interact::Selected)
+        } else {
+            None
+        };
+        if let Some(s) = state {
+            buf.set_style(r, th.interact(s));
+        }
+        column(buf, r, 0, 18, text(row, "name"), fg);
+        column(buf, r, 19, 8, text(row, "scope"), dim);
+        let rest = inner.width.saturating_sub(28);
+        match get(row, "error").and_then(|e| e.as_text()) {
+            Some(why) => column(buf, r, 28, rest, &format!("broken: {why}"), Style::new().fg(th.error)),
+            None => {
+                let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
+                column(buf, r, 28, rest, &format!("{}  {}", agents.join(" > "), text(row, "description")), fg);
+            }
+        }
+        hits.push((hit, r));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    let ok = rows.get(sel).is_some_and(|r| get(r, "error").is_none_or(|e| matches!(e, Value::Null)));
+    let (b, _) = buttons(buf, bottom, 0, &[("wf_run", "Enter", "Run", ok), ("cancel", "Esc", "Close", true)], th, pointer);
+    hits.extend(b);
+    Placed { area, hits }
+}
+
+/// `/workflow show <name>` and a refused `/workflow save`: the text as data, and one summary line
+/// under it.
+pub fn workflow_show(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, 100, full.height.saturating_sub(4).max(8));
+    Clear.render(area, buf);
+    let title = get(v, "name").and_then(|t| t.as_text()).unwrap_or("workflow");
+    let inner = {
+        let i = panel(buf, area, title, th.swarm, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let lines = as_list(get(v, "lines").unwrap_or(&NULL));
+    let room = usize::from(inner.height.saturating_sub(4));
+    for (k, l) in lines.iter().take(room).enumerate() {
+        let r = Rect { y: inner.y + k as u16, height: 1, ..inner };
+        put(buf, r, 0, 0, &clip(l.as_str_or(""), usize::from(r.width)), Style::new().fg(th.fg));
+    }
+    let summary = get(v, "summary").and_then(|t| t.as_text()).unwrap_or("");
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    put(buf, bottom, 0, 0, &clip(summary, usize::from(bottom.width)), Style::new().fg(th.dim_text));
+    let (hits, _) = buttons(buf, bottom, 1, &[("cancel", "Esc", "Close", true)], th, pointer);
     Placed { area, hits }
 }
 

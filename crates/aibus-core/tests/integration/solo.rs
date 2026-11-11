@@ -149,6 +149,7 @@ impl Solo {
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
             assist: None,
+            fallback: None,
         };
         tweak(&mut cfg, &mut deps);
         let handle = spawn(cfg, deps);

@@ -252,6 +252,39 @@ fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
     assert_eq!(gone.status.code(), Some(11));
 }
 
+#[test]
+fn doctor_shows_the_region_and_project_of_the_cloud_providers() {
+    let home = xdg_temp();
+    user_config(
+        home.path(),
+        "[[account]]\nname = \"bedrock\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\nregion = \"us-east-1\"\n\n\
+         [[account]]\nname = \"vertex\"\nprovider = \"vertex\"\nauth = { gcloud = true }\nproject = \"my-project\"\nregion = \"us-east5\"\n",
+    );
+    let out = aibus(home.path(), &["doctor"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let row = |id: &str| text.lines().find(|l| l.contains(&format!("provider: {id}: "))).unwrap_or_default();
+    let (bedrock, vertex) = (row("bedrock"), row("vertex"));
+    assert!(bedrock.contains("anthropic-bedrock") && bedrock.contains("auth sigv4") && bedrock.contains("region us-east-1"), "{text}");
+    assert!(vertex.contains("anthropic-vertex") && vertex.contains("auth gcloud") && vertex.contains("project my-project") && vertex.contains("region us-east5"), "{text}");
+}
+
+#[test]
+fn doctor_has_a_row_per_provider_and_warns_about_one_no_account_uses() {
+    let home = xdg_temp();
+    user_config(
+        home.path(),
+        "[[provider]]\nid = \"lab\"\napi = \"openai-chat\"\nbase_url = \"http://10.1.1.1:8000/v1\"\n\n\
+         [[account]]\nname = \"g\"\nprovider = \"groq\"\nauth = { env = \"GROQ_API_KEY\" }\n",
+    );
+    let out = aibus(home.path(), &["doctor"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let groq = text.lines().find(|l| l.contains("provider: groq: ")).unwrap_or_default();
+    assert!(groq.contains("openai-chat") && groq.contains("preset groq") && groq.contains("auth env") && groq.contains("no cache"), "{text}");
+    assert!(text.lines().any(|l| l.contains("provider: lab: ") && l.contains("custom [[provider]]")), "{text}");
+    assert!(text.lines().any(|l| l.contains("warning: [[provider]] lab is used by no enabled account")), "{text}");
+    assert_eq!(out.status.code(), Some(0), "a warning is not a failure: {text}");
+}
+
 // ---- completions ------------------------------------------------------------------------
 
 #[test]

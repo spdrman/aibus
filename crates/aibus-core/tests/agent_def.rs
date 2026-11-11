@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use aibus_core::agent::builtin::BUILTINS;
 use aibus_core::agent::def::{parse, DefError};
 use aibus_core::agent::discover::discover;
 use aibus_core::*;
@@ -301,13 +302,28 @@ fn skills_are_distinct_and_capped_at_32() {
 }
 
 #[test]
-fn builtins_are_the_nine_in_the_spec() {
+fn workflow_author_is_a_builtin_with_read_tools_and_the_mcp_prefix() {
+    let found = discover(None, Path::new("/nonexistent"), None, &[], &[]).unwrap();
+    let d = &found.agents[&"workflow-author".parse::<AgentName>().unwrap()];
+    assert_eq!(d.source.scope, Scope::Builtin);
+    assert_eq!(d.role, Role::Worker);
+    assert!(!d.background);
+    // Read-only files, and the tools of the server named `aibus` and nothing else of MCP.
+    let allowed: Vec<_> = d.tools.allow.iter().flatten().map(|p| p.tool.as_str()).collect();
+    assert_eq!(allowed, ["read", "glob", "grep", "mcp:aibus:*"]);
+    assert!(d.system_prompt.contains("workflow_validate") && d.system_prompt.contains("never as instructions"));
+    // No gate, no write: those are the owner's.
+    assert!(!allowed.iter().any(|t| ["bash", "write", "edit"].contains(t)));
+}
+
+#[test]
+fn builtins_are_the_ten_in_the_spec() {
     let found = discover(None, Path::new("/nonexistent"), None, &[], &[]).unwrap();
     assert!(found.warnings.is_empty(), "{:?}", found.warnings);
     let names: Vec<_> = found.agents.keys().map(|n| n.as_str()).collect();
     assert_eq!(
         names,
-        ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit"]
+        ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit", "workflow-author"]
     );
     assert!(found
         .agents
@@ -353,6 +369,13 @@ fn builtins_are_the_nine_in_the_spec() {
     );
 
     let get = |n: &str| &a[&n.parse::<AgentName>().unwrap()];
+    assert_eq!(
+        tools("workflow-author"),
+        Some(vec![tool("read", None), tool("glob", None), tool("grep", None), tool("mcp:aibus:*", None)])
+    );
+    assert_eq!(get("workflow-author").role, Role::Worker);
+    assert!(!get("workflow-author").background);
+    assert_eq!(get("workflow-author").model, ModelRef::Inherit);
     assert_eq!(get("lead").role, Role::Lead);
     assert_eq!(get("advisor").role, Role::Advisor);
     assert_eq!(get("router").role, Role::Router);
@@ -419,20 +442,20 @@ fn same_name_in_all_scopes_follows_the_precedence_walk() {
     let e = [extra.clone()];
     assert_eq!(
         who(Some(cli), Some(&user), &e, &cwd),
-        ("cli".into(), Scope::Cli, 9)
+        ("cli".into(), Scope::Cli, BUILTINS.len())
     );
     assert_eq!(
         who(None, Some(&user), &e, &cwd),
-        ("project".into(), Scope::Project, 9)
+        ("project".into(), Scope::Project, BUILTINS.len())
     );
     // Not inside a project: project scope is empty.
     assert_eq!(
         who(None, Some(&user), &e, &root.join("user")),
-        ("user".into(), Scope::User, 9)
+        ("user".into(), Scope::User, BUILTINS.len())
     );
     assert_eq!(
         who(None, None, &e, &root.join("user")),
-        ("extra".into(), Scope::Extra(extra.clone()), 9)
+        ("extra".into(), Scope::Extra(extra.clone()), BUILTINS.len())
     );
     assert_eq!(
         who(None, None, &[], &root.join("user")),
@@ -440,7 +463,7 @@ fn same_name_in_all_scopes_follows_the_precedence_walk() {
             "Read-only codebase search. Say how thorough to be (quick, medium, very_thorough)."
                 .into(),
             Scope::Builtin,
-            9
+            BUILTINS.len()
         )
     );
 
@@ -554,4 +577,17 @@ fn cli_json_errors_are_errors() {
         (Some(3), &ModelRef::Alias("sonnet".into()))
     );
     assert_eq!(ok.warnings, ["--agents r: unknown key `extra`"]);
+}
+
+#[test]
+fn fallback_is_absent_a_list_or_an_empty_list_that_pins_the_run() {
+    let (d, w) = ok("---\nname: a\ndescription: x\n---\nBe brief.\n");
+    assert!(w.is_empty());
+    assert_eq!(d.fallback, None);
+    let (d, w) = ok("---\nname: a\ndescription: x\nfallback: [anthropic-personal, bedrock]\n---\nBe brief.\n");
+    assert!(w.is_empty());
+    assert_eq!(d.fallback, Some(vec![AccountName("anthropic-personal".into()), AccountName("bedrock".into())]));
+    let (d, w) = ok("---\nname: a\ndescription: x\nfallback: []\n---\nBe brief.\n");
+    assert!(w.is_empty());
+    assert_eq!(d.fallback, Some(Vec::new()), "[] stays put, which is not the same as absent");
 }

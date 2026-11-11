@@ -16,7 +16,7 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 27] = [
+pub const ALL_NAMES: [&str; 32] = [
     "Key",
     "Mouse",
     "Ui",
@@ -41,8 +41,13 @@ pub const ALL_NAMES: [&str; 27] = [
     "HandoffWritten",
     "AgentsReloaded",
     "AccountsReloaded",
+    "AccountOpDone",
+    "AccountPrompt",
     "IoError",
     "Shutdown",
+    "ModelSwitched",
+    "RunSwitched",
+    "WorkflowsLoaded",
     "Persisted",
 ];
 
@@ -229,6 +234,7 @@ fn def() -> AgentDef {
         router: None,
         initial_prompt: None,
         auto_compact_at: None,
+        fallback: None,
         system_prompt: SENTINEL.into(),
         source: DefSource {
             path: None,
@@ -598,9 +604,22 @@ pub fn cases() -> Vec<Case> {
                     label: "work".into(),
                     default_model: None,
                     key_ref: "keyring:aibus/anthropic-work".into(),
+                    models: vec![],
                 }],
             },
             expect: vec!["model:accounts", "model:log"],
+        },
+        Case {
+            name: "AccountOpDone",
+            setup: none,
+            msg: Msg::AccountOpDone { op: "add".into(), account: "work".into(), ok: true, text: t.clone() },
+            expect: vec!["model:log"],
+        },
+        Case {
+            name: "AccountPrompt",
+            setup: none,
+            msg: Msg::AccountPrompt { account: "work".into(), line: t.clone() },
+            expect: vec![],
         },
         Case {
             name: "IoError",
@@ -618,6 +637,43 @@ pub fn cases() -> Vec<Case> {
                 reason: ShutdownReason::Signal,
             },
             expect: vec!["eng:shutdown"],
+        },
+        Case {
+            name: "ModelSwitched",
+            setup: running,
+            msg: Msg::ModelSwitched {
+                id: 1,
+                target: ModelTarget::Run(R()),
+                to: Ok(Some((ModelId("m2".into()), AccountName("acct".into())))),
+            },
+            expect: vec!["model:log", "model:run:<id>:meta", "model:session:assist"],
+        },
+        Case {
+            name: "RunSwitched",
+            setup: running,
+            msg: Msg::RunSwitched {
+                run: R(),
+                from: AccountName("acct".into()),
+                to: AccountName("backup".into()),
+                model: ModelId("m2".into()),
+            },
+            expect: vec!["model:log", "model:run:<id>:meta"],
+        },
+        Case {
+            name: "WorkflowsLoaded",
+            setup: none,
+            msg: Msg::WorkflowsLoaded {
+                rows: vec![aibus_core::workflow::WorkflowRow {
+                    name: "review".into(),
+                    scope: "project".into(),
+                    description: t.clone(),
+                    agents: vec!["explore".into()],
+                    error: None,
+                }],
+                shown: Some(WorkflowShown { name: "review".into(), text: t.clone(), summary: t.clone() }),
+                said: Some(t.clone()),
+            },
+            expect: vec!["model:log", "model:workflow:shown", "model:workflows"],
         },
         Case {
             name: "Persisted",
@@ -764,6 +820,15 @@ pub fn cases() -> Vec<Case> {
             Command::Compact { run: R() },
             vec!["model:run:<id>:status"],
         ),
+        cmd(
+            Command::SetModel {
+                target: ModelTarget::Lead,
+                model: "haiku".into(),
+            },
+            vec!["model:session:assist"],
+        ),
+        cmd(Command::WorkflowFile(WorkflowFile::Save { name: SENTINEL.into(), user: false, force: false }), vec![]),
+        cmd(Command::WorkflowAuthor { goal: SENTINEL.into(), write: true, edit: None }, vec![]),
         cmd(Command::Clear, vec!["model:log"]),
         cmd(Command::Quit { force: true }, vec!["eng:shutdown"]),
     ]);

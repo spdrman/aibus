@@ -10,11 +10,13 @@ use smol_str::SmolStr;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{ConfigError, ProviderError};
+use crate::error::{ConfigError, ProviderError, RateLimitInfo};
 use crate::secret::{AuthMethodKind, Credential};
+use crate::presets::{CompatFlag, ProviderDef};
 use crate::types::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SystemRole {
     /// The API has a separate system field.
     Separate,
@@ -36,6 +38,78 @@ pub struct Capabilities {
     pub images: bool,
     pub system_role: SystemRole,
     pub max_tools: Option<u32>,
+}
+
+/// The capabilities a model entry or a provider definition names. Each field is optional, so
+/// an entry overrides only what it says and the rest stays what the layer below had.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CapabilityOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tools: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_role: Option<SystemRole>,
+}
+
+impl CapabilityOverrides {
+    /// `self` with every field `top` names replaced by `top`'s.
+    pub fn over(self, top: &Self) -> Self {
+        Self {
+            tools: top.tools.or(self.tools),
+            parallel_tool_calls: top.parallel_tool_calls.or(self.parallel_tool_calls),
+            thinking: top.thinking.or(self.thinking),
+            effort: top.effort.or(self.effort),
+            images: top.images.or(self.images),
+            prompt_cache: top.prompt_cache.or(self.prompt_cache),
+            logprobs: top.logprobs.or(self.logprobs),
+            max_tools: top.max_tools.or(self.max_tools),
+            system_role: top.system_role.or(self.system_role),
+        }
+    }
+}
+
+impl Capabilities {
+    /// These capabilities with every field `o` names replaced.
+    pub fn with(mut self, o: &CapabilityOverrides) -> Self {
+        self.tools = o.tools.unwrap_or(self.tools);
+        self.parallel_tool_calls = o.parallel_tool_calls.unwrap_or(self.parallel_tool_calls);
+        self.thinking = o.thinking.unwrap_or(self.thinking);
+        self.effort = o.effort.unwrap_or(self.effort);
+        self.images = o.images.unwrap_or(self.images);
+        self.prompt_cache = o.prompt_cache.unwrap_or(self.prompt_cache);
+        self.logprobs = o.logprobs.unwrap_or(self.logprobs);
+        self.system_role = o.system_role.unwrap_or(self.system_role);
+        self.max_tools = o.max_tools.or(self.max_tools);
+        self
+    }
+
+    /// The flags that are capabilities seen from the wire: a server with no system role, or
+    /// one that cannot take a picture. They apply after the model layers, since a quirk of the
+    /// server holds whatever a model entry claims. The other flags only shape the body.
+    pub fn with_compat(mut self, flags: &[CompatFlag]) -> Self {
+        for f in flags {
+            match f {
+                CompatFlag::NoSystemRole => self.system_role = SystemRole::FirstMessage,
+                CompatFlag::StripImages => self.images = false,
+                _ => {}
+            }
+        }
+        self
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -75,11 +149,14 @@ impl Price {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct AccountInfo {
     pub label: String,
     pub org: Option<String>,
     pub models: Vec<ModelId>,
+    /// What the verifying call cost, for a provider whose only authenticated call is a real
+    /// request (Bedrock and Vertex). `None` when it was free or its price is not known.
+    pub cost_usd: Option<f64>,
 }
 
 /// Provider-neutral request. Credentials are never part of it.
@@ -98,6 +175,15 @@ pub struct ChatRequest {
     pub cache_hint: CacheHint,
     pub logprobs: bool,
     pub metadata: RequestMetadata,
+}
+
+impl ChatRequest {
+    /// The temperature as the number the user typed: the `f32` widened to `f64` reads
+    /// `0.20000000298023224`, which every wire would send, so this goes through the shortest
+    /// decimal the `f32` prints as (`0.2`).
+    pub fn temperature_f64(&self) -> Option<f64> {
+        self.temperature.and_then(|t| t.to_string().parse().ok())
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -132,6 +218,8 @@ pub enum StopReason {
     ToolUse,
     MaxTokens,
     Refusal,
+    /// A 200 stream the provider's content filter cut short (`finish_reason = content_filter`).
+    ContentFilter,
     Other(SmolStr),
 }
 
@@ -141,6 +229,8 @@ pub struct ChatResponse {
     pub usage: Usage,
     pub stop: StopReason,
     pub request_id: Option<String>,
+    /// The window headers of the answer, `None` when the provider sent none.
+    pub rate_limit: Option<RateLimitInfo>,
 }
 
 #[async_trait]
@@ -150,6 +240,12 @@ pub trait Provider: Send + Sync + 'static {
 
     /// What this provider can do, so core can degrade instead of guessing.
     fn capabilities(&self) -> Capabilities;
+
+    /// What this provider can do with `model`: the provider's capabilities with the model's
+    /// own entry laid over them. A provider with no per-model data answers like `capabilities`.
+    fn capabilities_for(&self, _model: &ModelId) -> Capabilities {
+        self.capabilities()
+    }
 
     /// Known models for alias resolution and context sizes. May be a static table
     /// refreshed by `refresh_models` when the API supports listing.
@@ -205,6 +301,10 @@ pub struct ProviderConfig {
     pub cache_dir: Option<PathBuf>,
     /// `~/.config/aibus/providers`: `<provider>/models.json` overrides the built-in table.
     pub overrides_dir: Option<PathBuf>,
+    /// The resolved definition this instance is built from (a preset, a `[[provider]]` table or
+    /// both). When it is set it wins over `base_url` and `api` above, which are the old
+    /// account-level settings a factory falls back to when it is built without one.
+    pub def: Option<ProviderDef>,
 }
 
 pub trait ProviderFactory: Send + Sync {
@@ -212,6 +312,11 @@ pub trait ProviderFactory: Send + Sync {
     fn build(&self, cfg: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError>;
     /// Which `auth` values this provider accepts.
     fn auth_methods(&self) -> &'static [AuthMethodKind];
+    /// The wire dialects (`Api::as_str`) this factory can build an instance of from a
+    /// definition. A factory that serves none is only built as itself, from its own id.
+    fn apis(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// Built providers by id. Constructed from the binary's explicit factory list.
@@ -220,25 +325,51 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    /// Builds every factory with its entry in `configs` (keyed by provider id), or the
-    /// default config when it has none. Two factories with one id is a config error.
+    /// Builds one instance per definition in `configs` (an entry with `def` set, keyed by
+    /// provider id) with the factory that serves its `api`, then every factory as itself with
+    /// its entry in `configs`, or the default config when it has none. An instance from a
+    /// definition wins over a factory's own of the same id; a definition no factory serves is
+    /// left to the factory of the same id. Two factories with one id is a config error.
     pub fn new(
         factories: &[Box<dyn ProviderFactory>],
         configs: &BTreeMap<String, ProviderConfig>,
     ) -> Result<Self, ConfigError> {
         let mut providers = BTreeMap::new();
+        let mut unserved = std::collections::BTreeSet::new();
+        for (id, cfg) in configs {
+            let Some(def) = &cfg.def else { continue };
+            let api = def
+                .api
+                .ok_or_else(|| ConfigError::Invalid(id.clone(), "the definition has no api".into()))?
+                .as_str();
+            // No adapter for this api (a test registry of stand-ins): the factory of the same
+            // id, if there is one, builds from the config as it did before definitions.
+            match factories.iter().find(|f| f.apis().contains(&api)) {
+                Some(factory) => {
+                    providers.insert(def.static_id(), factory.build(cfg)?);
+                }
+                None => {
+                    unserved.insert(id.as_str());
+                }
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
         for f in factories {
             let id = f.id().0;
-            let cfg = configs.get(id).cloned();
+            if !seen.insert(id) {
+                return Err(ConfigError::DuplicateProvider(id.to_owned()));
+            }
+            if providers.contains_key(id) {
+                continue;
+            }
+            let cfg = configs.get(id).filter(|c| c.def.is_none() || unserved.contains(id)).cloned();
             // A provider that needs settings (`openai-compatible` needs a base URL) is left out
             // while no account uses it, instead of failing everyone else's startup.
             let built = match f.build(&cfg.clone().unwrap_or_default()) {
                 Err(ConfigError::NotConfigured(..)) if cfg.is_none() => continue,
                 built => built?,
             };
-            if providers.insert(id, built).is_some() {
-                return Err(ConfigError::DuplicateProvider(id.to_owned()));
-            }
+            providers.insert(id, built);
         }
         Ok(Self { providers })
     }

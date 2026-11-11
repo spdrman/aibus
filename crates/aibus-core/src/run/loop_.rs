@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::budget::Budgets;
 use super::coalesce::Coalescer;
+use super::fallback::Fallback;
 use super::result;
 use super::transcript::{self, Kind, Line, RunMeta, Transcript};
 use super::{
@@ -73,6 +74,26 @@ pub enum RunMail {
     /// A fork is starting from this run (01 section 5.2): at the next turn boundary the run
     /// answers with a copy of its conversation.
     Fork { reply: oneshot::Sender<Conversation> },
+    /// `/model`: from the next request on, the run talks to this model. A request already in
+    /// flight finishes on the old one.
+    Model(ModelSwitch),
+}
+
+/// Where a run's requests go: the provider, the credential, the model and the account. A run
+/// starts with the one in its `RunConfig` and `RunDeps`; `RunMail::Model` replaces it. The four
+/// change together, because a model only means something on its own provider.
+#[derive(Clone)]
+pub struct ModelSwitch {
+    pub provider: Arc<dyn Provider>,
+    pub creds: Arc<dyn CredentialSource>,
+    pub model: ModelId,
+    pub account: AccountName,
+}
+
+impl std::fmt::Debug for ModelSwitch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ModelSwitch({} on {})", self.model.0, self.account.0)
+    }
 }
 
 pub struct RunHandle {
@@ -140,6 +161,9 @@ pub struct RunDeps {
     pub compactor: Option<Arc<dyn Compactor>>,
     /// The advisor, the router and the session ledger (B2.3). Without it nobody is consulted.
     pub assist: Option<Arc<Assist>>,
+    /// The accounts the run moves to when its own fails before the first token of a turn (F9).
+    /// Without one a failure ends or retries as it always did.
+    pub fallback: Option<Arc<Fallback>>,
 }
 
 /// Summarises the start of a conversation into a `compact_boundary` message (01 section 5.5).
@@ -196,6 +220,8 @@ struct Task<'a> {
     transcript: Mutex<Option<Transcript>>,
     /// A tool the router chose for the next request (`tool_choice`), taken by `request`.
     hint: Mutex<Option<smol_str::SmolStr>>,
+    /// Where the next request goes; `RunMail::Model` replaces it at a turn boundary.
+    now: Mutex<ModelSwitch>,
 }
 
 async fn task(
@@ -211,6 +237,12 @@ async fn task(
         cancel: &cancel,
         transcript: Mutex::new(None),
         hint: Mutex::new(None),
+        now: Mutex::new(ModelSwitch {
+            provider: deps.provider.clone(),
+            creds: deps.creds.clone(),
+            model: cfg.model.clone(),
+            account: cfg.account.clone(),
+        }),
     };
     t.send(Msg::RunStarted {
         run: cfg.run,
@@ -520,6 +552,7 @@ impl Task<'_> {
                     });
                 }
                 RunMail::Compact => compact = true,
+                RunMail::Model(to) => *self.now.lock().unwrap_or_else(PoisonError::into_inner) = to,
                 RunMail::Call { tool, input } => call = Some((tool, input)),
                 RunMail::ChildFinished(report) => {
                     conv.messages.push(Message::text(MessageRole::User, &report));
@@ -604,7 +637,7 @@ impl Task<'_> {
     ) -> ChatRequest {
         let cfg = self.cfg;
         ChatRequest {
-            model: cfg.model.clone(),
+            model: self.now.lock().unwrap_or_else(PoisonError::into_inner).model.clone(),
             system: conv.system.clone(),
             messages: conv.messages.clone(),
             tools: specs.to_vec(),
@@ -646,6 +679,8 @@ impl Task<'_> {
         let mut retries = 0;
         let mut compacted = false;
         let mut waiting = false;
+        // The accounts this turn has used, so a fallback never goes back to one.
+        let mut tried = vec![self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone()];
         // The router may have named the tool to call; it holds for every attempt of this turn.
         let choice = match self.hint.lock().unwrap_or_else(PoisonError::into_inner).take() {
             Some(name) => ToolChoice::Named(name),
@@ -658,7 +693,10 @@ impl Task<'_> {
                 self.note_waiting("").await;
                 waiting = false;
             }
-            let e = match stream_turn(self.deps, cfg.run, req, self.cancel).await {
+            // Taken now: a switch that lands while this request runs applies to the next one.
+            let to = self.now.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let (result, emitted) = stream_turn(self.deps, &to, cfg.run, req, self.cancel).await;
+            let e = match result {
                 Ok(resp) => return Ok(resp),
                 Err(e) => e,
             };
@@ -666,8 +704,13 @@ impl Task<'_> {
                 return Err(End::of(RunStatus::Cancelled));
             }
             match e.kind {
+                ProviderErrorKind::Auth | ProviderErrorKind::Quota
+                    if self.fall_back(&e, emitted, &mut tried).await =>
+                {
+                    retries = 0;
+                }
                 ProviderErrorKind::Auth => {
-                    let who = &cfg.account;
+                    let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
                     let what = if e.message.is_empty() {
                         "authentication failed"
                     } else {
@@ -677,6 +720,29 @@ impl Task<'_> {
                     let mut end = failed(conv, banner, false);
                     if let Some(e) = end.error.as_mut() {
                         e.kind = RunErrorKind::Auth;
+                    }
+                    return Err(end);
+                }
+                ProviderErrorKind::Quota => {
+                    let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
+                    let banner = format!(
+                        "account {who}: quota or billing cap reached ({}), top up the plan or switch account, then run aibus account test {who}",
+                        e.message
+                    );
+                    let mut end = failed(conv, banner, false);
+                    if let Some(e) = end.error.as_mut() {
+                        e.kind = RunErrorKind::Quota;
+                    }
+                    return Err(end);
+                }
+                ProviderErrorKind::ContentFilter => {
+                    let mut end = failed(
+                        conv,
+                        format!("run ended early: the provider's content filter refused the request ({})", e.message),
+                        false,
+                    );
+                    if let Some(e) = end.error.as_mut() {
+                        e.kind = RunErrorKind::ContentFilter;
                     }
                     return Err(end);
                 }
@@ -711,6 +777,9 @@ impl Task<'_> {
                         () = sleep(wait) => {}
                     }
                 }
+                // The retries on this account are spent: an overload (or, if asked for, a rate
+                // limit) moves on to the next account.
+                _ if self.fall_back(&e, emitted, &mut tried).await => retries = 0,
                 _ => {
                     return Err(failed(
                         conv,
@@ -720,6 +789,32 @@ impl Task<'_> {
                 }
             }
         }
+    }
+
+    /// F9: `e` came from the account the run is on. When nothing of the turn has reached the
+    /// user yet and the fallback chain has an account for this kind of failure, the run moves
+    /// there (the transcript and the graph record it) and this answers true: the caller asks
+    /// again, with a fresh retry budget. Never after the first `TextDelta`, `ThinkingDelta` or
+    /// `ToolUseStart`.
+    async fn fall_back(&self, e: &ProviderError, emitted: bool, tried: &mut Vec<AccountName>) -> bool {
+        let Some(fb) = self.deps.fallback.as_ref().filter(|_| !emitted) else {
+            return false;
+        };
+        let from = self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
+        let Some(to) = fb.next(&from, tried, e) else {
+            return false;
+        };
+        tried.push(to.account.clone());
+        self.write_line(&Line::Switch { account: to.account.clone(), model: to.model.clone() }).await;
+        self.send(Msg::RunSwitched {
+            run: self.cfg.run,
+            from,
+            to: to.account.clone(),
+            model: to.model.clone(),
+        })
+        .await;
+        *self.now.lock().unwrap_or_else(PoisonError::into_inner) = to;
+        true
     }
 
     /// The card's "waiting for ..." note (empty clears it).
@@ -770,7 +865,7 @@ impl Task<'_> {
                         self.send(decided(decision, None)).await;
                         return decision;
                     }
-                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::Call { .. } | RunMail::ChildFinished(_) | RunMail::Fork { .. })) => queued.push(m),
+                    Some(m @ (RunMail::UserMessage(_) | RunMail::Compact | RunMail::Call { .. } | RunMail::ChildFinished(_) | RunMail::Fork { .. } | RunMail::Model(_))) => queued.push(m),
                     Some(RunMail::Permission { .. }) => {}
                     None => return Decision::Deny,
                 },
@@ -820,7 +915,10 @@ impl Task<'_> {
         let provider_error = end
             .error
             .as_ref()
-            .filter(|e| matches!(e.kind, RunErrorKind::Provider | RunErrorKind::Auth));
+            .filter(|e| matches!(
+                e.kind,
+                RunErrorKind::Provider | RunErrorKind::Auth | RunErrorKind::Quota | RunErrorKind::ContentFilter
+            ));
         if end.status == RunStatus::Failed || provider_error.is_some() {
             if let Some(error) = &end.error {
                 self.send(Msg::RunFailed {
@@ -862,12 +960,14 @@ fn opening_call(name: &str, input: serde_json::Value) -> ChatResponse {
                 id: aibus_provider::ToolCallId(ulid::Ulid::new()),
                 name: name.into(),
                 input,
+                signature: None,
             }],
             at: SystemTime::UNIX_EPOCH,
         },
         usage: Default::default(),
         stop: aibus_provider::StopReason::ToolUse,
         request_id: None,
+        rate_limit: None,
     }
 }
 
@@ -902,13 +1002,6 @@ async fn drive(
         max_tokens_total: cfg.def.max_tokens_total.unwrap_or(cfg.budgets.max_tokens_total),
         max_cost_usd: cfg.def.max_cost_usd.unwrap_or(cfg.budgets.max_cost_usd),
     };
-    let max_output = deps
-        .provider
-        .models()
-        .iter()
-        .find(|m| m.id == cfg.model)
-        .map_or(8_192, |m| m.max_output);
-    let price = deps.provider.price(&cfg.model);
     let specs = deps.tools.specs(eff);
     // The directory the `memory_*` tools are rooted at, found the way the run's first message
     // finds `MEMORY.md`.
@@ -925,18 +1018,6 @@ async fn drive(
     // Input tokens of the latest request: what a compaction started now would be shrinking.
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
-    let window = deps
-        .provider
-        .models()
-        .iter()
-        .find(|m| m.id == cfg.model)
-        .map(|m| u64::from(m.context_window));
-    let auto_limit = cfg
-        .def
-        .auto_compact_at
-        .map(u64::from)
-        .or(window.map(|w| w / 10 * 8))
-        .filter(|_| deps.compactor.is_some());
     let mut lead = LeadAssist::new(t);
 
     loop {
@@ -946,6 +1027,21 @@ async fn drive(
         if let Some(call) = t.boundary(mail, &mut queued, conv, mode, pre_tokens).await {
             forced = Some(call);
         }
+        // What the model this turn talks to allows and costs: read again every turn, because
+        // `/model` may have changed it at the boundary just now.
+        let (max_output, price, auto_limit) = {
+            let at = t.now.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let known = at.provider.models();
+            let info = known.iter().find(|m| m.id == at.model);
+            let window = info.map(|m| u64::from(m.context_window));
+            let limit = cfg
+                .def
+                .auto_compact_at
+                .map(u64::from)
+                .or(window.map(|w| w / 10 * 8))
+                .filter(|_| deps.compactor.is_some());
+            (info.map_or(8_192, |m| m.max_output), at.provider.price(&at.model), limit)
+        };
         // `auto_compact_at`, else 80 % of the window (01 section 5.5). The count is what the
         // last response said the request was; before there is one, the heuristic's estimate
         // (which already carries a 10 % margin).
@@ -993,6 +1089,9 @@ async fn drive(
             total.output_tokens += turn.output_tokens;
             total.cache_read += turn.cache_read;
             total.cache_write += turn.cache_write;
+            if turn.cost_source == aibus_provider::CostSource::Provider {
+                total.cost_source = aibus_provider::CostSource::Provider;
+            }
             // The provider's own figure when it has one, otherwise the price table's.
             total.cost_usd += match price {
                 Some(p) if turn.cost_usd == 0.0 => {
@@ -1020,7 +1119,7 @@ async fn drive(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input } => {
+                ContentBlock::ToolUse { id, name, input, .. } => {
                     Some((*id, name.clone(), input.clone()))
                 }
                 _ => None,
@@ -1330,16 +1429,17 @@ async fn drive(
 /// One provider request. Chunks are coalesced into `Msg::Stream` as they arrive.
 async fn stream_turn(
     deps: &RunDeps,
+    to: &ModelSwitch,
     run: RunId,
     req: ChatRequest,
     cancel: &CancellationToken,
-) -> Result<ChatResponse, ProviderError> {
+) -> (Result<ChatResponse, ProviderError>, bool) {
     let (out, mut chunks) = mpsc::channel::<StreamChunk>(STREAM_CAPACITY);
     // Resolved for every request, so a rotated key is picked up within the store's cache time.
-    let creds = deps
-        .creds
-        .credential()
-        .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
+    let creds = match to.creds.credential() {
+        Ok(c) => c,
+        Err(e) => return (Err(ProviderError::new(ProviderErrorKind::Auth, e.to_string())), false),
+    };
     let span = tracing::trace_span!(
         target: "aibus_trace",
         "provider_call",
@@ -1348,9 +1448,17 @@ async fn stream_turn(
     );
     let began = Instant::now();
     let mut first = span.is_disabled();
-    let call = deps.provider.stream(&creds, req, out, cancel.clone());
+    let call = to.provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
 
+    // Whether anything the user could see has come out: after that the turn cannot move.
+    let mut emitted = false;
+    let mut seen = |c: &StreamChunk| {
+        emitted |= matches!(
+            c,
+            StreamChunk::TextDelta(_) | StreamChunk::ThinkingDelta(_) | StreamChunk::ToolUseStart { .. }
+        );
+    };
     let mut co = Coalescer::default();
     let send = |batch: Vec<StreamChunk>| async move {
         if deps
@@ -1371,6 +1479,7 @@ async fn stream_turn(
             }
             r = &mut call => break r,
             Some(chunk) = chunks.recv() => {
+                seen(&chunk);
                 if !std::mem::replace(&mut first, true) {
                     span.record("ttfb_ms", began.elapsed().as_millis() as u64);
                 }
@@ -1386,6 +1495,7 @@ async fn stream_turn(
         }
     };
     while let Ok(chunk) = chunks.try_recv() {
+        seen(&chunk);
         if !std::mem::replace(&mut first, true) {
             span.record("ttfb_ms", began.elapsed().as_millis() as u64);
         }
@@ -1399,7 +1509,7 @@ async fn stream_turn(
     if let Ok(resp) = &result {
         span.record("tokens", resp.usage.input_tokens + resp.usage.output_tokens);
     }
-    result
+    (result, emitted)
 }
 
 fn last_text(conv: &Conversation) -> String {

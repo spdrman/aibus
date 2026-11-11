@@ -1,6 +1,10 @@
 //! Fixtures, fake clock, TestBackend helpers and snapshot macros.
 #![forbid(unsafe_code)]
 
+pub mod capability_matrix;
+pub mod catalog_sync;
+pub mod conformance;
+pub mod oauth;
 pub mod replay;
 mod session;
 pub mod tui;

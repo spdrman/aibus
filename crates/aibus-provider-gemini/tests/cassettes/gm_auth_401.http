@@ -1,0 +1,11 @@
+HTTP 401
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "error": {
+    "code": 401,
+    "message": "Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential.",
+    "status": "UNAUTHENTICATED"
+  }
+}

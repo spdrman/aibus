@@ -46,3 +46,30 @@ secrets = ["SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "abcdefghijklmnopqrstu
 name = "a url with a token in the query"
 body = 'Failed to fetch https://hooks.example/v1/ping?user=7&token=d34db33f0000&retry=1: 401'
 secrets = ["d34db33f0000"]
+
+# Bodies with nothing to hide. The redactor has to leave them alone (a billing message or a
+# policy code is not a credential), and the kind table in aibus-provider reads their codes.
+
+[[intact]]
+name = "openai insufficient_quota 429"
+body = '{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}'
+
+[[intact]]
+name = "openai usage_limit_reached"
+body = '{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","param":null,"code":"usage_limit_reached","plan_type":"plus","resets_in_seconds":3600}}'
+
+[[intact]]
+name = "openai content policy 400"
+body = '{"error":{"message":"Your request was rejected as a result of our safety system.","type":"invalid_request_error","param":null,"code":"content_policy_violation"}}'
+
+[[intact]]
+name = "openai content_filter on a 200 stream"
+body = '{"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}'
+
+[[intact]]
+name = "anthropic billing_error 402"
+body = '{"type":"error","error":{"type":"billing_error","message":"Your account has hit its monthly spend cap."}}'
+
+[[intact]]
+name = "anthropic low credit balance 400"
+body = '{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}'

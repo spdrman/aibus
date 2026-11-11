@@ -8,7 +8,7 @@
 //! (B1.3) at 7 and 9, the TUI at 8.
 
 use std::io::{IsTerminal, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -93,6 +93,9 @@ pub struct Ctx {
     /// Starts the lead's children, hands their results back and holds the limits.
     pub orch: Option<Arc<Orchestrator>>,
     pub launcher: Option<Arc<ChildLauncher>>,
+    /// The connection to this program's own `aibus mcp`, which the workflow author uses; `None`
+    /// when the user has their own `[mcp.aibus]` or it did not start.
+    pub author: Option<Arc<aibus_core::mcp::Client>>,
     /// What runs `[hooks]` and the definitions' hooks; runs nothing under `--no-hooks`.
     pub hooks: Option<Arc<HookRunner>>,
     pub rx: Option<mpsc::Receiver<Msg>>,
@@ -134,6 +137,7 @@ impl Ctx {
             plan: None,
             orch: None,
             launcher: None,
+            author: None,
             hooks: None,
             rx: None,
             handle: None,
@@ -455,6 +459,44 @@ impl Step for DiscoverAgents {
 
 struct LoadAccounts;
 
+/// The accounts of the config files as they are now: a registry over freshly built providers, and
+/// what the graph may know about each. A login or a logout in the terminal calls this after the
+/// config changed, so the new account is selectable without a restart.
+pub(crate) fn reload_accounts(
+    paths: &Paths,
+    project_settings: &Path,
+    factories: &[Box<dyn ProviderFactory>],
+) -> Result<(Arc<AccountRegistry>, Vec<AccountView>, config::Defaults), AibusError> {
+    let cfg = config::load(&paths.config_file(), Some(project_settings))?.config;
+    let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
+    let providers = Arc::new(ProviderRegistry::new(factories, &configs)?);
+    let registry = Arc::new(AccountRegistry::new(&cfg, providers));
+    let views = account_views(&cfg, &registry);
+    Ok((registry, views, cfg.defaults))
+}
+
+#[cfg(test)]
+mod model_rows;
+#[cfg(test)]
+mod reload;
+
+/// What the graph may know about each enabled account, with the models its provider's tables
+/// list. Used at startup and by a reload after an account was added or removed.
+pub(crate) fn account_views(cfg: &config::Config, registry: &AccountRegistry) -> Vec<AccountView> {
+    cfg.accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .map(|a| AccountView {
+            name: a.account_name(),
+            provider: a.provider.as_str().into(),
+            label: a.label.clone().unwrap_or_else(|| a.name.clone()),
+            default_model: a.default_model.as_deref().map(|m| ModelId(m.into())),
+            key_ref: a.key_ref().map_or_else(|| "none".into(), |k| k.to_string()),
+            models: registry.model_views(&a.account_name()),
+        })
+        .collect()
+}
+
 /// Hands out the one scripted fake the session was started with, whatever its config.
 struct Scripted(Arc<dyn Provider>);
 
@@ -488,14 +530,14 @@ impl Step for LoadAccounts {
             .map_err(|e| AibusError::Usage(format!("script: {e}")))?;
         let mut factories: Vec<Box<dyn ProviderFactory>> =
             vec![Box::new(Scripted(Arc::new(FakeProvider::new(script))))];
-        factories.extend(builtin_factories().into_iter().filter(|f| f.id().0 != "fake"));
-        let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
-        let configs = provider_configs(&cfg.accounts, paths)?;
-        let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
         let store = Arc::new(CredentialStore::new(
             Arc::new(OsKeychain),
             ctx.redactor.clone(),
         ));
+        factories.extend(builtin_factories(store.clone()).into_iter().filter(|f| f.id().0 != "fake"));
+        let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
+        let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
+        let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
         let builtin = cfg.accounts.is_empty();
         if !builtin {
             refresh_stale_models(&cfg.accounts, providers.clone(), store.clone(), paths.cache.join("models"));
@@ -513,20 +555,10 @@ impl Step for LoadAccounts {
                 ..Default::default()
             });
         }
-        let views = effective
-            .accounts
-            .iter()
-            .filter(|a| a.enabled)
-            .map(|a| AccountView {
-                name: a.account_name(),
-                provider: a.provider.as_str().into(),
-                label: a.label.clone().unwrap_or_else(|| a.name.clone()),
-                default_model: a.default_model.as_deref().map(|m| ModelId(m.into())),
-                key_ref: a.key_ref().map_or_else(|| "none".into(), |k| k.to_string()),
-            })
-            .collect();
+        let registry = Arc::new(AccountRegistry::new(&effective, providers));
+        let views = account_views(&effective, &registry);
         ctx.accounts = Some(Accounts {
-            registry: Arc::new(AccountRegistry::new(&effective, providers)),
+            registry,
             store,
             script_text,
             builtin,
@@ -779,6 +811,33 @@ impl Step for EnterLoop {
                 registry.register(tool);
             }
         }
+        // The workflow author talks to `aibus mcp` over stdio, read-only (no `--allow`): started
+        // here, at the first point the registry is built, because it is built once. A user's own
+        // `[mcp.aibus]` is theirs and is left alone.
+        let wants_author = ctx.interactive || ctx.global.agent.as_deref() == Some("workflow-author");
+        let author = if wants_author && !cfg.mcp.contains_key("aibus") {
+            let rt = ctx.rt.as_ref().ok_or_else(|| not_ready("runtime"))?;
+            let server = crate::author::server(false);
+            let env: Vec<(String, String)> = std::env::vars().collect();
+            let connected = match server {
+                Ok(server) => rt.block_on(aibus_core::mcp::Client::connect("aibus", &server, &env, &ctx.cwd, &session.id.to_string())),
+                Err(e) => Err(e),
+            };
+            match connected {
+                Ok((client, listed)) => {
+                    for tool in aibus_core::mcp::tools_of("aibus", &client, listed) {
+                        registry.register(tool);
+                    }
+                    Some(client)
+                }
+                Err(why) => {
+                    eprintln!("aibus: warning: mcp.aibus (the workflow author): {why}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone())));
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
@@ -809,12 +868,14 @@ impl Step for EnterLoop {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect(),
             ),
-            registry: acc.registry.clone(),
+            live: std::sync::RwLock::new(crate::launch::Live {
+                registry: acc.registry.clone(),
+                builtin: acc.builtin,
+                defaults: defaults.clone(),
+                session_default: session_default.clone(),
+            }),
             store: acc.store.clone(),
-            builtin: acc.builtin,
             redactor: ctx.redactor.clone(),
-            defaults: defaults.clone(),
-            session_default: session_default.clone(),
             tools: tools.clone(),
             hooks: hooks.clone(),
             deny: ctx.global.deny.iter().filter_map(|t| t.parse().ok()).collect(),
@@ -829,6 +890,8 @@ impl Step for EnterLoop {
             worktrees: paths.cache.join("worktrees").join(session.id.to_string()),
             assist: Default::default(),
             workflow_dirs: workflow_dirs.clone(),
+            author_server: author.is_some(),
+            author_write: Default::default(),
         });
         // A `prompt` hook asks the session's own model; the account is only touched when some hook
         // wants it, so a session with none never reads a key for this.
@@ -845,6 +908,7 @@ impl Step for EnterLoop {
                         creds: p.creds,
                         model: p.model,
                         account: p.account,
+                        fallback: None,
                     });
                 }
                 Err(e) => eprintln!("aibus: warning: prompt hooks have no model to ask: {e}"),
@@ -893,6 +957,7 @@ impl Step for EnterLoop {
         };
         // A missing key fails here, with exit 4, rather than on the first request.
         let picked = launcher.pick(&target, &hints)?;
+        let fallback = launcher.fallback_for(&picked.account, &target, def.fallback.as_deref());
         let run = resume.as_ref().map_or_else(aibus_core::RunId::new, |(run, _)| *run);
         launcher.remember(run, &picked.account, &picked.model, &def);
         // A resumed run that worked in a worktree goes back to the one it kept (09 section 7).
@@ -947,6 +1012,7 @@ impl Step for EnterLoop {
             hooks: hooks.clone(),
             compactor: Some(compactor as Arc<dyn Compactor>),
             assist,
+            fallback,
         };
         Some((run_cfg, deps, extractor))
         };
@@ -967,6 +1033,7 @@ impl Step for EnterLoop {
         }
         ctx.orch = Some(orch);
         ctx.launcher = Some(launcher);
+        ctx.author = author;
         ctx.hooks = Some(hooks);
         ctx.plan = plan;
         ctx.rx = Some(rx);

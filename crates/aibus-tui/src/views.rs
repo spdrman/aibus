@@ -5,10 +5,11 @@
 use aibus_core::state::store::{Row, Store};
 use aibus_core::state::value::{as_i64, as_list, as_str, get, list, map, n, s};
 use aibus_core::state::{
-    run_key, transcript_body, AGENTS_DEFS, AGENTS_WARNINGS, ACCOUNTS, MODAL, PALETTE_TEXT, PERMISSIONS_OPEN, RUNS_ORDER,
-    SCREEN_SEL, SIZE, TRANSCRIPT_UI,
+    router_last, run_key, transcript_body, ADVISOR_STATE, AGENTS_DEFS, AGENTS_WARNINGS, ACCOUNTS, CLOCK_MS, MODAL,
+    PALETTE_TEXT, PERMISSIONS_OPEN, ROUTER_FORKS, RUNS_ORDER, SCREEN_SEL, SESSION_ASSIST, SIZE, TRANSCRIPT_UI, WORKFLOWS,
+    WORKFLOW_SHOWN,
 };
-use aibus_core::RunStatus;
+use aibus_core::{ModelTarget, RunStatus};
 use aibus_graph::{Tracker, Value};
 
 pub const PERMISSION: &str = "view:permission";
@@ -16,20 +17,11 @@ pub const PALETTE: &str = "view:palette";
 pub const AGENTS: &str = "view:agents";
 pub const ACCOUNTS_VIEW: &str = "view:accounts";
 pub const TRANSCRIPT: &str = "view:transcript";
-
-/// The commands the palette lists besides agents, workflows and runs: `(id, label, hint)`.
-pub const PALETTE_COMMANDS: [(&str, &str, &str); 10] = [
-    ("agents", "agents screen", "A"),
-    ("accounts", "accounts screen", "K"),
-    ("help", "help: the key map", "?"),
-    ("lead", "lead transcript", "t"),
-    ("permission", "oldest permission prompt", "p"),
-    ("handoff", "write a handoff", "/handoff"),
-    ("clear", "clear the session log", "/clear"),
-    ("rail", "advisor rail", "a"),
-    ("compact", "compact the lead", "/compact"),
-    ("quit", "quit", "q"),
-];
+pub const RUN_STATUS: &str = "view:run_status";
+pub const COST: &str = "view:cost";
+pub const MODELS: &str = "view:models";
+pub const PROVIDERS: &str = "view:providers";
+pub const WORKFLOWS_VIEW: &str = "view:workflows";
 
 /// The palette's fuzzy match: every character of `needle` in `hay`, in order. A run of
 /// consecutive characters and a match at the start of a word score higher. `None` is no match.
@@ -78,6 +70,8 @@ pub fn permission(store: &Store, t: &mut Tracker) -> Value {
         ("run", s(&run)),
         ("run_short", s(&short(&run))),
         ("tool", get(first, "tool").cloned().unwrap_or(s(""))),
+        // A workflow write asks every time, so the modal does not offer "always" for it.
+        ("always", Value::Bool(!get(first, "tool").and_then(as_str).is_some_and(aibus_core::mcp::asks_every_time))),
         ("summary", s(&{
             // The gate's line is `<tool>: <input>`; the modal names the tool on its own line.
             let line = get(first, "summary").map(|v| text_of(store, v)).unwrap_or_default();
@@ -100,7 +94,7 @@ pub fn palette(t: &mut Tracker) -> Value {
     }
     let text = t.get_key(PALETTE_TEXT).and_then(as_str).unwrap_or("").to_owned();
     let mut all: Vec<Entry> = Vec::new();
-    for (id, label, hint) in PALETTE_COMMANDS {
+    for (id, label, hint) in crate::commands::palette_rows() {
         all.push((format!("cmd:{id}"), "command", label.to_owned(), hint.to_owned()));
     }
     for d in t.get_key(AGENTS_DEFS).map(as_list).unwrap_or_default() {
@@ -166,6 +160,27 @@ pub fn agents(store: &Store, t: &mut Tracker) -> Value {
     ])
 }
 
+/// `view:workflows`: the rows of `/workflow list` with the selection, or the text of `/workflow
+/// show` as lines with its summary. Null unless one of those two modals is open.
+pub fn workflows(store: &Store, t: &mut Tracker) -> Value {
+    let modal = t.get_key(MODAL).and_then(as_str).map(str::to_owned);
+    match modal.as_deref() {
+        Some("workflows") => {
+            let rows = t.get_key(WORKFLOWS).map(as_list).unwrap_or_default().to_vec();
+            let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, rows.len().saturating_sub(1) as i64);
+            map([("rows", list(rows)), ("sel", n(sel))])
+        }
+        Some("workflow_show") => {
+            let shown = t.get_key(WORKFLOW_SHOWN).cloned().unwrap_or(Value::Null);
+            let body = get(&shown, "text").map(|x| text_of(store, x)).unwrap_or_default();
+            let word = |k: &str| get(&shown, k).cloned().unwrap_or_else(|| s(""));
+            let lines: Vec<Value> = body.lines().take(400).map(s).collect();
+            map([("name", word("name")), ("lines", list(lines)), ("summary", word("summary"))])
+        }
+        _ => Value::Null,
+    }
+}
+
 pub fn accounts(t: &mut Tracker) -> Value {
     if t.get_key(MODAL).and_then(as_str) != Some("accounts") {
         return Value::Null;
@@ -191,6 +206,133 @@ pub fn accounts(t: &mut Tracker) -> Value {
         })
         .collect();
     map([("rows", list(rows)), ("sel", n(sel))])
+}
+
+/// `$3.00`, `$0.25`, `$0.075`: two decimals, a third only when the price has one.
+fn usd(price: Option<&Value>) -> String {
+    match price {
+        Some(Value::F64(x)) => {
+            let long = format!("{x:.3}");
+            format!("${}", long.strip_suffix('0').unwrap_or(&long))
+        }
+        _ => "n/a".to_owned(),
+    }
+}
+
+/// `200k`, `1M`: a context window in the room a column has.
+fn window(tokens: i64) -> String {
+    if tokens >= 1_000_000 && tokens % 1_000_000 == 0 {
+        format!("{}M", tokens / 1_000_000)
+    } else {
+        format!("{}k", tokens / 1000)
+    }
+}
+
+/// `view:models`: one row per `(account, model)` the connected accounts serve, for the target the
+/// screen was opened for. A lead or a worker needs tools, so a model without them is not offered;
+/// the advisor has no requirement; the router prefers logprobs and shows the rest dimmed.
+/// `{target, rows, sel, text, hidden}`; each row has the `ref` that `SetModel` takes
+/// (`account/model`, which pins the account).
+pub fn models(t: &mut Tracker) -> Value {
+    let Some(target) = t.get_key(MODAL).and_then(as_str).and_then(|m| m.strip_prefix("models:")).and_then(ModelTarget::parse) else {
+        return Value::Null;
+    };
+    let text = t.get_key(PALETTE_TEXT).and_then(as_str).unwrap_or("").to_owned();
+    // What the target runs on now, to mark its row.
+    let run = match target {
+        ModelTarget::Run(r) => Some(r.to_string()),
+        ModelTarget::Lead => {
+            let order: Vec<String> = t.get_key(RUNS_ORDER).map(as_list).unwrap_or_default().iter().filter_map(as_str).map(str::to_owned).collect();
+            order
+                .into_iter()
+                .find(|id| t.get_key(&run_key(id, "meta")).and_then(|m| get(m, "role")).and_then(as_str) == Some("lead"))
+        }
+        _ => None,
+    };
+    let now: Option<(String, Option<String>)> = match (&run, target) {
+        (Some(run), _) => {
+            let meta = t.get_key(&run_key(run, "meta")).cloned().unwrap_or(Value::Null);
+            let model = get(&meta, "model").and_then(as_str).map(str::to_owned);
+            model.map(|m| (m, get(&meta, "account").and_then(as_str).map(str::to_owned)))
+        }
+        (None, ModelTarget::Advisor) => t
+            .get_key(SESSION_ASSIST)
+            .and_then(|a| get(a, "advisor"))
+            .and_then(|x| get(x, "label"))
+            .and_then(as_str)
+            .map(|m| (m.to_owned(), None)),
+        _ => None,
+    };
+    let accounts = t.get_key(ACCOUNTS).map(as_list).unwrap_or_default().to_vec();
+    let mut rows: Vec<(i64, Value)> = Vec::new();
+    let mut hidden = 0;
+    for a in &accounts {
+        let account = get(a, "name").and_then(as_str).unwrap_or("");
+        for m in get(a, "models").map(as_list).unwrap_or_default() {
+            let flag = |k: &str| matches!(get(m, k), Some(Value::Bool(true)));
+            if matches!(target, ModelTarget::Lead | ModelTarget::Run(_)) && !flag("tools") {
+                hidden += 1;
+                continue;
+            }
+            let id = get(m, "id").and_then(as_str).unwrap_or("");
+            let alias = get(m, "alias").and_then(as_str).unwrap_or("");
+            let score = if text.is_empty() { Some(0) } else { fuzzy(&text, &format!("{alias} {id} {account}")) };
+            let Some(score) = score else { continue };
+            let caps: String = [(flag("tools"), 'T'), (flag("thinking"), 'R'), (flag("images"), 'I'), (flag("cache"), 'C')]
+                .iter()
+                .map(|(on, c)| if *on { *c } else { '-' })
+                .collect();
+            let current = now.as_ref().is_some_and(|(model, acct)| model == id && acct.as_deref().is_none_or(|x| x == account));
+            rows.push((
+                score,
+                map([
+                    ("ref", s(&format!("{account}/{id}"))),
+                    ("alias", s(alias)),
+                    ("id", s(id)),
+                    ("account", s(account)),
+                    ("context", s(&window(get(m, "context").and_then(as_i64).unwrap_or(0)))),
+                    ("input", s(&usd(get(m, "input")))),
+                    ("output", s(&usd(get(m, "output")))),
+                    ("caps", s(&caps)),
+                    ("dim", Value::Bool(target == ModelTarget::Router && !flag("logprobs"))),
+                    ("current", Value::Bool(current)),
+                ]),
+            ));
+        }
+    }
+    // Typing a filter ranks; with none, the accounts' own order stands.
+    if !text.is_empty() {
+        rows.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+    let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, rows.len().saturating_sub(1) as i64);
+    map([
+        ("target", s(&target.label())),
+        ("text", s(&text)),
+        ("sel", n(sel)),
+        ("hidden", n(hidden)),
+        ("rows", list(rows.into_iter().map(|r| r.1).collect())),
+    ])
+}
+
+
+/// `view:providers`: the providers an account can be added for, one row each. They are the
+/// built-in presets (`aibus_provider::presets`), so a new vendor is a line of data there.
+pub fn providers(t: &mut Tracker) -> Value {
+    if t.get_key(MODAL).and_then(as_str) != Some("providers") {
+        return Value::Null;
+    }
+    let all = aibus_provider::presets::presets();
+    let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, all.len().saturating_sub(1) as i64);
+    let rows = all.iter().map(|p| {
+        let keyless = p.auth_methods.iter().all(|m| m == "none");
+        map([
+            ("id", s(&p.id)),
+            ("api", s(p.api.map_or("", |a| a.as_str()))),
+            ("url", s(p.base_url.as_deref().unwrap_or("your own"))),
+            ("auth", s(if keyless { "none" } else { "key" })),
+        ])
+    });
+    map([("rows", list(rows.collect())), ("sel", n(sel))])
 }
 
 fn row_value(row: &Row, selected: Option<i64>) -> Value {
@@ -251,6 +393,7 @@ pub fn transcript(store: &Store, t: &mut Tracker) -> Value {
         ("role", s(&meta_s("role"))),
         ("model", s(&meta_s("model"))),
         ("account", s(&meta_s("account"))),
+        ("fallback_from", s(&meta_s("fallback_from"))),
         ("status", s(&status)),
         ("live", Value::Bool(live)),
         ("retryable", Value::Bool(retryable)),
@@ -292,6 +435,122 @@ pub fn lines(t: &mut Tracker, run: &str) -> Value {
         ),
         ("width", n(width)),
     ])
+}
+
+/// `$0.0123`, the one way a cost is written in the status modal, the cost table and the tooltips.
+pub fn dollars(x: f64) -> String {
+    format!("${x:.4}")
+}
+
+/// One run's cost so far.
+fn run_cost(t: &mut Tracker, id: &str) -> f64 {
+    match t.get_key(&run_key(id, "usage")).and_then(|u| get(u, "cost_usd")) {
+        Some(Value::F64(x)) => *x,
+        Some(Value::I64(x)) => *x as f64,
+        _ => 0.0,
+    }
+}
+
+/// What the whole session has cost. The cost table's total and the status bar's `cost` field are
+/// both this sum, so they cannot disagree.
+pub fn session_cost(t: &mut Tracker) -> f64 {
+    let ids: Vec<String> = t.get_key(RUNS_ORDER).map(as_list).unwrap_or_default().iter().filter_map(as_str).map(str::to_owned).collect();
+    ids.iter().map(|id| run_cost(t, id)).sum()
+}
+
+/// `view:run_status`: the rows of the `/status` modal, `{title, rows: [{k, v}]}`. Null unless the
+/// modal is `status:<run>`, `status:advisor` or `status:router`.
+pub fn run_status(t: &mut Tracker) -> Value {
+    let Some(what) = t.get_key(MODAL).and_then(as_str).and_then(|m| m.strip_prefix("status:")).map(str::to_owned) else {
+        return Value::Null;
+    };
+    let row = |k: &str, v: String| map([("k", s(k)), ("v", s(&v))]);
+    let text = |v: Option<&Value>| v.and_then(as_str).unwrap_or("").to_owned();
+    let count = |v: Option<&Value>| v.and_then(as_i64).unwrap_or(0);
+    fn seat(t: &mut Tracker, name: &str) -> String {
+        t.get_key(SESSION_ASSIST).and_then(|a| get(a, name)).and_then(|x| get(x, "label")).and_then(as_str).unwrap_or("").to_owned()
+    }
+    if what == "advisor" {
+        let adv = t.get_key(ADVISOR_STATE).cloned().unwrap_or(Value::Null);
+        let rows = vec![
+            row("model", seat(t, "advisor")),
+            row("state", text(get(&adv, "status"))),
+            row("checkpoints", count(get(&adv, "calls")).to_string()),
+            row("tokens read", count(get(&adv, "tokens_read")).to_string()),
+            row("at checkpoint", text(get(&adv, "active_checkpoint"))),
+        ];
+        return map([("title", s("advisor")), ("rows", list(rows))]);
+    }
+    if what == "router" {
+        let answered = crate::view::FORK_KINDS
+            .iter()
+            .filter(|(k, _)| t.get_key(&router_last(k)).is_some_and(|v| !matches!(v, Value::Null)))
+            .count();
+        let rows = vec![
+            row("model", seat(t, "router")),
+            row("answers so far", count(t.get_key(ROUTER_FORKS)).to_string()),
+            row("question kinds answered", answered.to_string()),
+        ];
+        return map([("title", s("router")), ("rows", list(rows))]);
+    }
+    let meta = t.get_key(&run_key(&what, "meta")).cloned().unwrap_or(Value::Null);
+    let status = text(t.get_key(&run_key(&what, "status")));
+    let turns = count(t.get_key(&run_key(&what, "turns")));
+    let usage = t.get_key(&run_key(&what, "usage")).cloned().unwrap_or(Value::Null);
+    let cost = run_cost(t, &what);
+    let clock = count(t.get_key(CLOCK_MS));
+    // A run still going is measured to the clock, a finished one to when it ended.
+    let elapsed = get(&meta, "started_at").and_then(as_i64).map_or_else(
+        || "not started".to_owned(),
+        |from| {
+            let secs = (get(&meta, "ended_at").and_then(as_i64).unwrap_or(clock) - from).max(0) / 1000;
+            if secs >= 60 { format!("{}m {:02}s", secs / 60, secs % 60) } else { format!("{secs}s") }
+        },
+    );
+    let parent = match get(&meta, "parent").and_then(as_str) {
+        Some(p) => {
+            let name = text(t.get_key(&run_key(p, "meta")).and_then(|m| get(m, "agent")));
+            format!("{name} {}", short(p))
+        }
+        None => "none".to_owned(),
+    };
+    let rows = vec![
+        row("agent", text(get(&meta, "agent"))),
+        row("role", text(get(&meta, "role"))),
+        row("model", text(get(&meta, "model"))),
+        row("account", text(get(&meta, "account"))),
+        row("status", status),
+        row("parent", parent),
+        row("depth", count(get(&meta, "depth")).to_string()),
+        row("turns", turns.to_string()),
+        row("input tokens", count(get(&usage, "input_tokens")).to_string()),
+        row("output tokens", count(get(&usage, "output_tokens")).to_string()),
+        row("cache read", count(get(&usage, "cache_read")).to_string()),
+        row("cache write", count(get(&usage, "cache_write")).to_string()),
+        row("cost", dollars(cost)),
+        row("elapsed", elapsed),
+    ];
+    map([("title", s(&format!("{} {}", text(get(&meta, "agent")), short(&what)))), ("rows", list(rows))])
+}
+
+/// `view:cost`: `{rows: [{agent, run, status, cost}], total}` sorted by cost, dearest first.
+/// Null unless the modal is `cost`.
+pub fn cost(t: &mut Tracker) -> Value {
+    if t.get_key(MODAL).and_then(as_str) != Some("cost") {
+        return Value::Null;
+    }
+    let ids: Vec<String> = t.get_key(RUNS_ORDER).map(as_list).unwrap_or_default().iter().filter_map(as_str).map(str::to_owned).collect();
+    let mut rows: Vec<(f64, Value)> = ids
+        .iter()
+        .map(|id| {
+            let c = run_cost(t, id);
+            let agent = t.get_key(&run_key(id, "meta")).and_then(|m| get(m, "agent")).and_then(as_str).unwrap_or("").to_owned();
+            let status = t.get_key(&run_key(id, "status")).and_then(as_str).unwrap_or("").to_owned();
+            (c, map([("agent", s(&agent)), ("run", s(&short(id))), ("status", s(&status)), ("cost", s(&dollars(c)))]))
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    map([("rows", list(rows.into_iter().map(|r| r.1).collect())), ("total", s(&dollars(session_cost(t))))])
 }
 
 #[cfg(test)]

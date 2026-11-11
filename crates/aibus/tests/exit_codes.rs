@@ -169,3 +169,48 @@ fn eleven_is_doctor_finding_a_problem_and_twelve_is_agent_validate() {
     let out = aibus(home.path(), &["agent", "validate"]);
     assert_eq!(code(&out), 12, "{}", String::from_utf8_lossy(&out.stdout));
 }
+
+#[test]
+fn workflow_validate_exits_twelve_on_errors_and_zero_on_warnings() {
+    let home = xdg_temp();
+    let dir = home.path().join("proj/.aibus/workflows");
+    fs::create_dir_all(&dir).unwrap();
+    // A gate is a warning: the exit code stays 0.
+    fs::write(dir.join("gated.toml"), "[[step]]\nagent = \"explore\"\nprompt = \"a\"\ngate = \"true\"\n").unwrap();
+    let warned = aibus(home.path(), &["workflow", "validate"]);
+    assert_eq!(code(&warned), 0, "{}", String::from_utf8_lossy(&warned.stdout));
+    assert!(String::from_utf8_lossy(&warned.stdout).contains("warning"));
+
+    fs::write(dir.join("bad.toml"), "[[step]]\nagent = \"ghost\"\nprompt = \"a\"\n").unwrap();
+    let bad = aibus(home.path(), &["workflow", "validate"]);
+    assert_eq!(code(&bad), 12, "{}", String::from_utf8_lossy(&bad.stdout));
+    let one = aibus(home.path(), &["workflow", "validate", "gated"]);
+    assert_eq!(code(&one), 0);
+}
+
+#[test]
+fn mcp_run_status_exit_codes_follow_06_section_3() {
+    use common::mcp_client::{McpClient, Protocol};
+    use serde_json::json;
+    // A chain that completes is 0, as `aibus run` would exit; the budget (8) and interrupt (7)
+    // mappings are the child's own exit codes, carried through by `run_status`, and
+    // `aibus-mcp/tests/run_tools.rs` plays them.
+    let home = xdg_temp();
+    let dir = home.path().join("proj/.aibus/workflows");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("ship.toml"), "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n").unwrap();
+    let mut c = McpClient::start(home.path(), Protocol::V2026_07_28, &["--allow", "run"]);
+    let started = c.call("workflow_run", json!({ "name": "ship", "scope": "project", "input": "look" })).unwrap();
+    let run = started["structuredContent"]["run"].as_str().unwrap().to_owned();
+    for _ in 0..120 {
+        let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).unwrap();
+        let body = &r["structuredContent"];
+        // The exit code comes off the child's last event, a moment before the status settles.
+        if !body["exit_code"].is_null() && !matches!(body["status"].as_str(), Some("starting" | "running")) {
+            assert_eq!(body["exit_code"], 0, "{body}");
+            assert_eq!(body["status"], "completed", "{body}");
+            return;
+        }
+    }
+    panic!("the run never finished");
+}

@@ -1,0 +1,11 @@
+{
+ "flag": "no_named_tool_choice",
+ "api": "anthropic-messages",
+ "with": {
+  "/tool_choice/type": "any"
+ },
+ "without": {
+  "/tool_choice/type": "tool",
+  "/tool_choice/name": "read"
+ }
+}

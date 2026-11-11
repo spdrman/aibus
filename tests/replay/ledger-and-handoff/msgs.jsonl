@@ -1,14 +1,14 @@
-{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ledger_update"}],"msg":"Stream","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"section\":\"Goal\",\"text\":\"Move auth to middleware\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"chunks":[{"id":"00000000000000000000000002","k":"tool_start","name":"ledger_update"}],"msg":"Stream","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"chunks":[{"id":"00000000000000000000000002","k":"tool_input","v":"{\"section\":\"In Progress\",\"text\":\"run the migration\\nadd a test\"}"},{"id":"00000000000000000000000002","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"msg":"UsageUpdate","run":"01M6Z6N78ECKF7C43Q7408H9S0","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"00000000000000000000000001","input":{"section":"Goal","text":"Move auth to middleware"},"msg":"ToolCallRequested","name":"ledger_update","needs_permission":false,"run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"call":"00000000000000000000000001","content_len":104,"is_error":false,"ms":2,"msg":"ToolCallFinished","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"call":"00000000000000000000000002","input":{"section":"In Progress","text":"run the migration\nadd a test"},"msg":"ToolCallRequested","name":"ledger_update","needs_permission":false,"run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"call":"00000000000000000000000002","content_len":104,"is_error":false,"ms":1,"msg":"ToolCallFinished","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"chunks":[{"k":"text","v":"The ledger is up to date."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N78ECKF7C43Q7408H9S0"}
-{"msg":"UsageUpdate","run":"01M6Z6N78ECKF7C43Q7408H9S0","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":7222133,"secs":0},"error":null,"run_id":"01M6Z6N78ECKF7C43Q7408H9S0","status":"Completed","summary":"","summary_file":null,"summary_len":25,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N78ECKF7C43Q7408H9S0"}
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ledger_update"}],"msg":"Stream","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"section\":\"Goal\",\"text\":\"Move auth to middleware\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"chunks":[{"id":"00000000000000000000000002","k":"tool_start","name":"ledger_update"}],"msg":"Stream","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"chunks":[{"id":"00000000000000000000000002","k":"tool_input","v":"{\"section\":\"In Progress\",\"text\":\"run the migration\\nadd a test\"}"},{"id":"00000000000000000000000002","k":"tool_end"}],"msg":"Stream","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"msg":"UsageUpdate","run":"01M769A7DTQ7D7DRC4T4PAGMRW","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"section":"Goal","text":"Move auth to middleware"},"msg":"ToolCallRequested","name":"ledger_update","needs_permission":false,"run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"call":"00000000000000000000000001","content_len":104,"is_error":false,"ms":8,"msg":"ToolCallFinished","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"call":"00000000000000000000000002","input":{"section":"In Progress","text":"run the migration\nadd a test"},"msg":"ToolCallRequested","name":"ledger_update","needs_permission":false,"run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"call":"00000000000000000000000002","content_len":104,"is_error":false,"ms":4,"msg":"ToolCallFinished","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"chunks":[{"k":"text","v":"The ledger is up to date."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A7DTQ7D7DRC4T4PAGMRW"}
+{"msg":"UsageUpdate","run":"01M769A7DTQ7D7DRC4T4PAGMRW","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":25203629,"secs":0},"error":null,"run_id":"01M769A7DTQ7D7DRC4T4PAGMRW","status":"Completed","summary":"","summary_file":null,"summary_len":25,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A7DTQ7D7DRC4T4PAGMRW"}

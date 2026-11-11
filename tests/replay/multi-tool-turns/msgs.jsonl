@@ -1,26 +1,26 @@
-{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"k":"text","v":"Three looks, two of them at once."},{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000002","k":"tool_start","name":"glob"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000002","k":"tool_input","v":"{\"pattern\":\"**/*.rs\"}"},{"id":"00000000000000000000000002","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":150,"output_tokens":30}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"msg":"UsageUpdate","run":"01M6Z6N51GVY4G0DS9VSK2S1G3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0003,"input_tokens":150,"output_tokens":30}}
-{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"call":"00000000000000000000000001","content_len":14,"is_error":false,"ms":0,"msg":"ToolCallFinished","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"call":"00000000000000000000000002","input":{"pattern":"**/*.rs"},"msg":"ToolCallRequested","name":"glob","needs_permission":false,"run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"call":"00000000000000000000000002","content_len":11,"is_error":false,"ms":0,"msg":"ToolCallFinished","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"grep"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"pattern\":\"fn main\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":310,"output_tokens":14}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"msg":"UsageUpdate","run":"01M6Z6N51GVY4G0DS9VSK2S1G3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00068,"input_tokens":460,"output_tokens":44}}
-{"call":"00000000000000000000000001","input":{"pattern":"fn main"},"msg":"ToolCallRequested","name":"grep","needs_permission":false,"run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"call":"00000000000000000000000001","content_len":25,"is_error":false,"ms":0,"msg":"ToolCallFinished","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"read"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\"src/main.rs\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":380,"output_tokens":12}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"msg":"UsageUpdate","run":"01M6Z6N51GVY4G0DS9VSK2S1G3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0011200000000000001,"input_tokens":840,"output_tokens":56}}
-{"call":"00000000000000000000000001","input":{"path":"src/main.rs"},"msg":"ToolCallRequested","name":"read","needs_permission":false,"run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"call":"00000000000000000000000001","content_len":58,"is_error":false,"ms":0,"msg":"ToolCallFinished","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"chunks":[{"k":"text","v":"main prints a greeting and nothing else."},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":460,"output_tokens":11}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
-{"msg":"UsageUpdate","run":"01M6Z6N51GVY4G0DS9VSK2S1G3","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0016350000000000002,"input_tokens":1300,"output_tokens":67}}
-{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":7070241,"secs":0},"error":null,"run_id":"01M6Z6N51GVY4G0DS9VSK2S1G3","status":"Completed","summary":"","summary_file":null,"summary_len":40,"turns":4,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0016350000000000002,"input_tokens":1300,"output_tokens":67}},"run":"01M6Z6N51GVY4G0DS9VSK2S1G3"}
+{"account":"fake","agent":"explore","model":"fake-small","msg":"RunStarted","parent":null,"role":"worker","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"k":"text","v":"Three looks, two of them at once."},{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000002","k":"tool_start","name":"glob"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000002","k":"tool_input","v":"{\"pattern\":\"**/*.rs\"}"},{"id":"00000000000000000000000002","k":"tool_end"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":150,"output_tokens":30,"reasoning_tokens":null}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"msg":"UsageUpdate","run":"01M769A2VVNNYTM7A2ESF8Q4GS","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0003,"input_tokens":150,"output_tokens":30,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"call":"00000000000000000000000001","content_len":14,"is_error":false,"ms":6,"msg":"ToolCallFinished","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"call":"00000000000000000000000002","input":{"pattern":"**/*.rs"},"msg":"ToolCallRequested","name":"glob","needs_permission":false,"run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"call":"00000000000000000000000002","content_len":11,"is_error":false,"ms":3,"msg":"ToolCallFinished","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"grep"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"pattern\":\"fn main\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":310,"output_tokens":14,"reasoning_tokens":null}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"msg":"UsageUpdate","run":"01M769A2VVNNYTM7A2ESF8Q4GS","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.00068,"input_tokens":460,"output_tokens":44,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"pattern":"fn main"},"msg":"ToolCallRequested","name":"grep","needs_permission":false,"run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"call":"00000000000000000000000001","content_len":25,"is_error":false,"ms":3,"msg":"ToolCallFinished","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"read"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\"src/main.rs\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":380,"output_tokens":12,"reasoning_tokens":null}},{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"msg":"UsageUpdate","run":"01M769A2VVNNYTM7A2ESF8Q4GS","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0011200000000000001,"input_tokens":840,"output_tokens":56,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"path":"src/main.rs"},"msg":"ToolCallRequested","name":"read","needs_permission":false,"run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"call":"00000000000000000000000001","content_len":58,"is_error":false,"ms":3,"msg":"ToolCallFinished","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"chunks":[{"k":"text","v":"main prints a greeting and nothing else."},{"k":"usage","v":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":460,"output_tokens":11,"reasoning_tokens":null}},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A2VVNNYTM7A2ESF8Q4GS"}
+{"msg":"UsageUpdate","run":"01M769A2VVNNYTM7A2ESF8Q4GS","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0016350000000000002,"input_tokens":1300,"output_tokens":67,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"explore","duration":{"nanos":24818630,"secs":0},"error":null,"run_id":"01M769A2VVNNYTM7A2ESF8Q4GS","status":"Completed","summary":"","summary_file":null,"summary_len":40,"turns":4,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0016350000000000002,"input_tokens":1300,"output_tokens":67,"reasoning_tokens":null}},"run":"01M769A2VVNNYTM7A2ESF8Q4GS"}

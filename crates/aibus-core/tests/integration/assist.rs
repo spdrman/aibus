@@ -22,6 +22,7 @@ fn seat(fake: &Arc<FakeProvider>, account: &str) -> Seat {
         creds: Arc::new(fake_credential()),
         model: ModelId("fake-small".into()),
         account: AccountName(account.into()),
+        fallback: None,
     }
 }
 

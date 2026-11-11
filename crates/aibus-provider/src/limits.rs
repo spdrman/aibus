@@ -438,11 +438,11 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_gate_blocks_on_the_window_headers_of_an_error() {
         let mut err = ProviderError::new(ProviderErrorKind::Server, "boom");
-        err.rate_limit = Some(RateLimitInfo {
+        err.rate_limit = Some(Box::new(RateLimitInfo {
             requests_remaining: Some(0),
             resets_in: Some(Duration::from_secs(20)),
             ..RateLimitInfo::default()
-        });
+        }));
         let limiter = Limiter::new(acct("work"), limits(4));
         let gated = Gated::new(Arc::new(FakeProvider::new(Script::new().then(Step::Error(err)))), limiter.clone());
         let (tx, _rx) = mpsc::channel(8);

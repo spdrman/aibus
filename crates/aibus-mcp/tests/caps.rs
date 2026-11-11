@@ -21,7 +21,7 @@ fn the_tool_list_follows_the_flags_and_the_fixed_order() {
     let (plain, _home) = common::server(Caps::default(), Redactor::new());
     let reading: Vec<String> = plain.tools().iter().map(|t| t.name.to_string()).collect();
     assert_eq!(reading[0], "workflow_list");
-    assert!(!reading.iter().any(|n| n.starts_with("workflow_c") || n == "workflow_update" || n.contains("run")));
+    assert!(!reading.iter().any(|n| ["workflow_create", "workflow_update", "workflow_run", "run_status", "run_cancel"].contains(&n.as_str())));
     for (write, gates, run) in [
         (false, false, false),
         (true, false, false),

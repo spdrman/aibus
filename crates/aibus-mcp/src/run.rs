@@ -337,7 +337,7 @@ impl View {
 impl Entry {
     fn update(&self, f: impl FnOnce(&mut View) -> bool) {
         let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
-        let changed = f(&mut *view);
+        let changed = f(&mut view);
         drop(view);
         if changed {
             self.changed.send_modify(|n| *n += 1);
@@ -498,7 +498,9 @@ impl Runs {
             "step": v.step,
             "attempts": attempts,
             "usage": { "input_tokens": v.usage.0, "output_tokens": v.usage.1, "cost_usd": v.usage.2 },
-            "exit_code": v.exit_code,
+            // The exit code of the process: the `SessionEnd` event carries one earlier, while the
+            // status still says `running`, so it is shown only once the process has ended.
+            "exit_code": if v.ended { v.exit_code } else { None },
             "session": v.session,
             // Wrapped as data, with aibus's own markers escaped, like a worker's report.
             "tail": format!(
@@ -621,12 +623,6 @@ impl Server {
         let Some(runs) = &self.runs else {
             return Ok(self.fail("this server was started without a way to run workflows"));
         };
-        let limited = self.run_limiter.lock().unwrap_or_else(|e| e.into_inner()).take(now);
-        if let Err(secs) = limited {
-            return Ok(self.fail(format!(
-                "rate limit: at most {RUNS_PER_MINUTE} runs a minute, try again in {secs} s"
-            )));
-        }
         if !workflow::valid_name(name) {
             return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$"));
         }
@@ -662,6 +658,14 @@ impl Server {
         };
         let steps = parsed.steps.iter().map(|s| s.agent.to_string()).collect();
 
+        // Only a start that would spawn a child costs a token: a typo in a name or a workflow
+        // that does not validate starts nothing, and the per-call limit still counts it.
+        let limited = self.run_limiter.lock().unwrap_or_else(|e| e.into_inner()).take(now);
+        if let Err(secs) = limited {
+            return Ok(self.fail(format!(
+                "rate limit: at most {RUNS_PER_MINUTE} runs a minute, try again in {secs} s"
+            )));
+        }
         match runs.start(name, input, steps, &self.project, &self.caps.allow_tools, &self.redactor) {
             Err(why) => Ok(self.fail(why)),
             Ok(id) => {

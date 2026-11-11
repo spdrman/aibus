@@ -120,13 +120,6 @@ impl Server {
         }
         let expected = if update { Some(text(tool, map, "expected_revision")?) } else { None };
 
-        let limited = self.write_limiter.lock().unwrap_or_else(|e| e.into_inner()).take(now);
-        if let Err(secs) = limited {
-            return Ok(self.fail(format!(
-                "rate limit: at most {WRITES_PER_MINUTE} writes a minute, try again in {secs} s"
-            )));
-        }
-
         // Everything up to the directory is decided from the arguments alone.
         if !workflow::valid_name(name) {
             return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$ (a name, not a path)"));
@@ -166,6 +159,15 @@ impl Server {
                     step.gate.as_deref().unwrap_or_default().trim()
                 )));
             }
+        }
+
+        // A call the arguments alone refuse never reaches the disk, so it costs no token; the
+        // per-call limit still counts it.
+        let limited = self.write_limiter.lock().unwrap_or_else(|e| e.into_inner()).take(now);
+        if let Err(secs) = limited {
+            return Ok(self.fail(format!(
+                "rate limit: at most {WRITES_PER_MINUTE} writes a minute, try again in {secs} s"
+            )));
         }
 
         let _one_writer = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());

@@ -30,7 +30,8 @@ COLS=$(sed -n 's/^pub const COLS: u16 = \([0-9]*\);/\1/p' "$ROOT/crates/aibus-tu
 ROWS=$(sed -n 's/^pub const ROWS: u16 = \([0-9]*\);/\1/p' "$ROOT/crates/aibus-tui/src/demo.rs")
 PROMPT=$(sed -n 's/^pub const PROMPT: &str = "\(.*\)";/\1/p' "$ROOT/crates/aibus-tui/src/demo.rs")
 
-build() { (cd "$ROOT" && cargo build --locked -p aibus); }
+# AIBUS_FEATURES=flow-diagram records the rataflow path; a plain call records the default build.
+build() { (cd "$ROOT" && cargo build --locked -p aibus ${AIBUS_FEATURES:+--features "$AIBUS_FEATURES"}); }
 
 msgs() {
   local home=$WORK/home

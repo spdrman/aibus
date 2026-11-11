@@ -33,7 +33,7 @@ pub fn audit_lines(home: &Xdg) -> Vec<serde_json::Value> {
 }
 
 /// A stand-in for `aibus run --workflow <name> --json -- <input>` that plays one scripted
-/// chain, chosen by the input (the last argument): `ok`, `slow`, `ask`, `costly` or `step`.
+/// chain, chosen by the input (the last argument): `ok`, `slow`, `ask`, `costly`, `step`, `echo:<text>` (puts its input in the output) or `loud` (a long log).
 /// It writes its arguments and its environment to `<dir>/argv.txt` and `<dir>/env.txt`, and an
 /// empty `commits.jsonl.zst` to `<dir>/session/`, so a test can tell whether (and how) it was
 /// started. Returns the path of the script.
@@ -74,6 +74,22 @@ case "$last" in
     fin L1 partial 3 3 0.02 "bash was denied"
     ev '{"type":"SessionEnd","session":"SESSION1","exit_code":10}'
     exit 10 ;;
+  echo:*)
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    printf '{"type":"Stream","text":"the step saw %s and kept going\\n"}\n' "$last"
+    fin L1 completed 1 1 0.01 "echoed $last, then the last line of the report"
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":0}'
+    exit 0 ;;
+  loud)
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    i=0
+    while [ $i -lt 3000 ]; do
+      ev '{"type":"Stream","text":"filler line of the log number xxxxxxxxxxxxxxxxxxxxxxxx\n"}'
+      i=$((i+1))
+    done
+    fin L1 completed 1 1 0.01 "the last line of the report"
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":0}'
+    exit 0 ;;
   costly)
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     ev '{"type":"RunFailed","run":"L1","kind":"budget","message":"budget exceeded"}'

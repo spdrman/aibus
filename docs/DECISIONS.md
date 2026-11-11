@@ -377,6 +377,24 @@ Gated calls, taken at the recommended default:
 
 **Why.** The safety model in the issue (nothing prompts, nothing the model sends raises the surface, no secret in a result) is easiest to keep when the run is a separate process with a fixed command line.
 
+## D-17: run resources of `aibus mcp` (E10, #105, 2026-11-11)
+
+**Context.** Runs exist (D-16) and a client wants to read one as a resource, not only poll a tool. The issue left the log's source, the handle spelling and subscriptions open.
+
+**Decision.**
+
+1. `aibus://runs/{run}` is the `run_status` body without `tail`, and `aibus://runs/{run}/log` is `text/plain`. Both are listed as templates only with `--allow run`, and `resources/list` adds one concrete entry per handle this process gave out (oldest first). Without the flag every `aibus://runs/...` uri is `-32602`, the same as a uri that never existed.
+2. `{run}` is the handle as `workflow_run` returns it, `run-` plus the ulid, not the bare ulid the issue wrote. One spelling is easier to explain than two, and the table lookup is the only check: a session ulid on disk, a handle from another process and a made-up one all miss it, so they are `-32602` without anything touching the file system.
+3. The log is not read back from the session on disk (that would be a path from a uri to a file). The server folds the child's stream, its stderr and the final summary into a buffer of the last 256 KiB as they arrive, which is the report's text for a run that ended and the transcript tail for one that has not. Non-JSON lines are redacted on the way in, and the whole buffer again when it is served, so a key cut in half at the front of the buffer is the only thing that can get through, and the buffer drops to the next line start to avoid even that.
+4. The body is cut to its last `limits.result_max_bytes` (the end of a log is the part a client wants), under a "cut at N of M bytes, the start of the log is left out" line, with aibus's markers escaped and a fixed header that says it is output and not instructions. `as_data` cuts the front, which is right for a file and wrong here, so the run log has its own cut.
+5. No subscriptions. `run_status` with `wait_ms` already returns on any change and works on both protocol revisions; `docs/MCP.md` says so.
+6. The `explain_run` prompt now names the two resources next to `run_status`, and the "not in this release" lines in `docs/MCP.md` lose the run resources.
+7. The security test the issue puts in `aibus-core/tests/security/mcp_server.rs` is in `aibus-mcp/tests/run_resources.rs` and `aibus/tests/mcp_security.rs`, for the reason in E4 item 7 (`aibus-core` cannot depend on the server). The golden transcript `run_resources` is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run.
+
+**Alternatives.** Read the log from the child's session directory (rejected: a path reachable from a uri, and the redacted transcript there is not the report). Accept the bare ulid too (rejected: two spellings for one thing).
+
+**Why.** A client can only read what this process started, and nothing it sends can name a file.
+
 ## E12 (2026-11-11): confirmation through elicitation and MRTR is built, the permission relay is not (#107)
 
 **Context.** #107 sat behind owner decisions 6 and 7 on epic #95. Decision 6 (do #106 and #107, elicitation first) has the recommended default of yes. Decision 7 (relay a run's `bash` prompts through the client) has the recommended default of non-goal: the epic says "I lean non-goal until a client I use supports elicitation", and I have no such client. The owner wants zero open issues, so I took both defaults.

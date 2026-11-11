@@ -15,20 +15,21 @@ use aibus_provider_anthropic::TokenSource;
 use async_trait::async_trait;
 use zeroize::Zeroizing;
 
+/// Reads one variable of the process environment.
+type EnvFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+/// Runs `gcloud auth print-access-token`.
+type RunFn = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+
 pub struct GcloudTokens {
     store: Arc<CredentialStore>,
-    env: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
-    run: Arc<dyn Fn() -> Result<String, String> + Send + Sync>,
+    env: EnvFn,
+    run: RunFn,
 }
 
 impl GcloudTokens {
     /// `env` reads the process environment and `run` is `gcloud` itself in a real run; a test
     /// hands in fakes.
-    pub fn new(
-        store: Arc<CredentialStore>,
-        env: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
-        run: Arc<dyn Fn() -> Result<String, String> + Send + Sync>,
-    ) -> Self {
+    pub fn new(store: Arc<CredentialStore>, env: EnvFn, run: RunFn) -> Self {
         Self { store, env, run }
     }
 }
@@ -136,15 +137,15 @@ mod tests {
     #[tokio::test]
     async fn the_token_comes_from_gcloud_once_and_is_then_cached_under_the_account() {
         let runs = Arc::new(AtomicUsize::new(0));
-        let (tokens, redactor) = source(&Env::default(), &runs, Ok(format!("{FAKE_KEY}")));
+        let (tokens, redactor) = source(&Env::default(), &runs, Ok(FAKE_KEY.to_owned()));
         let logs = capture_logs();
         for _ in 0..3 {
             assert_eq!(tokens.token(&cred()).await.unwrap().expose(), FAKE_KEY);
         }
         assert_eq!(runs.load(Ordering::SeqCst), 1, "gcloud is not run again inside the 50 minutes");
         assert!(!redactor.redact(&format!("token {FAKE_KEY}")).contains(FAKE_KEY));
-        drop(logs);
         assert_no_secret_logged();
+        drop(logs);
     }
 
     #[tokio::test]

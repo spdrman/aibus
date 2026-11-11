@@ -1217,7 +1217,7 @@ mod tests {
         assert!(slash_offered(&env).iter().all(|(n, _)| n != "/fix"));
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 13);
+        assert_eq!(slash_offered(&env).len(), 15);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
     }

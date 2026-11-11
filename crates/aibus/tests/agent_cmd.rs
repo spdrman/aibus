@@ -63,6 +63,11 @@ fn list_shows_the_ten_built_ins_with_the_json_shape() {
 
 #[test]
 fn list_follows_the_precedence_and_names_is_one_per_line() {
+    // The built-in roster grows with releases, so the count is measured, not written down.
+    let built_in = {
+        let bare = xdg_temp();
+        stdout(&aibus(bare.path(), &["agent", "list", "--names"])).lines().count()
+    };
     let home = xdg_temp();
     let p = proj(home.path());
     write(
@@ -84,7 +89,8 @@ fn list_follows_the_precedence_and_names_is_one_per_line() {
 
     let out = aibus(home.path(), &["agent", "list", "--names"]);
     let names = stdout(&out);
-    assert_eq!(names.lines().count(), 10);
+    // `explore` replaces a built-in of the same name; `helper` is the one addition.
+    assert_eq!(names.lines().count(), built_in + 1);
     assert!(names.lines().any(|l| l == "helper") && names.lines().any(|l| l == "audit"));
 
     let out = aibus(home.path(), &["agent", "list"]);

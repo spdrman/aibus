@@ -563,3 +563,81 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Making the oauth test pass by serialising callers harder, or by relaxing it to "at most two refreshes" (rejected: the lock is right and the test was the one asking the wrong question). A `#[allow(clippy::type_complexity)]` in `assist.rs` (rejected: two fields were simpler than an allow). Dropping `termwiz` from the banned list (rejected: the guard is worth having, it only needed the right graph).
 
 **Why.** Each test now fails for the reason it names, and not for a number somebody had to remember to bump.
+
+
+## D-0.2.0-C: The dashboard stabilisation, what I changed in the code and what in the tests (#172)
+
+**Context.** The first full gate on `cut/0.2.0` was red for 17 tests, 2 clippy lints, 1 test-module lint and 1 rustc warning in `aibus-tui`. For each one I read the issue that introduced the behaviour and decided which side was wrong.
+
+**Decision.** Tests that were stale, and now follow the code: the popup and `/`-completion counts (15 commands offered once `/login` and `/logout` exist), `/model opus` and `/advisor opus` (they are `SetModel` since G2, not prompt lines), the legend text (`<model> · lead`, as 05-ui section 3 says, not `lead · <model>`), `header.rs` (it never registered the dashboard's views, so there was no `view:header` to draw), the `$` key in `cost_table_total_equals_the_status_bar` (it is a dashboard key, so it types while the prompt has focus; the test now leaves the prompt first) and `workflow_commands` (`line` types, so the prompt that Enter filled has to be cleared first). The status bar's `cost` node was never missing: the failing assertion was the `$` key.
+
+Code that was wrong, and is now fixed. The `?` screen could not show its closing line at 80x24 any more (`i` and `$` made 42 key rows, so two columns of 21 plus the border and a footer row are 25 rows high): "any key closes" is now in the title and the box is two rows shorter. And a key typed on a `/login <provider> <key>` line was drawn in the prompt until Enter refused it, which `docs/SECURITY.md` says never happens ("never echoed"): everything after the provider on a `/login` line is now drawn as dots (`widgets::prompt`; the text, the cursor and the history are untouched). That one was a real leak of the typed text into a frame, not a false positive of the guard.
+
+Lints: the two `nonminimal_bool` in `Keymap::lookup` are rewritten, the test module of `views.rs` moves to the end of the file, and `demo.rs` takes `Terminal::new` with `let Ok(..)` because its error is `Infallible` (the nightly fuzz build flagged the `?` as unreachable). `result_large_err` on three functions in `app.rs` comes from `AibusError` in `aibus-core`, so it is not fixed here.
+
+Snapshots: regenerated with `AIBUS_UPDATE_SNAPSHOTS=1` on arm64 (MERCURY) after the logic was right, then checked on x86_64 (MARS), and diffed by eye. The context menu now has Status and Cost (G5), the help frames have the two new keys and the new title, and six frames that had never been written exist now (`workflow_show` too: the test failed before it got to it). No colour changed, so there are no contrast numbers to report.
+
+**Alternatives.** Drawing the commands on the help screen (left alone, as D-G9 item 3 says: it does not fit 80x24 and I did not want to change every help frame twice). Masking only the argument that looks like a key (rejected: anything after the provider is refused anyway, so there is nothing legitimate to show). Boxing `AibusError` (core's call, not the dashboard's).
+
+**Why.** A red gate is only useful if each failure is traced to the side that moved, and a snapshot is only evidence once the logic it photographs is right.
+
+
+## D-F11: The MCP rate limits count calls that can change something, and a run's exit code waits for the process (0.2.0 stabilisation, #172)
+
+**Context.** The first full gate on `cut/0.2.0` had eight red tests in `aibus-mcp`. Four of them were stale fixtures (a roster that grew, a `workflow_dry_run` tool whose name contains "run", a fifth toml block in the author prompt, an agent named `build` that was never in the roster). Two said "a secret reached" a file, and three hit the write and run limits. The last two (`a_tool_that_would_ask_is_denied_not_queued` and the cost cap one) saw `running` next to an exit code.
+
+**Decision.** The limiters were already one per `Server`, not per process, so there was nothing global to unglobal. What changed is where the token is taken: `workflow_create`, `workflow_update` and `workflow_run` now take it after the checks that need only the arguments and the files (name, size, credential, validate, gate rule, workflow lookup) and just before the disk write or the spawn. A call that is refused for a typo spends no write or run token, so a client that fixes a typo is not locked out for ten seconds. The 60 calls a minute limit still counts every call, so a flood of bad calls is still bounded. The limit tests are unchanged and still pass because they use valid calls. `run_status` shows `exit_code` only once the process has ended: the `SessionEnd` event carries one earlier, and a client saw an exit code next to `running`, which `docs/MCP.md` does not promise. The two arm64 flakes were that, not timing, so the tests keep their bounded poll and now wait on a condition the server keeps true. The "secret reached" failures were the tests' own fixtures (`leaky.md`, `leak.toml`, `w.toml` hold the key on purpose so the tools can read it) tripping the scan of the temp tree when the test ended; every redaction assertion in those tests had already passed, so there is no hole in the server. The tests now delete the fixtures before the scan, which leaves the scan covering only what the server wrote (audit log included). `audit::record` keeps its nine arguments under an `allow`, since six callers each pass different values and a struct would only be a second spelling of the call.
+
+**Alternatives.** A clock or a fresh server per call in the tests (rejected: it hides that a refused call should not spend a write). Making the testkit scan skip fixtures (rejected: it is another crate's rule). A `Record` struct for the audit line (rejected: a pass-through).
+
+**Why.** The limits protect the disk and the process table, so they count what reaches them.
+## F7 follow-up (2026-11-11): the unused half of the login framework stays, and says so
+
+**Context.** The first full gate on `cut/0.2.0` built with `-D warnings` failed on `Kind::DeviceCode` and `Outcome::Tokens` in `oauth/mod.rs`: the only `Def` in the binary is OpenRouter's (PKCE, returns a key), so nothing outside the tests builds either variant.
+
+**Decision.** I kept both and marked them `#[cfg_attr(not(test), expect(dead_code, ...))]`. The device flow, the token refresh and the tokens branch of `Login::tokens` are exercised by the tests and are the half of #115 that a second vendor needs. The `expect` (not `allow`) turns into a build error the day a `Def` uses the variant, which is the moment to delete the attribute.
+
+**Alternatives.** Wire them up now (rejected: a `Def` exists only for a vendor that documents a login for third-party applications, SECURITY.md "Identity", and I know of none). Remove the device flow and the tokens branch (rejected: that is a shipped, tested RFC 8628 implementation and the refresh path, to be written again later).
+
+**Why.** The release needs a clean `-D warnings` build; deleting working, tested code to get it would be the wrong trade.
+
+## Gate fixes in the aibus crate (2026-11-11)
+
+**Context.** Triage of the first full gate on `cut/0.2.0`.
+
+**Decision.** `FakeAuthServer` (testkit) is served by a task on the test's own runtime instead of wiremock's thread. The oauth tests use a paused clock; tokio advances a paused clock whenever the runtime has nothing ready, and a reply that has to come from another thread is never ready at that moment, so reqwest's 30 s timeout fired before every answer. The product's timeouts are right and stay. Smaller test fixes: the reload test stored its key under `work` where the credential store reads `account:work`; the gcloud test checked the log capture after dropping it; the agent roster count is measured instead of written down (the built-ins are ten now).
+
+**Alternatives.** Give `Login` test-only timeout knobs, or drop `start_paused` and wait the real 5 s device interval (rejected: product code bent for a harness, or a 20 s test).
+
+**Why.** The bug was in the harness, so the harness changed.
+
+
+## D-R1: Provider fixes from the first full gate on cut/0.2.0 (#172)
+
+**Context.** The first full gate on cut/0.2.0 was red in the provider crates and the testkit catalog tests. I read each failure to see whether the product or the test was wrong.
+
+**Decision.** `price_of` is a pointer into the plain Anthropic table: the Bedrock and Vertex files only hold pointers (D-F5) and the catalog test says the target must be an anthropic row, so `price_at` now looks the target up in its own table first and then in the built-in anthropic one (the product was wrong, the tests were right). The gemini wire sent `0.20000000298023224` for a temperature of 0.2 because the `f32` was widened to `f64`; `ChatRequest::temperature_f64` goes through the shortest decimal the `f32` prints as, and the anthropic and openai wires use it too, since all four callers had the same bug (the test was right). The four OpenAI conformance sets named the content-filter case `content_filter` while the kit requires `refusal` (the anthropic and gemini sets already use it), so I renamed the cases and left the kit alone (the test data was wrong). The 95 `result_large_err` warnings came from `ProviderError` being 152 bytes, 64 of them the rate-limit windows, so `rate_limit` is now `Option<Box<RateLimitInfo>>` (96 bytes), which only the quota test in `aibus-core` and one line of `accounts.rs` had to follow.
+
+**Alternatives.** Copying the plain rows into the Bedrock and Vertex files (rejected: the model list would then offer ids Bedrock cannot serve, and `catalog-sync` would have to keep two copies in step). Rounding the temperature in the tests (rejected: the wire was what looked wrong). Boxing the whole `ProviderError` (rejected: it touches every `Result` in the workspace for no extra gain). An `allow` for the lint (rejected: the size was real).
+
+**Why.** Each fix sits where the wrong behaviour was, and the tests stay as the contract they were written as.
+
+## MCP over HTTP: the product is right, the test client was behind the spec (2026-11-11)
+
+**Context.** Four `mcp_http` tests got `400` with `-32020 missing required Mcp-Method header` where they expected `200`, and the audit file had no line with the client address (the rejected requests never reached the audit).
+
+**Decision.** The server stays as it is. Protocol `2026-07-28` moves the method (and a call's tool name) into the `Mcp-Method` and `Mcp-Name` headers as well as the body, and rmcp enforces it; `2025-11-25` has neither, and the legacy handshake test still passes without them. The test client now sends both on every `2026-07-28` request. The audit address check passes once the requests are accepted.
+
+**Alternatives.** Drop the check in the transport so old-style requests pass on the new version (rejected: it would make aibus the lenient one in a spec that added the headers so gateways can route without parsing the body).
+
+**Why.** A server that accepts less than it should is a bug in the server, but a client that sends less than the version asks for is a bug in the client, and here it was the client.
+
+## Golden MCP transcripts re-recorded (2026-11-11)
+
+**Context.** Eleven scenarios under `fixtures/mcp-server/`; only `list.jsonl` existed, and it listed one tool.
+
+**Decision.** I recorded all of them with `AIBUS_UPDATE_TRANSCRIPTS=1` after the mcp crate fixes landed, twice in separate runs (byte-identical), then once more in compare mode (both protocols against the one file). I read each for secrets, host paths and addresses: the only hit for the author's name is the public schema URL in `$id`. The run scenarios carry the default fake script's text (`Done.`), so a change to `fixtures/scripts/explore.ron` means re-recording `run_status_cancel` and `run_resources`.
+
+**Alternatives.** Hand-write the goldens (rejected: they would encode what I expected, not what the server says).
+
+**Why.** The goldens are what a client author reads to see the wire, so they are checked by eye once and by diff every time after.

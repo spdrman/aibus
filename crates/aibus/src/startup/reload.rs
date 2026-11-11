@@ -124,7 +124,7 @@ fn started_on_the_fake() -> (TempDir, Paths, crate::launch::ChildLauncher, Arc<a
     std::fs::write(paths.config_file(), FAKE).unwrap();
     let (registry, _, _) = reload_accounts(&paths, &dir.path().join("settings.toml"), &[Box::new(Fake)]).unwrap();
     let keys = Arc::new(aibus_core::MemoryKeychain::default());
-    keys.set("aibus", "work", &aibus_provider::Secret::new(REAL.to_owned())).unwrap();
+    keys.set("aibus", "account:work", &aibus_provider::Secret::new(REAL.to_owned())).unwrap();
     let l = launcher(registry, true, keys.clone());
     (dir, paths, l, keys)
 }
@@ -189,7 +189,7 @@ fn between_real_accounts_only_the_registry_is_swapped() {
     let (dir, paths) = home();
     std::fs::write(paths.config_file(), KEPT).unwrap();
     let keys = Arc::new(aibus_core::MemoryKeychain::default());
-    keys.set("aibus", "work", &aibus_provider::Secret::new(REAL.to_owned())).unwrap();
+    keys.set("aibus", "account:work", &aibus_provider::Secret::new(REAL.to_owned())).unwrap();
     let (registry, views, defaults) = reload_accounts(&paths, &dir.path().join("settings.toml"), &[Box::new(Fake)]).unwrap();
     let l = launcher(registry.clone(), false, keys);
     let before = l.live().session_default;

@@ -170,6 +170,17 @@ fn an_inline_key_is_redacted_in_the_notice_and_the_log() {
     }
 }
 
+#[test]
+fn a_key_typed_on_the_login_line_is_drawn_as_dots() {
+    let mut r = Rig::new(session(), (98, 46), Theme::recording());
+    r.type_text("/login anthropic ");
+    assert!(r.text().contains("/login anthropic ▌"), "the provider name is plain: {}", r.text());
+    r.type_text(KEY);
+    let text = r.text();
+    assert!(!text.contains("sk-test") && !text.contains("LOGIN"), "{text}");
+    assert!(text.contains(&format!("/login anthropic {}", "•".repeat(KEY.chars().count()))), "{text}");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir).unwrap().flatten() {

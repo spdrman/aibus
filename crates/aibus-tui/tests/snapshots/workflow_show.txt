@@ -1,0 +1,40 @@
+                                    AIBUS   ·   SONNET 5.5 LEADS
+────────────────────────────────────────────────────────────────────────────────────────────────────
+┌ review ──────────────────────────────────────────────────────────────────────────────────────────┐
+│ name = "review"                                                                                  │
+│ description = "Find what changed, then review it"                                                │
+│                                                                                                  │
+│ [[step]]                                                                                         │
+│ agent = "explore"                                                                                │
+│ prompt = "Find the code that changed for this and the code around it (callers, tests): {{input}… │
+│                                                                                                  │
+│ [[step]]                                                                                         │
+│ agent = "plan"                                                                                   │
+│ prompt = "Review this change for bugs, missing tests and risks. Quote file paths and lines. Con… │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│ valid, 2 steps, 0 warnings                                                                       │
+│  [Esc] Close                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ~/app $ ▌
+  swarm [idle]   subagents [0/0]   opus [on call]   jev [ 0 forks]

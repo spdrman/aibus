@@ -1,0 +1,24 @@
+┌ models for the lead ─────────────────────────────────────────────────────────┐
+│ filter: son▌                                                                 │
+│   alias    model                      account       ctx   in $/M out $… TRIC │
+│ ● sonnet   Sonnet 5.5                 acct          200k  $3.00  $15.00 TR-C │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│  [Enter] Use    [a] Advisor    [r] Router    [s] This run only               │
+│  [/] Filter    [Esc] Close                                                   │
+└──────────────────────────────────────────────────────────────────────────────┘

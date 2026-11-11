@@ -227,8 +227,8 @@ fn the_answer_changes_the_header() {
         .step(Msg::ModelSwitched { id, target: ModelTarget::Lead, to: Ok(Some((ModelId("Haiku 5.5".into()), AccountName("acct".into())))) })
         .unwrap();
     r.settle();
-    assert!(r.text().contains("lead · Haiku 5.5"), "{}", r.text());
-    assert!(!r.text().contains("lead · Sonnet 5.5"), "{}", r.text());
+    assert!(r.text().contains("Haiku 5.5 · lead"), "{}", r.text());
+    assert!(!r.text().contains("Sonnet 5.5 · lead"), "{}", r.text());
 }
 
 // ---- frames: roomy and compact, filtered and unfiltered ---------------------------------------

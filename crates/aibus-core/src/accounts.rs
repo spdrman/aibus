@@ -144,7 +144,7 @@ impl AccountRegistry {
     /// 30 minutes; an overload 60 seconds; a rate limit as long as the provider asked; an auth
     /// failure until `tested`.
     pub fn cool(&self, name: &AccountName, kind: FallbackKind, e: &aibus_provider::ProviderError) {
-        let reset = e.rate_limit.and_then(|r| r.resets_in);
+        let reset = e.rate_limit.as_ref().and_then(|r| r.resets_in);
         let span = match kind {
             FallbackKind::Quota => Some(reset.unwrap_or(QUOTA_COOLDOWN)),
             FallbackKind::Overloaded => Some(OVERLOADED_COOLDOWN),

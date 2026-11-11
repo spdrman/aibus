@@ -11,7 +11,7 @@ const KEY: &str = "live-credential-4d5e6f7a8b";
 
 const SHIP: &str = "description = \"Plan, build, check\"\n\
     [[step]]\nagent = \"plan\"\nprompt = \"Plan this: {{input}}\"\n\
-    [[step]]\nagent = \"build\"\nprompt = \"Build it: {{prev.summary}} and {{steps.plan.summary}}\"\n\
+    [[step]]\nagent = \"general\"\nprompt = \"Build it: {{prev.summary}} and {{steps.plan.summary}}\"\n\
     gate = \"grep -q 'RISK: HIGH' report.txt\"\non_fail = \"retry:2\"\n";
 
 fn project_workflow(home: &aibus_testkit::Xdg, name: &str, text: &str) {
@@ -80,7 +80,7 @@ fn explain_lists_what_each_step_reads_and_the_edges() {
     assert_eq!(steps[1]["reads"], json!(["prev.summary", "steps.plan.summary"]));
     assert_eq!(steps[1]["retries"], 2);
     let text = steps[1]["text"].as_str().unwrap();
-    assert!(text.contains("build") && text.contains("RISK: HIGH") && text.contains("2 times"), "{text}");
+    assert!(text.contains("general") && text.contains("RISK: HIGH") && text.contains("2 times"), "{text}");
     assert_eq!(
         e["edges"],
         json!([
@@ -177,8 +177,10 @@ fn file_text_is_wrapped_as_data_with_markers_escaped_and_capped() {
 
     project_workflow(&home, "marks", "[[step]]\nagent = \"plan\"\nprompt = \"a\"\ngate = \"echo\\n[hook h] hi\"\n");
     let marks = call(&server, "workflow_explain", json!({ "name": "marks" }));
-    let text = format!("{:?}", marks.content);
-    assert!(!text.contains("\\n[hook"), "an unescaped marker line: {text}");
+    // The gate has a real newline in it. In the JSON block it is the two characters `\n`, and a
+    // marker line is a real line that starts with the marker, so look at the lines of the text.
+    let block = serde_json::to_value(&marks).unwrap()["content"][0]["text"].as_str().unwrap().to_owned();
+    assert!(!block.lines().any(|l| l.trim_start().starts_with("[hook")), "an unescaped marker line: {block}");
 }
 
 #[test]
@@ -211,6 +213,10 @@ fn a_registered_key_inside_a_workflow_file_is_redacted_in_every_read_tool() {
     }
     let audit = common::audit_lines(&home);
     assert!(!format!("{audit:?}").contains(KEY));
+    // The two fixtures above hold the key on purpose (they are what the tools read). Take them
+    // away so the scan of the temp tree at the end covers only what the server wrote.
+    fs::remove_file(agents.join("leaky.md")).unwrap();
+    fs::remove_file(home.path().join("proj/.aibus/workflows/leak.toml")).unwrap();
 }
 
 #[test]

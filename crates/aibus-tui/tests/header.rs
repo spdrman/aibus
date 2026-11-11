@@ -8,8 +8,12 @@ use aibus_testkit::tui::{render, start};
 #[test]
 fn the_model_label_follows_set_model() {
     let mut app = App::new(aibus_graph::mini::MiniGraph::new(), || 0);
+    // The header is a `view:` node, so the dashboard's views have to be registered to have one.
+    let keys = aibus_tui::register(&mut app.graph, app.store.clone());
+    app.keys.extend(keys);
     start(&mut app, 1, "lead", Role::Lead, "sonnet");
-    assert!(render(&mut app, (98, 46), 0).text.contains("lead · sonnet"));
+    let text = render(&mut app, (98, 46), 0).text;
+    assert!(text.contains("sonnet · lead"), "{text}");
 
     app.step(Msg::Command(Command::SetModel { target: ModelTarget::Lead, model: "haiku".into() })).unwrap();
     let assist = app.graph.read_key("model:session:assist").unwrap().clone();
@@ -22,6 +26,6 @@ fn the_model_label_follows_set_model() {
     .unwrap();
 
     let text = render(&mut app, (98, 46), 0).text;
-    assert!(text.contains("lead · haiku"), "{text}");
-    assert!(!text.contains("lead · sonnet"), "{text}");
+    assert!(text.contains("haiku · lead"), "{text}");
+    assert!(!text.contains("sonnet · lead"), "{text}");
 }

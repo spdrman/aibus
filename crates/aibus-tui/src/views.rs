@@ -437,26 +437,6 @@ pub fn lines(t: &mut Tracker, run: &str) -> Value {
     ])
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fuzzy_needs_the_letters_in_order_and_prefers_tight_matches() {
-        assert!(fuzzy("agt", "agents screen").is_some());
-        assert!(fuzzy("tga", "agents screen").is_none());
-        let tight = fuzzy("agent", "agents screen").unwrap();
-        let loose = fuzzy("agent", "a great enterprise").unwrap();
-        assert!(tight > loose, "{tight} vs {loose}");
-        assert_eq!(fuzzy("", "anything"), Some(0));
-        assert!(fuzzy("ACC", "accounts screen").is_some(), "case does not matter");
-        assert!(fuzzy("a c", "accounts screen").is_some(), "spaces in the needle are ignored");
-        let word_start = fuzzy("s", "agents screen").unwrap();
-        let mid = fuzzy("g", "agents screen").unwrap();
-        assert!(word_start != mid);
-    }
-}
-
 /// `$0.0123`, the one way a cost is written in the status modal, the cost table and the tooltips.
 pub fn dollars(x: f64) -> String {
     format!("${x:.4}")
@@ -571,4 +551,24 @@ pub fn cost(t: &mut Tracker) -> Value {
         .collect();
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));
     map([("rows", list(rows.into_iter().map(|r| r.1).collect())), ("total", s(&dollars(session_cost(t))))])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fuzzy_needs_the_letters_in_order_and_prefers_tight_matches() {
+        assert!(fuzzy("agt", "agents screen").is_some());
+        assert!(fuzzy("tga", "agents screen").is_none());
+        let tight = fuzzy("agent", "agents screen").unwrap();
+        let loose = fuzzy("agent", "a great enterprise").unwrap();
+        assert!(tight > loose, "{tight} vs {loose}");
+        assert_eq!(fuzzy("", "anything"), Some(0));
+        assert!(fuzzy("ACC", "accounts screen").is_some(), "case does not matter");
+        assert!(fuzzy("a c", "accounts screen").is_some(), "spaces in the needle are ignored");
+        let word_start = fuzzy("s", "agents screen").unwrap();
+        let mid = fuzzy("g", "agents screen").unwrap();
+        assert!(word_start != mid);
+    }
 }

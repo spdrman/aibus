@@ -274,7 +274,8 @@ fn lead_of(jsonl: &str) -> Option<RunId> {
 /// `ESC ] 7777 ; <ms> BEL`. An emulator ignores it; `tools/demo-cast.py` takes it as the frame's
 /// time, so the recording follows the virtual clock and not how fast this process ran.
 pub fn print(text: bool, mut out: impl std::io::Write) -> Result<(), String> {
-    let mut term = Terminal::new(ratatui::backend::TestBackend::new(COLS, ROWS)).map_err(|e| e.to_string())?;
+    // The test backend cannot fail (its error is `Infallible`), so there is no `?` to write.
+    let Ok(mut term) = Terminal::new(ratatui::backend::TestBackend::new(COLS, ROWS));
     let mut failed = None;
     let mut prev: Option<ratatui::buffer::Buffer> = None;
     if !text {

@@ -568,7 +568,8 @@ impl Orchestrator {
         });
     }
 
-    fn send_later(&self, msg: Msg) {
+    /// Puts `msg` on the session's channel from outside the loop (a task that has something to say).
+    pub fn send_later(&self, msg: Msg) {
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let _ = tx.send(msg).await;

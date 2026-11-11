@@ -484,3 +484,18 @@ Gated calls, taken at the recommended default:
 **Alternatives.** Keeping `Compat` as a struct next to the new list (rejected: two things called compat). Replacing a model entry whole per layer (rejected: a size-only override would drop its capabilities). Adding `user` and friends to the enum (rejected: the issue says anything not named goes on the "Later" list).
 
 **Why.** One place says what a model can do, one small closed set says how the server deviates, and `degrade` stays a pure function of resolved capabilities.
+
+## G8 (2026-11-11): the author writes only when the owner asks, per command (#127)
+
+**Context.** #127 was decision gated on epic open decision 4: let the author write through a flag on the command, or through a config key.
+
+**Decision.** The flag, per command, which is the issue's recommendation. `/workflow new --write <goal>` and `/workflow edit <name> <change>` are the only ways in, nothing about it is stored, and `[workflows] author_may_write` does not exist. The pieces follow from reading the code:
+
+1. A second child, not a flag on the first. The read-only child started with the session has no write tool at all, which is the property I wanted to keep, so the write child (`aibus mcp --allow write`, built by the same `author::server(write)`, which never adds `gates` or `run`) is started the first time a write command is typed and stays for the session. It registers as the server `aibus-write`, so its tools are `mcp:aibus-write:*`. The executor's registry gained `register_late`, because it is built once at startup.
+2. Per run, not per session. A flag on the launcher says the next `workflow-author` run may write; it is taken when that run starts and every command sets it, so a plain `/workflow new` after a write one clears it. For that run `mcp:aibus-write:*` replaces `mcp:aibus:*` in the author's allow-list (the write child lists the read tools too, so the author sees one set). Every other agent gets a deny for `mcp:aibus-write:*`. One gap I accept: if the lead never gets to the delegate after a write command, the flag stays until the author next starts.
+3. Every write asks, in the executor and not only in the modal. `asks_every_time` names the two write tools; for them a pre-approved pattern does not count as approval and an "always" answer is treated as "once" and adds no pattern. The modal does not draw the button and the key does nothing. The summary line comes from `workflow::write_summary`, which parses the draft to count steps and gates.
+4. `edit` tells the author to call `workflow_get` and pass the revision back, rather than the command reading the file itself, so the revision in the update is the one the author actually read and the server's conflict error is what a changed file produces.
+
+**Alternatives.** A config key (rejected, as the issue says: it turns a per-command decision into a standing one). One child started with `--allow write` and a deny for the write tools on the read-only author (rejected: the process boundary is the capability, and a deny is a layer that can be misconfigured). Having the command read the file and put the revision in the prompt (rejected: the author could be handed a revision it never saw).
+
+**Why.** A write never happens because a model decided it should: the owner types the flag, the owner answers each write, and the server's own checks (validation, caps, redaction, the revision) still apply.

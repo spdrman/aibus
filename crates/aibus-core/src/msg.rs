@@ -587,11 +587,15 @@ pub enum Command {
     /// the terminal loop does the step (it owns the directories) and answers with
     /// `Msg::WorkflowsLoaded`.
     WorkflowFile(WorkflowFile),
-    /// `/workflow new <goal>`: the lead delegates `goal` to the `workflow-author` in the
-    /// foreground. The reducer does nothing with it; the binary sends the lead the call, because
-    /// it holds the connection to the server the author talks to.
+    /// `/workflow new <goal>`, `/workflow new --write <goal>` and `/workflow edit <name> <change>`:
+    /// the lead delegates to the `workflow-author` in the foreground. With `write` the author's
+    /// server is started with `--allow write` for this run, and `edit` names the workflow to
+    /// change (`goal` is then the change). The reducer does nothing with it; the binary sends
+    /// the lead the call, because it holds the connections to the servers the author talks to.
     WorkflowAuthor {
         goal: String,
+        write: bool,
+        edit: Option<String>,
     },
 }
 

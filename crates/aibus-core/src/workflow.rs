@@ -278,6 +278,32 @@ pub fn summarise(text: &str, stem: &str, roster: &[AgentName]) -> (bool, String)
     }
 }
 
+/// The one line the permission modal shows for a workflow write by the author: `create review
+/// (project), 4 steps, no gate` or `update review, revision ab12cd34...`. `None` for any other
+/// tool, and for a call whose arguments are not what the server takes (it will say so itself).
+pub fn write_summary(tool: &str, input: &serde_json::Value) -> Option<String> {
+    let text = |k: &str| input.get(k).and_then(serde_json::Value::as_str);
+    match &*crate::mcp::allow_name(tool) {
+        "mcp:aibus-write:workflow_create" => {
+            let (name, scope, toml) = (text("name")?, text("scope")?, text("toml")?);
+            let steps = Workflow::parse(name, toml).map_or_else(
+                |_| "an unreadable draft".to_owned(),
+                |w| {
+                    let gates = w.steps.iter().filter(|s| s.gate.is_some()).count();
+                    let gate = if gates == 0 { "no gate".to_owned() } else { format!("{gates} gate(s)") };
+                    format!("{} step{}, {gate}", w.steps.len(), if w.steps.len() == 1 { "" } else { "s" })
+                },
+            );
+            Some(format!("create {name} ({scope}), {steps}"))
+        }
+        "mcp:aibus-write:workflow_update" => {
+            let (name, revision) = (text("name")?, text("expected_revision")?);
+            Some(format!("update {name}, revision {}...", revision.chars().take(8).collect::<String>()))
+        }
+        _ => None,
+    }
+}
+
 /// Where workflows are looked for, project first: `<project>/.aibus/workflows` and then
 /// `<config>/workflows`. A name in the project hides the same name in the user's directory.
 pub fn dirs(project: &Path, config: Option<&Path>) -> Vec<PathBuf> {

@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::{Instant, SystemTime};
 
@@ -72,6 +73,9 @@ pub struct ChildLauncher {
     pub workflow_dirs: Vec<PathBuf>,
     /// The binary added `[mcp.aibus]` itself, for the workflow author: nobody else is offered it.
     pub author_server: bool,
+    /// The next `workflow-author` run may write workflows: the owner started it with
+    /// `/workflow new --write` or `/workflow edit`. Taken (and so cleared) when that run starts.
+    pub author_write: AtomicBool,
 }
 
 /// What was remembered for `run`.
@@ -373,8 +377,21 @@ impl Launcher for ChildLauncher {
                     .cloned()
                     .ok_or_else(|| format!("no agent named {}", spec.agent))?;
                 def.tools.deny.extend(self.deny.iter().cloned());
-                if self.author_server && def.name.as_str() != "workflow-author" {
-                    def.tools.deny.push(ToolPattern { tool: "mcp:aibus:*".into(), spec: None });
+                let deny = |tool: &str| ToolPattern { tool: tool.into(), spec: None };
+                if def.name.as_str() != "workflow-author" {
+                    // The write child belongs to the author's one run, and the read-only child
+                    // (when the binary started it) to the author alone.
+                    def.tools.deny.push(deny("mcp:aibus-write:*"));
+                    if self.author_server {
+                        def.tools.deny.push(deny("mcp:aibus:*"));
+                    }
+                } else if self.author_write.swap(false, Ordering::SeqCst) {
+                    // This run may write: the write child (which lists the read tools too)
+                    // replaces the read-only one, so the author sees one set of tools.
+                    if let Some(allow) = def.tools.allow.as_mut() {
+                        allow.retain(|p| p.tool != "mcp:aibus:*");
+                        allow.push(deny("mcp:aibus-write:*"));
+                    }
                 }
                 def
             }

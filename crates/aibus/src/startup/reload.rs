@@ -115,6 +115,7 @@ fn launcher(registry: Arc<aibus_core::AccountRegistry>, builtin: bool, keys: Arc
         assist: Default::default(),
         workflow_dirs: Vec::new(),
         author_server: false,
+        author_write: Default::default(),
     }
 }
 

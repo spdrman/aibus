@@ -313,7 +313,10 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     count_session(&paths.state);
     // Permission answers and messages reach the run that is waiting through its mailbox. The
     // map of which run asked is kept from what the runs say.
-    let author = ctx.author.clone();
+    let author = ctx.launcher.clone().map(|launcher| {
+        let session = ctx.session.as_ref().map(|s| s.id.to_string()).unwrap_or_default();
+        Arc::new(crate::author::Author::new(ctx.author.clone(), launcher, ctx.cwd.clone(), session))
+    });
     if let Some(orch) = ctx.orch.clone() {
         let asked: Arc<std::sync::Mutex<HashMap<PermissionId, RunId>>> = Arc::default();
         let seen = asked.clone();
@@ -345,21 +348,21 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             Msg::Command(aibus_core::Command::SendMessage { run, text }) => {
                 let _ = o.message(*run, text.clone());
             }
-            // `/workflow new <goal>`: the lead delegates the goal to the workflow author in the
+            // `/workflow new <goal>` and `edit`: the lead delegates to the workflow author in the
             // foreground at its next turn boundary, so the draft comes back to it as data. The
-            // task is the server's `author_workflow` prompt when the server has one.
-            Msg::Command(aibus_core::Command::WorkflowAuthor { goal }) => {
+            // task is the server's `author_workflow` prompt when the server has one. `--write`
+            // starts the write child for this run (see `author.rs`).
+            Msg::Command(aibus_core::Command::WorkflowAuthor { goal, write, edit }) => {
                 let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(mail) = run.and_then(|r| o.mailbox(r)) {
-                    let (goal, client) = (goal.clone(), author.clone());
+                if let (Some(mail), Some(author)) = (run.and_then(|r| o.mailbox(r)), author.clone()) {
+                    let (goal, edit, write, orch) = (goal.clone(), edit.clone(), *write, o.clone());
                     tokio::spawn(async move {
-                        let served = match &client {
-                            Some(c) => c.prompt("author_workflow", serde_json::json!({"goal": goal})).await.ok(),
-                            None => None,
-                        };
-                        let prompt = served.unwrap_or_else(|| format!("Draft a workflow for this goal: {goal}"));
-                        let call = serde_json::json!({"agent": "workflow-author", "prompt": prompt, "background": false});
-                        let _ = mail.send(RunMail::Call { tool: "delegate".into(), input: call }).await;
+                        match author.delegate(&goal, write, edit.as_deref()).await {
+                            Ok(call) => {
+                                let _ = mail.send(RunMail::Call { tool: "delegate".into(), input: call }).await;
+                            }
+                            Err(why) => orch.send_later(Msg::IoError { context: format!("workflow author: {why}"), error: String::new() }),
+                        }
                     });
                 }
             }

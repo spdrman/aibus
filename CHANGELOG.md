@@ -24,6 +24,7 @@ uses as the release notes, so every release needs its entry before it is merged 
 * `/login [provider]`, `/logout <account>` and `/accounts`: pick a provider, name the account, type the key into a masked field (a `Secret` from the first keystroke). The verify runs off the UI loop, and the new account is usable at once for a session that started with accounts (G4, #123).
 
 * `/login openrouter` offers the browser login in a modal: the address and the device code the flow prints, `o` to open the browser, `Esc` to cancel the flow. A session that started with no account now runs on the account `/login` adds, with no restart; the fake key and the fake's default model never go to the new account (G4b, #161).
+* `/workflow new --write <goal>` and `/workflow edit <name> <change>` let the author save (G8, #127), per command and never as a standing setting. They start a second `aibus mcp --allow write` child (never `gates`, never `run`) for that one author run, registered as `aibus-write`; without the flag no write tool exists for the author. Every `workflow_create` and `workflow_update` asks in the permission modal with a summary line (`create review (project), 4 steps, no gate`, `update review, revision ab12cd34...`), a pre-approved pattern does not skip it, and "always" is not offered. `edit` reads the file with `workflow_get` and updates with that revision, so a file changed meanwhile is a conflict. The log gets `workflow <name> written by workflow-author`.
 
 ### Providers
 

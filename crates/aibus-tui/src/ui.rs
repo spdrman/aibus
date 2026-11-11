@@ -29,7 +29,7 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, PALETTE, PERMISSION, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, PALETTE, PERMISSION, RUN_STATUS, TRANSCRIPT};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -39,11 +39,11 @@ static NULL: Value = Value::Null;
 pub struct Views<'a> {
     header: &'a Value,
     rail: &'a Value,
-    lead: &'a Value,
-    delegate: &'a Value,
-    fork: &'a Value,
-    cards: &'a Value,
-    ret: &'a Value,
+    pub(crate) lead: &'a Value,
+    pub(crate) delegate: &'a Value,
+    pub(crate) fork: &'a Value,
+    pub(crate) cards: &'a Value,
+    pub(crate) ret: &'a Value,
     log: &'a Value,
     status: &'a Value,
     tips: &'a Value,
@@ -53,6 +53,8 @@ pub struct Views<'a> {
     agents: &'a Value,
     accounts: &'a Value,
     transcript: &'a Value,
+    run_status: &'a Value,
+    cost: &'a Value,
 }
 
 impl<'a> Views<'a> {
@@ -75,6 +77,8 @@ impl<'a> Views<'a> {
             agents: at(AGENTS),
             accounts: at(ACCOUNTS_VIEW),
             transcript: at(TRANSCRIPT),
+            run_status: at(RUN_STATUS),
+            cost: at(COST),
         }
     }
 }
@@ -208,14 +212,15 @@ fn dotted(buf: &mut Buffer, path: &[(u16, u16)], at: Option<usize>, dim: Style, 
 }
 
 /// Where the centre column put things, for the connectors and the hit map.
-struct Centre {
-    cards: Vec<(usize, Rect)>,
-    lead: Rect,
-    ret: Rect,
+pub(crate) struct Centre {
+    pub(crate) cards: Vec<(usize, Rect)>,
+    pub(crate) lead: Rect,
+    pub(crate) ret: Rect,
 }
 
 /// The centre column: lead box, fork layer, delegate row, cards, return box. Items that do
 /// not fit are dropped from the bottom up.
+#[cfg_attr(feature = "flow-diagram", allow(unreachable_code))]
 fn centre(
     buf: &mut Buffer,
     area: Rect,
@@ -223,6 +228,10 @@ fn centre(
     th: &Theme,
     (compact, first_card, tick): (bool, usize, i64),
 ) -> Centre {
+    // The one branch: with `flow-diagram` the column is drawn by rataflow, and the code below is
+    // the classic path, still compiled so the two stay comparable.
+    #[cfg(feature = "flow-diagram")]
+    return crate::diagram::centre(buf, area, v, th, (compact, first_card, tick));
     const W: u16 = 40;
     let narrow = |r: Rect| Rect {
         x: r.x + r.width.saturating_sub(W) / 2,
@@ -679,7 +688,12 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             "agents" => screens::agents(buf, full, v.agents, th, &sc.pointer, sc.entry, sc.note),
             "accounts" => screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note),
             "outcome" => screens::outcome(buf, full, th, &sc.pointer),
-            "confirm:clear" => screens::confirm_clear(buf, full, th, &sc.pointer),
+            "confirm:clear" => screens::confirm(buf, full, th, &sc.pointer, "clear", "Clear the session log?", ("clear_yes", "Clear")),
+            c if c.starts_with("confirm:cancel:") => {
+                screens::confirm(buf, full, th, &sc.pointer, "cancel", "Cancel the lead run?", ("cancel_yes", "Cancel the lead"))
+            }
+            t if t.starts_with("status:") => screens::run_status(buf, full, v.run_status, th, &sc.pointer),
+            "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
                 let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
                 for (id, r, kind) in &g.hits {

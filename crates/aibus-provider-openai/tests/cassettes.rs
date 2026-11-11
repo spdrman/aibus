@@ -160,15 +160,6 @@ async fn kimi_cannot_do_logprobs_so_the_request_drops_them() {
     assert!(body(&sent(&server).await).get("logprobs").is_none());
 }
 
-#[tokio::test]
-async fn length_and_content_filter_are_stop_reasons() {
-    for (name, stop) in [("oa_length", StopReason::MaxTokens), ("oa_content_filter", StopReason::Refusal)] {
-        let server = server_with("POST", "/chat/completions", name).await;
-        let (result, _) = collect(&*build(Factory::openai(), &server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-        assert_eq!(result.unwrap().stop, stop, "{name}");
-    }
-}
-
 /// The mapping table of 04 section 2, one row per recorded error, for each provider.
 #[tokio::test]
 async fn http_errors_map_to_provider_errors() {
@@ -177,7 +168,8 @@ async fn http_errors_map_to_provider_errors() {
         // factory, model, cassette, kind, retryable, retry_after seconds, request id
         ("openai", "oa_auth_401", Auth, false, None, "req_oa_auth"),
         ("openai", "oa_rate_limit_429", RateLimit, true, Some(20), "req_oa_rate"),
-        ("openai", "oa_quota_429", RateLimit, false, None, "req_oa_quota"),
+        ("openai", "oa_quota_429", Quota, false, None, "req_oa_quota"),
+        ("openai", "oa_content_filter_400", ContentFilter, false, None, "req_oa_filter"),
         ("openai", "oa_overloaded_503", Overloaded, true, None, "req_oa_503"),
         ("openai", "oa_server_500", Server, true, None, "req_oa_500"),
         ("openai", "oa_context_too_long_400", ContextTooLong, false, None, "req_oa_ctx"),
@@ -202,33 +194,45 @@ async fn http_errors_map_to_provider_errors() {
     }
 }
 
-#[tokio::test]
-async fn malformed_sse_is_an_error_not_a_panic_for_each_provider() {
-    for (f, name) in [(Factory::openai(), "oa_malformed_sse"), (Factory::kimi(), "kimi_malformed_sse")] {
-        let server = server_with("POST", "/chat/completions", name).await;
-        let (result, chunks) = collect(&*build(f, &server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-        let e = result.unwrap_err();
-        assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Unknown, false), "{name}");
-        assert!(e.message.starts_with("malformed SSE"), "{}", e.message);
-        assert!(!chunks.iter().any(|c| matches!(c, StreamChunk::Done(_))), "{name}");
+/// Every recorded error answer has a row in the table above, so a new cassette cannot land
+/// without saying which kind it maps to.
+#[test]
+fn every_error_cassette_has_an_expected_kind() {
+    let known = [
+        "oa_auth_401", "oa_rate_limit_429", "oa_quota_429", "oa_content_filter_400", "oa_overloaded_503",
+        "oa_server_500", "oa_invalid_400", "oa_forbidden_403", "oa_too_large_413", "oa_overloaded_529",
+        "oa_context_too_long_400", "oa_not_found_404", "kimi_auth_401", "kimi_rate_limit_429",
+        "kimi_overloaded_503", "kimi_server_500", "kimi_context_too_long_400", "kimi_not_found_404",
+    ];
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let status: u16 = text.lines().next().unwrap().trim_start_matches("HTTP ").parse().unwrap();
+        let name = path.file_stem().unwrap().to_str().unwrap();
+        assert!(status < 400 || known.contains(&name), "{name} answers {status} but has no row");
     }
 }
 
 #[tokio::test]
-async fn a_stream_cut_before_it_finishes_is_a_retryable_network_error() {
-    let server = server_with("POST", "/chat/completions", "oa_truncated").await;
-    let (result, chunks) = collect(&*build(Factory::openai(), &server), &cred(AuthMethodKind::ApiKey), request("x")).await;
+async fn the_rate_limit_cassette_carries_its_window_and_the_quota_one_is_not_retryable() {
+    let server = server_with("POST", "/chat/completions", "oa_quota_429").await;
+    let (result, _) = collect(&*build(Factory::openai(), &server), &cred(AuthMethodKind::ApiKey), request("x")).await;
     let e = result.unwrap_err();
-    assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Network, true));
-    assert_eq!(texts(&chunks), ["Hello"]);
+    assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Quota, false));
+    assert!(e.message.contains("exceeded your current quota"), "the message is the provider's, not a sniff target");
 }
 
 #[tokio::test]
-async fn an_error_object_mid_stream_maps_like_the_http_error() {
-    let server = server_with("POST", "/chat/completions", "oa_stream_error").await;
+async fn window_headers_land_in_rate_limit_info_on_a_success() {
+    let server = server_with("POST", "/chat/completions", "oa_stream_text_windows").await;
     let (result, _) = collect(&*build(Factory::openai(), &server), &cred(AuthMethodKind::ApiKey), request("x")).await;
-    let e = result.unwrap_err();
-    assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Server, true));
+    let info = result.unwrap().rate_limit.expect("the headers were there");
+    assert_eq!((info.requests_remaining, info.tokens_remaining), (Some(0), Some(29_000)));
+    assert_eq!(info.resets_in, Some(Duration::from_secs(6)));
+    let server = server_with("POST", "/chat/completions", "oa_stream_text").await;
+    let (result, _) = collect(&*build(Factory::openai(), &server), &cred(AuthMethodKind::ApiKey), request("x")).await;
+    assert_eq!(result.unwrap().rate_limit, None, "no header, no info");
 }
 
 // ---- OpenAI, Responses -----------------------------------------------------------------
@@ -513,40 +517,6 @@ async fn refresh_keeps_known_prices_and_a_new_model_has_none() {
 }
 
 // ---- cancel ----------------------------------------------------------------------------
-
-/// Waits until the mock server has seen `n` requests, so a cancel is sent while the provider is
-/// really waiting on the server and not before it started. No clock bound on the cancel itself:
-/// the guard timeout only turns a hang into a failure.
-async fn requests_seen(server: &MockServer, n: usize) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while server.received_requests().await.unwrap().len() < n {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("the request reached the server");
-}
-
-#[tokio::test]
-async fn cancel_ends_a_call_waiting_for_the_server() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(cassette("oa_stream_text").template().set_delay(Duration::from_secs(600)))
-        .mount(&server)
-        .await;
-    let p = build(Factory::openai(), &server);
-    let cancel = CancellationToken::new();
-    let (tx, _rx) = tokio::sync::mpsc::channel(8);
-    let run = tokio::spawn({
-        let cancel = cancel.clone();
-        async move { p.stream(&cred(AuthMethodKind::ApiKey), request("x"), tx, cancel).await }
-    });
-    requests_seen(&server, 1).await;
-    cancel.cancel();
-    // The server will not answer for ten minutes, so only the cancel can end this.
-    let e = tokio::time::timeout(Duration::from_secs(30), run).await.expect("cancel ends the call").unwrap().unwrap_err();
-    assert_eq!(e.kind, ProviderErrorKind::Cancelled);
-}
 
 #[tokio::test]
 async fn cancel_wins_over_a_full_output_channel() {

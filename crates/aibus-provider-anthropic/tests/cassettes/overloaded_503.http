@@ -1,0 +1,5 @@
+HTTP 503
+content-type: application/json
+request-id: req_011CTx2nV4MhCe9Ga7Qx8ZtL
+
+{"type":"error","error":{"type":"api_error","message":"Service temporarily unavailable"}}

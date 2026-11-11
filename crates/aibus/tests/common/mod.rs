@@ -2,7 +2,9 @@
 
 #![allow(dead_code)]
 
+pub mod mcp_client;
 pub mod schema;
+pub mod transcript;
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};

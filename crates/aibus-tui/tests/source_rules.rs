@@ -63,3 +63,17 @@ fn widgets_cannot_reach_the_graph() {
         }
     }
 }
+
+/// rataflow is a 0.1 crate with one maintainer: one file knows it, so swapping it out is one file.
+#[test]
+fn rataflow_is_named_only_in_diagram_rs() {
+    for (name, src) in sources() {
+        if name == "diagram.rs" {
+            continue;
+        }
+        assert!(
+            !code_lines(&src).any(|l| l.contains("rataflow")),
+            "{name} names rataflow, only diagram.rs may"
+        );
+    }
+}

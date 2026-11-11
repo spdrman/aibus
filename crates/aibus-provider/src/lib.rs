@@ -6,17 +6,19 @@ pub mod error;
 pub mod fake;
 pub mod limits;
 pub mod models;
+pub mod presets;
 pub mod provider;
 pub mod secret;
 pub mod sse;
 pub mod tokens;
 pub mod types;
 
-pub use error::{ConfigError, ProviderError, ProviderErrorKind};
+pub use error::{ConfigError, ProviderError, ProviderErrorKind, RateLimitInfo};
 pub use limits::{Gated, Limiter, Permit, RateLimits};
 pub use provider::{
     AccountInfo, Capabilities, ChatRequest, ChatResponse, ModelInfo, Price, Provider,
     ProviderConfig, ProviderFactory, ProviderRegistry, StopReason, StreamChunk, SystemRole,
 };
+pub use presets::{Api, Compat, ModelTableSpec, ProviderDef};
 pub use secret::{AuthMethodKind, Credential, Secret};
 pub use types::*;

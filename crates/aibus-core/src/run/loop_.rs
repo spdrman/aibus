@@ -711,6 +711,29 @@ impl Task<'_> {
                     }
                     return Err(end);
                 }
+                ProviderErrorKind::Quota => {
+                    let who = &cfg.account;
+                    let banner = format!(
+                        "account {who}: quota or billing cap reached ({}), top up the plan or switch account, then run aibus account test {who}",
+                        e.message
+                    );
+                    let mut end = failed(conv, banner, false);
+                    if let Some(e) = end.error.as_mut() {
+                        e.kind = RunErrorKind::Quota;
+                    }
+                    return Err(end);
+                }
+                ProviderErrorKind::ContentFilter => {
+                    let mut end = failed(
+                        conv,
+                        format!("run ended early: the provider's content filter refused the request ({})", e.message),
+                        false,
+                    );
+                    if let Some(e) = end.error.as_mut() {
+                        e.kind = RunErrorKind::ContentFilter;
+                    }
+                    return Err(end);
+                }
                 ProviderErrorKind::ContextTooLong if !compacted => {
                     compacted = true;
                     match self.compact(conv, "auto", mode, pre_tokens).await {
@@ -851,7 +874,10 @@ impl Task<'_> {
         let provider_error = end
             .error
             .as_ref()
-            .filter(|e| matches!(e.kind, RunErrorKind::Provider | RunErrorKind::Auth));
+            .filter(|e| matches!(
+                e.kind,
+                RunErrorKind::Provider | RunErrorKind::Auth | RunErrorKind::Quota | RunErrorKind::ContentFilter
+            ));
         if end.status == RunStatus::Failed || provider_error.is_some() {
             if let Some(error) = &end.error {
                 self.send(Msg::RunFailed {
@@ -899,6 +925,7 @@ fn opening_call(name: &str, input: serde_json::Value) -> ChatResponse {
         usage: Default::default(),
         stop: aibus_provider::StopReason::ToolUse,
         request_id: None,
+        rate_limit: None,
     }
 }
 

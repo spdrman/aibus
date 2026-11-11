@@ -421,6 +421,15 @@ pub enum Screen {
     Accounts,
     /// `/clear` asks first.
     ConfirmClear,
+    /// `/cancel` on the lead asks first.
+    ConfirmCancel(RunId),
+    /// `/status`: one run's numbers.
+    RunStatus(RunId),
+    /// `/status @advisor` and `/status @router`: the seat's checkpoints or answers so far.
+    AdvisorStatus,
+    RouterStatus,
+    /// `/cost` with no target: the per-run table and the session total.
+    Cost,
 }
 
 /// What `Command::SetModel` changes: the lead's model, a seat's, or one run's.

@@ -27,7 +27,7 @@ fn rig() -> Rig {
     Rig::new(app, (98, 46), TH)
 }
 
-const ITEMS: [&str; 6] = ["Open transcript", "Cancel", "Fork", "Resume", "Copy id", "Copy result"];
+const ITEMS: [&str; 8] = ["Open transcript", "Cancel", "Fork", "Resume", "Copy id", "Copy result", "Status", "Cost"];
 
 fn opened(r: &mut Rig, card: usize) {
     let (c, row) = r.centre(HitId::Card(card));
@@ -90,7 +90,7 @@ fn a_double_click_on_a_log_row_of_a_run_opens_its_transcript() {
 // ---- the context menu ------------------------------------------------------------------------
 
 #[test]
-fn right_click_on_a_card_selects_it_and_opens_the_menu_with_all_six_items() {
+fn right_click_on_a_card_selects_it_and_opens_the_menu_with_all_eight_items() {
     let mut r = rig();
     let (c, row) = r.centre(HitId::Card(1));
     let msgs = names(&r.right_down(c, row));

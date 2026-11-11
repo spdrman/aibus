@@ -127,6 +127,39 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 
 **Why.** Flipping would make the default build depend on a source nobody but the owner can fetch. The gate is re-evaluated at each release (Q12): flip once the crate is public or vendored under a confirmed licence and the differential has been green across a release.
 
+## F4 error taxonomy (2026-11-11): body code first, reset as a span
+
+**Context.** Issue #112 (epic #108) adds `Quota` and `ContentFilter` to `ProviderErrorKind` and feeds the rate-limit headers to the `Limiter`. Three choices were open.
+
+**Decision.**
+
+1. `ProviderError::from_http` takes the body's `error.code` (else `error.type`) as a fifth argument and checks it before the status: `insufficient_quota`, `usage_limit_reached`, `billing_error` and a 402 are `Quota`, `content_filter*` and `content_policy*` are `ContentFilter`. Anthropic's 400 "credit balance is too low" is the one message match left, because that shape has no code of its own. The OpenAI message sniff is gone.
+2. `RateLimitInfo.resets_in` is a span from receipt, not a wall-clock `resets_at`. OpenAI sends spans and Anthropic sends RFC 3339 timestamps, and the limiter runs on tokio's clock, so a span is the one form its paused-clock tests can drive. Zero requests or tokens remaining blocks until `resets_in` without halving the limits; `tighten` stays for the 429 case.
+3. A run that ends on `Quota` is exit 4, the same as a rejected credential (the account has to act). `ContentFilter` is exit 5, a provider failure, and never names the account. `StopReason::ContentFilter` replaces `Refusal` for `finish_reason = content_filter`; the run loop does nothing special with it yet.
+
+**Alternatives.** A `Quota` exit code of its own (rejected: 06 section 3 has no spare code and the remedy is the same as for auth). Storing `resets_at` as `SystemTime` (rejected for the clock reason above). Sniffing messages for the content filter too (rejected: it is the sniff this issue removes).
+
+**Why.** The run loop needs to act differently on a spent quota, a refused prompt and a busy minute, and the provider's own code is the only signal that tells them apart.
+
+## D-12: rataflow for the centre column, behind a feature, with no events handed to it
+
+**Context.** The epic (#85) wants the worker cards on a canvas so that more than three of them can be panned to. rataflow is a 0.1 crate with one maintainer and its own mouse model (left drag moves nodes, the wheel zooms).
+
+**Decision.** Phase 1 moves to ratatui 0.30 (#86) and adds rataflow as an optional dependency behind `flow-diagram`, off by default (#87). One file, `diagram.rs`, names it. The flow is rebuilt every frame, locked, at zoom 1, so world cells are screen cells and no flow state outlives a frame. The mapping from our `Theme` to rataflow's palette lives in `diagram.rs` (`diagram::palette`), not in `theme.rs` as the epic first said, so that "only `diagram.rs` names rataflow" stays true and a test can enforce it. No mouse event is forwarded to the flow: the hit map resolves first as before, and panning is done by changing the offset the next frame is built from.
+
+**Alternatives.** Keep a long-lived `Flow` and forward only pan events (rejected for now: state that can drift from the graph, and a locked flow turns the wheel into zoom). Put `palette` in `theme.rs` behind the feature (rejected: a second file naming the crate). Draw the overflow by hand in `widgets.rs` (not tried: the epic's point is to find out if the canvas earns its place).
+
+**Why.** It keeps the default build exactly as it was, keeps the cost of backing out to one file, and keeps the graph as the only place state lives.
+
+## E2 (2026-11-11): what `workflow validate` warns about, and what the schema leaves out
+
+**Context.** #97 adds the workflow JSON Schema, `workflow::validate` and the two CLI commands. A few calls were open when I wrote it.
+
+**Decision.** The last step's summary never counts as unread, since it is the workflow's result. A `steps.<agent>.summary` only counts as read when no step of the same name sits between the writer and the reader, because the later one replaces the earlier. `on_fail` on the first step is not warned about (a retry of the first step has no predecessor to re-run, which `execute` already handles). The schema checks shape only and says so; `prompt` and `gate` use the pattern `\S` so a whitespace-only value fails the way `parse` fails it. Template errors and unknown agents live in a fourth fixture directory, `fixtures/workflows/semantic/`, because the schema passes them and the issue's `invalid/` directory has to fail the schema. `validate` reports every step's roster problem even when `parse` stopped earlier, and the CLI adds `path` to each problem in `--json` (the core type has no path, the file is the CLI's business). `$id` is the only keyword added to the schema checker's `KNOWN` list.
+
+**Alternatives.** Warn on the last step too (rejected: every workflow would carry one). Put `semantic` cases in `invalid/` and drop the schema-fails requirement for them (rejected: it weakens the acceptance check).
+
+**Why.** Each choice keeps warnings to things an author can act on and keeps the schema honest about what it can express.
 ## G1 (2026-11-11): the command registry and the help screen
 
 **Context.** The registry (`crates/aibus-tui/src/commands.rs`) is now the one place a command is declared. The issue asks for the help screen's command section to come from it, and also for no snapshot file to change. Those two cannot both hold: `shell_help_80x24.txt` and `shell_help_98x46.txt` draw the key map only, so a command section changes them.
@@ -137,6 +170,62 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 
 **Why.** Behaviour first, frames with the suites.
 
+## F2 (2026-11-11): providers are definitions, instances are per id
+
+**Context.** Five provider ids were code (`providers.rs` listed five factories, `kimi` was a flavour inside the OpenAI crate), so a new vendor meant a new factory and two local servers could not coexist: `provider_configs` refused two accounts of one id with different URLs.
+
+**Decision.** A provider is a `ProviderDef` (api, base URL, env vars, auth methods, model table, prefixes, compat flags, headers). Presets live in `presets.json` in `aibus-provider`; a `[[provider]]` table overrides a preset field by field or defines a new id. The registry builds one instance per id with the factory that serves the definition's `api`. The factories keep their ids (`anthropic`, `openai`) and now also report which apis they serve (`ProviderFactory::apis`), so the binary registers one adapter per wire and `Factory::kimi()` and `compatible()` stay only as constructors for the presets of those names. Provider ids became leaked `&'static str` (one leak per distinct id, at startup), because `ProviderId` holds a `&'static str` and user ids are not known at compile time.
+
+Gated calls, taken at the recommended default:
+
+* The old conflict error stays for the old form only (two accounts of one id with different `base_url` or `api` on the accounts). With `[[provider]]` ids the situation cannot arise, and keeping the error for the old form is safer than guessing which URL gets which key. The message now points at `[[provider]]`.
+* `[[provider]]` is user-file only, like `[[account]]`, since it decides where a key is sent.
+* A user-supplied `compat` replaces the preset's whole instead of merging per flag, to keep the merge rule one sentence long.
+* Model tables for the new cloud presets list one or two models without prices; an unknown price is `n/a`, never a guess.
+
+**Alternatives.** One factory per vendor (rejected: it is exactly the code-per-vendor this removes). Resolving the instance per account instead of per id (rejected: `registry.get(&account.provider)` is used in four places in core and the id is the cleaner key). Merging `compat` flag by flag (rejected for now: needs an `Option` per flag).
+
+**Why.** The vendor is data and the wire is code, so adding Groq is a review of a JSON entry.
+
+
+## G5 (2026-11-11): the per-agent commands
+
+**Context.** #124 adds `/status`, `/cost`, `/log`, `/cancel`, `/retry`, `/message`, `/resume` and `/background` to the registry, two menu items and two keys. A few things the issue left open had to be picked.
+
+**Decision.**
+
+1. The state rules (`/retry` on a failed or partial run, `/resume` on a finished one) are two more `needs` bits, `RETRYABLE` and `FINISHED`, judged against the run the `@target` resolved to, after the target is parsed. The popup judges them against the focused card, else the lead. A miss says `/retry is not available: the run is running`.
+2. `/cost` is not a `Run` row. With no target it is the session table, and the focused-card fallback would have turned it into a status. `/cost @t` opens the same modal as `/status @t`. The menu's Cost item opens the table.
+3. `/status @advisor` and `/status @router` get their own screens (`AdvisorStatus`, `RouterStatus`) rather than a `RunId`, since a seat has no run. The advisor shows its checkpoints so far, the router its answers so far.
+4. `/resume @t` with no text sends `continue`, the same as `R` and the menu. `/cancel` asks only when typed against the lead; the menu and `x` still cancel at once, as before.
+5. The status bar has no cost segment drawn yet, so I added a `cost` field to `view:status_bar` computed by the same `session_cost` the cost table uses. The two cannot disagree, and the acceptance test compares them. Drawing it is not part of this issue.
+6. `i` (status) is bound in cards and transcript, `$` (cost) in the dashboard and transcript, not the prompt, where it is typing.
+
+**Alternatives.** A `Screen::RunStatus` for seats too, with a fake id (rejected: it lies about what the id is). Making `/cost` a `Run` row and using a `--all` flag for the table (rejected: the issue says no target means the table). Waiting for a drawn cost segment before adding the field (rejected: the acceptance check needs a number to compare).
+
+**Why.** Each choice keeps the rule in the registry, where the popup, the slash line and the menu already read it.
+
+**Snapshots.** The menu is two rows taller and the help screen lists two more keys, so `state_menu_*`, `shell_help_*` and the menu crops change. I cannot run the suites on this lane, so they regenerate on the release PR, as with G1.
+
+## D-13: the card row pans a card at a time, and the flow gets no mouse events (#89)
+
+**Context.** #89 asks for pan on the rataflow canvas, with `cards_x` "now a world offset" and `ViewportChanged` read back from the flow. But `ctrl:scroll:cards:x` is already the index of the first card in the window, the reducer already moves it when the selection leaves the window, and a locked flow turns the wheel into zoom and a left press into a pan without any hit test (D1.1, item 7).
+
+**Decision.** `cards:x` stays a card index. A drag from empty canvas (`Drag::Pan` in `input.rs`) and Shift plus the wheel both change it through the existing `UiIntent::Scroll { sideways: true }`, one card and its gap (20 cells) per step, so the position persists and replays like before. The reducer clamps it to the last window when there are more than three cards (it keeps accepting anything for three or fewer, which the older `ui_intent` test relies on). On the flow path the cards beside the window are nodes at the same 20-cell stride, so a card the window reaches is exactly where the classic row would draw it, and the neighbours show at the column's edges. The flow is rebuilt every frame and never sees a mouse event, so zoom, node drag, connect and box select are unreachable, not just switched off.
+
+**Alternatives.** A cell-granular world offset in the graph (rejected: it forks the reducer's selection logic and the replay fixtures for a smoother drag). Forward pan gestures to a long-lived `Flow` and read `ViewportChanged` (rejected: two sources of truth for one offset).
+
+**Why.** It meets the behaviour the issue wants (more than three cards reachable by mouse and key, clamped, selection stays in view) without a second copy of the pan state.
+
+## D-13: The MCP server uses `rmcp` 3.9 in a new `aibus-mcp` crate (E1, 2026-11-11)
+
+**Context.** Epic #95 adds `aibus mcp`, a stdio MCP server. The spike (`docs/spikes/E1-mcp-server.md`) built a throwaway crate with `rmcp` 3.9.0 (`server`, `macros`, `transport-io`, no defaults) in docker on MARS.
+
+**Decision.** Use `rmcp`, in a new `crates/aibus-mcp` that depends on `aibus-core` and is called from the `aibus` binary. It builds on rustc 1.89 with no `--precise` pin, `cargo deny check` passes with `deny.toml` unchanged (seven new `multiple-versions` warnings: `sha2`, `digest`, `block-buffer`, `crypto-common`, `darling*`), and the closure has no `reqwest`, `hyper`, `rustls`, `ratatui` or provider crate. It answers `server/discover` (`2026-07-28`) and `initialize` (`2025-11-25`) out of the box. Cost: 28 lock entries and about +2.1 MB stripped (+2.7 MB unstripped), +6 s on a musl release build. I took the recommended default here without asking.
+
+**Alternatives.** A hand-rolled stdio server in the style of `aibus-core/src/mcp.rs` (rejected for now: it would own both protocol lifecycles and the schema generation for good; it stays the fallback if rmcp stops fitting the MSRV or a duplicate becomes a `deny` hit). Putting the handler in `aibus-core` or `aibus` (rejected: rmcp's tokio, schemars and chrono would reach every crate, or the handler would only be testable through the binary).
+
+**Why.** The two protocol lifecycles and paging are the expensive part to get right and they work on the first try. A separate crate keeps the new dependencies and the closure test local, and makes the fallback a swap rather than a rewrite.
 ## G2 (2026-11-11): where /model is resolved, and what the reducer keeps
 
 **Context.** The issue has the reducer validate a model reference through `AccountRegistry` and write `model:defaults:<role>`. The reducer is a pure function of the graph and has no accounts, and no `model:defaults:*` node exists; the lead's model lives in its run's `meta.model`, which the header already reads.

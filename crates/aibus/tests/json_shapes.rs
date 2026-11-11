@@ -103,6 +103,36 @@ fn agent_commands_validate() {
 }
 
 #[test]
+fn workflow_validate_and_show_match_their_schemas() {
+    let home = xdg_temp();
+    let init = aibus(home.path(), &["init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let show = aibus(home.path(), &["workflow", "show", "fix", "--json"]);
+    assert!(show.status.success(), "{}", stderr(&show));
+    let v = out_json(&show);
+    assert_valid("workflow-show", &v);
+    assert_eq!(v["steps"][1]["agent"], "plan");
+    assert_eq!(v["steps"][3]["on_fail"], "retry:2");
+
+    // The four examples carry a gate warning or two, and no errors.
+    let ok = aibus(home.path(), &["workflow", "validate", "--json"]);
+    assert_eq!(ok.status.code(), Some(0), "{}", stderr(&ok));
+    let v = out_json(&ok);
+    assert_valid("workflow-validate", &v);
+    assert_eq!(v["ok"], true);
+    assert!(!v["warnings"].as_array().unwrap().is_empty());
+
+    let dir = home.path().join("proj/.aibus/workflows");
+    fs::write(dir.join("bad.toml"), "[[step]]\nagent = \"ghost\"\nprompt = \"x\"\n").unwrap();
+    let bad = aibus(home.path(), &["workflow", "validate", "bad", "--json"]);
+    assert_eq!(bad.status.code(), Some(12));
+    let v = out_json(&bad);
+    assert_valid("workflow-validate", &v);
+    assert_eq!(v["errors"][0]["step"], 1);
+    assert!(v["errors"][0]["message"].as_str().unwrap().contains("ghost"));
+}
+
+#[test]
 fn account_commands_validate() {
     let home = xdg_temp();
     let key = "sk-cli-0123456789abcdef";

@@ -130,6 +130,7 @@ version = "0.1.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
+ "aibus-testkit",
  "async-trait",
  "base64 0.22.1",
  "bytes",
@@ -165,6 +166,7 @@ version = "0.1.0"
 dependencies = [
  "aibus-provider",
  "aibus-provider-http",
+ "aibus-testkit",
  "async-trait",
  "base64 0.22.1",
  "bytes",
@@ -213,6 +215,7 @@ dependencies = [
  "aibus-testkit",
  "arboard",
  "crossterm",
+ "rataflow",
  "ratatui",
  "serde_json",
  "tempfile",
@@ -2915,6 +2918,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rataflow"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37bbb54f8b326976a8ebc3efb0f6937325fb68a267d121eb6ef6803429f2f113"
+dependencies = [
+ "ratatui",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

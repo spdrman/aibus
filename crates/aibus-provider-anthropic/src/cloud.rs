@@ -50,16 +50,11 @@ impl ProviderFactory for CloudFactory {
         let def = cfg.def.as_ref().ok_or_else(|| {
             ConfigError::NotConfigured("anthropic-cloud".into(), "built from a bedrock or vertex definition only".into())
         })?;
-        let need = |field: &Option<String>, what: &str| {
-            field.as_deref().ok_or_else(|| {
-                ConfigError::Invalid(def.id.clone(), format!("{what} is required: set it on the account or on the [[provider]]"))
-            })
-        };
-        let region = need(&def.region, "region")?;
+        let region = need(def.region.as_deref(), &def.id, "region")?;
         match def.api {
             Some(Api::AnthropicBedrock) => Ok(Arc::new(Anthropic::bedrock(cfg, region, SystemTime::now)?)),
             Some(Api::AnthropicVertex) => {
-                Ok(Arc::new(Anthropic::vertex(cfg, need(&def.project, "project")?, region, self.tokens.clone())?))
+                Ok(Arc::new(Anthropic::vertex(cfg, need(def.project.as_deref(), &def.id, "project")?, region, self.tokens.clone())?))
             }
             other => Err(ConfigError::Invalid(def.id.clone(), format!("api {other:?} is not a cloud api"))),
         }
@@ -72,6 +67,11 @@ impl ProviderFactory for CloudFactory {
     fn apis(&self) -> &'static [&'static str] {
         &["anthropic-bedrock", "anthropic-vertex"]
     }
+}
+
+/// A setting a cloud definition cannot do without, or the error that says where to put it.
+fn need<'a>(field: Option<&'a str>, id: &str, what: &str) -> Result<&'a str, ConfigError> {
+    field.ok_or_else(|| ConfigError::Invalid(id.to_owned(), format!("{what} is required: set it on the account or on the [[provider]]")))
 }
 
 pub(crate) enum Transport {

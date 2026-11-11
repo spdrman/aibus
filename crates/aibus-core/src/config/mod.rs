@@ -443,6 +443,8 @@ impl Default for Account {
             tags: Vec::new(),
             enabled: true,
             auth: Auth::default(),
+            region: None,
+            project: None,
         }
     }
 }

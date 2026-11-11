@@ -104,6 +104,8 @@ pub struct CredentialStore {
     wall: Box<dyn Fn() -> u64 + Send + Sync>,
     oauth: Option<Arc<dyn OAuthFlow>>,
     cache: Mutex<HashMap<AccountName, Cached>>,
+    /// Access tokens a token source fetched (`gcloud`), by account, each with its own lifetime.
+    tokens: Mutex<HashMap<AccountName, Cached>>,
     /// One lock per OAuth account, so two requests that both find an expired token do one
     /// refresh: the second waits, then reads what the first stored.
     refreshing: Mutex<HashMap<AccountName, Arc<tokio::sync::Mutex<()>>>>,
@@ -123,6 +125,7 @@ impl CredentialStore {
             wall: Box::new(oauth::unix_now),
             oauth: None,
             cache: Mutex::new(HashMap::new()),
+            tokens: Mutex::new(HashMap::new()),
             refreshing: Mutex::new(HashMap::new()),
         }
     }

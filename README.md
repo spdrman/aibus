@@ -111,6 +111,52 @@ target/release/aibus version
 * The release pipeline and the installers have only run against fake releases in containers until the first real release is cut.
 * Only the Linux and macOS terminals I own have been tried by eye; the rest of the checklist in [docs/RELEASE.md](docs/RELEASE.md) is open.
 
+## Inside a session
+
+Everything below is typed in the prompt line of the dashboard. `/` lists what is on offer right now, and a command that cannot run says why in a notice (`/retry` on a run that did not fail, `/resume` on one that is still going). The table is generated from the command registry, the one place a command is declared, so it cannot drift from `/help` or from the spec (a test fails with the diff when it does).
+
+<!-- aibus:commands:start -->
+| Command | Arguments | What it does | Asks first |
+|---|---|---|---|
+| `/fork` | `<task>` | fork the lead with a new task | no |
+| `/delegate` | `<agent> <task>` | start a background run of an agent | no |
+| `/compact` |  | compact the lead's context | no |
+| `/clear` |  | clear the session log (asks first) | yes, before it clears |
+| `/handoff` |  | write a handoff | no |
+| `/ledger` | `<section> <text>` | add text to a ledger section | no |
+| `/model` | `[@target] [ref]` | pick a model from the connected accounts, or set one by name | no |
+| `/advisor` | `<ref\|off>` | change the advisor's model, or turn it off | no |
+| `/router` | `<ref\|off>` | change the router's model, or turn it off | no |
+| `/workflow` | `new [--write] <goal> \| edit <name> <change> \| list \| show <name> \| save <name> [--user] [--force] \| run <name> <input>` | draft (new, edit), list, show, save and run workflows (/workflow <name> <input> runs one too) | `new --write` and `edit` ask in the permission modal before each save |
+| `/agents` |  | the agents screen | no |
+| `/accounts` |  | the accounts screen | no |
+| `/help` |  | the key map (type / to list the commands) | no |
+| `/fix` | `<input>` | shorthand for /workflow fix | no |
+| `/build` | `<input>` | shorthand for /workflow build | no |
+| `/review` | `<input>` | shorthand for /workflow review | no |
+| `/explore` | `<input>` | shorthand for /workflow explore | no |
+| `/status` | `[@target]` | a run's numbers, or a seat's (@advisor, @router) | no |
+| `/cost` | `[@target]` | the session's cost per run, or one target's status | no |
+| `/log` | `[@target]` | open the run's transcript | no |
+| `/cancel` | `[@target]` | cancel the run (asks first on the lead) | on the lead, yes |
+| `/retry` | `[@target]` | retry a failed or partial run | no |
+| `/message` | `@target <text>` | send a message to a run | no |
+| `/resume` | `[@target] [text]` | resume a finished run with a message | no |
+| `/background` | `[@target]` | move the run's wait to the background | no |
+| `/login` | `[provider]` | add an account: pick a provider, name it, type the key | no |
+| `/logout` | `<account>` | remove an account and its key (asks first) | yes, before it removes the key |
+<!-- aibus:commands:end -->
+
+The ones that act on a run take an optional `@target` first: `@lead`, `@advisor` or `@router`, an agent name for its newest run (`@grep`), or a prefix of a run id. With no target they act on the focused card, and on the lead when no card is focused.
+
+Three short flows...
+
+**Connect an account and pick a model.** `/login` opens the list of providers; pick one, name the account, and type the key into the masked field (it is never typed on the line: `/login anthropic sk-...` is refused and kept out of the history). The key is checked off the UI loop, and the new account works at once, with no restart. Then `/model` opens the picker with what your accounts serve, their context window, prices and capabilities; `Enter` sets the lead. `/model haiku` does the same by name, and either way the change takes effect from the next request and lasts for the session.
+
+**Act on one agent.** `/status @grep` opens that run's numbers (model, account, turns, tokens, cost, elapsed). `/cancel @grep` stops it at once, where the same on the lead asks first. `/model @grep haiku` moves just that run to another model, again from its next request.
+
+**Build a workflow and run it.** `/workflow new review a PR and leave a summary` has the built-in `workflow-author` agent draft one, read-only, checked against the agents you actually have. `/workflow save pr-review` writes the latest valid draft to `.aibus/workflows/pr-review.toml` (`--user` puts it in your config directory, `--force` replaces a file that exists), and `/workflow run pr-review the diff of my branch` runs it. If you want the author to save for you, `/workflow new --write ...` (and `/workflow edit <name> <change>`) lets it, one run at a time, and every save asks in the permission modal first with no "always".
+
 ## Layout
 
 ```

@@ -1,0 +1,11 @@
+HTTP 413
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "error": {
+    "code": 413,
+    "message": "Request payload size exceeds the limit: 20971520 bytes.",
+    "status": "INVALID_ARGUMENT"
+  }
+}

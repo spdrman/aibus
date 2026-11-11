@@ -18,6 +18,7 @@ aibus-core = { path = "crates/aibus-core" }
 aibus-graph = { path = "crates/aibus-graph" }
 aibus-provider = { path = "crates/aibus-provider" }
 aibus-provider-anthropic = { path = "crates/aibus-provider-anthropic" }
+aibus-provider-gemini = { path = "crates/aibus-provider-gemini" }
 aibus-provider-http = { path = "crates/aibus-provider-http" }
 aibus-provider-openai = { path = "crates/aibus-provider-openai" }
 aibus-tui = { path = "crates/aibus-tui" }

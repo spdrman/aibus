@@ -1,0 +1,13 @@
+HTTP 200
+content-type: text/event-stream
+cache-control: no-cache
+x-request-id: req_gm_0001
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"The user wants a file, ","thought":true}]}}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001"}
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"so I should call read_file.","thought":true}]}}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001"}
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Reading it."}]}}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001"}
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":{"path":"src/main.rs"}},"thoughtSignature":"CiQBjz1rX2c3dGhvdWdodC1zaWduYXR1cmUtYmFzZTY0LXRva2Vu"}]},"finishReason":"STOP"}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001","usageMetadata":{"promptTokenCount":200,"cachedContentTokenCount":50,"candidatesTokenCount":12,"thoughtsTokenCount":40,"totalTokenCount":252}}
+

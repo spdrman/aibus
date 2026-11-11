@@ -1,0 +1,9 @@
+HTTP 200
+content-type: text/event-stream
+cache-control: no-cache
+x-request-id: req_gm_0001
+
+data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Hel"}]}}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001"}
+
+data: {"error":{"code":500,"message":"An internal error has occurred.","status":"INTERNAL"}}
+

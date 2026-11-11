@@ -1,0 +1,11 @@
+HTTP 400
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "error": {
+    "code": 400,
+    "message": "The input token count (1196742) exceeds the maximum number of tokens allowed (1048575).",
+    "status": "INVALID_ARGUMENT"
+  }
+}

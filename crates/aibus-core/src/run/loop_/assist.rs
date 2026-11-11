@@ -444,7 +444,7 @@ async fn advise(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input } => Some((*id, name.clone(), input.clone())),
+                ContentBlock::ToolUse { id, name, input, .. } => Some((*id, name.clone(), input.clone())),
                 _ => None,
             })
             .collect();

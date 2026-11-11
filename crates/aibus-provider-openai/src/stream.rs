@@ -267,7 +267,7 @@ impl Turn {
             } else {
                 serde_json::from_str(&t.json).map_err(|e| malformed(&format!("tool input for {}: {e}", t.name)))?
             };
-            blocks.push(ContentBlock::ToolUse { id: t.id, name: t.name, input });
+            blocks.push(ContentBlock::ToolUse { id: t.id, name: t.name, input, signature: None });
         }
         Ok(ChatResponse {
             message: Message { role: MessageRole::Assistant, blocks, at: SystemTime::now() },

@@ -117,6 +117,9 @@ pub enum ContentBlock {
         id: ToolCallId,
         name: SmolStr,
         input: serde_json::Value,
+        /// Gemini's `thoughtSignature` for this call; the next request has to send it back unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
     ToolResult {
         id: ToolCallId,

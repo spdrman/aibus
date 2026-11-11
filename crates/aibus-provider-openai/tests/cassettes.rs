@@ -121,7 +121,7 @@ async fn openai_tool_call_streams_start_fragments_and_end() {
     assert_eq!(fragments, "{\"path\": \"src/main.rs\"}");
     assert!(chunks.contains(&StreamChunk::ToolUseEnd { id: *id }));
     assert_eq!(resp.stop, StopReason::ToolUse);
-    assert_eq!(resp.message.blocks, [ContentBlock::ToolUse { id: *id, name: "read_file".into(), input: json!({"path": "src/main.rs"}) }]);
+    assert_eq!(resp.message.blocks, [ContentBlock::ToolUse { id: *id, name: "read_file".into(), input: json!({"path": "src/main.rs"}), signature: None }]);
     let b = body(&sent(&server).await);
     assert_eq!(b["tools"][0]["function"]["name"], "read_file");
     assert_eq!(b["tool_choice"], "auto");
@@ -279,7 +279,7 @@ async fn the_responses_dialect_streams_a_function_call() {
     assert_eq!(name, "read_file");
     assert_eq!(chunks.iter().filter(|c| matches!(c, StreamChunk::ToolUseEnd { .. })).count(), 1);
     assert_eq!(resp.stop, StopReason::ToolUse);
-    assert_eq!(resp.message.blocks, [ContentBlock::ToolUse { id: *id, name: "read_file".into(), input: json!({"path": "src/main.rs"}) }]);
+    assert_eq!(resp.message.blocks, [ContentBlock::ToolUse { id: *id, name: "read_file".into(), input: json!({"path": "src/main.rs"}), signature: None }]);
     assert_eq!(body(&sent(&server).await)["tools"][0]["name"], "read_file");
 }
 

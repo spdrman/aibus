@@ -136,3 +136,12 @@ The Rust engineer: a young crate with stubbed traits, every value boxed to `Json
 **Alternatives.** Warn on the last step too (rejected: every workflow would carry one). Put `semantic` cases in `invalid/` and drop the schema-fails requirement for them (rejected: it weakens the acceptance check).
 
 **Why.** Each choice keeps warnings to things an author can act on and keeps the schema honest about what it can express.
+## G1 (2026-11-11): the command registry and the help screen
+
+**Context.** The registry (`crates/aibus-tui/src/commands.rs`) is now the one place a command is declared. The issue asks for the help screen's command section to come from it, and also for no snapshot file to change. Those two cannot both hold: `shell_help_80x24.txt` and `shell_help_98x46.txt` draw the key map only, so a command section changes them.
+
+**Decision.** The registry gives the help screen its lines (`commands::help_lines()`, with a test), but I did not draw them yet. The two help snapshots stay as they are, and the section lands with the regenerated snapshots on the release PR, where the suites run and I can see the frames. Two smaller calls went the same way: a `needs` miss on a `/fix`-style shorthand now says `/build is not available: no workflow named build` (it used to say `no command /build (try /help)`), and the argument shape check stays inside each entry's `run`, because the existing notices (`/ledger needs a section and text`) are worded per command and the issue says to keep them.
+
+**Alternatives.** Draw the section now and update the two snapshots by hand (rejected: I cannot run the suites on this lane, and a hand-edited frame is a guess). Derive the shape check from the `args` hint (rejected: `/x needs <section> <text>` is a different notice from the current one).
+
+**Why.** Behaviour first, frames with the suites.

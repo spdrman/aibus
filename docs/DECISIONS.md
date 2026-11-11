@@ -341,3 +341,21 @@ Gated calls, taken at the recommended default:
 **Alternatives.** `axum` as the host (rejected: a router for one path, and one more big dependency). A unix socket instead of TCP (rejected for now: the clients this is for speak HTTP to a port; the SSH tunnel recipe covers the remote case). Wildcard ports for `Origin` (rejected: `http://localhost:*` accepts any local web page, which is the attack). A comparison with plain `==` (rejected: the token is the only thing between a web page and the user's workflows).
 
 **Why.** It meets the spec's MUSTs (Origin 403, loopback bind, authenticate) with rmcp doing the protocol and about 150 lines of ours doing the policy, and it leaves `aibus-mcp` transport-free so the closure test keeps meaning something. Tests are written and unrun, as the lane's rule says; they run on the release PR.
+
+## G4 (2026-11-11): /login, /logout, the secret entry, and what a reload swaps
+
+**Context.** #123 is a bug (the verify blocks the loop, the key is a plain `String`, the registry is only built at startup) and a feature (`/login`, `/logout`, a provider list). A few things in it were open or turned out bigger than they read.
+
+**Decision.**
+
+1. The key is a `Secret<String>` from the first keystroke. `Entry` holds it in `key` and shows one dot per character in `text`; every edit builds the next `Secret` into a buffer sized to never regrow, so the old one is zeroised on drop. `Entry::clone` (used to hand the frame its copy) leaves the key out on purpose. `AccountOp` and `Job` lose `Clone`; `AccountOp` compares keys by their text, by hand, because `Secret` has no `PartialEq`.
+2. The verify runs on a thread of the account hook's own. The hook returns the line to show (`verifying <name>...`) and the thread sends `Msg::AccountsReloaded` and then `Msg::AccountOpDone { op, account, ok, text }` through the loop's channel. The graph logs the outcome (`account add work: done`), never `text`, since a provider's words can echo a key; `Input::observe` is what puts `text` under the Accounts rows. `run_job` and `AccountHook` take the sender for this.
+3. `/login` with anything after the provider is refused with the provider and `[redacted]`. The line is also kept out of the prompt history (`Prompt::take` asks `commands::carries_key`), so the up arrow does not bring a pasted key back. The same name entry serves `/login <provider>`, a pick in the list and `a` on the Accounts screen (which now opens the list; the free-text provider step is gone).
+4. The provider list is the presets (`aibus_provider::presets`). A user `[[provider]]` is not listed; `aibus account add` still takes it.
+5. `/logout` asks first through `confirm:logout:<name>`, which needs `Screen` to carry an account name, so `Screen` is no longer `Copy`.
+6. Reload without restart swaps the launcher's registry (`ChildLauncher::set_accounts`, behind an `RwLock`); the seats and a run already started keep what they resolved. It is only done for a session that started with accounts. A session that started on the built-in fake (no account configured) keeps the fake, because its default model and its credential path are the fake's, and swapping the registry under them would send the fake key to a real provider; the line says `restart to run on it`. Making `session_default` and the model defaults swappable is the follow-up.
+7. The OAuth modal of the issue (authorization URL, device code, `o` to open the browser, `Esc` to cancel) is split out of this PR as a follow-up issue: the key path works for every provider that takes a key, including OpenRouter, and the modal is a screen and a flow of its own.
+
+**Alternatives.** Keep `String` in the job and zeroise after (rejected: it is in the loop's state for the length of the verify). A `Secret` newtype with `Clone` for the entry (rejected: a clone is exactly how it would end up in a frame). Swap `session_default` as well in this PR (rejected: it touches the defaults every launch reads and the issue says to split rather than widen).
+
+**Why.** The key never exists outside a `Secret`, nothing waits on the network, and the part of the reload that would have been a second PR is named instead of half done.

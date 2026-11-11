@@ -5,7 +5,7 @@
 //! `run` writes into the same `Out` the key handling fills, so a slash line, a palette row and a
 //! menu item are three ways into one function and cannot drift apart.
 
-use aibus_core::{AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent};
+use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
@@ -65,13 +65,15 @@ pub struct Env<'a> {
     /// The graph does not tell the dashboard about these two yet, so `Context::env` says yes.
     pub accounts: bool,
     pub mcp: bool,
+    /// The accounts there are, for `/logout`.
+    pub account_names: &'a [String],
 }
 
 impl<'a> Env<'a> {
     /// No session at all: only the agents and workflows given.
     #[cfg(test)]
     pub fn bare(agents: &'a [String], workflows: &'a [String]) -> Self {
-        Self { agents, workflows, lead: None, focused: None, runs: &[], states: &[], accounts: true, mcp: true }
+        Self { agents, workflows, lead: None, focused: None, runs: &[], states: &[], accounts: true, mcp: true, account_names: &[] }
     }
 }
 
@@ -337,6 +339,42 @@ pub const REGISTRY: &[Spec] = &[
         needs: 0,
         surfaces: at(12, 2, 0),
         run: |_, out| command(out, Command::OpenScreen(Screen::Accounts)),
+    },
+    Spec {
+        name: "login",
+        args: "[provider]",
+        help: "add an account: pick a provider, name it, type the key",
+        label: "",
+        hint: "",
+        scope: Scope::Screen,
+        needs: 0,
+        surfaces: at(26, 0, 0),
+        run: |c, out| match c.args.split_whitespace().collect::<Vec<_>>()[..] {
+            [] => command(out, Command::OpenScreen(Screen::Providers)),
+            // Anything after the provider could be a key, and a key typed on a line is in the
+            // scrollback and the history. It is refused, and the line says where the key goes.
+            [provider, _, ..] => Err(format!("/login {provider} [redacted]: type the key in the masked field after the name, never on the line")),
+            [provider] if aibus_provider::presets::preset(provider).is_some() => {
+                out.login = Some(provider.to_owned());
+                Ok(())
+            }
+            [provider] => Err(format!("/login: no provider named {provider} (/login lists them)")),
+        },
+    },
+    Spec {
+        name: "logout",
+        args: "<account>",
+        help: "remove an account and its key (asks first)",
+        label: "",
+        hint: "",
+        scope: Scope::Screen,
+        needs: ACCOUNTS,
+        surfaces: at(27, 0, 0),
+        run: |c, out| match c.env.account_names.iter().find(|a| a.as_str() == c.args) {
+            Some(account) => command(out, Command::OpenScreen(Screen::ConfirmLogout(AccountName(account.as_str().into())))),
+            None if c.args.is_empty() => need(c, "an account"),
+            None => Err(format!("/logout: no account named {}", c.args)),
+        },
     },
     Spec {
         name: "help",
@@ -700,6 +738,13 @@ pub fn pick(name: &str, via: Via, run: Option<RunId>, env: &Env, out: &mut Out) 
     let _ = (spec.run)(&call, out);
 }
 
+/// A `/login` line with something after the provider: a key typed where it would stay in the
+/// history and the scrollback.
+pub fn carries_key(line: &str) -> bool {
+    let mut words = line.split_whitespace();
+    words.next() == Some("/login") && words.nth(1).is_some()
+}
+
 /// What a line of text means: a slash command becomes the messages it stands for, anything else
 /// is a prompt for the lead (which `reduce` hands on, or turns into a delegate for `@agent-`).
 pub fn send(line: &str, env: &Env) -> Sent {
@@ -733,6 +778,7 @@ pub fn send(line: &str, env: &Env) -> Sent {
     }
     let mut out = Out::default();
     match (spec.run)(&Call { name: spec.name, via: Via::Slash, line, args, target, env }, &mut out) {
+        Ok(()) if out.login.is_some() => Sent::Login(out.login.take().unwrap_or_default(), out.msgs),
         Ok(()) => Sent::Msgs(out.msgs),
         Err(why) => Sent::Bad(why),
     }
@@ -793,6 +839,32 @@ mod tests {
     }
 
     #[test]
+    fn login_refuses_anything_after_the_provider_and_never_echoes_it() {
+        let env = Env::bare(&[], &[]);
+        for line in ["/login anthropic sk-ant-api03-abcdef", "/login anthropic --key sk-1 sk-2"] {
+            let Sent::Bad(why) = send(line, &env) else { panic!("{line} is refused") };
+            assert!(why.contains("anthropic") && why.contains("[redacted]"), "{why}");
+            assert!(!why.contains("sk-"), "{why}");
+        }
+        assert!(carries_key("/login anthropic sk-ant-api03-abcdef"));
+        assert!(!carries_key("/login anthropic") && !carries_key("/login") && !carries_key("/model a b"));
+    }
+
+    #[test]
+    fn logout_names_an_account_that_exists() {
+        let names = vec!["work".to_owned()];
+        let env = Env { account_names: &names, ..Env::bare(&[], &[]) };
+        let m = |l: &str| match send(l, &env) {
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Login(..) => "login".to_owned(),
+            Sent::Bad(why) => format!("BAD {why}"),
+        };
+        assert_eq!(m("/logout work"), "Command(OpenScreen(ConfirmLogout(AccountName(\"work\"))))");
+        assert_eq!(m("/logout"), "BAD /logout needs an account");
+        assert_eq!(m("/logout nobody"), "BAD /logout: no account named nobody");
+    }
+
+    #[test]
     fn registry_matches_spec_05_section_4() {
         let mut ours: Vec<String> = REGISTRY.iter().filter(|s| s.surfaces.slash > 0).map(|s| s.name.to_owned()).collect();
         ours.sort();
@@ -834,6 +906,7 @@ mod tests {
     fn msgs(line: &str, agents: &[String], workflows: &[String]) -> String {
         match send(line, &Env::bare(agents, workflows)) {
             Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         }
     }
@@ -863,6 +936,9 @@ mod tests {
         assert_eq!(m("/build x"), "BAD /build is not available: no workflow named build");
         assert_eq!(m("/agents"), "Command(OpenScreen(Agents))");
         assert_eq!(m("/accounts"), "Command(OpenScreen(Accounts))");
+        assert_eq!(m("/login"), "Command(OpenScreen(Providers))");
+        assert_eq!(m("/login anthropic"), "LOGIN anthropic");
+        assert_eq!(m("/login sk-ant-123"), "BAD /login: no provider named sk-ant-123 (/login lists them)");
         assert_eq!(m("/help"), "Command(OpenHelp)");
         assert_eq!(m("/nope"), "BAD no command /nope (try /help)");
         assert_eq!(m("hello"), "SubmitPrompt { text: \"hello\" }");
@@ -967,6 +1043,7 @@ mod tests {
     fn sent(line: &str, env: &Env) -> String {
         match send(line, env) {
             Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         }
     }

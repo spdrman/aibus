@@ -27,7 +27,7 @@ pub const MENU_VIEW: &str = "view:menu";
 pub const DIRTY: &str = "view:dirty";
 
 /// Widget name and the one `view:` node it draws. `view:dirty` lists the names.
-pub const WIDGETS: [(&str, &str); 19] = [
+pub const WIDGETS: [(&str, &str); 20] = [
     ("header", HEADER),
     ("rail", RAIL),
     ("lead_box", LEAD_BOX),
@@ -44,6 +44,7 @@ pub const WIDGETS: [(&str, &str); 19] = [
     ("agents", crate::views::AGENTS),
     ("accounts", crate::views::ACCOUNTS_VIEW),
     ("models", crate::views::MODELS),
+    ("providers", crate::views::PROVIDERS),
     ("transcript", crate::views::TRANSCRIPT),
     ("run_status", crate::views::RUN_STATUS),
     ("cost", crate::views::COST),
@@ -613,6 +614,7 @@ pub fn register<G: Graph>(g: &mut G, store: Store) -> Vec<NodeKey> {
             "agents" => Box::new(move |t| crate::views::agents(&st, t)),
             "accounts" => Box::new(crate::views::accounts),
             "models" => Box::new(crate::views::models),
+            "providers" => Box::new(crate::views::providers),
             "transcript" => Box::new(move |t| crate::views::transcript(&st, t)),
             "run_status" => Box::new(crate::views::run_status),
             "cost" => Box::new(crate::views::cost),

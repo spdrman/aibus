@@ -11,6 +11,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Clear, Widget};
 
+use aibus_provider::Secret;
+
 use crate::hit::HitId;
 use crate::theme::{Interact, Theme};
 use crate::ui::Pointer;
@@ -25,19 +27,58 @@ pub struct Placed {
 }
 
 /// A text field open over a modal: an edited tool input, a message to a run, an account being
-/// added. A key is masked while `secret`, and the text never leaves this struct except by Enter.
-#[derive(Clone, PartialEq, Eq)]
+/// added. `text` is what the field shows. A secret field (the key of an account) keeps what was
+/// typed in `key` from the first keystroke, as a `Secret`, and shows one dot per character in
+/// `text`; Enter hands the `Secret` on and nothing else ever reads it.
 pub struct Entry {
     pub kind: EntryKind,
     pub label: String,
     pub text: String,
-    pub secret: bool,
+    pub key: Option<Secret<String>>,
+}
+
+impl Entry {
+    /// A plain field.
+    pub fn plain(kind: EntryKind, label: &str, text: &str) -> Self {
+        Self { kind, label: label.to_owned(), text: text.to_owned(), key: None }
+    }
+
+    /// A field whose content is a secret: it starts empty.
+    pub fn secret(kind: EntryKind, label: &str) -> Self {
+        Self { kind, label: label.to_owned(), text: String::new(), key: Some(Secret::new(String::new())) }
+    }
+
+    /// The typed key with `edit` applied, which may add up to `room` bytes. The result is a new buffer sized so that it never grows
+    /// (a regrown `String` would leave the old allocation behind, un-zeroed), and the old
+    /// `Secret` is zeroised as it drops.
+    pub fn edit_key(&mut self, room: usize, edit: impl FnOnce(&mut String)) {
+        let Some(old) = self.key.take() else { return };
+        let mut next = String::with_capacity(old.expose().len() + room);
+        next.push_str(old.expose());
+        edit(&mut next);
+        self.text = next.chars().map(|_| '•').collect();
+        self.key = Some(Secret::new(next));
+    }
+}
+
+// What a frame depends on: the key is not part of it, and its dots are in `text`.
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.label == other.label && self.text == other.text
+    }
+}
+
+// A copy is for drawing: it has the dots and never the key.
+impl Clone for Entry {
+    fn clone(&self) -> Self {
+        Self { kind: self.kind.clone(), label: self.label.clone(), text: self.text.clone(), key: None }
+    }
 }
 
 // A key typed here must not reach a log through Debug.
 impl std::fmt::Debug for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let shown = if self.secret { "<hidden>" } else { self.text.as_str() };
+        let shown = if self.key.is_some() { "<hidden>" } else { self.text.as_str() };
         write!(f, "Entry({:?}, {:?}, {shown})", self.kind, self.label)
     }
 }
@@ -50,9 +91,8 @@ pub enum EntryKind {
     Message(RunId),
     /// `R` on a partial run.
     Resume(RunId),
-    /// The three steps of adding an account: its name, its provider, its key.
-    AccountName,
-    AccountProvider(String),
+    /// The two steps of adding an account: its name (for the provider that was picked), its key.
+    AccountName(String),
     AccountKey(String, String),
     /// `n` on the agents screen: the new agent's name.
     AgentName,
@@ -122,7 +162,7 @@ pub fn buttons(
 
 /// The text field open over a modal: its label, then the text (dots for a secret) and a cursor.
 pub fn entry_line(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
-    let shown: String = if e.secret { e.text.chars().map(|_| '•').collect() } else { e.text.clone() };
+    let shown = e.text.clone();
     let x = put(buf, area, 0, y, &format!("{}: ", e.label), Style::new().fg(th.dim_text));
     let room = usize::from(area.width.saturating_sub(x + 2));
     let skip = shown.chars().count().saturating_sub(room);
@@ -491,6 +531,55 @@ pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
     Placed { area, hits }
 }
 
+
+/// The `/login` provider picker: the presets, one row each.
+pub fn providers(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, 78, full.height.min(22));
+    Clear.render(area, buf);
+    let inner = {
+        let i = panel(buf, area, "log in to a provider", th.router, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let rows = as_list(get(v, "rows").unwrap_or(&NULL));
+    let sel = int(v, "sel") as usize;
+    let dim = Style::new().fg(th.dim_text);
+    let fg = Style::new().fg(th.fg);
+    let head = Rect { height: 1, ..inner };
+    column(buf, head, 0, 18, "provider", dim);
+    column(buf, head, 19, 24, "wire", dim);
+    column(buf, head, 44, 5, "auth", dim);
+    column(buf, head, 50, 24, "address", dim);
+    let shown = usize::from(inner.height.saturating_sub(4)).max(1);
+    let first = sel.saturating_sub(shown.saturating_sub(1));
+    let mut hits = Vec::new();
+    for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
+        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let i = first + k;
+        let hit = HitId::ListRow(i);
+        let state = if pointer.pressed == Some(hit) {
+            Some(Interact::Pressed)
+        } else if pointer.hover == Some(hit) {
+            Some(Interact::Hover)
+        } else if i == sel {
+            Some(Interact::Selected)
+        } else {
+            None
+        };
+        if let Some(s) = state {
+            buf.set_style(r, th.interact(s));
+        }
+        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        column(buf, r, 0, 18, &word("id"), fg);
+        column(buf, r, 19, 24, &word("api"), dim);
+        column(buf, r, 44, 5, &word("auth"), dim);
+        column(buf, r, 50, 24, &word("url"), dim);
+        hits.push((hit, r));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    let (b, _) = buttons(buf, bottom, 0, &[("provider_pick", "Enter", "Choose", !rows.is_empty()), ("cancel", "Esc", "Close", true)], th, pointer);
+    hits.extend(b);
+    Placed { area, hits }
+}
 
 fn row_model(row: &Value) -> &str {
     get(row, "model").and_then(|m| m.as_text()).unwrap_or("")

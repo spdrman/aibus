@@ -337,7 +337,7 @@ impl R<'_> {
                 ]),
             );
         }
-        if matches!(name, "palette" | "agents" | "accounts") || name.starts_with("models:") {
+        if matches!(name, "palette" | "agents" | "accounts" | "providers") || name.starts_with("models:") {
             self.put(SCREEN_SEL, n(0));
             self.put(PALETTE_TEXT, s(""));
         }
@@ -812,6 +812,8 @@ impl R<'_> {
             }
             Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
             Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
+            Command::OpenScreen(Screen::Providers) => self.open_modal("providers"),
+            Command::OpenScreen(Screen::ConfirmLogout(account)) => self.open_modal(&format!("confirm:logout:{account}")),
             Command::OpenScreen(Screen::Models(target)) => self.open_modal(&format!("models:{}", target.label())),
             Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
             Command::OpenScreen(Screen::ConfirmCancel(run)) => self.open_modal(&format!("confirm:cancel:{run}")),
@@ -1468,6 +1470,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 .collect::<Result<Vec<_>, _>>()?;
             r.put(ACCOUNTS, list(items));
             r.log("info", &format!("{} accounts loaded", accounts.len()));
+        }
+        Msg::AccountOpDone { op, account, ok, .. } => {
+            // The line the screen shows can carry a provider's words, so only the outcome is logged.
+            let level = if *ok { "info" } else { "warn" };
+            r.log(level, &format!("account {op} {account}: {}", if *ok { "done" } else { "failed" }));
         }
         Msg::IoError { context, .. } => {
             // A compaction that failed leaves the run running again (`Compact` set `compacting`).

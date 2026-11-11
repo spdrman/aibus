@@ -16,6 +16,7 @@ use aibus_tui::keys::Keymap;
 use aibus_tui::{Prompt, Theme};
 
 use crate::cli::{Global, RunArgs};
+use crate::launch::ChildLauncher;
 use crate::startup::{self, not_ready, Ctx};
 
 /// The environment the loop reads: names, so a test can pass its own.
@@ -110,44 +111,74 @@ fn count_session(state: &Path) {
         .and_then(|()| aibus_core::persist::fs::write_private(state.join("sessions_seen"), n.to_string()));
 }
 
-/// One account operation from the accounts screen, run by the same code as `aibus account`.
-/// It runs on its own thread: `account test` starts a runtime of its own.
-fn account_op(op: AccountOp, paths: &Paths, redactor: &Redactor) -> String {
+/// One account operation from the Accounts screen, run by the same code as `aibus account`. It
+/// returns at once: a provider verify takes seconds, and the dashboard keeps drawing meanwhile.
+/// The work runs on a thread of its own (`account test` starts a runtime of its own), and what
+/// it did comes back as `Msg::AccountOpDone`, after a `Msg::AccountsReloaded` when the accounts
+/// changed. The key stays a `Secret` until the worker feeds it to `account add` as its stdin.
+fn account_op(
+    op: AccountOp,
+    tx: tokio::sync::mpsc::Sender<Msg>,
+    paths: &Paths,
+    project_settings: &Path,
+    redactor: &Redactor,
+    launcher: Option<Arc<ChildLauncher>>,
+) -> String {
     use crate::account::{self, Io};
     use crate::cli::{AccountAdd, AccountCmd};
-    let (cmd, key) = match op {
-        AccountOp::Test(name) => (AccountCmd::Test { name }, String::new()),
-        AccountOp::Disable(name) => (AccountCmd::Disable { name }, String::new()),
+    let (what, name, cmd, key) = match op {
+        AccountOp::Test(name) => ("test", name.clone(), AccountCmd::Test { name }, None),
+        AccountOp::Disable(name) => ("disable", name.clone(), AccountCmd::Disable { name }, None),
+        AccountOp::Remove(name) => ("remove", name.clone(), AccountCmd::Remove { name }, None),
         AccountOp::Add { name, provider, key } => (
+            "add",
+            name.clone(),
             AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None }),
-            key,
+            Some(key),
         ),
     };
-    let (paths, redactor) = (paths.clone(), redactor.clone());
-    let done = std::thread::spawn(move || {
+    let (paths, project_settings, redactor) = (paths.clone(), project_settings.to_path_buf(), redactor.clone());
+    let shown = format!("{} {name}...", if what == "add" { "verifying" } else { what });
+    std::thread::spawn(move || {
         let mut out = Vec::new();
-        let mut stdin = std::io::Cursor::new(key.into_bytes());
+        // The only copy of the key outside the keychain: wiped when the worker is done with it.
+        let bytes = zeroize::Zeroizing::new(key.map(|k| k.expose().clone().into_bytes()).unwrap_or_default());
+        let mut stdin: &[u8] = &bytes;
         let mut io = Io {
-            paths,
+            paths: paths.clone(),
             keychain: Arc::new(crate::keychain::OsKeychain),
             factories: crate::providers::builtin_factories(),
             env: Arc::new(|v| std::env::var(v).ok()),
-            redactor,
+            redactor: redactor.clone(),
             oauth: None,
             stdin: &mut stdin,
             prompt: None,
             out: &mut out,
         };
-        account::run(&cmd, false, &mut io)?;
-        Ok::<_, AibusError>(String::from_utf8_lossy(&out).trim().replace('\n', "  "))
-    })
-    .join();
-    match done {
-        Ok(Ok(text)) if text.is_empty() => "done".to_owned(),
-        Ok(Ok(text)) => text,
-        Ok(Err(e)) => format!("failed: {e}"),
-        Err(_) => "failed".to_owned(),
-    }
+        let ran = account::run(&cmd, false, &mut io);
+        let line = String::from_utf8_lossy(&out).trim().replace('\n', "  ");
+        let (ok, mut text) = match ran {
+            Ok(_) if line.is_empty() => (true, format!("{what} {name}: done")),
+            Ok(_) => (true, line),
+            Err(e) => (false, format!("failed: {e}")),
+        };
+        // The accounts changed: the new set is usable by the next pick, and the screens show it.
+        if ok && what != "test" {
+            match crate::startup::reload_accounts(&paths, &project_settings, &crate::providers::builtin_factories()) {
+                Ok((registry, accounts)) => {
+                    match launcher.as_ref().filter(|l| !l.builtin) {
+                        Some(l) => l.set_accounts(registry),
+                        None => text.push_str(" (this session started without an account: restart to run on it)"),
+                    }
+                    let _ = tx.blocking_send(Msg::AccountsReloaded { accounts });
+                }
+                Err(e) => text.push_str(&format!(" (could not reload the accounts: {e})")),
+            }
+        }
+        let text = redactor.redact(&text).into_owned();
+        let _ = tx.blocking_send(Msg::AccountOpDone { op: what.to_owned(), account: name, ok, text });
+    });
+    shown
 }
 
 /// Returns the process exit code.
@@ -248,7 +279,9 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     opts.writer = ctx.writer.take();
     opts.runs_dir = ctx.session.as_ref().map(|s| s.dir.join("runs"));
     let (g, r) = (paths.clone(), ctx.redactor.clone());
-    opts.account = Some(Box::new(move |op| account_op(op, &g, &r)));
+    let project_settings = aibus_core::persist::paths::project_dir(&ctx.cwd).join("settings.toml");
+    let launcher = ctx.launcher.clone();
+    opts.account = Some(Box::new(move |op, tx| account_op(op, tx, &g, &project_settings, &r, launcher.clone())));
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();

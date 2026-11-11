@@ -24,6 +24,8 @@ pub enum Api {
     OpenaiChat,
     #[serde(rename = "openai-responses")]
     OpenaiResponses,
+    #[serde(rename = "gemini-generate-content")]
+    GeminiGenerateContent,
 }
 
 impl Api {
@@ -32,12 +34,13 @@ impl Api {
             Self::AnthropicMessages => "anthropic-messages",
             Self::OpenaiChat => "openai-chat",
             Self::OpenaiResponses => "openai-responses",
+            Self::GeminiGenerateContent => "gemini-generate-content",
         }
     }
 }
 
 /// Where a provider's model table starts: the name of a table an adapter ships (`openai`,
-/// `kimi`, `anthropic`, `empty`) or the table itself, in the shape of `models.json`.
+/// `kimi`, `anthropic`, `gemini`, `empty`) or the table itself, in the shape of `models.json`.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ModelTableSpec {
@@ -212,14 +215,16 @@ pub fn resolve(id: &str, user: Option<&ProviderDef>) -> Result<Option<ProviderDe
         (Some(p), None) => p.clone(),
         (Some(p), Some(u)) => p.clone().overlaid(u),
         (None, Some(u)) => {
-            let generic = matches!(u.api, Some(Api::OpenaiChat | Api::OpenaiResponses))
-                .then(|| preset("openai-compatible"))
-                .flatten();
+            let generic = match u.api {
+                Some(Api::OpenaiChat | Api::OpenaiResponses) => preset("openai-compatible"),
+                Some(Api::GeminiGenerateContent) => preset("gemini"),
+                _ => None,
+            };
             generic.cloned().unwrap_or_default().overlaid(u)
         }
     };
     if def.api.is_none() {
-        return Err(format!("provider {id} has no api: set api to one of anthropic-messages, openai-chat, openai-responses"));
+        return Err(format!("provider {id} has no api: set api to one of anthropic-messages, openai-chat, openai-responses, gemini-generate-content"));
     }
     match def.problems().into_iter().next() {
         Some((field, why)) => Err(format!("provider {id}: {field}: {why}")),

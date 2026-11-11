@@ -166,7 +166,7 @@ impl Turn {
                     } else {
                         serde_json::from_str(&json).map_err(|e| malformed(&format!("tool input: {e}")))?
                     };
-                    self.blocks.push(ContentBlock::ToolUse { id, name, input });
+                    self.blocks.push(ContentBlock::ToolUse { id, name, input, signature: None });
                     out.push(StreamChunk::ToolUseEnd { id });
                 }
                 None => {}

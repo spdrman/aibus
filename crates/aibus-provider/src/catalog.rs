@@ -9,6 +9,7 @@ pub fn table(name: &str) -> Option<&'static str> {
         "deepinfra" => include_str!("../../../catalog/deepinfra.json"),
         "deepseek" => include_str!("../../../catalog/deepseek.json"),
         "fireworks" => include_str!("../../../catalog/fireworks.json"),
+        "gemini" => include_str!("../../../catalog/gemini.json"),
         "gemini-openai" => include_str!("../../../catalog/gemini-openai.json"),
         "groq" => include_str!("../../../catalog/groq.json"),
         "kimi" => include_str!("../../../catalog/kimi.json"),

@@ -14,13 +14,14 @@ use aibus_provider::{
     Api, ConfigError, ProviderConfig, ProviderDef, ProviderFactory, ProviderRegistry,
 };
 
-/// Fake, plus one adapter per wire: the Messages API and the two OpenAI ones. Which vendors use
+/// Fake, plus one adapter per wire: the Messages API, the two OpenAI ones and Gemini's. Which vendors use
 /// them is data (`aibus_provider::presets`, `[[provider]]`), not another line here.
 pub fn builtin_factories() -> Vec<Box<dyn ProviderFactory>> {
     vec![
         Box::new(aibus_provider::fake::Factory),
         Box::new(aibus_provider_anthropic::Factory),
         Box::new(aibus_provider_openai::Factory::openai()),
+        Box::new(aibus_provider_gemini::Factory),
     ]
 }
 

@@ -1,0 +1,7 @@
+HTTP 200
+content-type: text/event-stream
+cache-control: no-cache
+x-request-id: req_gm_0001
+
+data: {"candidates":[{"index":0,"finishReason":"MALFORMED_FUNCTION_CALL","finishMessage":"Malformed function call: print(read_file(path=src/main.rs))"}],"modelVersion":"gemini-2.5-pro","responseId":"resp_gm_0001"}
+

@@ -888,6 +888,7 @@ fn opening_call(name: &str, input: serde_json::Value) -> ChatResponse {
                 id: aibus_provider::ToolCallId(ulid::Ulid::new()),
                 name: name.into(),
                 input,
+                signature: None,
             }],
             at: SystemTime::UNIX_EPOCH,
         },
@@ -1050,7 +1051,7 @@ async fn drive(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input } => {
+                ContentBlock::ToolUse { id, name, input, .. } => {
                     Some((*id, name.clone(), input.clone()))
                 }
                 _ => None,

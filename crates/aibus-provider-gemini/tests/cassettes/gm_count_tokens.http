@@ -1,0 +1,13 @@
+HTTP 200
+content-type: application/json; charset=UTF-8
+x-request-id: req_gm_err
+
+{
+  "totalTokens": 42,
+  "promptTokensDetails": [
+    {
+      "modality": "TEXT",
+      "tokenCount": 42
+    }
+  ]
+}

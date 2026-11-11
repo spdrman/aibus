@@ -82,6 +82,15 @@ fn error_of(body: &[u8]) -> (String, String) {
     (found.unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_owned()), code)
 }
 
+/// `error.details[].retryDelay` of a Google error body.
+fn retry_delay(body: &[u8]) -> Option<Duration> {
+    let json: serde_json::Value = serde_json::from_slice(body).ok()?;
+    json.pointer("/error/details")?
+        .as_array()?
+        .iter()
+        .find_map(|d| parse_go_duration(d["retryDelay"].as_str()?))
+}
+
 /// A Go-style duration, as OpenAI writes its reset headers: `1s`, `6m0s`, `20ms`, `1h2m3.5s`.
 fn parse_go_duration(value: &str) -> Option<Duration> {
     let mut rest = value.trim();
@@ -206,7 +215,6 @@ impl Http {
         }
         let status = resp.status().as_u16();
         let info = rate_limit(resp.headers(), SystemTime::now());
-        let retry_after = info.and_then(|i| i.retry_after);
         let id = request_id(&resp);
         let mut body = Vec::new();
         while body.len() < ERROR_BODY_MAX {
@@ -222,6 +230,8 @@ impl Http {
             }
         }
         let (message, code) = error_of(&body);
+        // Google sends the wait in the body (`error.details[].retryDelay`, "33s"), not a header.
+        let retry_after = info.and_then(|i| i.retry_after).or_else(|| retry_delay(&body));
         let mut e = ProviderError::from_http(status, &message, retry_after, id, &code);
         e.rate_limit = info;
         Err(e)
@@ -383,6 +393,14 @@ mod tests {
             h.insert(reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
         }
         h
+    }
+
+    #[test]
+    fn google_puts_the_wait_in_the_error_body() {
+        let body = br#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"x/ErrorInfo"},{"@type":"x/RetryInfo","retryDelay":"33s"}]}}"#;
+        assert_eq!(retry_delay(body), Some(Duration::from_secs(33)));
+        assert_eq!(retry_delay(br#"{"error":{"message":"no details"}}"#), None);
+        assert_eq!(retry_delay(b"not json"), None);
     }
 
     #[test]

@@ -88,4 +88,8 @@ fn a_registered_key_in_an_agent_description_is_redacted_in_prompts_and_resources
         let got = server.get_prompt_text(name, args.as_object().unwrap()).unwrap();
         assert!(!format!("{got:?}").contains(KEY), "{name}");
     }
+    // The fixtures hold the key on purpose; the scan of the temp tree at the end is for what the
+    // server wrote.
+    fs::remove_file(agents.join("leaky.md")).unwrap();
+    fs::remove_file(dir.join("w.toml")).unwrap();
 }

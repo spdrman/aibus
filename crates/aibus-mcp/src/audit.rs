@@ -45,6 +45,9 @@ impl AuditLog {
 
     /// Writes one line. A failure to write is logged and otherwise ignored: a full disk must not
     /// turn a read-only call into an error.
+    // Nine arguments, and every one is a different column of the line. Six callers each pass their
+    // own values, so a struct to carry them would only be a second spelling of the same call.
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &self,
         client: Option<&Implementation>,

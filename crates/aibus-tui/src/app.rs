@@ -72,6 +72,8 @@ pub struct Options {
     pub validate: Option<Validator>,
     /// The accounts screen's `t`, `a` and `d`: what was done, in a line.
     pub account: Option<AccountHook>,
+    /// The providers whose definition carries a browser login (`/login` shows its modal for them).
+    pub oauth_providers: Vec<String>,
     /// Where `/workflow list`, `show` and `save` find the files. Without it they do nothing.
     pub workflows: Option<crate::workflows::WorkflowFiles>,
 }
@@ -409,6 +411,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
     let workflows = opts.workflows.take();
     let mut input = Input::default();
+    input.oauth_providers = std::mem::take(&mut opts.oauth_providers);
     let mut ctrl_c = CtrlC::default();
     let supported = input::mouse_supported(opts.term.as_deref());
     let mut mode = MouseMode::Off;

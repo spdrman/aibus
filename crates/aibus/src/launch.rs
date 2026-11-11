@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::{Instant, SystemTime};
 
-use aibus_core::config::Config;
+use aibus_core::config::{Config, Defaults};
 use aibus_core::{
     expand, AccountCredential, AccountName, AccountRegistry, AdvisorSeat, AgentDef, AgentName,
-    AibusError, Assist, Budgets, CredentialSource, CredentialStore, HookRunner, Isolation,
+    AccountView, AibusError, Assist, Budgets, CredentialSource, CredentialStore, HookRunner, Isolation,
     Launcher, ModelCompactor, ModelDefaults, ModelId, ModelSwitch, ModelTarget, Redactor, RouterSeat, RunConfig, RunDeps,
     RunId, Seat, SelectHints, SpawnSpec, Start, ToolExecutor, ToolLimits, ToolPattern,
 };
@@ -27,19 +27,27 @@ pub struct Picked {
     pub creds: Arc<dyn CredentialSource>,
 }
 
+/// What a login in the terminal replaces as one unit. A pick reads all four from one snapshot, so
+/// it can never pair the new registry with the fake's credential or the fake's default model.
+#[derive(Clone)]
+pub(crate) struct Live {
+    /// The accounts a pick chooses from.
+    pub registry: Arc<AccountRegistry>,
+    /// No account is configured: the built-in fake stands in with its fixed key.
+    pub builtin: bool,
+    pub defaults: ModelDefaults,
+    pub session_default: ModelRef,
+}
+
 /// Everything a child run is built from. The lead goes through `pick` too, so there is one place
 /// that turns a model and an account into a provider and a credential.
 pub struct ChildLauncher {
     /// The definitions a child can be started from; a reload replaces them.
     pub agents: RwLock<BTreeMap<AgentName, AgentDef>>,
-    /// The accounts a pick chooses from; a login or a logout in the terminal swaps it.
-    pub(crate) registry: RwLock<Arc<AccountRegistry>>,
+    /// The accounts and the model defaults; a login or a logout in the terminal swaps them.
+    pub(crate) live: RwLock<Live>,
     pub store: Arc<CredentialStore>,
-    /// No account is configured: the built-in fake stands in with its fixed key.
-    pub builtin: bool,
     pub redactor: Redactor,
-    pub defaults: ModelDefaults,
-    pub session_default: ModelRef,
     pub tools: Arc<ToolExecutor>,
     pub hooks: Arc<HookRunner>,
     /// `--deny`, which holds for every run of the session.
@@ -70,15 +78,55 @@ fn recall<T: Clone>(m: &Mutex<HashMap<RunId, T>>, run: RunId) -> Option<T> {
 }
 
 impl ChildLauncher {
+    /// The accounts and defaults as they are now, as one snapshot.
+    pub(crate) fn live(&self) -> Live {
+        self.live.read().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
     /// The accounts as they are now.
     pub fn registry(&self) -> Arc<AccountRegistry> {
-        self.registry.read().unwrap_or_else(PoisonError::into_inner).clone()
+        self.live().registry
     }
 
     /// Swaps in the accounts of a reloaded config, so a login or a logout is usable by the next
     /// pick. A run that already started keeps its provider and credential.
-    pub fn set_accounts(&self, registry: Arc<AccountRegistry>) {
-        *self.registry.write().unwrap_or_else(PoisonError::into_inner) = registry;
+    ///
+    /// A session that started on the built-in fake leaves it here: the fake key and the fake's
+    /// default model go with it, and the defaults are rebuilt from the config's `defaults.*`, else
+    /// from the first account's default model, else from the first model it lists. When there is
+    /// none to default to, nothing is swapped and the fake stays whole.
+    pub fn set_accounts(
+        &self,
+        registry: Arc<AccountRegistry>,
+        views: &[AccountView],
+        cfg: &Defaults,
+    ) -> Result<(), String> {
+        let mut live = self.live.write().unwrap_or_else(PoisonError::into_inner);
+        let mut next = Live { registry: registry.clone(), ..live.clone() };
+        if live.builtin {
+            let first = views.iter().find_map(|v| v.default_model.clone().or_else(|| v.models.first().map(|m| m.id.clone())));
+            let default = cfg
+                .model
+                .as_deref()
+                .map(|m| registry.model_ref(m))
+                .or(first.map(ModelRef::Full))
+                .ok_or("the new account lists no model: set defaults.model")?;
+            let side = |named: &Option<String>| match named.as_deref() {
+                Some("off") => None,
+                Some(m) => Some(registry.model_ref(m)),
+                None => Some(default.clone()),
+            };
+            next.builtin = false;
+            next.defaults = ModelDefaults {
+                default_model: Some(default.clone()),
+                advisor_model: side(&cfg.advisor_model),
+                router_model: side(&cfg.router_model),
+                swarm_model: side(&cfg.swarm_model),
+            };
+            next.session_default = default;
+        }
+        *live = next;
+        Ok(())
     }
 
     /// One side role's seat: its definition, and the account and model it runs on, apart from the
@@ -107,7 +155,7 @@ impl ChildLauncher {
         }
         // A fresh install has no account to name: the built-in fake serves the lead, and nobody
         // else is consulted unless the user asks.
-        if named.is_none() && self.builtin {
+        if named.is_none() && self.live().builtin {
             return None;
         }
         let name = role.parse::<AgentName>().ok()?;
@@ -120,7 +168,7 @@ impl ChildLauncher {
             ModelRef::Alias(a) if *a == *reserved => {
                 self.registry().model_ref(named.unwrap_or(fallback))
             }
-            other => expand(other, &self.defaults),
+            other => expand(other, &self.live().defaults),
         };
         let hints = SelectHints {
             agent: def.account.clone(),
@@ -192,9 +240,10 @@ impl ChildLauncher {
     /// The account for `target` under `hints`, its provider, and a credential that works (so a
     /// missing key fails now, with exit 4, rather than on the first request).
     pub fn pick(&self, target: &ModelRef, hints: &SelectHints) -> Result<Picked, AibusError> {
-        let (account, model) = self.registry().select(target, hints)?;
-        let provider = self.registry().provider(&account)?;
-        let creds: Arc<dyn CredentialSource> = if self.builtin {
+        let live = self.live();
+        let (account, model) = live.registry.select(target, hints)?;
+        let provider = live.registry.provider(&account)?;
+        let creds: Arc<dyn CredentialSource> = if live.builtin {
             self.redactor.register(&account, FAKE_KEY);
             Arc::new(Credential {
                 account: account.clone(),
@@ -203,7 +252,7 @@ impl ChildLauncher {
                 resolved_at: Instant::now(),
             })
         } else {
-            let configured = self.registry().account(&account).cloned().ok_or_else(|| {
+            let configured = live.registry.account(&account).cloned().ok_or_else(|| {
                 aibus_core::CredentialError::UnknownAccount(account.clone())
             })?;
             Arc::new(AccountCredential {
@@ -331,6 +380,7 @@ impl Launcher for ChildLauncher {
             def.name = spec.agent.clone();
         }
 
+        let live = self.live();
         let parent = spec.parent.and_then(|p| recall(&self.chosen, p));
         let same = again.and_then(|r| recall(&self.chosen, r));
         // The caller's model, else the definition's. `inherit` takes the parent's, or the
@@ -345,9 +395,9 @@ impl Launcher for ChildLauncher {
                 },
             ),
             None => (
-                match (&spec.model, expand(&def.model, &self.defaults), &parent) {
-                    (Some(m), _, _) => self.registry().model_ref(m),
-                    (None, ModelRef::Inherit, None) => self.session_default.clone(),
+                match (&spec.model, expand(&def.model, &live.defaults), &parent) {
+                    (Some(m), _, _) => live.registry.model_ref(m),
+                    (None, ModelRef::Inherit, None) => live.session_default.clone(),
                     (None, other, _) => other,
                 },
                 SelectHints {

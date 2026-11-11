@@ -462,13 +462,13 @@ pub(crate) fn reload_accounts(
     paths: &Paths,
     project_settings: &Path,
     factories: &[Box<dyn ProviderFactory>],
-) -> Result<(Arc<AccountRegistry>, Vec<AccountView>), AibusError> {
+) -> Result<(Arc<AccountRegistry>, Vec<AccountView>, config::Defaults), AibusError> {
     let cfg = config::load(&paths.config_file(), Some(project_settings))?.config;
     let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
     let providers = Arc::new(ProviderRegistry::new(factories, &configs)?);
     let registry = Arc::new(AccountRegistry::new(&cfg, providers));
     let views = account_views(&cfg, &registry);
-    Ok((registry, views))
+    Ok((registry, views, cfg.defaults))
 }
 
 #[cfg(test)]
@@ -837,12 +837,14 @@ impl Step for EnterLoop {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect(),
             ),
-            registry: std::sync::RwLock::new(acc.registry.clone()),
+            live: std::sync::RwLock::new(crate::launch::Live {
+                registry: acc.registry.clone(),
+                builtin: acc.builtin,
+                defaults: defaults.clone(),
+                session_default: session_default.clone(),
+            }),
             store: acc.store.clone(),
-            builtin: acc.builtin,
             redactor: ctx.redactor.clone(),
-            defaults: defaults.clone(),
-            session_default: session_default.clone(),
             tools: tools.clone(),
             hooks: hooks.clone(),
             deny: ctx.global.deny.iter().filter_map(|t| t.parse().ok()).collect(),

@@ -129,6 +129,7 @@ impl Rig {
             env: Arc::new(move |v| env.get(v).cloned()),
             redactor: Redactor::new(),
             oauth: self.oauth.clone(),
+            cancel: None,
             stdin: &mut input,
             prompt: asked.as_ref().map(|f| f as &dyn Fn() -> std::io::Result<String>),
             out: &mut out,

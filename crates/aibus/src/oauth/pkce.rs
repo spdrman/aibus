@@ -109,7 +109,7 @@ async fn bind_any() -> Result<TcpListener, String> {
 
 /// The platform opener, with the URL as one argv element and no shell. A failure only means
 /// the user opens the printed address by hand.
-fn open(url: &str) {
+pub(crate) fn open(url: &str) {
     let mut cmd = if cfg!(target_os = "macos") {
         Command::new("open")
     } else if cfg!(windows) {

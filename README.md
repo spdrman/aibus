@@ -6,7 +6,7 @@ A terminal app for running AI agents with sub-agents, an advisor and continuity 
 
 That is the dashboard on the built-in fake provider, so no account or network is involved: the lead makes a plan, the advisor rail on the left comments on it, the router answers a small decision, three workers take a card each, and the last two seconds are the mouse (hover, click, right click). The recording is made by a script, see [docs/media/README.md](docs/media/README.md).
 
-What it does, in one paragraph: a lead agent talks to you and delegates to sub-agents defined as Markdown files with YAML frontmatter (project or user scope, tool allow-lists, model per agent, background or foreground, resumable). An advisor reads the whole session and speaks only at checkpoints. A router answers small decisions with a cheap model and escalates the uncertain ones. Ledgers, handoffs and memory carry state from one session to the next... compound, don't compact. Several providers and several accounts per provider, credentials in the OS keychain. The whole application state is one Causl graph, so every event is one atomic commit, the commit log is the audit trail, and a snapshot is the session save.
+What it does, in one paragraph: a lead agent talks to you and delegates to sub-agents defined as Markdown files with YAML frontmatter (project or user scope, tool allow-lists, model per agent, background or foreground, resumable). An advisor reads the whole session and speaks only at checkpoints. A router answers small decisions with a cheap model and escalates the uncertain ones. Ledgers, handoffs and memory carry state from one session to the next... compound, don't compact. Twenty-four provider presets (Anthropic, OpenAI, Gemini, Claude on Bedrock and Vertex, Groq, Ollama and the rest, see [docs/CAPABILITIES.md](docs/CAPABILITIES.md)) and three ways to connect: pick a preset, write a `[[provider]]` for a server the presets do not know, or log in with OAuth where a vendor publishes a login for third-party applications. Several accounts per provider, an optional fallback to the next account when one runs out of quota before the first token, and credentials in the OS keychain. Coming from 0.1.0? Your config loads as it is, and [docs/MIGRATION.md](docs/MIGRATION.md) has the three cases that change shape. The whole application state is one Causl graph, so every event is one atomic commit, the commit log is the audit trail, and a snapshot is the session save.
 
 The spec is at [docs/SPEC.md](docs/SPEC.md) and the contested decisions are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -107,6 +107,8 @@ target/release/aibus version
 ### What is not proven
 
 * No real provider has been exercised end to end: the tests and the demo run on the fake provider, and the live provider run is a separate nightly job.
+* No live run against Gemini, Bedrock or Vertex has happened in CI. Those adapters are proven against recorded cassettes and a scripted server, the OAuth flows against a fake authorization server, and the Vertex token path against a stand-in for `gcloud`. The OpenRouter login in particular has not been tried against openrouter.ai from a release build.
+* The capability columns for a preset are its adapter's default for a model its table says nothing about. A row of the catalog can differ, and a provider can change a model under me, so `docs/CAPABILITIES.md` is what aibus assumes, not what the vendor guarantees.
 * Windows is unverified. The binary is built, but nobody has run it on a Windows machine yet (see [docs/RELEASE.md](docs/RELEASE.md)), and the `PATH` change in `install.ps1` is the part the container tests could not exercise.
 * The release pipeline and the installers have only run against fake releases in containers until the first real release is cut.
 * Only the Linux and macOS terminals I own have been tried by eye; the rest of the checklist in [docs/RELEASE.md](docs/RELEASE.md) is open.
@@ -166,6 +168,7 @@ crates/aibus-graph                Causl contract, mini engine, causl-engine-core
 crates/aibus-provider             Provider trait, accounts, fake provider
 crates/aibus-provider-anthropic
 crates/aibus-provider-openai      OpenAI, Kimi/Moonshot and OpenAI-compatible dialects
+crates/aibus-provider-gemini      Google's native Gemini API
 crates/aibus-tui                  ratatui widgets and view model
 crates/aibus-testkit
 ```

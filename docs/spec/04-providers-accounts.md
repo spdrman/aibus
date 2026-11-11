@@ -1,5 +1,7 @@
 # 04. Providers and accounts
 
+> **0.2.0 changes.** A provider is now a definition (a preset or a `[[provider]]` table) that names a wire protocol, models carry their own capabilities, Gemini, Bedrock and Vertex have adapters, OAuth is available where a vendor publishes it, the model tables moved to `catalog/`, and accounts can fall back to one another (section 4.3). This spec is not rewritten for them; the current description is in `docs/PROVIDERS.md`, the generated table of what every preset can do is `docs/CAPABILITIES.md`, a 0.1.0 config is covered in `docs/MIGRATION.md`, and the choices behind the changes are the F-series and D-14 entries of `docs/DECISIONS.md`.
+
 Multiple providers and multiple logins to the same provider, from day one. The security expert signed off on sections 5 and 7 with the two conditions recorded at the end.
 
 ## 1. Shape

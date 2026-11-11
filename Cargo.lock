@@ -238,6 +238,7 @@ dependencies = [
  "aibus-graph",
  "aibus-provider",
  "aibus-provider-anthropic",
+ "aibus-provider-gemini",
  "aibus-provider-openai",
  "aibus-tui",
  "async-trait",

@@ -16,7 +16,7 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 28] = [
+pub const ALL_NAMES: [&str; 29] = [
     "Key",
     "Mouse",
     "Ui",
@@ -44,6 +44,7 @@ pub const ALL_NAMES: [&str; 28] = [
     "IoError",
     "Shutdown",
     "ModelSwitched",
+    "WorkflowsLoaded",
     "Persisted",
 ];
 
@@ -632,6 +633,22 @@ pub fn cases() -> Vec<Case> {
             expect: vec!["model:log", "model:run:<id>:meta", "model:session:assist"],
         },
         Case {
+            name: "WorkflowsLoaded",
+            setup: none,
+            msg: Msg::WorkflowsLoaded {
+                rows: vec![aibus_core::workflow::WorkflowRow {
+                    name: "review".into(),
+                    scope: "project".into(),
+                    description: t.clone(),
+                    agents: vec!["explore".into()],
+                    error: None,
+                }],
+                shown: Some(WorkflowShown { name: "review".into(), text: t.clone(), summary: t.clone() }),
+                said: Some(t.clone()),
+            },
+            expect: vec!["model:log", "model:workflow:shown", "model:workflows"],
+        },
+        Case {
             name: "Persisted",
             setup: none,
             msg: Msg::Persisted,
@@ -783,6 +800,8 @@ pub fn cases() -> Vec<Case> {
             },
             vec!["model:session:assist"],
         ),
+        cmd(Command::WorkflowFile(WorkflowFile::Save { name: SENTINEL.into(), user: false, force: false }), vec![]),
+        cmd(Command::WorkflowAuthor { goal: SENTINEL.into() }, vec![]),
         cmd(Command::Clear, vec!["model:log"]),
         cmd(Command::Quit { force: true }, vec!["eng:shutdown"]),
     ]);

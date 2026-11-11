@@ -15,11 +15,11 @@ use super::value::{as_i64, as_list, as_str, get, list, map, map_of, n, pushed, s
 use super::*;
 use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
-use crate::ids::{PermissionId, RunId};
+use crate::ids::{AgentName, PermissionId, RunId};
 use crate::msg::{AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
-use crate::workflow::WorkflowRow;
+use crate::workflow::{self, WorkflowRow};
 
 /// What `reduce` may not read from the world itself.
 #[derive(Clone, Copy, Debug, Default)]
@@ -882,7 +882,7 @@ impl R<'_> {
                 self.log("info", "queued request");
             }
             // The loop reads the files and answers with `Msg::WorkflowsLoaded`.
-            Command::WorkflowFile(_) => {}
+            Command::WorkflowFile(_) | Command::WorkflowAuthor { .. } => {}
         }
     }
 }
@@ -1319,6 +1319,22 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             }
             let who = r.agent_of(&id);
             r.log_row("info", &who, Some(id.clone()), &format!("finished {}", result.status.as_value()), Vec::new());
+            // The workflow author ends with its TOML in a fenced block; the last one is the
+            // draft `/workflow save` writes, if it validates against the roster we have.
+            let fenced = result.summary.rsplit_once("```toml").and_then(|(_, after)| after.split_once("```"));
+            if let (true, true, Some((body, _))) = (result.agent.as_str() == "workflow-author", result.status == RunStatus::Completed, fenced) {
+                let toml = body.trim_start_matches('\n');
+                let roster: Vec<AgentName> = as_list(r.cur(AGENTS_DEFS))
+                    .iter()
+                    .filter_map(|d| get(d, "name").and_then(as_str))
+                    .filter_map(|name| AgentName::new(name).ok())
+                    .collect();
+                let (ok, line) = workflow::summarise(toml, "draft", &roster);
+                if ok {
+                    r.put(WORKFLOW_DRAFT, map([("toml", r.store.inline_or_handle(toml)), ("summary", s(&line))]));
+                }
+                r.log(if ok { "info" } else { "warn" }, &format!("workflow draft: {line}"));
+            }
             r.cancel_queued_below(&id);
         }
         Msg::RunFailed { run, error } => {

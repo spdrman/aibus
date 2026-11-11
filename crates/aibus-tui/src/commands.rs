@@ -302,8 +302,8 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "workflow",
-        args: "list | show <name> | save <name> | run <name> <input>",
-        help: "list, show, save and run workflows (/workflow <name> <input> runs one too)",
+        args: "new <goal> | list | show <name> | save <name> | run <name> <input>",
+        help: "draft (new), list, show, save and run workflows (/workflow <name> <input> runs one too)",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -621,6 +621,15 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
         None => need(c, "a workflow name"),
     };
     match sub {
+        "new" => {
+            if let Some(why) = c.env.lacking(c.name, LEAD | MCP, None) {
+                return Err(format!("/workflow new is not available: {why}"));
+            }
+            if rest.is_empty() {
+                return need(c, "a goal, in words");
+            }
+            command(out, Command::WorkflowAuthor { goal: rest.to_owned() })
+        }
         "list" => command(out, Command::WorkflowFile(WorkflowFile::List)),
         "show" if rest.is_empty() => need(c, "a workflow name"),
         "show" => command(out, Command::WorkflowFile(WorkflowFile::Show(rest.to_owned()))),
@@ -667,15 +676,21 @@ impl Env<'_> {
     /// Why `spec` is not available right now, or `None` when it is. `run` is the run it would act
     /// on, when that is known yet: the state needs are only judged against one.
     fn unmet(&self, spec: &Spec, run: Option<RunId>) -> Option<String> {
-        let missing = |bit: u8| spec.needs & bit != 0;
+        self.lacking(spec.name, spec.needs, run)
+    }
+
+    /// Why `needs` (a bit set) is not met right now for the command `name`, or `None` when it
+    /// is. A subcommand that needs more than its row (`/workflow new`) asks this directly.
+    fn lacking(&self, name: &str, needs: u8, run: Option<RunId>) -> Option<String> {
+        let missing = |bit: u8| needs & bit != 0;
         if missing(LEAD) && self.lead.is_none() {
             return Some("no lead is running".into());
         }
         if missing(RUNS) && self.runs.is_empty() {
             return Some("no run yet".into());
         }
-        if missing(WORKFLOWS) && !self.workflows.iter().any(|w| w == spec.name) {
-            return Some(format!("no workflow named {}", spec.name));
+        if missing(WORKFLOWS) && !self.workflows.iter().any(|w| w == name) {
+            return Some(format!("no workflow named {name}"));
         }
         let state = run.and_then(|r| self.states.iter().find(|(id, _)| *id == r)).map(|(_, st)| *st);
         if let Some(st) = state {
@@ -892,6 +907,28 @@ mod tests {
             assert!(m(&format!("/workflow save {bad}")).starts_with("BAD `"), "{bad}");
         }
         assert_eq!(m("/workflow run review the diff"), m("/workflow review the diff"));
+    }
+
+    #[test]
+    fn workflow_new_needs_a_goal_and_a_lead() {
+        let agents: Vec<String> = Vec::new();
+        let workflows: Vec<String> = Vec::new();
+        let bare = Env::bare(&agents, &workflows);
+        let with_lead = Env { lead: Some(lead_run()), ..bare };
+        let said = |env: &Env, line: &str| match send(line, env) {
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Bad(why) => format!("BAD {why}"),
+        };
+        assert_eq!(said(&bare, "/workflow new review a pull request"), "BAD /workflow new is not available: no lead is running");
+        assert_eq!(said(&with_lead, "/workflow new"), "BAD /workflow needs a goal, in words");
+        assert_eq!(
+            said(&with_lead, "/workflow new review a pull request and leave a summary"),
+            "Command(WorkflowAuthor { goal: \"review a pull request and leave a summary\" })"
+        );
+    }
+
+    fn lead_run() -> RunId {
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap()
     }
 
     #[test]

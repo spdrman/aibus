@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
-use aibus_core::config::{self, Loaded};
+use aibus_core::config::{self, Loaded, McpServer};
 use aibus_core::persist::fs::create_private_dir;
 use aibus_core::persist::index::Index;
 use aibus_core::persist::paths::{project_dir, Paths};
@@ -93,6 +93,9 @@ pub struct Ctx {
     /// Starts the lead's children, hands their results back and holds the limits.
     pub orch: Option<Arc<Orchestrator>>,
     pub launcher: Option<Arc<ChildLauncher>>,
+    /// The connection to this program's own `aibus mcp`, which the workflow author uses; `None`
+    /// when the user has their own `[mcp.aibus]` or it did not start.
+    pub author: Option<Arc<aibus_core::mcp::Client>>,
     /// What runs `[hooks]` and the definitions' hooks; runs nothing under `--no-hooks`.
     pub hooks: Option<Arc<HookRunner>>,
     pub rx: Option<mpsc::Receiver<Msg>>,
@@ -134,6 +137,7 @@ impl Ctx {
             plan: None,
             orch: None,
             launcher: None,
+            author: None,
             hooks: None,
             rx: None,
             handle: None,
@@ -789,6 +793,37 @@ impl Step for EnterLoop {
                 registry.register(tool);
             }
         }
+        // The workflow author talks to `aibus mcp` over stdio, read-only (no `--allow`): started
+        // here, at the first point the registry is built, because it is built once. A user's own
+        // `[mcp.aibus]` is theirs and is left alone.
+        let wants_author = ctx.interactive || ctx.global.agent.as_deref() == Some("workflow-author");
+        let author = if wants_author && !cfg.mcp.contains_key("aibus") {
+            let rt = ctx.rt.as_ref().ok_or_else(|| not_ready("runtime"))?;
+            let server = std::env::current_exe().and_then(std::fs::canonicalize).map(|exe| McpServer {
+                command: exe.to_string_lossy().into_owned(),
+                args: vec!["mcp".into()],
+                ..McpServer::default()
+            });
+            let env: Vec<(String, String)> = std::env::vars().collect();
+            let connected = match server {
+                Ok(server) => rt.block_on(aibus_core::mcp::Client::connect("aibus", &server, &env, &ctx.cwd, &session.id.to_string())),
+                Err(e) => Err(format!("this program's own path does not resolve: {e}")),
+            };
+            match connected {
+                Ok((client, listed)) => {
+                    for tool in aibus_core::mcp::tools_of("aibus", &client, listed) {
+                        registry.register(tool);
+                    }
+                    Some(client)
+                }
+                Err(why) => {
+                    eprintln!("aibus: warning: mcp.aibus (the workflow author): {why}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone())));
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
@@ -839,6 +874,7 @@ impl Step for EnterLoop {
             worktrees: paths.cache.join("worktrees").join(session.id.to_string()),
             assist: Default::default(),
             workflow_dirs: workflow_dirs.clone(),
+            author_server: author.is_some(),
         });
         // A `prompt` hook asks the session's own model; the account is only touched when some hook
         // wants it, so a session with none never reads a key for this.
@@ -977,6 +1013,7 @@ impl Step for EnterLoop {
         }
         ctx.orch = Some(orch);
         ctx.launcher = Some(launcher);
+        ctx.author = author;
         ctx.hooks = Some(hooks);
         ctx.plan = plan;
         ctx.rx = Some(rx);

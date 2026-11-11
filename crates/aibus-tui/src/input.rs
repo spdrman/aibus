@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER};
 use aibus_core::{
-    Command, Decision, KeyCode, KeyEvent, Msg, Outcome, Pane, PermissionId, RunId, Screen, Selection, TrOp, UiIntent,
+    Command, Decision, KeyCode, KeyEvent, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
 };
 use aibus_graph::{Graph, Value};
 use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -92,6 +92,8 @@ pub struct Context {
     pub agents: Vec<String>,
     /// Every run, oldest first, with its agent (the `@target` of a command).
     pub runs: Vec<(RunId, String)>,
+    /// Where each run stands, for the commands that only apply to a run in some state.
+    pub states: Vec<(RunId, RunStatus)>,
     /// Some run has finished: quitting asks how it went.
     pub any_runs: bool,
 }
@@ -193,6 +195,13 @@ impl Context {
                 Some((id.parse().ok()?, agent.to_owned()))
             })
             .collect();
+        let states: Vec<(RunId, RunStatus)> = runs
+            .iter()
+            .filter_map(|(id, _)| {
+                let status = g.read_key(&run_key(id, "status")).and_then(as_str).and_then(RunStatus::parse)?;
+                Some((*id, status))
+            })
+            .collect();
         let any_runs = !g.read_key(RUNS_ORDER).map_or(&[][..], as_list).is_empty();
         let permission_summary = view(PERMISSION).and_then(|p| get(p, "summary")).and_then(as_str).unwrap_or("").to_owned();
         Self {
@@ -212,6 +221,7 @@ impl Context {
             account_rows,
             agents,
             runs,
+            states,
             any_runs,
         }
     }
@@ -225,6 +235,7 @@ impl Context {
             lead: self.lead_run,
             focused: (self.chrome.focus == Pane::Cards).then_some(self.selected_run).flatten(),
             runs: &self.runs,
+            states: &self.states,
             accounts: true,
             mcp: true,
         }
@@ -248,7 +259,7 @@ impl Context {
             Some("agents") => Ctx::Agents,
             Some("accounts") => Ctx::Accounts,
             Some("outcome") => Ctx::Outcome,
-            Some("confirm:clear") => Ctx::Confirm,
+            Some(m) if m.starts_with("confirm:") => Ctx::Confirm,
             Some(_) => Ctx::Modal,
             None => match self.chrome.focus {
                 Pane::Cards => Ctx::Cards,
@@ -334,7 +345,7 @@ enum Scr {
     AcctDisable,
     Outcome(Outcome),
     QuitNow,
-    ClearYes,
+    ConfirmYes,
     SendEntry,
     CancelEntry,
 }
@@ -355,7 +366,7 @@ fn scr_of(id: &str) -> Option<Scr> {
         "outcome:3" => Scr::Outcome(Outcome::PartialMinus),
         "outcome:4" => Scr::Outcome(Outcome::Failed),
         "quit_now" => Scr::QuitNow,
-        "clear_yes" => Scr::ClearYes,
+        "clear_yes" | "cancel_yes" => Scr::ConfirmYes,
         "send_entry" | "send_edit" => Scr::SendEntry,
         "cancel_entry" => Scr::CancelEntry,
         _ => return None,
@@ -645,7 +656,7 @@ impl Input {
         // A modal's backdrop catches the click so it never reaches the dashboard. Only a
         // dismissible one closes on it: an outside click must not be an unintended deny.
         if matches!(id, HitId::Backdrop) {
-            if !matches!(cx.chrome.modal.as_deref(), Some("permission" | "outcome" | "confirm:clear")) {
+            if !cx.chrome.modal.as_deref().is_some_and(|m| matches!(m, "permission" | "outcome") || m.starts_with("confirm:")) {
                 self.entry = None;
                 out.msgs.push(Msg::Command(Command::CloseModal));
             }
@@ -1108,7 +1119,7 @@ impl Input {
                 self.screen(a, cx, prompt, out);
             }
             Ctx::Confirm => match c {
-                Some('y') => self.screen(Scr::ClearYes, cx, prompt, out),
+                Some('y') => self.screen(Scr::ConfirmYes, cx, prompt, out),
                 Some('n') => self.screen(Scr::Close, cx, prompt, out),
                 _ => {}
             },
@@ -1180,7 +1191,12 @@ impl Input {
                 out.msgs.extend([cmd(Command::CreateHandoff { outcome: Some(o) }), cmd(Command::Quit { force: false })]);
             }
             Scr::QuitNow => out.msgs.push(cmd(Command::Quit { force: true })),
-            Scr::ClearYes => out.msgs.extend([cmd(Command::Clear), cmd(Command::CloseModal)]),
+            Scr::ConfirmYes => {
+                // The modal's name says what was asked: `confirm:clear` or `confirm:cancel:<run>`.
+                let run = cx.chrome.modal.as_deref().and_then(|m| m.strip_prefix("confirm:cancel:")).and_then(|r| r.parse().ok());
+                out.msgs.push(cmd(run.map_or(Command::Clear, |run| Command::Cancel { run })));
+                out.msgs.push(cmd(Command::CloseModal));
+            }
             Scr::SendEntry => self.finish_entry(cx, prompt, out),
             Scr::CancelEntry => self.entry = None,
         }
@@ -1372,6 +1388,13 @@ impl Input {
             OpenHelp => out.msgs.push(cmd(Command::OpenHelp)),
             OpenAgents => out.msgs.push(cmd(Command::OpenScreen(Screen::Agents))),
             OpenAccounts => out.msgs.push(cmd(Command::OpenScreen(Screen::Accounts))),
+            OpenRunStatus => {
+                let run = if in_transcript { cx.transcript.as_ref().map(|t| t.run) } else { cx.selected_run.or(cx.lead_run) };
+                if let Some(run) = run {
+                    out.msgs.push(cmd(Command::OpenScreen(Screen::RunStatus(run))));
+                }
+            }
+            OpenCost => out.msgs.push(cmd(Command::OpenScreen(Screen::Cost))),
             CloseModal if cx.menu.is_some() => out.msgs.push(ui(UiIntent::CloseMenu)),
             CloseModal => out.msgs.push(cmd(Command::CloseModal)),
             PickMenuItem => {

@@ -358,6 +358,25 @@ Gated calls, taken at the recommended default:
 
 **Why.** The safety model in the issue (names not paths, validate first, a revision check, no gate without its flag) holds with one writer, and a second writer is the user's editor, which the revision check already catches.
 
+## D-16: the run tools of `aibus mcp` (E9, #104, 2026-11-11)
+
+**Context.** The issue left several calls open, and the owner's rule is to take the recommended default and write it down.
+
+**Decision.**
+
+1. A run is a child process, `aibus run --workflow <name> --json --permission-mode dont-ask [--allow <pattern>]... -- <input>`, started from `std::env::current_exe()` (a `RunConfig` in `aibus-mcp` names the program, so tests can stand in for it). `AIBUS_I_KNOW` is removed from its environment, stdin is closed, and the server folds its NDJSON events into `run_status`. The issue says the server hosts one session the way `headless::run` does; a child gives each run its own session directory, commit log and transcript, makes `bypass` unreachable by construction (the mode is on a command line the model cannot touch), and lets a cancel be a SIGINT, which `aibus run` already turns into a snapshot and exit 7. `aibus-mcp` keeps its closure free of provider crates, which a hosted session would have broken.
+2. `session` in the `workflow_run` answer is `null` until the child has made one; `run_status` shows it from the child's `SessionEnd` on. The id belongs to the child, which does not exist yet when the answer goes out.
+3. The cost cap is the sum of the finished runs' `cost_usd`; each run is started with the remainder as `AIBUS_MAX_COST_USD`, a new variable read next to `AIBUS_MAX_SPAWN_DEPTH` in `env::apply_limits`, so the child ends with the budget error and exit 8 on its own. `--max-cost-usd` defaults to `limits.max_cost_usd`, which makes `aibus mcp --allow run` the one mode that reads `config.toml` (never a key).
+4. `workflow_run` takes a `scope`, but `aibus run` resolves a name project first, so a run for the user scope is refused when the project has the same name.
+5. `run_status` waits without holding a thread (`call_async`, a `tokio::sync::watch` per run) and `wait_ms` is capped by `RunConfig::max_wait` (30 s); `run_cancel` sends the interrupt and waits for the run to end, with a kill after the grace. The synchronous `Server::call` answers at once.
+6. When the server ends, `Drop` cancels live runs and waits up to 11 s for them to snapshot, whichever transport it served. A server killed with SIGKILL leaves its children to finish on their own.
+7. The `explain_run` prompt no longer points at a run resource that does not exist; it reads `run_status`. A handle may contain `-`, so the prompt accepts it.
+8. The golden transcript (`run_status_cancel`) is recorded with `AIBUS_UPDATE_TRANSCRIPTS=1` on the release run, since nothing was run for this PR. The security tests are in `crates/aibus/tests/mcp_security.rs` and `crates/aibus-mcp/tests/run_bypass.rs`, for the reason in E4 item 7.
+
+**Alternatives.** Host one session in the server process (rejected: it pulls the provider crates and the startup pipeline into `aibus-mcp`, and cancel becomes a task abort with no snapshot). A fixed per-run cost cap instead of the remainder (rejected: N runs could spend N times the cap).
+
+**Why.** The safety model in the issue (nothing prompts, nothing the model sends raises the surface, no secret in a result) is easiest to keep when the run is a separate process with a fixed command line.
+
 ## E12 (2026-11-11): confirmation through elicitation and MRTR is built, the permission relay is not (#107)
 
 **Context.** #107 sat behind owner decisions 6 and 7 on epic #95. Decision 6 (do #106 and #107, elicitation first) has the recommended default of yes. Decision 7 (relay a run's `bash` prompts through the client) has the recommended default of non-goal: the epic says "I lean non-goal until a client I use supports elicitation", and I have no such client. The owner wants zero open issues, so I took both defaults.

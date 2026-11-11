@@ -321,3 +321,52 @@ fn the_create_update_conflict_scenario_matches_its_golden_transcript() {
         c.transcript.assert_matches("create_update_conflict");
     }
 }
+
+/// Polls `run_status` until the run has an exit code.
+fn finished(c: &mut McpClient, run: &str) -> Value {
+    for _ in 0..120 {
+        let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).expect("run_status");
+        assert_ne!(r["isError"], true, "{r}");
+        if !r["structuredContent"]["exit_code"].is_null() {
+            return r["structuredContent"].clone();
+        }
+    }
+    panic!("the run never finished");
+}
+
+#[test]
+fn the_run_status_cancel_scenario_matches_its_golden_transcript() {
+    for p in Protocol::BOTH {
+        let home = xdg_temp();
+        let dir = home.path().join("proj/.aibus/workflows");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("ship.toml"), SHIP).unwrap();
+        let mut c = client(home.path(), p, &["--allow", "run"]);
+        let names: Vec<String> =
+            c.list_tools().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        for n in ["workflow_run", "run_status", "run_cancel"] {
+            assert!(names.iter().any(|x| x == n), "{p:?}: {n} in {names:?}");
+        }
+        // Read-only until the first run: no session exists yet.
+        assert!(!home.path().join(".local/share/aibus/sessions").exists(), "{p:?}");
+        let started = c
+            .call("workflow_run", json!({ "name": "ship", "scope": "project", "input": "the repo" }))
+            .expect("workflow_run");
+        assert_eq!(started["structuredContent"]["status"], "starting", "{started}");
+        let run = started["structuredContent"]["run"].as_str().unwrap().to_owned();
+        let done = finished(&mut c, &run);
+        assert_eq!(done["exit_code"], 0, "{p:?}: {done}");
+        assert_eq!(done["status"], "completed", "{p:?}: {done}");
+        assert!(done["session"].is_string(), "{done}");
+
+        // How many polls it took depends on timing, so the golden file starts here: the final
+        // status, a cancel of the finished run (which changes nothing), and an unknown handle.
+        c.transcript = common::transcript::Transcript::new(home.path());
+        c.call("run_status", json!({ "run": run })).expect("run_status");
+        let cancelled = c.call("run_cancel", json!({ "run": run })).expect("run_cancel");
+        assert_eq!(cancelled["structuredContent"]["status"], "completed", "{cancelled}");
+        let unknown = c.call("run_status", json!({ "run": "run-00000000000000000000000000" })).expect("unknown");
+        assert_eq!(unknown["isError"], true, "{unknown}");
+        c.transcript.assert_matches("run_status_cancel");
+    }
+}

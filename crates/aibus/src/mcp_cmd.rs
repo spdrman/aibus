@@ -2,8 +2,10 @@
 //! the log goes to stderr, through the redactor, at the level `-v`, `AIBUS_LOG` or `RUST_LOG`
 //! give (warnings by default).
 
+use aibus_core::config;
+use aibus_core::persist::paths::project_dir;
 use aibus_core::{AccountName, AibusError, Redactor};
-use aibus_mcp::{Caps, ConfirmConfig, Server};
+use aibus_mcp::{Caps, ConfirmConfig, RunConfig, Server};
 use aibus_provider::Secret;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
@@ -13,17 +15,22 @@ use crate::logging;
 use crate::mcp_http;
 
 pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusError> {
-    if args.max_runs.is_some() || args.max_concurrent_runs.is_some() || args.max_cost_usd.is_some() {
-        return Err(AibusError::Usage(
-            "--max-runs, --max-concurrent-runs and --max-cost-usd are not available yet: \
-             runs over MCP come with the run tools"
-                .into(),
-        ));
-    }
     let has = |cap: &str| args.allow.iter().any(|a| a == cap);
     let mut caps = Caps::new(has("write"), has("gates"), has("run"), args.allow_tool.clone())
         .map_err(AibusError::Usage)?;
     caps.no_provenance = args.no_provenance;
+    let capped = args.max_runs.is_some() || args.max_concurrent_runs.is_some() || args.max_cost_usd.is_some();
+    if capped && !caps.run {
+        return Err(AibusError::Usage(
+            "--max-runs, --max-concurrent-runs and --max-cost-usd need --allow run".into(),
+        ));
+    }
+    if args.max_runs == Some(0) || args.max_concurrent_runs == Some(0) {
+        return Err(AibusError::Usage("--max-runs and --max-concurrent-runs are at least 1".into()));
+    }
+    if args.max_cost_usd.is_some_and(|c| !c.is_finite() || c <= 0.0) {
+        return Err(AibusError::Usage("--max-cost-usd is a positive number".into()));
+    }
 
     // The address and the token are settled before anything is created: a refused address leaves
     // no audit file and no socket behind.
@@ -39,14 +46,37 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
     }
 
     tracing::info!(write = caps.write, gates = caps.gates, run = caps.run, "aibus mcp starting");
-    let server = Server::new(
+    let (project, paths) = (g.project_dir()?, g.paths()?);
+    // `--max-cost-usd` defaults to the configured per-run limit. Reading the config reads no
+    // credential; the first run's own process does that, when it starts.
+    let runs = if caps.run {
+        let loaded = config::load(&paths.config_file(), Some(&project_dir(&project).join("settings.toml")))?;
+        let mut runs = RunConfig::new(
+            std::env::current_exe()?,
+            args.max_cost_usd.unwrap_or(loaded.config.limits.max_cost_usd),
+        );
+        runs.max_runs = args.max_runs.unwrap_or(runs.max_runs);
+        runs.max_concurrent = args.max_concurrent_runs.unwrap_or(runs.max_concurrent);
+        Some(runs)
+    } else {
+        None
+    };
+    let confirm = ConfirmConfig {
+        elicit: args.confirm == ConfirmMode::Elicit,
+        run_cap_usd: runs.as_ref().map(|r| r.max_cost_usd),
+        ..ConfirmConfig::default()
+    };
+    let mut server = Server::new(
         caps,
-        g.project_dir()?,
-        &g.paths()?,
+        project,
+        &paths,
         std::env::var_os("HOME").map(Into::into),
         redactor.clone(),
     )?
-    .with_confirm(ConfirmConfig { elicit: args.confirm == ConfirmMode::Elicit, ..ConfirmConfig::default() });
+    .with_confirm(confirm);
+    if let Some(runs) = runs {
+        server = server.with_runs(runs);
+    }
     match http {
         Some((bind, token)) => mcp_http::serve(server, bind, args.origin.clone(), token),
         None => aibus_mcp::serve_stdio(server),

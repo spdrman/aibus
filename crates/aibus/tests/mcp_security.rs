@@ -117,3 +117,44 @@ fn no_write_tool_can_reach_settings_or_the_user_config() {
     assert!(home.path().join("proj/.aibus/workflows/settings.toml").is_file());
     assert!(home.path().join(".config/aibus/workflows/config.toml").is_file());
 }
+
+#[test]
+fn no_credential_reaches_stdout_or_the_audit_log_during_a_run() {
+    let mut home = xdg_temp();
+    home.forbid(KEY);
+    let dir = home.path().join("proj/.aibus/workflows");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("ship.toml"), FLOW).unwrap();
+    for p in Protocol::BOTH {
+        let mut cmd = mcp_command(home.path(), &["--allow", "run"]);
+        cmd.env("AIBUS_LOG", "trace");
+        let mut c = McpClient::spawn(cmd, p, home.path());
+        match p {
+            Protocol::V2026_07_28 => drop(c.discover().expect("discover")),
+            Protocol::V2025_11_25 => drop(c.initialize_legacy().expect("initialize")),
+        }
+        // The key as the run's input and as a made-up handle.
+        let started = c
+            .call("workflow_run", json!({ "name": "ship", "scope": "project", "input": format!("use {KEY}") }))
+            .expect("workflow_run");
+        let run = started["structuredContent"]["run"].as_str().expect("a handle").to_owned();
+        for _ in 0..120 {
+            let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).expect("run_status");
+            if !r["structuredContent"]["exit_code"].is_null() {
+                break;
+            }
+        }
+        let unknown = c.call("run_status", json!({ "run": format!("run-{KEY}") })).expect("a tool error");
+        assert_eq!(unknown["isError"], true);
+        let (done, lines) = c.finish();
+        assert_eq!(lines_that_are_not_json_rpc(&lines), Vec::<String>::new(), "{p:?}");
+        assert!(!lines.join("\n").contains(KEY), "{p:?}: the key came back over stdout");
+        assert!(!done.stderr.contains(KEY), "{p:?}: the key reached stderr");
+    }
+    // The audit files and the sessions of the runs are searched again when `home` is dropped.
+    let dir = home.path().join(".local/state/aibus/logs/mcp");
+    for f in std::fs::read_dir(&dir).expect("the audit directory").flatten() {
+        let text = std::fs::read_to_string(f.path()).unwrap();
+        assert!(!text.contains(KEY), "{}", f.path().display());
+    }
+}

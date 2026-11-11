@@ -8,6 +8,7 @@ mod limits;
 pub mod prompts;
 mod read;
 pub mod resources;
+mod write;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -15,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use aibus_core::persist::paths::Paths;
-use aibus_core::{workflow, Redactor};
+use aibus_core::{workflow, AgentName, Redactor};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
     GetPromptResponse, Implementation, JsonObject, ListPromptsResult, ListResourceTemplatesResult,
@@ -25,16 +26,16 @@ use rmcp::model::{
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler, ServiceExt};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use audit::AuditLog;
-pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES};
+pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES, WRITES_PER_MINUTE};
 use limits::RateLimiter;
 
 /// Tools per `tools/list` page.
 const PAGE: usize = 50;
 
-const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
+pub(crate) const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 
 /// The peer address of an HTTP request. The HTTP host in the binary puts one in the request's
 /// extensions and `call_tool` reads it back from there (rmcp hands the request parts to the
@@ -56,7 +57,7 @@ fn peer(context: &RequestContext<RoleServer>) -> Option<SocketAddr> {
 /// start and the model cannot raise it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Caps {
-    /// `--allow write`: create and update workflows (no tool for it yet).
+    /// `--allow write`: `workflow_create` and `workflow_update`.
     pub write: bool,
     /// `--allow gates`: a written workflow may carry `gate` commands.
     pub gates: bool,
@@ -64,6 +65,8 @@ pub struct Caps {
     pub run: bool,
     /// `--allow-tool`: pre-approvals for runs.
     pub allow_tools: Vec<String>,
+    /// `--no-provenance`: do not put the `# written through aibus mcp` line in written files.
+    pub no_provenance: bool,
 }
 
 impl Caps {
@@ -73,7 +76,7 @@ impl Caps {
         if gates && !write {
             return Err("--allow gates needs --allow write: a gate is part of a written workflow".into());
         }
-        Ok(Self { write, gates, run, allow_tools })
+        Ok(Self { write, gates, run, allow_tools, no_provenance: false })
     }
 }
 
@@ -84,6 +87,10 @@ pub struct Server {
     home: Option<PathBuf>,
     audit: AuditLog,
     limiter: Mutex<RateLimiter>,
+    write_limiter: Mutex<RateLimiter>,
+    /// Held from the revision check to the rename, so two writes in this process cannot both
+    /// pass the check.
+    write_lock: Mutex<()>,
     redactor: Redactor,
 }
 
@@ -119,9 +126,32 @@ impl Server {
             config: paths.config.clone(),
             home,
             audit,
-            limiter: Mutex::new(RateLimiter::new(Instant::now())),
+            limiter: Mutex::new(RateLimiter::new(CALLS_PER_MINUTE, Instant::now())),
+            write_limiter: Mutex::new(RateLimiter::new(WRITES_PER_MINUTE, Instant::now())),
+            write_lock: Mutex::new(()),
             redactor,
         })
+    }
+
+    /// An `isError` result: the sentence a caller can act on, through the redactor.
+    fn fail(&self, message: impl AsRef<str>) -> CallToolResult {
+        let text = self.redactor.redact(message.as_ref()).into_owned();
+        CallToolResult::error(vec![ContentBlock::text(text)])
+    }
+
+    /// A structured result, through the redactor.
+    fn done(&self, mut body: Value) -> CallToolResult {
+        self.redactor.redact_json(&mut body);
+        CallToolResult::structured(body)
+    }
+
+    /// The agents a workflow may name: whatever discovery finds for this project and the user.
+    /// `agents.extra_dirs` from the config are not read here.
+    fn roster(&self) -> Result<Vec<AgentName>, String> {
+        let user = self.config.join("agents");
+        aibus_core::agent::discover::discover(None, &self.project, Some(&user), &[], &[])
+            .map(|found| found.agents.into_keys().collect())
+            .map_err(|e| format!("agent discovery failed: {e}"))
     }
 
     pub fn caps(&self) -> &Caps {
@@ -130,9 +160,6 @@ impl Server {
 
     /// The tools the flags enable, in the epic's table order. A tool that is off is not listed.
     pub fn tools(&self) -> Vec<Tool> {
-        let schema = |v: Value| -> Arc<JsonObject> {
-            Arc::new(v.as_object().expect("a schema is an object").clone())
-        };
         let item = json!({
             "type": "object",
             "properties": {
@@ -167,6 +194,9 @@ impl Server {
             ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false),
         )];
         tools.extend(read::tools());
+        if self.caps.write {
+            tools.extend(write::tools());
+        }
         tools
     }
 
@@ -225,15 +255,20 @@ impl Server {
                 "rate limit: at most {CALLS_PER_MINUTE} tool calls a minute, try again in {secs} s"
             ))]));
         }
-        if name != "workflow_list" {
-            return self.read_tool(name, args);
+        match name {
+            "workflow_list" => {
+                if args.as_object().is_some_and(|a| !a.is_empty()) {
+                    return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));
+                }
+                let mut found = self.list_workflows();
+                self.redactor.redact_json(&mut found);
+                Ok(CallToolResult::structured(found))
+            }
+            "workflow_create" => self.workflow_write(false, args, now),
+            "workflow_update" => self.workflow_write(true, args, now),
+            // The read tools; it answers `-32602` for a name it does not know either.
+            other => self.read_tool(other, args),
         }
-        if args.as_object().is_some_and(|a| !a.is_empty()) {
-            return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));
-        }
-        let mut found = self.list_workflows();
-        self.redactor.redact_json(&mut found);
-        Ok(CallToolResult::structured(found))
     }
 
     /// `{workflows:[{name, scope, path, description, ok, error?}]}`, paths relative to the
@@ -382,3 +417,40 @@ pub fn serve_stdio(server: Server) -> Result<(), String> {
         running.waiting().await.map(|_| ()).map_err(|e| e.to_string())
     })
 }
+
+/// The shared schema object of a tool.
+pub(crate) fn schema(v: Value) -> Arc<JsonObject> {
+    Arc::new(v.as_object().expect("a schema is an object").clone())
+}
+
+/// The arguments of `tool` as an object that has every key of `required` and no key outside
+/// `required` and `optional`; anything else is a call the schema forbids (`-32602`).
+pub(crate) fn arguments<'a>(
+    tool: &str,
+    args: &'a Value,
+    required: &[&str],
+    optional: &[&str],
+) -> Result<&'a Map<String, Value>, ErrorData> {
+    static EMPTY: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
+    let map = match args {
+        Value::Object(m) => m,
+        Value::Null => EMPTY.get_or_init(Map::new),
+        _ => return Err(ErrorData::invalid_params(format!("{tool} takes an object"), None)),
+    };
+    if let Some(k) = required.iter().find(|k| !map.contains_key(**k)) {
+        return Err(ErrorData::invalid_params(format!("{tool} needs {k}"), None));
+    }
+    if let Some(k) = map.keys().find(|k| !required.contains(&k.as_str()) && !optional.contains(&k.as_str())) {
+        return Err(ErrorData::invalid_params(format!("{tool} has no argument {k:.40}"), None));
+    }
+    Ok(map)
+}
+
+/// The string at `key`, which `arguments` has already said is there if it is required.
+pub(crate) fn text<'a>(tool: &str, map: &'a Map<String, Value>, key: &str) -> Result<&'a str, ErrorData> {
+    match map.get(key) {
+        Some(Value::String(s)) => Ok(s),
+        _ => Err(ErrorData::invalid_params(format!("{tool}: {key} must be a string"), None)),
+    }
+}
+

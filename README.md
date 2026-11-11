@@ -60,7 +60,7 @@ With no account configured, `aibus` starts on the built-in fake provider. Add a 
 {"command": "aibus", "args": ["mcp"]}
 ```
 
-Today it is read-only: it lists and explains workflows, validates a draft against your real agents, shows what a workflow would do for an input without calling a model, and serves the workflow schema and an authoring prompt. Later flags add writing workflows (`--allow write`) and running them (`--allow run`). Setup for a few clients, the tool list and what the server logs are in [docs/MCP.md](docs/MCP.md).
+By default it is read-only: it lists and explains workflows, validates a draft against your real agents, shows what a workflow would do for an input without calling a model, and serves the workflow schema and an authoring prompt. `--allow write` adds creating and updating workflows (a gate needs `--allow gates` as well); a later flag adds running them (`--allow run`). Setup for a few clients, the tool list and what the server logs are in [docs/MCP.md](docs/MCP.md).
 
 ### Upgrade
 

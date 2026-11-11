@@ -221,6 +221,9 @@ pub struct McpArgs {
     /// Cost cap for one run (not available yet)
     #[arg(long, value_name = "USD")]
     pub max_cost_usd: Option<f64>,
+    /// Do not put the "written through aibus mcp" line at the top of written workflows
+    #[arg(long)]
+    pub no_provenance: bool,
 }
 
 #[derive(Args, Debug, Default)]

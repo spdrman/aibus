@@ -6,7 +6,7 @@
 use aibus_core::config::Config;
 use aibus_core::AibusError;
 
-/// `AIBUS_MAX_SPAWN_DEPTH` and `AIBUS_MAX_CONCURRENT_RUNS` replace the config's limits (01
+/// `AIBUS_MAX_SPAWN_DEPTH`, `AIBUS_MAX_CONCURRENT_RUNS` and `AIBUS_MAX_COST_USD` replace the config's limits (01
 /// section 4.4). An empty value counts as unset.
 pub fn apply_limits(
     cfg: &mut Config,
@@ -32,6 +32,16 @@ pub fn apply_limits(
             ));
         }
         cfg.limits.max_concurrent_runs = n;
+    }
+    // The most one run may cost, in dollars: how `aibus mcp --allow run` passes the budget that is
+    // left to the run it starts.
+    if let Some(v) = get("AIBUS_MAX_COST_USD").filter(|v| !v.trim().is_empty()) {
+        cfg.limits.max_cost_usd = v
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|c| c.is_finite() && *c > 0.0)
+            .ok_or_else(|| AibusError::Usage(format!("AIBUS_MAX_COST_USD={v}: want a positive number")))?;
     }
     Ok(())
 }
@@ -86,10 +96,15 @@ mod tests {
             ("AIBUS_MAX_SPAWN_DEPTH", "300"),
             ("AIBUS_MAX_CONCURRENT_RUNS", "0"),
             ("AIBUS_MAX_CONCURRENT_RUNS", "-1"),
+            ("AIBUS_MAX_COST_USD", "free"),
+            ("AIBUS_MAX_COST_USD", "0"),
+            ("AIBUS_MAX_COST_USD", "NaN"),
         ] {
             let e = apply_limits(&mut Config::default(), env(&[bad])).unwrap_err();
             assert_eq!(e.exit_code(), 2, "{bad:?}");
         }
+        apply_limits(&mut cfg, env(&[("AIBUS_MAX_COST_USD", " 0.25 ")])).unwrap();
+        assert_eq!(cfg.limits.max_cost_usd, 0.25);
         // An empty variable is unset.
         apply_limits(&mut cfg, env(&[("AIBUS_MAX_SPAWN_DEPTH", "")])).unwrap();
     }

@@ -9,12 +9,13 @@ mod limits;
 pub mod prompts;
 mod read;
 pub mod resources;
+mod run;
 mod write;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use aibus_core::persist::paths::Paths;
 use aibus_core::{workflow, AgentName, Redactor};
@@ -32,8 +33,9 @@ use serde_json::{json, Map, Value};
 use audit::AuditLog;
 pub use confirm::ConfirmConfig;
 use confirm::Confirm;
-pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES, WRITES_PER_MINUTE};
+pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES, RUNS_PER_MINUTE, WRITES_PER_MINUTE};
 use limits::RateLimiter;
+pub use run::RunConfig;
 
 /// Tools per `tools/list` page.
 const PAGE: usize = 50;
@@ -64,7 +66,7 @@ pub struct Caps {
     pub write: bool,
     /// `--allow gates`: a written workflow may carry `gate` commands.
     pub gates: bool,
-    /// `--allow run`: start and watch runs (no tool for it yet).
+    /// `--allow run`: `workflow_run`, `run_status` and `run_cancel`.
     pub run: bool,
     /// `--allow-tool`: pre-approvals for runs.
     pub allow_tools: Vec<String>,
@@ -91,9 +93,11 @@ pub struct Server {
     audit: AuditLog,
     limiter: Mutex<RateLimiter>,
     write_limiter: Mutex<RateLimiter>,
+    run_limiter: Mutex<RateLimiter>,
     /// Held from the revision check to the rename, so two writes in this process cannot both
     /// pass the check.
     write_lock: Mutex<()>,
+    runs: Option<Arc<run::Runs>>,
     redactor: Redactor,
     confirm: Confirm,
 }
@@ -115,6 +119,7 @@ impl Server {
             None,
             "server/start",
             None,
+            None,
             &json!({
                 "write": caps.write,
                 "gates": caps.gates,
@@ -132,10 +137,19 @@ impl Server {
             audit,
             limiter: Mutex::new(RateLimiter::new(CALLS_PER_MINUTE, Instant::now())),
             write_limiter: Mutex::new(RateLimiter::new(WRITES_PER_MINUTE, Instant::now())),
+            run_limiter: Mutex::new(RateLimiter::new(RUNS_PER_MINUTE, Instant::now())),
             write_lock: Mutex::new(()),
+            runs: None,
             redactor,
             confirm: Confirm::new(ConfirmConfig::default()),
         })
+    }
+
+    /// How runs are started (`--allow run`). Nothing is spawned until the first `workflow_run`,
+    /// so a client that only reads never causes a session or a credential lookup.
+    pub fn with_runs(mut self, config: RunConfig) -> Self {
+        self.runs = Some(Arc::new(run::Runs::new(config)));
+        self
     }
 
     /// An `isError` result: the sentence a caller can act on, through the redactor.
@@ -202,6 +216,9 @@ impl Server {
         if self.caps.write {
             tools.extend(write::tools());
         }
+        if self.caps.run {
+            tools.extend(run::tools());
+        }
         tools
     }
 
@@ -234,13 +251,56 @@ impl Server {
     ) -> Result<CallToolResult, ErrorData> {
         let started = Instant::now();
         let args = args.map_or(Value::Null, Value::Object);
-        let result = self.dispatch(name, &args, now);
+        let mut run = None;
+        let result = self.dispatch(name, &args, now, &mut run);
         let ok = result.as_ref().is_ok_and(|r| r.is_error != Some(true));
-        self.audit.record(client, addr, "tools/call", Some(name), &args, ok, started.elapsed());
+        let run = run.or_else(|| {
+            let given = args.get("run")?.as_str()?;
+            (given.starts_with("run-") && given.len() <= 40).then(|| given.to_owned())
+        });
+        self.audit.record(client, addr, "tools/call", Some(name), run.as_deref(), &args, ok, started.elapsed());
         result
     }
 
-    fn dispatch(&self, name: &str, args: &Value, now: Instant) -> Result<CallToolResult, ErrorData> {
+    /// `call`, for the transport: `run_status` with `wait_ms` waits (without holding the thread)
+    /// until the run changes or the wait is spent, and `run_cancel` waits for the run to end. The
+    /// synchronous `call` answers at once either way.
+    pub async fn call_async(
+        &self,
+        client: Option<&Implementation>,
+        addr: Option<SocketAddr>,
+        name: &str,
+        args: Option<JsonObject>,
+        now: Instant,
+    ) -> Result<CallToolResult, ErrorData> {
+        let id = args.as_ref().and_then(|a| a.get("run")).and_then(Value::as_str).map(str::to_owned);
+        let wait_ms = args.as_ref().and_then(|a| a.get("wait_ms")).and_then(Value::as_u64);
+        let (Some(runs), true, Some(id)) = (&self.runs, self.caps.run, id) else {
+            return self.call_from(client, addr, name, args, now);
+        };
+        if name == "run_status" {
+            if let Some(ms) = wait_ms.filter(|ms| *ms > 0) {
+                runs.wait_changed(&id, Duration::from_millis(ms)).await;
+            }
+            return self.call_from(client, addr, name, args, now);
+        }
+        let answered = self.call_from(client, addr, name, args, now);
+        if name == "run_cancel" && answered.as_ref().is_ok_and(|r| r.is_error != Some(true)) {
+            runs.wait_ended(&id).await;
+            if let Some(body) = runs.body(&id, &self.redactor) {
+                return Ok(self.done(body));
+            }
+        }
+        answered
+    }
+
+    fn dispatch(
+        &self,
+        name: &str,
+        args: &Value,
+        now: Instant,
+        run: &mut Option<String>,
+    ) -> Result<CallToolResult, ErrorData> {
         if args.to_string().len() > MAX_ARGS_BYTES {
             return Err(ErrorData::invalid_params(
                 format!("the arguments are over {} KiB", MAX_ARGS_BYTES / 1024),
@@ -271,6 +331,8 @@ impl Server {
             }
             "workflow_create" => self.workflow_write(false, args, now),
             "workflow_update" => self.workflow_write(true, args, now),
+            "workflow_run" => self.workflow_run(args, now, run),
+            "run_status" | "run_cancel" => self.run_tool(name, args, run),
             // The read tools; it answers `-32602` for a name it does not know either.
             other => self.read_tool(other, args),
         }
@@ -300,6 +362,16 @@ impl Server {
             })
             .collect();
         json!({ "workflows": rows })
+    }
+}
+
+/// The end of the server, whichever way it comes (stdin closed, an error): every live run is
+/// cancelled and gets the SIGTERM budget to write its snapshot.
+impl Drop for Server {
+    fn drop(&mut self) {
+        if let Some(runs) = &self.runs {
+            runs.shutdown();
+        }
     }
 }
 
@@ -342,7 +414,8 @@ impl ServerHandler for Server {
         if let Some(stop) = self.confirm(&request, &context, client.as_ref(), addr).await {
             return Ok(stop);
         }
-        self.call_from(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
+        self.call_async(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
+            .await
             .map(CallToolResponse::from)
     }
 
@@ -375,6 +448,7 @@ impl ServerHandler for Server {
             peer(&context),
             "resources/read",
             None,
+            None,
             &json!({ "uri": uri }),
             read.is_ok(),
             started.elapsed(),
@@ -405,6 +479,7 @@ impl ServerHandler for Server {
             peer(&context),
             "prompts/get",
             Some(&name),
+            None,
             &Value::Object(args),
             got.is_ok(),
             started.elapsed(),

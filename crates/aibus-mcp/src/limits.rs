@@ -11,6 +11,9 @@ pub const MAX_ARGS_BYTES: usize = 256 * 1024;
 /// Writes per minute, per process (`workflow_create` and `workflow_update` share the bucket).
 pub const WRITES_PER_MINUTE: u32 = 10;
 
+/// Run starts per minute, per process.
+pub const RUNS_PER_MINUTE: u32 = 5;
+
 /// A token bucket: `per_minute` tokens, refilled evenly. The caller says what time it is, so a
 /// test can move the clock without sleeping.
 pub struct RateLimiter {

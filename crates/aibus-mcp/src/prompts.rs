@@ -133,7 +133,7 @@ impl Server {
                 let run = need("run")?;
                 if !self.caps.run {
                     "Runs are not enabled on this server. It was started without `--allow run`, so there is no run to explain.".to_owned()
-                } else if run.len() > 40 || !run.chars().all(|c| c.is_ascii_alphanumeric()) {
+                } else if run.len() > 40 || !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     return Err(bad("run is a handle from this server"));
                 } else {
                     fill(include_str!("../prompts/explain_run.md"), &[("run", run.to_owned())])

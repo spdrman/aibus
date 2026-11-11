@@ -9,6 +9,7 @@ pub mod prompts;
 mod read;
 pub mod resources;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -34,6 +35,12 @@ use limits::RateLimiter;
 const PAGE: usize = 50;
 
 const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
+
+/// The peer address of an HTTP request. The HTTP host in the binary puts one in the request's
+/// extensions and `call_tool` reads it back from there (rmcp hands the request parts to the
+/// handler), so the audit line can say who called. Stdio has none.
+#[derive(Clone, Copy, Debug)]
+pub struct ClientAddr(pub SocketAddr);
 
 /// What the process was started to allow (the epic's capability table). The surface is fixed at
 /// start and the model cannot raise it.
@@ -83,6 +90,7 @@ impl Server {
     ) -> std::io::Result<Self> {
         let audit = AuditLog::create(&paths.state.join("logs").join("mcp"), redactor.clone())?;
         audit.record(
+            None,
             None,
             "server/start",
             None,
@@ -167,11 +175,23 @@ impl Server {
         args: Option<JsonObject>,
         now: Instant,
     ) -> Result<CallToolResult, ErrorData> {
+        self.call_from(client, None, name, args, now)
+    }
+
+    /// `call` for a request that came from a socket: `addr` goes on the audit line.
+    pub fn call_from(
+        &self,
+        client: Option<&Implementation>,
+        addr: Option<SocketAddr>,
+        name: &str,
+        args: Option<JsonObject>,
+        now: Instant,
+    ) -> Result<CallToolResult, ErrorData> {
         let started = Instant::now();
         let args = args.map_or(Value::Null, Value::Object);
         let result = self.dispatch(name, &args, now);
         let ok = result.as_ref().is_ok_and(|r| r.is_error != Some(true));
-        self.audit.record(client, "tools/call", Some(name), &args, ok, started.elapsed());
+        self.audit.record(client, addr, "tools/call", Some(name), &args, ok, started.elapsed());
         result
     }
 
@@ -268,7 +288,12 @@ impl ServerHandler for Server {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let client = context.client_info();
-        self.call(client.as_ref(), &request.name, request.arguments, Instant::now())
+        let addr = context
+            .extensions
+            .get::<http::request::Parts>()
+            .and_then(|p| p.extensions.get::<ClientAddr>())
+            .map(|a| a.0);
+        self.call_from(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
             .map(CallToolResponse::from)
     }
 

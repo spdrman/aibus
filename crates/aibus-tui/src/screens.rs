@@ -230,13 +230,11 @@ pub fn permission(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: 
         let (b, _) = buttons(buf, inner, y + 4, &[("send_edit", "Enter", "Allow edited", true), ("cancel", "Esc", "Back", true)], th, pointer);
         hits.extend(b);
     } else {
-        let items = [
-            ("allow", "y", "Allow once", true),
-            ("always", "a", "Allow always", true),
-            ("deny", "n", "Deny", true),
-            ("edit", "e", "Edit", true),
-            ("cancel", "Esc", "Cancel", true),
-        ];
+        let mut items = vec![("allow", "y", "Allow once", true)];
+        if flag(v, "always") {
+            items.push(("always", "a", "Allow always", true));
+        }
+        items.extend([("deny", "n", "Deny", true), ("edit", "e", "Edit", true), ("cancel", "Esc", "Cancel", true)]);
         let (b, _) = buttons(buf, inner, y + 2, &items, th, pointer);
         hits.extend(b);
     }

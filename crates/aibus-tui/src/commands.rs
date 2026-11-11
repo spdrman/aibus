@@ -304,8 +304,8 @@ pub const REGISTRY: &[Spec] = &[
     },
     Spec {
         name: "workflow",
-        args: "new <goal> | list | show <name> | save <name> | run <name> <input>",
-        help: "draft (new), list, show, save and run workflows (/workflow <name> <input> runs one too)",
+        args: "new [--write] <goal> | edit <name> <change> | list | show <name> | save <name> | run <name> <input>",
+        help: "draft (new, edit), list, show, save and run workflows (/workflow <name> <input> runs one too)",
         label: "",
         hint: "",
         scope: Scope::Global,
@@ -659,14 +659,30 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
         None => need(c, "a workflow name"),
     };
     match sub {
-        "new" => {
+        "new" | "edit" => {
             if let Some(why) = c.env.lacking(c.name, LEAD | MCP, None) {
-                return Err(format!("/workflow new is not available: {why}"));
+                return Err(format!("/workflow {sub} is not available: {why}"));
             }
-            if rest.is_empty() {
-                return need(c, "a goal, in words");
+            // `--write` is the owner's flag for this one run; `edit` always writes, to the one
+            // workflow it names. Nothing else about the author's server can be asked for here.
+            let (write, goal) = match rest.strip_prefix("--write") {
+                Some(goal) if sub == "new" && (goal.is_empty() || goal.starts_with(char::is_whitespace)) => (true, goal.trim()),
+                _ => (sub == "edit", rest),
+            };
+            if sub == "new" {
+                if goal.is_empty() {
+                    return need(c, "a goal, in words");
+                }
+                return command(out, Command::WorkflowAuthor { goal: goal.to_owned(), write, edit: None });
             }
-            command(out, Command::WorkflowAuthor { goal: rest.to_owned() })
+            match goal.split_once(char::is_whitespace) {
+                Some((name, change)) if valid_name(name) && !change.trim().is_empty() => command(
+                    out,
+                    Command::WorkflowAuthor { goal: change.trim().to_owned(), write: true, edit: Some(name.to_owned()) },
+                ),
+                Some((name, _)) if !valid_name(name) => Err(SaveError::Name(name.to_owned()).to_string()),
+                _ => need(c, "a workflow name and the change, in words"),
+            }
         }
         "list" => command(out, Command::WorkflowFile(WorkflowFile::List)),
         "show" if rest.is_empty() => need(c, "a workflow name"),
@@ -997,8 +1013,41 @@ mod tests {
         assert_eq!(said(&with_lead, "/workflow new"), "BAD /workflow needs a goal, in words");
         assert_eq!(
             said(&with_lead, "/workflow new review a pull request and leave a summary"),
-            "Command(WorkflowAuthor { goal: \"review a pull request and leave a summary\" })"
+            "Command(WorkflowAuthor { goal: \"review a pull request and leave a summary\", write: false, edit: None })"
         );
+    }
+
+    #[test]
+    fn write_is_the_owners_flag_for_one_run_and_edit_names_its_workflow() {
+        let agents: Vec<String> = Vec::new();
+        let workflows: Vec<String> = Vec::new();
+        let env = Env { lead: Some(lead_run()), ..Env::bare(&agents, &workflows) };
+        let said = |line: &str| match send(line, &env) {
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
+            Sent::Login(p, _) => format!("LOGIN {p}"),
+            Sent::Bad(why) => format!("BAD {why}"),
+        };
+        assert_eq!(
+            said("/workflow new --write review a pull request"),
+            "Command(WorkflowAuthor { goal: \"review a pull request\", write: true, edit: None })"
+        );
+        // `--write` with no goal, or glued to a word, is not the flag.
+        assert_eq!(said("/workflow new --write"), "BAD /workflow needs a goal, in words");
+        assert_eq!(
+            said("/workflow new --writeable idea"),
+            "Command(WorkflowAuthor { goal: \"--writeable idea\", write: false, edit: None })"
+        );
+        assert_eq!(
+            said("/workflow edit review add a test step"),
+            "Command(WorkflowAuthor { goal: \"add a test step\", write: true, edit: Some(\"review\") })"
+        );
+        assert_eq!(said("/workflow edit review"), "BAD /workflow needs a workflow name and the change, in words");
+        assert!(said("/workflow edit ../x change it").starts_with("BAD `../x` is not a workflow name"));
+        // Every way into the author carries a yes or no for `--allow write` and nothing more:
+        // `gates` and `run` are not in the command at all.
+        for line in ["/workflow new g", "/workflow new --write g", "/workflow edit r c"] {
+            assert!(said(line).starts_with("Command(WorkflowAuthor { goal:"), "{line}");
+        }
     }
 
     fn lead_run() -> RunId {

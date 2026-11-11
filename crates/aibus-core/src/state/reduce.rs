@@ -1229,6 +1229,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
         } => {
             let key = call_id.0.to_string();
             let pending = as_list(r.cur(TOOLS_PENDING)).to_vec();
+            // The workflow a write tool named, for the line logged below.
+            let written = pending
+                .iter()
+                .find(|p| get(p, "id").and_then(as_str) == Some(&key))
+                .and_then(|p| get(p, "input"))
+                .and_then(|i| get(i, "name"))
+                .and_then(as_str)
+                .map(str::to_owned);
             let name = pending
                 .iter()
                 .find(|p| get(p, "id").and_then(as_str) == Some(&key))
@@ -1255,6 +1263,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let ok = if result.is_error { "failed" } else { "ok" };
             r.log("info", &format!("{name} {ok} {} ms", duration.as_millis()));
             let id = run.to_string();
+            // A write the owner allowed and the server accepted (a refusal says `· error` in the
+            // wrapper's header).
+            if let (true, Some(wf), false) =
+                (crate::mcp::asks_every_time(&name), written, result.is_error || result.content.contains("· error]"))
+            {
+                let who = r.agent_of(&id);
+                r.log("info", &format!("workflow {wf} written by {who}"));
+            }
             if name == "ask_user" && r.status(&id) == Some(RunStatus::WaitingUser) {
                 r.set_status(&id, RunStatus::Running);
             }

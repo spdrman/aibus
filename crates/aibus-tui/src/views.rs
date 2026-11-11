@@ -70,6 +70,8 @@ pub fn permission(store: &Store, t: &mut Tracker) -> Value {
         ("run", s(&run)),
         ("run_short", s(&short(&run))),
         ("tool", get(first, "tool").cloned().unwrap_or(s(""))),
+        // A workflow write asks every time, so the modal does not offer "always" for it.
+        ("always", Value::Bool(!get(first, "tool").and_then(as_str).is_some_and(aibus_core::mcp::asks_every_time))),
         ("summary", s(&{
             // The gate's line is `<tool>: <input>`; the modal names the tool on its own line.
             let line = get(first, "summary").map(|v| text_of(store, v)).unwrap_or_default();

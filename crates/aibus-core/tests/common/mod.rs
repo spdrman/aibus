@@ -828,7 +828,7 @@ pub fn cases() -> Vec<Case> {
             vec!["model:session:assist"],
         ),
         cmd(Command::WorkflowFile(WorkflowFile::Save { name: SENTINEL.into(), user: false, force: false }), vec![]),
-        cmd(Command::WorkflowAuthor { goal: SENTINEL.into() }, vec![]),
+        cmd(Command::WorkflowAuthor { goal: SENTINEL.into(), write: true, edit: None }, vec![]),
         cmd(Command::Clear, vec!["model:log"]),
         cmd(Command::Quit { force: true }, vec!["eng:shutdown"]),
     ]);

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod conformance;
+pub mod oauth;
 pub mod replay;
 mod session;
 pub mod tui;

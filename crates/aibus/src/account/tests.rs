@@ -462,9 +462,26 @@ fn a_rejected_oauth_token_is_not_stored_or_written() {
     let rig = Rig { oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))), offers_oauth: true, ..Rig::new() };
     // Burn the first token so the login hands out `-2`, which the provider does not accept.
     let flow = rig.oauth.clone().unwrap();
-    let _ = flow.authorize(&|_| {});
+    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let _ = rt.block_on(flow.authorize(&|_| {}, &tokio_util::sync::CancellationToken::new()));
     let ran = rig.run(&oauth_cmd(), "", None);
     assert_eq!(exit(&ran.result), 4, "{:?}", ran.result);
     assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none());
     assert!(!rig.config().exists());
+}
+
+#[test]
+fn add_oauth_for_a_login_that_returns_a_key_stores_it_as_a_plain_keyring_account() {
+    // OpenRouter-style: the login is only the way to get a durable key, nothing to refresh.
+    let mut flow = FakeOAuth::new(1_000, 3_600);
+    flow.yields_key = true;
+    let rig = Rig { oauth: Some(Arc::new(flow)), offers_oauth: true, ..Rig::new() };
+    let ran = rig.run(&oauth_cmd(), "", None);
+    assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
+    let cfg = std::fs::read_to_string(rig.config()).unwrap();
+    assert!(cfg.contains("auth = { keyring = true }") && !cfg.contains("oauth"), "{cfg}");
+    let kept = rig.keychain.get("aibus", "account:work").unwrap().unwrap();
+    assert_eq!(kept.expose(), TOKEN, "the key itself, not a JSON token set");
+    assert_eq!(rig.secret_in_files(TOKEN), Vec::<PathBuf>::new());
+    assert!(!ran.out.contains(TOKEN));
 }

@@ -3,6 +3,8 @@
 
 pub mod app;
 pub mod demo;
+#[cfg(feature = "flow-diagram")]
+pub mod diagram;
 pub mod glyphs;
 pub mod hit;
 pub mod input;

@@ -372,3 +372,49 @@ fn an_account_whose_provider_is_not_registered_serves_nothing_and_has_no_provide
     };
     assert!(matches!(r.select(&alias("sonnet"), &h), Err(SelectError::CannotServe { .. })));
 }
+
+/// The fake provider, except that its `fake-small` has no logprobs (the model, not the provider).
+struct SmallHasNoLogprobs;
+
+impl aibus_provider::ProviderFactory for SmallHasNoLogprobs {
+    fn id(&self) -> aibus_provider::ProviderId {
+        aibus_provider::ProviderId("fake")
+    }
+    fn build(&self, _: &aibus_provider::ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        use aibus_provider::fake::{FakeProvider, Script};
+        let over = aibus_provider::CapabilityOverrides { logprobs: Some(false), ..Default::default() };
+        Ok(Arc::new(FakeProvider::new(Script::new()).with_model_capabilities("fake-small", over)))
+    }
+    fn auth_methods(&self) -> &'static [aibus_provider::AuthMethodKind] {
+        &[aibus_provider::AuthMethodKind::None]
+    }
+}
+
+#[test]
+fn a_model_without_logprobs_on_a_logprob_capable_provider_is_not_preferred_by_the_router() {
+    install_log_router();
+    let cfg: Config = toml::from_str(
+        r#"
+[[account]]
+name = "first"
+provider = "fake"
+auth = { none = true }
+aliases = { judge = "fake-small" }
+
+[[account]]
+name = "second"
+provider = "fake"
+auth = { none = true }
+aliases = { judge = "fake-large" }
+"#,
+    )
+    .unwrap();
+    let providers = ProviderRegistry::new(&[Box::new(SmallHasNoLogprobs)], &BTreeMap::new()).unwrap();
+    let r = AccountRegistry::new(&cfg, Arc::new(providers));
+
+    // Without the hint the first account in the file wins.
+    assert_eq!(r.select(&alias("judge"), &hints()), pair("first", "fake-small"));
+    // With it, the account whose model reports logprobs does, though both share one provider.
+    let h = SelectHints { logprobs: true, ..hints() };
+    assert_eq!(r.select(&alias("judge"), &h), pair("second", "fake-large"));
+}

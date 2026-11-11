@@ -268,7 +268,7 @@ mod tests {
             ..ProviderDef::default()
         };
         let def = resolve("ollama-home", Some(&user)).unwrap().unwrap();
-        assert!(def.compat().open_aliases && def.compat().logprobs);
+        assert!(def.open_aliases == Some(true) && def.default_capabilities.logprobs == Some(true));
         assert_eq!(def.id, "ollama-home");
         assert!(resolve("fake", None).unwrap().is_none());
         let bare = ProviderDef { id: "x".into(), ..ProviderDef::default() };
@@ -294,5 +294,44 @@ mod tests {
     fn static_id_hands_out_one_str_per_id() {
         let a = ProviderDef { id: "same".into(), ..ProviderDef::default() };
         assert!(std::ptr::eq(a.static_id(), a.clone().static_id()));
+    }
+
+    #[test]
+    fn compat_is_a_closed_list_of_flags() {
+        let flags: Vec<CompatFlag> = serde_json::from_str(
+            r#"["no_strict_tools", "no_developer_role", {"max_tokens_field": "max_completion_tokens"},
+                {"reasoning_field": "reasoning"}, "reasoning_content_replay", "no_usage_in_stream",
+                "no_tool_choice", "no_named_tool_choice", "no_store", "no_sampling_params",
+                "no_system_role", "strip_images"]"#,
+        )
+        .unwrap();
+        assert_eq!(flags.len(), 12);
+        assert!(flags.contains(&CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)));
+        assert!(flags.contains(&CompatFlag::ReasoningField(ReasoningField::Reasoning)));
+        // A name outside the set is an error, not a silently ignored string.
+        assert!(serde_json::from_str::<Vec<CompatFlag>>(r#"["no_such_quirk"]"#).is_err());
+        assert!(serde_json::from_str::<Vec<CompatFlag>>(r#"[{"max_tokens_field": "tokens"}]"#).is_err());
+    }
+
+    #[test]
+    fn a_user_compat_list_replaces_the_presets_and_default_capabilities_merge_per_field() {
+        let user = ProviderDef {
+            id: "openai".into(),
+            compat: Some(vec![CompatFlag::NoStore]),
+            default_capabilities: CapabilityOverrides { images: Some(false), ..CapabilityOverrides::default() },
+            ..ProviderDef::default()
+        };
+        let def = resolve("openai", Some(&user)).unwrap().unwrap();
+        assert_eq!(def.compat, Some(vec![CompatFlag::NoStore]));
+        assert_eq!(def.default_capabilities.images, Some(false));
+        assert_eq!(def.default_capabilities.logprobs, Some(true), "what the user left out stays the preset's");
+    }
+
+    #[test]
+    fn the_presets_carry_the_flags_the_old_compat_booleans_did() {
+        let openai = preset("openai").unwrap();
+        assert!(openai.compat.as_deref().unwrap().contains(&CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)));
+        assert!(preset("kimi").unwrap().compat.as_deref().unwrap().contains(&CompatFlag::ReasoningContentReplay));
+        assert_eq!(preset("azure-openai").unwrap().auth_header.as_deref(), Some("api-key"));
     }
 }

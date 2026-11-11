@@ -226,6 +226,7 @@ pub fn cache_is_stale(cache_dir: &Path, provider: &str, now: SystemTime) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::{Capabilities, CapabilityOverrides, SystemRole};
 
     const BUILTIN: &str = r#"{
         "models": [
@@ -366,5 +367,115 @@ mod tests {
         assert!(cache_is_stale(dir.path(), "other", now), "no file is stale");
         // The next process starts from the cache.
         assert_eq!(table(&cfg).models().len(), 3);
+    }
+
+    fn base_caps() -> Capabilities {
+        Capabilities {
+            tools: true,
+            parallel_tool_calls: true,
+            streaming: true,
+            thinking: false,
+            prompt_cache: false,
+            logprobs: true,
+            effort: false,
+            images: false,
+            system_role: SystemRole::Separate,
+            max_tools: None,
+        }
+    }
+
+    #[test]
+    fn an_entry_parses_capabilities_and_reasoning_and_defaults_both() {
+        let f: File = serde_json::from_str(
+            r#"{"models": [
+              {"id": "a", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false},
+              {"id": "b", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false,
+               "reasoning": true,
+               "capabilities": {"logprobs": false, "max_tools": 8, "system_role": "first_message"}}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(f.models[0].capabilities, CapabilityOverrides::default());
+        assert_eq!(f.models[0].reasoning, None);
+        assert_eq!(f.models[1].reasoning, Some(true));
+        assert_eq!(
+            f.models[1].capabilities,
+            CapabilityOverrides {
+                logprobs: Some(false),
+                max_tools: Some(8),
+                system_role: Some(SystemRole::FirstMessage),
+                ..CapabilityOverrides::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_0_1_0_override_file_loads_unchanged_and_keeps_what_the_builtin_said() {
+        // No capabilities, no reasoning: the shape every 0.1.0 `models.json` has.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("p")).unwrap();
+        std::fs::write(
+            dir.path().join("p/models.json"),
+            r#"{"models": [{"id": "caps", "context_window": 5, "max_output": 5, "family": "f", "deprecated": false}]}"#,
+        )
+        .unwrap();
+        let cfg = ProviderConfig { overrides_dir: Some(dir.path().to_owned()), ..ProviderConfig::default() };
+        let t = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap();
+        assert_eq!(t.models().iter().find(|m| m.id.0 == "caps").unwrap().context_window, 5);
+        assert!(!t.capabilities_for(base_caps(), &id("caps")).logprobs, "the built-in's claim survives a size-only override");
+    }
+
+    const CAPS: &str = r#"{"models": [
+      {"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false,
+       "capabilities": {"logprobs": false, "images": true}},
+      {"id": "legacy", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "effort": true}
+    ]}"#;
+
+    #[test]
+    fn capabilities_for_resolves_default_then_builtin_then_cache_then_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cache, over) = (dir.path().join("cache"), dir.path().join("providers"));
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(over.join("p")).unwrap();
+        let cfg = ProviderConfig { cache_dir: Some(cache.clone()), overrides_dir: Some(over.clone()), ..ProviderConfig::default() };
+
+        // Preset default only: the model is not in any table.
+        let t = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap();
+        assert_eq!(t.capabilities_for(base_caps(), &id("nope")), base_caps());
+
+        // Built-in names logprobs=false and images=true; the rest is the preset's.
+        let c = t.capabilities_for(base_caps(), &id("caps"));
+        assert!(!c.logprobs && c.images && c.tools);
+
+        // The cache names tools=false, and says nothing of images: images stays.
+        std::fs::write(
+            cache.join("p.json"),
+            r#"{"fetched_at": 1, "models": [{"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "capabilities": {"tools": false}}]}"#,
+        )
+        .unwrap();
+        let c = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap().capabilities_for(base_caps(), &id("caps"));
+        assert!(!c.tools && c.images && !c.logprobs);
+
+        // The user's file wins last: logprobs back on, tools still off.
+        std::fs::write(
+            over.join("p/models.json"),
+            r#"{"models": [{"id": "caps", "context_window": 1, "max_output": 1, "family": "f", "deprecated": false, "capabilities": {"logprobs": true}}]}"#,
+        )
+        .unwrap();
+        let c = ModelTable::load("p", CAPS, &cfg, &[], false).unwrap().capabilities_for(base_caps(), &id("caps"));
+        assert!(c.logprobs && !c.tools && c.images);
+    }
+
+    #[test]
+    fn the_old_effort_field_still_means_the_effort_capability() {
+        let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
+        assert!(t.capabilities_for(base_caps(), &id("legacy")).effort);
+        assert!(!t.capabilities_for(base_caps(), &id("caps")).effort);
+    }
+
+    #[test]
+    fn a_dated_snapshot_takes_its_models_capabilities() {
+        let t = ModelTable::load("p", CAPS, &ProviderConfig::default(), &[], false).unwrap();
+        assert!(!t.capabilities_for(base_caps(), &id("caps-20250929")).logprobs);
     }
 }

@@ -1,0 +1,12 @@
+{
+ "flag": "no_system_role",
+ "api": "openai-chat",
+ "with": {
+  "/messages/0/role": "user",
+  "/messages/0/content/0/text": "Be terse.\n\n"
+ },
+ "without": {
+  "/messages/0/role": "system",
+  "/messages/0/content": "Be terse."
+ }
+}

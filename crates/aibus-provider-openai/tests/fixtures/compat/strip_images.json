@@ -1,0 +1,10 @@
+{
+ "flag": "strip_images",
+ "api": "openai-chat",
+ "with": {
+  "/messages/1/content": "hi\n[image omitted]"
+ },
+ "without": {
+  "/messages/1/content/1/type": "image_url"
+ }
+}

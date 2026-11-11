@@ -1,5 +1,6 @@
 //! Request bodies for Chat Completions and the Responses API.
 
+use aibus_provider::presets::{CompatFlag, MaxTokensField, ReasoningField};
 use aibus_provider::{ChatRequest, ContentBlock, Effort, Message, MessageRole, ToolCallId, ToolChoice};
 use base64::Engine;
 use serde_json::{json, Map, Value};
@@ -250,10 +251,14 @@ pub fn responses_body(req: &ChatRequest, o: Opts) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aibus_provider::{CacheHint, ModelId, RequestMetadata, ToolSpec};
+    use aibus_provider::{CacheHint, Capabilities, ModelId, RequestMetadata, SystemRole, ToolSpec};
     use ulid::Ulid;
 
-    const PLAIN: Opts = Opts { completion_tokens: false, reasoning: false, user: false, keep_reasoning: false, logprobs: false };
+    const PLAIN: Opts<'static> = Opts { reasoning: false, user: false, logprobs: false, compat: &[] };
+
+    fn with(compat: &'static [CompatFlag]) -> Opts<'static> {
+        Opts { compat, ..PLAIN }
+    }
 
     fn req() -> ChatRequest {
         ChatRequest {
@@ -311,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_reasoning_model_takes_effort_and_completion_tokens_but_no_temperature() {
-        let o = Opts { completion_tokens: true, reasoning: true, ..PLAIN };
+        let o = Opts { reasoning: true, compat: &[CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)], ..PLAIN };
         let b = chat_body(&req(), o);
         assert_eq!(b["max_completion_tokens"], 256);
         assert_eq!(b["reasoning_effort"], "high");
@@ -338,7 +343,7 @@ mod tests {
         assert_eq!(m[3]["tool_call_id"], m[2]["tool_calls"][0]["id"]);
         assert_eq!(m[4], json!({"role": "user", "content": "and then?"}));
 
-        let k = Opts { keep_reasoning: true, ..PLAIN };
+        let k = with(&[CompatFlag::ReasoningContentReplay]);
         assert_eq!(chat_body(&history(), k)["messages"][2]["reasoning_content"], "hmm");
     }
 
@@ -396,5 +401,118 @@ mod tests {
         assert_eq!(i[2]["call_id"], i[3]["call_id"]);
         assert_eq!(i[4]["content"][0]["text"], "and then?");
         assert_eq!(b["tools"][0]["name"], "read");
+    }
+
+    // One test per compat flag, each asserting the body that goes out, not the answer.
+
+    #[test]
+    fn flag_no_strict_tools_leaves_strict_off_the_responses_tools() {
+        assert_eq!(responses_body(&req(), PLAIN)["tools"][0]["strict"], false);
+        assert!(responses_body(&req(), with(&[CompatFlag::NoStrictTools]))["tools"][0].get("strict").is_none());
+    }
+
+    #[test]
+    fn flag_no_developer_role_sends_system_where_responses_would_say_developer() {
+        let mut r = req();
+        r.messages.push(Message::text(MessageRole::System, "note"));
+        assert_eq!(responses_body(&r, PLAIN)["input"][1]["role"], "developer");
+        assert_eq!(responses_body(&r, with(&[CompatFlag::NoDeveloperRole]))["input"][1]["role"], "system");
+    }
+
+    #[test]
+    fn flag_max_tokens_field_names_the_limit_key() {
+        let b = chat_body(&req(), with(&[CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)]));
+        assert_eq!(b["max_completion_tokens"], 256);
+        assert!(b.get("max_tokens").is_none());
+        let b = chat_body(&req(), with(&[CompatFlag::MaxTokensField(MaxTokensField::MaxTokens)]));
+        assert_eq!(b["max_tokens"], 256);
+    }
+
+    #[test]
+    fn flag_reasoning_field_picks_reasoning_effort_or_reasoning() {
+        let on = Opts { reasoning: true, ..PLAIN };
+        assert_eq!(chat_body(&req(), on)["reasoning_effort"], "high");
+        let o = Opts { reasoning: true, compat: &[CompatFlag::ReasoningField(ReasoningField::Reasoning)], ..PLAIN };
+        let b = chat_body(&req(), o);
+        assert_eq!(b["reasoning"], json!({"effort": "high"}));
+        assert!(b.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn flag_reasoning_content_replay_sends_earlier_thinking_back() {
+        let sent = |o| chat_body(&history(), o)["messages"][2].get("reasoning_content").cloned();
+        assert_eq!(sent(PLAIN), None);
+        assert_eq!(sent(with(&[CompatFlag::ReasoningContentReplay])), Some(json!("hmm")));
+    }
+
+    #[test]
+    fn flag_no_usage_in_stream_drops_stream_options() {
+        assert_eq!(chat_body(&req(), PLAIN)["stream_options"], json!({"include_usage": true}));
+        assert!(chat_body(&req(), with(&[CompatFlag::NoUsageInStream])).get("stream_options").is_none());
+    }
+
+    #[test]
+    fn flag_no_tool_choice_sends_tools_without_a_choice() {
+        let b = chat_body(&req(), with(&[CompatFlag::NoToolChoice]));
+        assert!(b.get("tools").is_some() && b.get("tool_choice").is_none());
+        let b = responses_body(&req(), with(&[CompatFlag::NoToolChoice]));
+        assert!(b.get("tools").is_some() && b.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn flag_no_named_tool_choice_turns_a_named_choice_into_required() {
+        let mut r = req();
+        r.tool_choice = ToolChoice::Named("read".into());
+        let o = with(&[CompatFlag::NoNamedToolChoice]);
+        assert_eq!(chat_body(&r, o)["tool_choice"], "required");
+        assert_eq!(responses_body(&r, o)["tool_choice"], "required");
+        r.tool_choice = ToolChoice::Auto;
+        assert_eq!(chat_body(&r, o)["tool_choice"], "auto", "other choices are untouched");
+    }
+
+    #[test]
+    fn flag_no_store_leaves_store_out_of_the_responses_body() {
+        assert_eq!(responses_body(&req(), PLAIN)["store"], false);
+        assert!(responses_body(&req(), with(&[CompatFlag::NoStore])).get("store").is_none());
+    }
+
+    #[test]
+    fn flag_no_sampling_params_leaves_temperature_out() {
+        assert!(chat_body(&req(), PLAIN).get("temperature").is_some());
+        assert!(chat_body(&req(), with(&[CompatFlag::NoSamplingParams])).get("temperature").is_none());
+        assert!(responses_body(&req(), with(&[CompatFlag::NoSamplingParams])).get("temperature").is_none());
+    }
+
+    fn all_on() -> Capabilities {
+        Capabilities {
+            tools: true,
+            parallel_tool_calls: true,
+            streaming: true,
+            thinking: false,
+            prompt_cache: false,
+            logprobs: true,
+            effort: true,
+            images: true,
+            system_role: SystemRole::Separate,
+            max_tools: None,
+        }
+    }
+
+    #[test]
+    fn flag_no_system_role_folds_the_prompt_into_the_first_user_message() {
+        let c = all_on().with_compat(&[CompatFlag::NoSystemRole]);
+        let b = chat_body(&c.degrade(req()), PLAIN);
+        assert_eq!(b["messages"][0], json!({"role": "user", "content": "Be terse.\n\n\nhi"}));
+        assert!(!b["messages"].as_array().unwrap().iter().any(|m| m["role"] == "system"));
+    }
+
+    #[test]
+    fn flag_strip_images_sends_a_note_instead_of_the_picture() {
+        let mut r = req();
+        r.messages[0].blocks.push(ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") });
+        let c = all_on().with_compat(&[CompatFlag::StripImages]);
+        let b = chat_body(&c.degrade(r), PLAIN);
+        assert!(!b.to_string().contains("image_url"), "{b}");
+        assert!(b.to_string().contains("[image omitted]"));
     }
 }

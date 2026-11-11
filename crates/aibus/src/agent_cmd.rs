@@ -18,7 +18,7 @@ use crate::cli::{AgentCmd, Global};
 use crate::providers::{builtin_factories, provider_configs};
 
 /// What every subcommand starts from: where definitions live and the config that says so.
-struct Env {
+pub(crate) struct Env {
     cwd: PathBuf,
     user_dir: PathBuf,
     config: Config,
@@ -26,7 +26,7 @@ struct Env {
 }
 
 impl Env {
-    fn load(g: &Global) -> Result<Self, AibusError> {
+    pub(crate) fn load(g: &Global) -> Result<Self, AibusError> {
         let cwd = g.project_dir()?;
         let paths = g.paths()?;
         let loaded = config::load(&paths.config_file(), Some(&project_dir(&cwd).join("settings.toml")))?;
@@ -50,7 +50,7 @@ impl Env {
         self.dirs(&self.config.agents.extra_dirs)
     }
 
-    fn discover(&self, g: &Global) -> Result<Discovered, AibusError> {
+    pub(crate) fn discover(&self, g: &Global) -> Result<Discovered, AibusError> {
         let found = discover(
             g.agents.as_deref(),
             &self.cwd,

@@ -1,0 +1,13 @@
+{
+  "gate.toml": {"ok": true, "errors": [], "warnings": [{"step": 1, "field": "gate", "message": "runs a shell command after this step: test -s /dev/stdin"}]},
+  "markers.toml": {"ok": true, "errors": [], "warnings": [
+    {"step": 1, "field": "prompt", "message": "the prompt contains `[hint]`, which has the shape of an aibus marker"},
+    {"step": 1, "field": "prompt", "message": "the prompt contains `[run`, which has the shape of an aibus marker"}
+  ]},
+  "on_fail_after_gate.toml": {"ok": true, "errors": [], "warnings": [
+    {"step": 1, "field": "gate", "message": "runs a shell command after this step: true"},
+    {"step": 2, "field": "on_fail", "message": "on_fail is set and the step before it has a gate, so a retry runs that gate again"}
+  ]},
+  "on_fail_not_last.toml": {"ok": true, "errors": [], "warnings": [{"step": 1, "field": "on_fail", "message": "on_fail is set on a step that is not the last one"}]},
+  "unread_summary.toml": {"ok": true, "errors": [], "warnings": [{"step": 1, "field": null, "message": "nothing after this step reads its summary ({{prev.summary}} or {{steps.explore.summary}})"}]}
+}

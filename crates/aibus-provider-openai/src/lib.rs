@@ -19,13 +19,13 @@ use aibus_provider::presets::resolve;
 use aibus_provider::{
     AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, Compat,
     ConfigError, Credential, ModelId, ModelInfo, ModelRef, ModelTableSpec, Price, Provider,
-    ProviderConfig, ProviderDef, ProviderError, ProviderErrorKind, ProviderFactory, ProviderId,
+    ProviderConfig, ProviderDef, ProviderError, ProviderFactory, ProviderId,
     StreamChunk, SystemRole,
 };
 use aibus_provider_http::reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE,
 };
-use aibus_provider_http::{cancelled, emit, json, request_id, sensitive, Events, Http};
+use aibus_provider_http::{cancelled, emit, json, rate_limit, request_id, sensitive, Events, Http};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -209,22 +209,13 @@ impl OpenAi {
         Ok(h)
     }
 
-    /// A 429 that is a spent quota will not pass by waiting.
-    fn not_retryable_quota(mut e: ProviderError) -> ProviderError {
-        if e.kind == ProviderErrorKind::RateLimit && e.message.contains("exceeded your current quota") {
-            e.retryable = false;
-        }
-        e
-    }
-
     async fn list_models(&self, creds: &Credential) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
         let url = self.url("models");
         let headers = self.headers(creds)?;
         let resp = self
             .http
             .send(&CancellationToken::new(), |c| c.get(&url).headers(headers))
-            .await
-            .map_err(Self::not_retryable_quota)?;
+            .await?;
         let org = resp
             .headers()
             .get("openai-organization")
@@ -330,9 +321,9 @@ impl Provider for OpenAi {
                     .header(ACCEPT, "text/event-stream")
                     .body(body.to_string())
             })
-            .await
-            .map_err(Self::not_retryable_quota)?;
+            .await?;
         let request_id = request_id(&resp);
+        let window = rate_limit(resp.headers(), SystemTime::now());
 
         let mut events = Events::new(resp, cancel.clone());
         let mut turn = stream::Turn::new(price);
@@ -351,7 +342,9 @@ impl Provider for OpenAi {
         for chunk in turn.close()? {
             emit(&out, &cancel, chunk).await?;
         }
-        turn.into_response(request_id)
+        let mut done = turn.into_response(request_id)?;
+        done.rate_limit = window;
+        Ok(done)
     }
 
     /// OpenAI has no counting endpoint: the caller uses `estimate_tokens`.

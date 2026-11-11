@@ -1,0 +1,7 @@
+[[step]]
+agent = "explore"
+prompt = "Look: {{input}}"
+
+[[step]]
+agent = "Bad Name"
+prompt = "Go on: {{prev.summary}}"

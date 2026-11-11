@@ -8,6 +8,8 @@ uses as the release notes, so every release needs its entry before it is merged 
 ### Build
 
 * The TUI is on ratatui 0.30 and crossterm 0.29, and `deny.toml` has no ignored advisories any more: `paste` (RUSTSEC-2024-0436) left the tree with ratatui 0.29. `crossterm` joins `ratatui` in the one-version-only ban list.
+* `aibus-tui` has an optional `flow-diagram` feature (off by default, forwarded by the `aibus` binary) that draws the centre column through rataflow 0.1. It adds one crate to the lock and nothing to a default build. See `docs/spikes/D1.1-rataflow.md`.
+* With `flow-diagram` on, the centre column reproduces the classic frames cell for cell: the same boxes, the same dotted connectors with their travelling dots and pulsing arrow head, the same card hit rects.
 
 ## [0.1.0] - 2026-11-09
 

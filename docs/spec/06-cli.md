@@ -14,7 +14,7 @@ aibus session list | show <id> | resume <id> [--run <run-id>] [MESSAGE] | export
 aibus handoff create [--topic T] [--outcome O] | list | show [PATH]
 aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
-aibus workflow list | run <name> <input>
+aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
 aibus config path | show | init | validate | edit
 aibus doctor
 aibus completions <bash|zsh|fish|powershell>
@@ -87,7 +87,7 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | 8 | token or cost budget exceeded | `Budget` |
 | 10 | the lead run ended `Failed`, `Partial` or `Cancelled` | `Run` |
 | 11 | `doctor` found problems | |
-| 12 | `agent validate` found errors | |
+| 12 | `agent validate` or `workflow validate` found errors | |
 
 `session list --json` and friends exit 0 even when the list is empty.
 
@@ -98,6 +98,8 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | `agent list` | `[{name, scope, path, role, model, tools, description}]` |
 | `agent show` | the full definition as JSON (frontmatter fields plus `prompt`) |
 | `agent validate` | `{ok, errors:[{path, field, message}], warnings:[..]}` |
+| `workflow show` | `{name, path, description, steps:[{agent, prompt, gate?, on_fail?}]}` |
+| `workflow validate` | `{ok, errors:[{path, step, field, message}], warnings:[..]}` |
 | `account list` | `[{name, provider, label, auth:"keyring|env|file|none", default_model, status}]` |
 | `account test` | `{name, ok, label, org, models:[..], latency_ms}` or `{name, ok:false, error:{kind, message}}` |
 | `session list` | `[{id, started_at, ended_at, topic, runs, outcome, cost_usd}]` |

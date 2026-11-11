@@ -403,23 +403,6 @@ pub fn card_rects(area: Rect, len: usize, start: usize) -> Vec<(usize, Rect)> {
         .collect()
 }
 
-/// Up to three cards, centred, starting at card `start`. Cards before or after the window are
-/// counted on the row below them. Returns each drawn card's index in the view and where it is.
-pub fn cards(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, start: usize) -> Vec<(usize, Rect)> {
-    let all = as_list(v);
-    let out = card_rects(area, all.len(), start);
-    for (i, rect) in &out {
-        card(buf, *rect, &all[*i], th);
-    }
-    if let (Some((first, _)), Some((last, _))) = (out.first(), out.last()) {
-        let card_h = area.height.min(7);
-        if area.height > card_h {
-            card_counts(buf, Rect { y: area.y + card_h, height: 1, ..area }, th, (*first, last + 1, all.len()));
-        }
-    }
-    out
-}
-
 /// One worker card inside `rect`.
 pub fn card(buf: &mut Buffer, rect: Rect, c: &Value, th: &Theme) {
     let border = if text(c, "border") == "advisor" { th.advisor } else { th.swarm };

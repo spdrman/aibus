@@ -16,7 +16,7 @@ pub const SENTINEL: &str = "SECRET-SENTINEL-7731";
 
 pub type A = App<MiniGraph>;
 
-pub const ALL_NAMES: [&str; 27] = [
+pub const ALL_NAMES: [&str; 28] = [
     "Key",
     "Mouse",
     "Ui",
@@ -43,6 +43,7 @@ pub const ALL_NAMES: [&str; 27] = [
     "AccountsReloaded",
     "IoError",
     "Shutdown",
+    "ModelSwitched",
     "Persisted",
 ];
 
@@ -598,6 +599,7 @@ pub fn cases() -> Vec<Case> {
                     label: "work".into(),
                     default_model: None,
                     key_ref: "keyring:aibus/anthropic-work".into(),
+                    models: vec![],
                 }],
             },
             expect: vec!["model:accounts", "model:log"],
@@ -618,6 +620,16 @@ pub fn cases() -> Vec<Case> {
                 reason: ShutdownReason::Signal,
             },
             expect: vec!["eng:shutdown"],
+        },
+        Case {
+            name: "ModelSwitched",
+            setup: running,
+            msg: Msg::ModelSwitched {
+                id: 1,
+                target: ModelTarget::Run(R()),
+                to: Ok(Some((ModelId("m2".into()), AccountName("acct".into())))),
+            },
+            expect: vec!["model:log", "model:run:<id>:meta", "model:session:assist"],
         },
         Case {
             name: "Persisted",
@@ -763,6 +775,13 @@ pub fn cases() -> Vec<Case> {
             running,
             Command::Compact { run: R() },
             vec!["model:run:<id>:status"],
+        ),
+        cmd(
+            Command::SetModel {
+                target: ModelTarget::Lead,
+                model: "haiku".into(),
+            },
+            vec!["model:session:assist"],
         ),
         cmd(Command::Clear, vec!["model:log"]),
         cmd(Command::Quit { force: true }, vec!["eng:shutdown"]),

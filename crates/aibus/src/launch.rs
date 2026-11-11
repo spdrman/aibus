@@ -10,7 +10,7 @@ use aibus_core::config::Config;
 use aibus_core::{
     expand, AccountCredential, AccountName, AccountRegistry, AdvisorSeat, AgentDef, AgentName,
     AibusError, Assist, Budgets, CredentialSource, CredentialStore, HookRunner, Isolation,
-    Launcher, ModelCompactor, ModelDefaults, ModelId, Redactor, RouterSeat, RunConfig, RunDeps,
+    Launcher, ModelCompactor, ModelDefaults, ModelId, ModelSwitch, ModelTarget, Redactor, RouterSeat, RunConfig, RunDeps,
     RunId, Seat, SelectHints, SpawnSpec, Start, ToolExecutor, ToolLimits, ToolPattern,
 };
 use aibus_provider::fake::FAKE_KEY;
@@ -237,6 +237,59 @@ impl ChildLauncher {
 }
 
 impl Launcher for ChildLauncher {
+    fn switch_model(&self, target: &ModelTarget, model: &str) -> Result<Option<ModelSwitch>, String> {
+        let role = match target {
+            ModelTarget::Advisor => "advisor",
+            ModelTarget::Router => "router",
+            ModelTarget::Run(_) | ModelTarget::Lead => "",
+        };
+        let seat_assist = || {
+            let assist = self.assist.get().ok_or_else(|| format!("the {role} is off in this session"))?;
+            let configured = if *target == ModelTarget::Advisor { assist.advisor.is_some() } else { assist.router.is_some() };
+            // A seat that started off has no definition to speak from.
+            configured.then_some(assist).ok_or_else(|| format!("the {role} was off at startup"))
+        };
+        if model == "off" {
+            seat_assist()?.switch(*target, None);
+            return Ok(None);
+        }
+        // The picker names the row it was clicked on as `account/model`; a prefix that is not an
+        // account (`meta-llama/...`) is part of the model id.
+        let (pinned, model) = match model.split_once('/') {
+            Some((acct, rest)) if self.registry.account(&AccountName(acct.into())).is_some() => {
+                (Some(AccountName(acct.into())), rest)
+            }
+            _ => (None, model),
+        };
+        let reference = self.registry.model_ref(model);
+        let def = match target {
+            ModelTarget::Run(run) => recall(&self.defs, *run).ok_or_else(|| format!("run {run} is not known"))?,
+            ModelTarget::Advisor | ModelTarget::Router => {
+                seat_assist()?;
+                let name = role.parse::<AgentName>().map_err(|e| e.to_string())?;
+                let agents = self.agents.read().unwrap_or_else(PoisonError::into_inner);
+                agents.get(&name).cloned().ok_or_else(|| format!("no definition of the {role}"))?
+            }
+            ModelTarget::Lead => return Err("the lead is switched through its run".into()),
+        };
+        let hints = SelectHints { agent: def.account.clone(), explicit: pinned, logprobs: *target == ModelTarget::Router, ..SelectHints::default() };
+        let p = self.pick(&reference, &hints).map_err(|e| e.to_string())?;
+        let switch = ModelSwitch { provider: p.provider, creds: p.creds, model: p.model, account: p.account };
+        match target {
+            ModelTarget::Run(run) => self.remember(*run, &switch.account, &switch.model, &def),
+            _ => seat_assist()?.switch(
+                *target,
+                Some(Seat {
+                    provider: switch.provider.clone(),
+                    creds: switch.creds.clone(),
+                    model: switch.model.clone(),
+                    account: switch.account.clone(),
+                }),
+            ),
+        }
+        Ok(Some(switch))
+    }
+
     fn launch(
         &self,
         spec: &SpawnSpec,

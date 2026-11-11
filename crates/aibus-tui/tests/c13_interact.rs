@@ -657,8 +657,8 @@ fn the_accounts_screen_has_t_a_d_and_a_key_never_shows() {
     let mut app = session();
     app.step(Msg::AccountsReloaded {
         accounts: vec![
-            AccountView { name: AccountName("work".into()), provider: "anthropic".into(), label: "work".into(), default_model: None, key_ref: "keyring:aibus/work".into() },
-            AccountView { name: AccountName("spare".into()), provider: "openai".into(), label: "spare".into(), default_model: None, key_ref: "none".into() },
+            AccountView { name: AccountName("work".into()), provider: "anthropic".into(), label: "work".into(), default_model: None, key_ref: "keyring:aibus/work".into(), models: vec![] },
+            AccountView { name: AccountName("spare".into()), provider: "openai".into(), label: "spare".into(), default_model: None, key_ref: "none".into(), models: vec![] },
         ],
     })
     .unwrap();

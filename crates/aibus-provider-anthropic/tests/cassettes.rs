@@ -119,7 +119,7 @@ async fn a_tool_call_streams_start_input_fragments_and_end_and_costs_the_cache()
     assert_eq!(resp.stop, StopReason::ToolUse);
     assert_eq!(
         resp.message.blocks[1],
-        ContentBlock::ToolUse { id: *id, name: "read_file".into(), input: json!({"path": "src/main.rs"}) }
+        ContentBlock::ToolUse { id: *id, name: "read_file".into(), input: json!({"path": "src/main.rs"}), signature: None }
     );
     let u = resp.usage;
     assert_eq!((u.input_tokens, u.output_tokens, u.cache_read, u.cache_write), (1200, 61, 1000, 150));

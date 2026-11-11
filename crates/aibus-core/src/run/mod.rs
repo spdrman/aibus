@@ -12,7 +12,7 @@ mod compact;
 pub use budget::Budgets;
 pub use compact::{AutoHandoff, ModelCompactor};
 pub use loop_::{
-    spawn, Compactor, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
+    spawn, Compactor, ModelSwitch, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
     STREAM_CAPACITY,
 };
 pub use model::{expand, resolve_model, ModelDefaults};

@@ -12,6 +12,7 @@ use smol_str::SmolStr;
 use crate::config::{self, Config};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::AccountName;
+use crate::msg::ModelView;
 
 /// What a caller knows that narrows the choice. Steps 1 to 3 of the chain read the first three.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -132,9 +133,9 @@ impl AccountRegistry {
         Some((self.accounts.iter().find(|a| a.name == acct)?, model))
     }
 
-    /// `model` on `account`: the global `[models]` first, then the account's own aliases.
-    fn resolve_on(&self, a: &config::Account, model: &ModelRef) -> Option<ModelId> {
-        let provider = self.providers.get(&a.provider).ok()?;
+    /// The aliases `a` answers to: the global `[models]` that are not pinned to another account,
+    /// over the account's own.
+    fn alias_table(&self, a: &config::Account) -> AliasTable {
         let mut table = a.aliases.clone();
         for (alias, value) in &self.models {
             match self.pin(value) {
@@ -150,7 +151,44 @@ impl AccountRegistry {
                 }
             }
         }
-        provider.resolve_model(model, &table)
+        table
+    }
+
+    /// `model` on `account`: the global `[models]` first, then the account's own aliases.
+    fn resolve_on(&self, a: &config::Account, model: &ModelRef) -> Option<ModelId> {
+        let provider = self.providers.get(&a.provider).ok()?;
+        provider.resolve_model(model, &self.alias_table(a))
+    }
+
+    /// What `name` serves according to its provider's tables (and the cache of the last refresh,
+    /// when the provider keeps one), without a request: the `/model` picker's rows. Deprecated
+    /// models are left out; a price the table lacks stays `None`.
+    pub fn model_views(&self, name: &AccountName) -> Vec<ModelView> {
+        let Some(a) = self.account(name) else { return Vec::new() };
+        let Ok(provider) = self.providers.get(&a.provider) else { return Vec::new() };
+        let aliases = self.alias_table(a);
+        // Capabilities are the provider's today; `capabilities_for(&id)` replaces this one line.
+        let caps = provider.capabilities();
+        provider
+            .models()
+            .into_iter()
+            .filter(|m| !m.deprecated)
+            .map(|m| {
+                let price = provider.price(&m.id);
+                ModelView {
+                    alias: aliases.iter().find(|(_, v)| v.as_str() == m.id.0.as_str()).map(|(k, _)| k.to_string()),
+                    context_window: m.context_window,
+                    input_per_mtok: price.map(|p| p.input_per_mtok),
+                    output_per_mtok: price.map(|p| p.output_per_mtok),
+                    tools: caps.tools,
+                    thinking: caps.thinking,
+                    images: caps.images,
+                    cache: caps.prompt_cache,
+                    logprobs: caps.logprobs,
+                    id: m.id,
+                }
+            })
+            .collect()
     }
 
     fn enabled(&self, name: &AccountName) -> Result<&config::Account, SelectError> {

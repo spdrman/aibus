@@ -455,6 +455,26 @@ impl Step for DiscoverAgents {
 
 struct LoadAccounts;
 
+#[cfg(test)]
+mod model_rows;
+
+/// What the graph may know about each enabled account, with the models its provider's tables
+/// list. Used at startup and by a reload after an account was added or removed.
+pub(crate) fn account_views(cfg: &config::Config, registry: &AccountRegistry) -> Vec<AccountView> {
+    cfg.accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .map(|a| AccountView {
+            name: a.account_name(),
+            provider: a.provider.as_str().into(),
+            label: a.label.clone().unwrap_or_else(|| a.name.clone()),
+            default_model: a.default_model.as_deref().map(|m| ModelId(m.into())),
+            key_ref: a.key_ref().map_or_else(|| "none".into(), |k| k.to_string()),
+            models: registry.model_views(&a.account_name()),
+        })
+        .collect()
+}
+
 /// Hands out the one scripted fake the session was started with, whatever its config.
 struct Scripted(Arc<dyn Provider>);
 
@@ -513,20 +533,10 @@ impl Step for LoadAccounts {
                 ..Default::default()
             });
         }
-        let views = effective
-            .accounts
-            .iter()
-            .filter(|a| a.enabled)
-            .map(|a| AccountView {
-                name: a.account_name(),
-                provider: a.provider.as_str().into(),
-                label: a.label.clone().unwrap_or_else(|| a.name.clone()),
-                default_model: a.default_model.as_deref().map(|m| ModelId(m.into())),
-                key_ref: a.key_ref().map_or_else(|| "none".into(), |k| k.to_string()),
-            })
-            .collect();
+        let registry = Arc::new(AccountRegistry::new(&effective, providers));
+        let views = account_views(&effective, &registry);
         ctx.accounts = Some(Accounts {
-            registry: Arc::new(AccountRegistry::new(&effective, providers)),
+            registry,
             store,
             script_text,
             builtin,

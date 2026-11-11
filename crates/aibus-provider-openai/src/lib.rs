@@ -119,6 +119,9 @@ pub struct OpenAi {
     table: Mutex<ModelTable>,
     cache_dir: Option<PathBuf>,
     http: Http,
+    /// The gateway puts what a request cost in `usage.cost` (OpenRouter), and that replaces the
+    /// table's estimate.
+    reports_cost: bool,
 }
 
 impl OpenAi {
@@ -159,16 +162,12 @@ impl OpenAi {
             .map(|h| HeaderName::from_bytes(h.as_bytes()).map_err(|e| bad("auth_header", e.to_string())))
             .transpose()?;
         let query = def.query.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&");
-        let empty = r#"{"models": []}"#;
         let builtin = match &def.model_table {
             Some(ModelTableSpec::Inline(v)) => v.to_string(),
-            Some(ModelTableSpec::Named(n)) => match n.as_str() {
-                "openai" => include_str!("openai.json").to_owned(),
-                "kimi" => include_str!("kimi.json").to_owned(),
-                "empty" => empty.to_owned(),
-                other => return Err(bad("model_table", format!("no built-in table called {other}"))),
-            },
-            None => empty.to_owned(),
+            Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
+                .ok_or_else(|| bad("model_table", format!("no built-in table called {n}")))?
+                .to_owned(),
+            None => aibus_provider::catalog::table("empty").unwrap_or_default().to_owned(),
         };
         let prefixes: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
         Ok(Self {
@@ -197,6 +196,7 @@ impl OpenAi {
             open_aliases,
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
+            reports_cost: id == "openrouter" || base.contains("openrouter.ai"),
         })
     }
 
@@ -313,7 +313,7 @@ impl Provider for OpenAi {
             );
             (t.price(&req.model), reasoning)
         };
-        let opts = wire::Opts { reasoning, user: self.send_user, logprobs: req.logprobs, compat: &self.compat };
+        let opts = wire::Opts { reasoning, user: self.send_user, logprobs: req.logprobs, include_cost: self.reports_cost, compat: &self.compat };
         let (path, body) = match self.wire {
             Wire::Chat => ("chat/completions", wire::chat_body(&req, opts)),
             Wire::Responses => ("responses", wire::responses_body(&req, opts)),
@@ -336,7 +336,7 @@ impl Provider for OpenAi {
         let window = rate_limit(resp.headers(), SystemTime::now());
 
         let mut events = Events::new(resp, cancel.clone());
-        let mut turn = stream::Turn::new(price);
+        let mut turn = stream::Turn::new(price, self.reports_cost);
         while let Some(ev) = events.next().await? {
             let chunks = match self.wire {
                 Wire::Chat => turn.chat_event(&ev.data)?,

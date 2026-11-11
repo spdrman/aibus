@@ -1,6 +1,6 @@
 ![aibus — AI agent orchestration](assets/aibus-logo.svg)
 
-A terminal app for running AI agents with sub-agents, an advisor and continuity across sessions. Rust, ratatui, crossterm.
+A terminal app for running AI agents with sub-agents, an advisor and continuity across sessions. Rust, ratatui, rataflow, crossterm.
 
 ![The aibus dashboard in a 10 second session: a lead plans, the advisor rail speaks, the router answers, three workers fill their cards one after the other, then a card is selected and its menu opens](docs/media/aibus-ui.gif)
 
@@ -51,6 +51,16 @@ aibus doctor     # the install and the config: keychain backend, config files, a
 ```
 
 With no account configured, `aibus` starts on the built-in fake provider. Add a real one with `aibus account add`, see [docs/PROVIDERS.md](docs/PROVIDERS.md).
+
+### Author workflows from an MCP client
+
+`aibus mcp` is an MCP server, so an editor or chat app can read your workflows and check a draft. Three lines of config in the client:
+
+```json
+{"command": "aibus", "args": ["mcp"]}
+```
+
+By default it is read-only: it lists and explains workflows, validates a draft against your real agents, shows what a workflow would do for an input without calling a model, and serves the workflow schema and an authoring prompt. `--allow write` adds creating and updating workflows (a gate needs `--allow gates` as well), and `--allow run` adds starting, watching and cancelling runs under the tightest settings aibus has. Setup for a few clients, the tool list and what the server logs are in [docs/MCP.md](docs/MCP.md).
 
 ### Upgrade
 

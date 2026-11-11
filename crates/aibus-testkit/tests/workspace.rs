@@ -12,14 +12,8 @@ fn root() -> PathBuf {
 
 /// Normal (non-dev, non-build) dependency closure of `name`, by package name.
 fn closure(name: &str) -> BTreeSet<String> {
-    closure_with(name, &[])
-}
-
-/// The same with extra `cargo metadata` arguments, e.g. `--features aibus-tui/flow-diagram`.
-fn closure_with(name: &str, extra: &[&str]) -> BTreeSet<String> {
     let out = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--locked"])
-        .args(extra)
         .current_dir(root())
         .output()
         .expect("run cargo metadata");
@@ -66,7 +60,7 @@ fn closure_with(name: &str, extra: &[&str]) -> BTreeSet<String> {
 #[test]
 fn core_never_sees_ratatui_or_a_concrete_provider() {
     let deps = closure("aibus-core");
-    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http", "reqwest"] {
+    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http", "reqwest"] {
         assert!(!deps.contains(banned), "aibus-core depends on {banned}");
     }
     let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
@@ -86,7 +80,7 @@ fn provider_crate_has_no_network_crates() {
 #[test]
 fn tui_never_sees_reqwest_or_a_provider_crate() {
     let deps = closure("aibus-tui");
-    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http"] {
+    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
         assert!(!deps.contains(banned), "aibus-tui depends on {banned}");
     }
 }
@@ -96,7 +90,7 @@ fn tui_never_sees_reqwest_or_a_provider_crate() {
 /// certificates through them; they do no TLS.
 #[test]
 fn provider_crates_use_rustls_and_never_openssl() {
-    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-http"] {
+    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
         let deps = closure(krate);
         assert!(deps.contains("rustls") && deps.contains("reqwest"), "{krate} lost its TLS stack");
         for banned in ["openssl", "openssl-sys", "openssl-src", "native-tls", "hyper-tls"] {
@@ -107,12 +101,26 @@ fn provider_crates_use_rustls_and_never_openssl() {
 
 #[test]
 fn only_the_provider_http_crates_open_sockets() {
-    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider"] {
+    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider", "aibus-mcp"] {
         let deps = closure(krate);
         for banned in ["reqwest", "hyper", "h2", "rustls"] {
             assert!(!deps.contains(banned), "{krate} depends on {banned}");
         }
     }
+}
+
+/// D-13: rmcp comes in with `server`, `macros` and `transport-io` only. Anything that opens a
+/// socket, draws a terminal or talks to a provider stays out of the crate that serves MCP, and
+/// `aibus-mcp` sits on `aibus-core` and nothing above it.
+#[test]
+fn mcp_crate_never_sees_a_transport_or_ui_crate() {
+    let deps = closure("aibus-mcp");
+    assert!(deps.contains("rmcp") && deps.contains("aibus-core"), "aibus-mcp lost its parts");
+    for banned in ["reqwest", "hyper", "h2", "rustls", "ratatui", "crossterm", "aibus-tui", "aibus"] {
+        assert!(!deps.contains(banned), "aibus-mcp depends on {banned}");
+    }
+    let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
+    assert!(providers.is_empty(), "aibus-mcp depends on provider crates {providers:?}");
 }
 
 #[test]
@@ -139,8 +147,8 @@ fn every_crate_forbids_unsafe_code() {
             }
         }
     }
-    // Nine workspace members plus aibus-graph-causl, which sits outside the workspace.
-    assert_eq!(checked, 10, "expected one root file per crate");
+    // Ten workspace members plus aibus-graph-causl, which sits outside the workspace.
+    assert_eq!(checked, 11, "expected one root file per crate");
 }
 
 #[test]
@@ -176,25 +184,42 @@ fn tui_is_on_ratatui_030_and_crossterm_029() {
     }
 }
 
-const FLOW: [&str; 2] = ["--features", "aibus-tui/flow-diagram"];
-
 #[test]
-fn rataflow_is_optional_and_only_the_tui_sees_it() {
-    for krate in ["aibus", "aibus-tui", "aibus-core", "aibus-graph", "aibus-provider"] {
-        assert!(!closure(krate).contains("rataflow"), "{krate} sees rataflow by default");
+fn rataflow_is_in_the_default_build() {
+    for krate in ["aibus", "aibus-tui"] {
+        assert!(closure(krate).contains("rataflow"), "{krate} lacks rataflow");
     }
     for krate in ["aibus-core", "aibus-graph", "aibus-provider"] {
-        assert!(!closure_with(krate, &FLOW).contains("rataflow"), "{krate} sees rataflow");
-    }
-    for krate in ["aibus-tui", "aibus"] {
-        assert!(closure_with(krate, &FLOW).contains("rataflow"), "{krate} lacks rataflow with the feature on");
+        assert!(!closure(krate).contains("rataflow"), "{krate} sees rataflow");
     }
 }
 
 #[test]
+fn rataflow_is_a_plain_dependency_of_the_tui() {
+    let out = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--locked", "--no-deps"])
+        .current_dir(root())
+        .output()
+        .expect("run cargo metadata");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let meta: Value = serde_json::from_slice(&out.stdout).expect("metadata json");
+    let mut owners = Vec::new();
+    for p in meta["packages"].as_array().unwrap() {
+        for d in p["dependencies"].as_array().unwrap() {
+            if d["name"] == "rataflow" {
+                assert_eq!(d["optional"], false, "{} has an optional rataflow", p["name"]);
+                owners.push(p["name"].as_str().unwrap().to_owned());
+            }
+        }
+        assert!(p["features"].as_object().unwrap().keys().all(|k| k != "flow-diagram"), "{} still has the feature", p["name"]);
+    }
+    assert_eq!(owners, ["aibus-tui"], "only the TUI names rataflow");
+}
+
+#[test]
 fn rataflow_brings_no_layout_or_network_crates() {
-    let tui = closure_with("aibus-tui", &FLOW);
-    let rataflow = closure_with("rataflow", &FLOW);
+    let tui = closure("aibus-tui");
+    let rataflow = closure("rataflow");
     assert!(!rataflow.is_empty(), "rataflow has dependencies");
     for banned in ["rust-sugiyama", "petgraph", "ratzilla", "termion", "termwiz", "serde_json"] {
         assert!(!rataflow.contains(banned), "rataflow pulls in {banned}");

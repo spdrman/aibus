@@ -6,10 +6,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::AgentName;
+use crate::persist::fs::{create_private_dir, write_atomic};
+use crate::persist::time::rfc3339;
 use crate::run::RunStatus;
 
 /// The four chains shipped as examples (`examples/workflows/`), installed by `aibus init`.
@@ -307,6 +310,106 @@ pub fn load(dirs: &[PathBuf], name: &str) -> Result<Workflow, String> {
     }
 }
 
+/// `^[a-z0-9][a-z0-9_-]{0,63}$`. A name is the file stem, so this is also what keeps a path
+/// separator, a dot, `~` and a leading dash out of a path (and out of the `aibus run` command
+/// line). `save` and the MCP write tools both check it.
+pub fn valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name.len() <= 64
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+/// The first line of a file `save` writes.
+pub const SCHEMA_LINE: &str = "# schema: aibus://schema/workflow v1";
+
+/// The start of the second line, which `save` ends with an RFC 3339 time. The MCP write tools
+/// write `# written through aibus mcp, ` and `save` takes either off a draft before adding its own.
+pub const PROVENANCE: &str = "# written through aibus, ";
+
+/// One row of `/workflow list`: what a person needs to pick a workflow.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct WorkflowRow {
+    pub name: String,
+    /// `project` or `user`.
+    pub scope: String,
+    pub description: String,
+    /// The agent of each step, in order. Empty for a file that does not parse.
+    pub agents: Vec<String>,
+    /// Why the file does not parse.
+    pub error: Option<String>,
+}
+
+/// The rows of `dirs` (as `list` finds them); the first directory is the project's.
+pub fn rows(dirs: &[PathBuf]) -> Vec<WorkflowRow> {
+    list(dirs)
+        .into_iter()
+        .map(|(name, path, parsed)| {
+            let scope = if dirs.first().is_some_and(|d| path.starts_with(d)) { "project" } else { "user" };
+            let (description, agents, error) = match parsed {
+                Ok(w) => (w.description, w.steps.iter().map(|s| s.agent.to_string()).collect(), None),
+                Err(e) => (String::new(), Vec::new(), Some(e.to_string())),
+            };
+            WorkflowRow { name, scope: scope.into(), description, agents, error }
+        })
+        .collect()
+}
+
+/// Why `save` wrote nothing.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SaveError {
+    #[error("`{0}` is not a workflow name: lowercase letters, digits, - and _, starting with a letter or digit, 64 at most")]
+    Name(String),
+    #[error("the draft does not validate")]
+    Invalid(Vec<Problem>),
+    #[error("{} exists, save it again with --force to replace it", .0.display())]
+    Exists(PathBuf),
+    #[error("{0}")]
+    Io(String),
+}
+
+/// Writes `text` as workflow `name` into the project's workflows directory, or the user's with
+/// `user`. Nothing touches the disk until the name and the draft have passed, and the path is the
+/// directory plus the validated name, never the argument. The file starts with `SCHEMA_LINE` and
+/// a `PROVENANCE` line made from `at` (a header the draft already had is replaced, not doubled),
+/// and is written atomically with mode 0600. An existing file is only replaced with `force`.
+pub fn save(
+    dirs: &[PathBuf],
+    user: bool,
+    name: &str,
+    text: &str,
+    force: bool,
+    roster: &[AgentName],
+    at: SystemTime,
+) -> Result<PathBuf, SaveError> {
+    if !valid_name(name) {
+        return Err(SaveError::Name(name.to_owned()));
+    }
+    let found = validate(text, name, roster);
+    if !found.ok {
+        return Err(SaveError::Invalid(found.errors));
+    }
+    let dir = dirs.get(usize::from(user)).ok_or_else(|| SaveError::Io("there is no user directory for workflows".into()))?;
+    let path = dir.join(format!("{name}.toml"));
+    match std::fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(SaveError::Io(format!("{}: {e}", path.display()))),
+        Ok(md) if md.file_type().is_symlink() || !md.is_file() => {
+            return Err(SaveError::Io(format!("{} is not a plain file, refusing to write through it", path.display())))
+        }
+        Ok(_) if !force => return Err(SaveError::Exists(path)),
+        Ok(_) => {}
+    }
+    create_private_dir(dir).map_err(|e| SaveError::Io(format!("{}: {e}", dir.display())))?;
+    let body: Vec<&str> = text
+        .lines()
+        .skip_while(|l| l.starts_with("# schema: ") || l.starts_with("# written through aibus"))
+        .collect();
+    let bytes = format!("{SCHEMA_LINE}\n{PROVENANCE}{}\n{}\n", rfc3339(at), body.join("\n"));
+    write_atomic(&path, bytes).map_err(|e| SaveError::Io(format!("{}: {e}", path.display())))?;
+    Ok(path)
+}
+
 /// `/workflow <name> <input>` or, for a name in `known`, `/<name> <input>`: the name and the
 /// input. `None` for anything else, so an ordinary message (or a path) is left alone.
 pub fn parse_slash<'a>(text: &'a str, known: &[String]) -> Option<(&'a str, &'a str)> {
@@ -339,6 +442,36 @@ fn render(template: &str, scope: &Scope<'_>) -> String {
             None => {}
         }
     });
+    out
+}
+
+/// What the prompt of one step reads, in the order it names them and each once: `input`,
+/// `prev.summary` or `steps.<agent>.summary`. Both MCP's `workflow_explain` and `workflow_dry_run`
+/// need the template syntax and only this module may know it.
+pub fn reads(prompt: &str) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    let _ = scan(prompt, |_, key| {
+        if let Some(k) = key.filter(|k| var(k).is_some()) {
+            if !keys.iter().any(|seen| seen == k) {
+                keys.push(k.to_owned());
+            }
+        }
+    });
+    keys
+}
+
+/// Every prompt of `wf` rendered for `input`, with `<summary of step N (agent)>` where a later
+/// step would read an earlier one's summary. Nothing runs.
+pub fn preview(wf: &Workflow, input: &str) -> Vec<String> {
+    let mut steps: BTreeMap<String, String> = BTreeMap::new();
+    let mut prev: Option<String> = None;
+    let mut out = Vec::new();
+    for (i, step) in wf.steps.iter().enumerate() {
+        out.push(render(&step.prompt, &Scope { input, prev: prev.as_deref(), steps: &steps }));
+        let placeholder = format!("<summary of step {} ({})>", i + 1, step.agent);
+        steps.insert(step.agent.to_string(), placeholder.clone());
+        prev = Some(placeholder);
+    }
     out
 }
 
@@ -620,6 +753,40 @@ on_fail = "retry:2"
         assert_eq!(parse_slash("/etc/passwd explain", &known), None);
         assert_eq!(parse_slash("fix it", &known), None);
         assert_eq!(parse_slash("/workflow", &known), None);
+    }
+
+    #[test]
+    fn a_saved_file_round_trips_with_its_comment_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let dirs = vec![dir.path().join("project"), dir.path().join("user")];
+        let text = EXAMPLES[2].1;
+        let roster: Vec<AgentName> = Workflow::parse("review", text).unwrap().steps.iter().map(|s| s.agent.clone()).collect();
+        let at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let path = save(&dirs, false, "review", text, false, &roster, at).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let mut lines = saved.lines();
+        assert_eq!(lines.next(), Some(SCHEMA_LINE));
+        assert_eq!(lines.next(), Some("# written through aibus, 2023-11-14T22:13:20.000Z"));
+        assert_eq!(Workflow::parse("review", &saved), Workflow::parse("review", text));
+        // Saving what was saved does not stack a second header.
+        assert_eq!(save(&dirs, false, "review", &saved, false, &roster, at), Err(SaveError::Exists(path.clone())));
+        save(&dirs, false, "review", &saved, true, &roster, at).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        let scopes: Vec<_> = rows(&dirs).into_iter().map(|r| (r.name, r.scope)).collect();
+        assert_eq!(scopes, [("review".to_owned(), "project".to_owned())]);
+    }
+
+    #[test]
+    fn a_bad_name_or_draft_is_refused_before_the_disk_is_touched() {
+        let dir = tempfile::tempdir().unwrap();
+        let dirs = vec![dir.path().join("project")];
+        let at = SystemTime::UNIX_EPOCH;
+        let long = "a".repeat(65);
+        for name in ["", "../x", "A", "-x", "a.b", long.as_str()] {
+            assert_eq!(save(&dirs, false, name, EXAMPLES[2].1, true, &[], at), Err(SaveError::Name(name.to_owned())));
+        }
+        assert!(matches!(save(&dirs, false, "ok", "nonsense", true, &[], at), Err(SaveError::Invalid(_))));
+        assert!(!dirs[0].exists());
     }
 
     #[test]

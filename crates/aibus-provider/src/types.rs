@@ -117,6 +117,9 @@ pub enum ContentBlock {
         id: ToolCallId,
         name: SmolStr,
         input: serde_json::Value,
+        /// Gemini's `thoughtSignature` for this call; the next request has to send it back unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
     ToolResult {
         id: ToolCallId,
@@ -160,6 +163,17 @@ impl Message {
     }
 }
 
+/// Where a `cost_usd` came from, so a dashboard can mark an estimate differently from a bill.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostSource {
+    /// Tokens times the model table's price.
+    #[default]
+    Table,
+    /// The gateway reported the cost in the response (OpenRouter's `usage.cost`).
+    Provider,
+}
+
 #[derive(Clone, Copy, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Usage {
     pub input_tokens: u64,
@@ -171,6 +185,16 @@ pub struct Usage {
     #[serde(default)]
     pub reasoning_tokens: Option<u64>,
     pub cost_usd: f64,
+    /// Absent from stored usage and from `Table` usage, so old graphs and snapshots read and
+    /// write as before.
+    #[serde(default, skip_serializing_if = "CostSource::is_table")]
+    pub cost_source: CostSource,
+}
+
+impl CostSource {
+    fn is_table(&self) -> bool {
+        *self == Self::Table
+    }
 }
 
 /// Run and session ids for provider-side tracing. Never carries secrets.

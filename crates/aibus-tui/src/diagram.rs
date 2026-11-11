@@ -1,4 +1,4 @@
-//! The centre column drawn through rataflow, behind the `flow-diagram` feature (D1.1).
+//! The centre column drawn through rataflow (D1.1).
 //!
 //! This is the only file in the workspace that names `rataflow`. A fresh locked `Flow` is built
 //! every frame from the same row budget the classic `ui::centre` uses, with world coordinates

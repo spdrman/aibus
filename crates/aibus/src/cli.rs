@@ -161,6 +161,8 @@ pub enum Command {
     /// The config file
     #[command(subcommand)]
     Config(ConfigCmd),
+    /// Serve workflows to an MCP client over stdio
+    Mcp(McpArgs),
     /// Put the example workflows in .aibus/workflows
     Init,
     /// Check the install and the config
@@ -180,6 +182,60 @@ pub enum Command {
         #[arg(long)]
         text: bool,
     },
+}
+
+/// `aibus mcp`: read-only unless these say otherwise. The surface is fixed when the process
+/// starts and nothing the client sends can raise it.
+#[derive(Args, Debug)]
+pub struct McpArgs {
+    /// Add to what the server may do (repeatable): write, gates (needs write) or run
+    ///
+    /// Same name as the global `--allow`, which this shadows for `mcp`; the values are text in
+    /// both so clap can share the argument.
+    #[arg(
+        long,
+        value_name = "CAP",
+        value_parser = ["write", "gates", "run"],
+        action = ArgAction::Append
+    )]
+    pub allow: Vec<String>,
+    /// Pre-approve a tool for runs started through MCP (repeatable)
+    #[arg(long, value_name = "PATTERN", action = ArgAction::Append)]
+    pub allow_tool: Vec<String>,
+    /// Ask the user before a write or a run when the client can ask (elicit), or never
+    ///
+    /// `never` keeps the flags as the only gate, for scripted use.
+    #[arg(long, value_enum, default_value_t = ConfirmMode::Elicit)]
+    pub confirm: ConfirmMode,
+    /// Serve Streamable HTTP on this loopback address instead of stdio (a non-loopback address
+    /// is exit 2)
+    ///
+    /// The bearer token comes from AIBUS_MCP_TOKEN, or one is generated and printed once to
+    /// stderr.
+    #[arg(long, value_name = "IP:PORT")]
+    pub http: Option<String>,
+    /// Accept this Origin as well as the loopback ones (repeatable, needs --http)
+    #[arg(long, value_name = "ORIGIN", action = ArgAction::Append, requires = "http")]
+    pub origin: Vec<String>,
+    /// Runs one process may start (default 10; needs --allow run)
+    #[arg(long, value_name = "N")]
+    pub max_runs: Option<u32>,
+    /// Runs that may be live at once (default 1; needs --allow run)
+    #[arg(long, value_name = "N")]
+    pub max_concurrent_runs: Option<u32>,
+    /// What the runs of this process may cost in total (default limits.max_cost_usd; needs --allow run)
+    #[arg(long, value_name = "USD")]
+    pub max_cost_usd: Option<f64>,
+    /// Do not put the "written through aibus mcp" line at the top of written workflows
+    #[arg(long)]
+    pub no_provenance: bool,
+}
+
+/// `aibus mcp --confirm`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmMode {
+    Elicit,
+    Never,
 }
 
 #[derive(Args, Debug, Default)]
@@ -445,6 +501,7 @@ mod tests {
         "config init",
         "config validate",
         "config edit",
+        "mcp",
         "doctor",
         "completions",
         "version",

@@ -1,0 +1,6 @@
+{
+  "models": [
+    {"id": "grok-3", "context_window": 131072, "max_output": 8192, "family": "grok", "deprecated": false}
+  ],
+  "families": {}
+}

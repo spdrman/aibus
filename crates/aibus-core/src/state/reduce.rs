@@ -16,9 +16,10 @@ use super::*;
 use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{PermissionId, RunId};
-use crate::msg::{AccountView, Command, Decision, Msg, Pane, Screen, Selection, TrOp, UiIntent};
+use crate::msg::{AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
+use crate::workflow::WorkflowRow;
 
 /// What `reduce` may not read from the world itself.
 #[derive(Clone, Copy, Debug, Default)]
@@ -337,7 +338,7 @@ impl R<'_> {
                 ]),
             );
         }
-        if matches!(name, "palette" | "agents" | "accounts") {
+        if matches!(name, "palette" | "agents" | "accounts" | "workflows") || name.starts_with("models:") {
             self.put(SCREEN_SEL, n(0));
             self.put(PALETTE_TEXT, s(""));
         }
@@ -812,12 +813,15 @@ impl R<'_> {
             }
             Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
             Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
+            Command::OpenScreen(Screen::Models(target)) => self.open_modal(&format!("models:{}", target.label())),
             Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
             Command::OpenScreen(Screen::ConfirmCancel(run)) => self.open_modal(&format!("confirm:cancel:{run}")),
             Command::OpenScreen(Screen::RunStatus(run)) => self.open_modal(&format!("status:{run}")),
             Command::OpenScreen(Screen::AdvisorStatus) => self.open_modal("status:advisor"),
             Command::OpenScreen(Screen::RouterStatus) => self.open_modal("status:router"),
             Command::OpenScreen(Screen::Cost) => self.open_modal("cost"),
+            Command::OpenScreen(Screen::Workflows) => self.open_modal("workflows"),
+            Command::OpenScreen(Screen::WorkflowShow) => self.open_modal("workflow_show"),
             Command::OpenHelp => self.open_modal("help"),
             Command::LedgerUpdate { section, text } => {
                 if ["goal", "now", "in_progress"].contains(&section.as_str()) {
@@ -829,6 +833,23 @@ impl R<'_> {
                 }
             }
             Command::Compact { run } => self.set_status(run, RunStatus::Compacting),
+            Command::SetModel { target, model } => {
+                let model = model.trim();
+                if model.is_empty() {
+                    self.log("warn", "model: needs a model");
+                } else if model == "off" && matches!(target, ModelTarget::Lead | ModelTarget::Run(_)) {
+                    let who = if *target == ModelTarget::Lead { "the lead".to_owned() } else { target.label() };
+                    self.log("warn", &format!("model: {who} cannot be turned off"));
+                } else {
+                    // The reducer has no accounts to resolve an alias with: the request waits in
+                    // the graph for the executor, which answers with `Msg::ModelSwitched`.
+                    let id = as_i64(&self.now(MSG_SEQ)).unwrap_or(0);
+                    let req = map([("id", n(id)), ("target", s(&target.label())), ("model", s(model))]);
+                    let assist = self.now(SESSION_ASSIST);
+                    let queue = pushed(get(&assist, "pending").unwrap_or(&NULL), req);
+                    self.put(SESSION_ASSIST, with(&assist, "pending", queue));
+                }
+            }
             Command::LogFilter(text) => {
                 self.put(LOG_FILTER, s(text));
                 self.put(scroll_key("log"), n(0));
@@ -860,6 +881,8 @@ impl R<'_> {
             Command::Workflow { .. } | Command::CreateHandoff { .. } => {
                 self.log("info", "queued request");
             }
+            // The loop reads the files and answers with `Msg::WorkflowsLoaded`.
+            Command::WorkflowFile(_) => {}
         }
     }
 }
@@ -873,6 +896,21 @@ pub fn tool_summary(name: &str, input: &serde_json::Value) -> String {
     }
     .map_or_else(|| input.to_string(), str::to_owned);
     line.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect()
+}
+
+/// `/model <ref>`, `/advisor <ref>` and `/router <ref>` as text: a line that reaches the reducer
+/// as a prompt (a headless caller, an old recording) still switches the model and never goes to
+/// the lead as words.
+fn slash_model(text: &str) -> Option<Command> {
+    let (word, rest) = text.trim().split_once(char::is_whitespace)?;
+    let target = match word {
+        "/model" => ModelTarget::Lead,
+        "/advisor" => ModelTarget::Advisor,
+        "/router" => ModelTarget::Router,
+        _ => return None,
+    };
+    let model = rest.trim();
+    (!model.is_empty()).then(|| Command::SetModel { target, model: model.to_owned() })
 }
 
 /// `/compact` and `/fork <task>` typed while a lead runs: the command, aimed at the lead.
@@ -962,7 +1000,7 @@ fn account_value(a: &AccountView) -> Result<Value, AibusError> {
     if !ok {
         return Err(CredentialError::NotAReference(a.name.clone()).into());
     }
-    Ok(map([
+    let mut v = map([
         ("name", s(&a.name.0)),
         ("provider", s(&a.provider)),
         ("label", s(&a.label)),
@@ -971,7 +1009,27 @@ fn account_value(a: &AccountView) -> Result<Value, AibusError> {
             a.default_model.as_ref().map_or(Value::Null, |m| s(&m.0)),
         ),
         ("key_ref", s(&a.key_ref)),
-    ]))
+    ]);
+    // Only an account that lists models carries the key, so a graph without them keeps its shape.
+    if !a.models.is_empty() {
+        let price = |p: Option<f64>| p.map_or(Value::Null, Value::F64);
+        let rows = a.models.iter().map(|m| {
+            map([
+                ("id", s(&m.id.0)),
+                ("alias", m.alias.as_deref().map_or(Value::Null, s)),
+                ("context", n(m.context_window)),
+                ("input", price(m.input_per_mtok)),
+                ("output", price(m.output_per_mtok)),
+                ("tools", Value::Bool(m.tools)),
+                ("thinking", Value::Bool(m.thinking)),
+                ("images", Value::Bool(m.images)),
+                ("cache", Value::Bool(m.cache)),
+                ("logprobs", Value::Bool(m.logprobs)),
+            ])
+        });
+        v = with(&v, "models", list(rows.collect()));
+    }
+    Ok(v)
 }
 
 /// The writes for one message. Always includes `model:last_msg` and `eng:msg_seq`, so every
@@ -1015,7 +1073,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.put(TICKS_DROPPED, n(r.env.ticks_dropped));
         }
         Msg::SubmitPrompt { text } => {
-            if as_list(r.cur(RUNS_ORDER)).is_empty() {
+            if let Some(c) = slash_model(text) {
+                r.command(&c);
+            } else if as_list(r.cur(RUNS_ORDER)).is_empty() {
                 r.queue_run(Queue {
                     role: Some(Role::Lead),
                     ..Queue::new("lead", text, false, Isolation::None, None)
@@ -1406,6 +1466,27 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             );
             r.log("info", &format!("{} agents loaded", defs.len()));
         }
+        Msg::WorkflowsLoaded { rows, shown, said } => {
+            let row = |w: &WorkflowRow| {
+                map([
+                    ("name", s(&w.name)),
+                    ("scope", s(&w.scope)),
+                    ("description", s(&w.description)),
+                    ("agents", list(w.agents.iter().map(|a| s(a)).collect())),
+                    ("error", w.error.as_deref().map_or(Value::Null, s)),
+                ])
+            };
+            r.put(WORKFLOWS, list(rows.iter().map(row).collect()));
+            if let Some(w) = shown {
+                r.put(
+                    WORKFLOW_SHOWN,
+                    map([("name", s(&w.name)), ("text", r.store.inline_or_handle(&w.text)), ("summary", s(&w.summary))]),
+                );
+            }
+            if let Some(said) = said {
+                r.log("info", said);
+            }
+        }
         Msg::AccountsReloaded { accounts } => {
             let items = accounts
                 .iter()
@@ -1424,6 +1505,55 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.log("error", &format!("io error in {context}"))
         }
         Msg::Shutdown { reason } => r.put(SHUTDOWN, s(reason.as_str())),
+        Msg::ModelSwitched { id, target, to } => {
+            let assist = r.now(SESSION_ASSIST);
+            let rest: Vec<Value> = as_list(get(&assist, "pending").unwrap_or(&NULL))
+                .iter()
+                .filter(|p| get(p, "id").and_then(as_i64) != i64::try_from(*id).ok())
+                .cloned()
+                .collect();
+            let mut assist = with(&assist, "pending", list(rest));
+            match to {
+                Err(why) => r.log("warn", &format!("model: {why}")),
+                Ok(chosen) => {
+                    let who = target.label();
+                    match (target, chosen) {
+                        (ModelTarget::Advisor | ModelTarget::Router, chosen) => {
+                            let key = if *target == ModelTarget::Advisor { "advisor" } else { "router" };
+                            let seat = get(&assist, key).cloned().unwrap_or(Value::Null);
+                            let mut seat = with(&seat, "enabled", Value::Bool(chosen.is_some()));
+                            // The advisor's label is its model; the router's is a name from config.
+                            if let (ModelTarget::Advisor, Some((m, _))) = (target, chosen) {
+                                seat = with(&seat, "label", s(&m.0));
+                            }
+                            assist = with(&assist, key, seat);
+                        }
+                        (_, None) => r.log("warn", &format!("model: {who} cannot be turned off")),
+                        (_, Some(_)) => {}
+                    }
+                    if let Some((m, account)) = chosen {
+                        let run = match target {
+                            ModelTarget::Run(run) => Some(run.to_string()),
+                            ModelTarget::Lead => as_list(r.cur(RUNS_ORDER))
+                                .iter()
+                                .filter_map(as_str)
+                                .find(|id| get(r.cur(&run_key(id, "meta")), "role").and_then(as_str) == Some("lead"))
+                                .map(str::to_owned),
+                            _ => None,
+                        };
+                        if let Some(run) = run {
+                            let meta = r.cur(&run_key(&run, "meta")).clone();
+                            let meta = with(&with(&meta, "model", s(&m.0)), "account", s(&account.0));
+                            r.put(run_key(&run, "meta"), meta);
+                        }
+                        r.log("info", &format!("model: {who} -> {} ({})", m.0, account.0));
+                    } else if matches!(target, ModelTarget::Advisor | ModelTarget::Router) {
+                        r.log("info", &format!("model: {who} -> off"));
+                    }
+                }
+            }
+            r.put(SESSION_ASSIST, assist);
+        }
     }
     Ok(())
 }

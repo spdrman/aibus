@@ -164,7 +164,7 @@ pub async fn check_case(p: &Arc<dyn Provider>, server: &FakeServer, f: &Fixtures
                 .message
                 .blocks
                 .iter()
-                .filter_map(|b| if let ContentBlock::ToolUse { id, name, input } = b { Some((*id, name.clone(), input.clone())) } else { None })
+                .filter_map(|b| if let ContentBlock::ToolUse { id, name, input, .. } = b { Some((*id, name.clone(), input.clone())) } else { None })
                 .collect();
             for (i, ((id, started), (want_name, want_input))) in starts.iter().zip(calls).enumerate() {
                 assert_eq!(started.as_str(), *want_name, "{name}: call {i} name");

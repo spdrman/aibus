@@ -16,6 +16,7 @@ aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
 aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
 aibus config path | show | init | validate | edit
+aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
 aibus doctor
 aibus completions <bash|zsh|fish|powershell>
 aibus version
@@ -141,3 +142,17 @@ Timestamps are RFC 3339 UTC. Ids are ULIDs as strings. Nothing in any `--json` o
 | `NO_COLOR`, `COLORTERM`, `TERM`, `EDITOR` | standard meanings |
 
 No environment variable carries a credential except the explicit `env` auth method, and aibus never enumerates the environment into logs.
+
+## 8. `aibus mcp`
+
+An MCP server for other programs to read workflows through. It starts read-only, speaks stdio unless `--http` is given, and answers `2026-07-28` and `2025-11-25`.
+
+| Flag | Meaning |
+|---|---|
+| `--allow write\|gates\|run` | add to what the server may do (repeatable); `gates` needs `write`, otherwise exit 2 |
+| `--allow-tool <pattern>` | pre-approve a tool for runs (repeatable) |
+| `--http <ip:port>` | Streamable HTTP on a loopback address instead of stdio; any other address is exit 2 |
+| `--origin <origin>` | accept this `Origin` as well as the loopback ones (needs `--http`) |
+| `--max-runs`, `--max-concurrent-runs`, `--max-cost-usd` | parse, and exit 2 with "not available yet" |
+
+The tools, resources and prompts are in `docs/MCP.md`. Logging goes to stderr, and each call leaves a redacted line under `<state>/logs/mcp/`.

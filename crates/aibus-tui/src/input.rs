@@ -13,9 +13,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
-use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER};
+use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER, WORKFLOWS};
 use aibus_core::{
-    Command, Decision, KeyCode, KeyEvent, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
+    Command, Decision, KeyCode, KeyEvent, ModelTarget, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
 };
 use aibus_graph::{Graph, Value};
 use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -29,7 +29,7 @@ use crate::screens::{Entry, EntryKind};
 use crate::transcript::Cells;
 use crate::ui::{Chrome, Drawn, Pointer};
 use crate::view::{CARDS, LOG_LINES, MENU_VIEW};
-use crate::views::{ACCOUNTS_VIEW, AGENTS, PALETTE, PERMISSION, TRANSCRIPT};
+use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, TRANSCRIPT, WORKFLOWS_VIEW};
 
 /// Two presses on the same thing this close together are a double click.
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -88,8 +88,15 @@ pub struct Context {
     /// The agents screen's rows: name and the file it lives in, when it has one.
     pub agent_rows: Vec<(String, Option<PathBuf>)>,
     pub account_rows: Vec<String>,
+    /// The picker's rows as the `account/model` that `SetModel` takes, and who it was opened for.
+    pub model_refs: Vec<String>,
+    pub models_target: Option<ModelTarget>,
     /// Names for the prompt's completion.
     pub agents: Vec<String>,
+    /// The workflows that parse, which the prompt's `/fix` family reads.
+    pub workflows: Vec<String>,
+    /// The rows of `/workflow list`, broken files included.
+    pub workflow_rows: Vec<String>,
     /// Every run, oldest first, with its agent (the `@target` of a command).
     pub runs: Vec<(RunId, String)>,
     /// Where each run stands, for the commands that only apply to a run in some state.
@@ -157,7 +164,7 @@ impl Context {
             .filter_map(|i| get(i, "id").and_then(as_str).map(str::to_owned))
             .collect();
         let palette_text = palette_view.and_then(|p| get(p, "text")).and_then(as_str).unwrap_or("").to_owned();
-        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW]
+        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS, WORKFLOWS_VIEW]
             .iter()
             .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
             .unwrap_or(0)
@@ -179,11 +186,25 @@ impl Context {
             .iter()
             .map(|r| get(r, "name").and_then(as_str).unwrap_or("").to_owned())
             .collect();
+        let model_refs = view(MODELS)
+            .and_then(|a| get(a, "rows"))
+            .map_or(&[][..], as_list)
+            .iter()
+            .filter_map(|r| get(r, "ref").and_then(as_str).map(str::to_owned))
+            .collect();
+        let models_target = view(MODELS).and_then(|a| get(a, "target")).and_then(as_str).and_then(ModelTarget::parse);
         let agents = g
             .read_key(aibus_core::state::AGENTS_DEFS)
             .map_or(&[][..], as_list)
             .iter()
             .filter_map(|d| get(d, "name").and_then(as_str).map(str::to_owned))
+            .collect();
+        let workflow_values = g.read_key(WORKFLOWS).map_or(&[][..], as_list);
+        let workflow_rows = workflow_values.iter().filter_map(|w| get(w, "name").and_then(as_str).map(str::to_owned)).collect();
+        let workflows = workflow_values
+            .iter()
+            .filter(|w| matches!(get(w, "error"), None | Some(Value::Null)))
+            .filter_map(|w| get(w, "name").and_then(as_str).map(str::to_owned))
             .collect();
         let runs: Vec<(RunId, String)> = g
             .read_key(RUNS_ORDER)
@@ -219,15 +240,19 @@ impl Context {
             screen_sel,
             agent_rows,
             account_rows,
+            model_refs,
+            models_target,
             agents,
+            workflows,
+            workflow_rows,
             runs,
             states,
             any_runs,
         }
     }
 
-    /// The session as the commands see it. The dashboard passes no workflows yet, so the `/fix`
-    /// family stays out of the popup and out of reach, as before.
+    /// The session as the commands see it. `workflows` are the ones that parse (`self.workflows`
+    /// for the dashboard), which is what lets the `/fix` family into the popup and within reach.
     pub fn env<'a>(&'a self, workflows: &'a [String]) -> Env<'a> {
         Env {
             agents: &self.agents,
@@ -258,6 +283,8 @@ impl Context {
             Some("palette") => Ctx::Palette,
             Some("agents") => Ctx::Agents,
             Some("accounts") => Ctx::Accounts,
+            Some("workflows") => Ctx::Workflows,
+            Some(m) if m.starts_with("models:") => Ctx::Models,
             Some("outcome") => Ctx::Outcome,
             Some(m) if m.starts_with("confirm:") => Ctx::Confirm,
             Some(_) => Ctx::Modal,
@@ -343,6 +370,13 @@ enum Scr {
     AcctTest,
     AcctAdd,
     AcctDisable,
+    /// The picker: the row for its own target, for a seat, for the one run it was opened on.
+    ModelUse,
+    ModelSeat(ModelTarget),
+    ModelThisRun,
+    ModelFilter,
+    /// The workflow list: put `/workflow run <name> ` in the prompt.
+    WorkflowRun,
     Outcome(Outcome),
     QuitNow,
     ConfirmYes,
@@ -361,6 +395,12 @@ fn scr_of(id: &str) -> Option<Scr> {
         "test" => Scr::AcctTest,
         "add" => Scr::AcctAdd,
         "disable" => Scr::AcctDisable,
+        "model_use" => Scr::ModelUse,
+        "seat_advisor" => Scr::ModelSeat(ModelTarget::Advisor),
+        "seat_router" => Scr::ModelSeat(ModelTarget::Router),
+        "this_run" => Scr::ModelThisRun,
+        "filter" => Scr::ModelFilter,
+        "wf_run" => Scr::WorkflowRun,
         "outcome:1" => Scr::Outcome(Outcome::Succeeded),
         "outcome:2" => Scr::Outcome(Outcome::PartialPlus),
         "outcome:3" => Scr::Outcome(Outcome::PartialMinus),
@@ -599,7 +639,7 @@ impl Input {
         let Some((item, true)) = menu.items.get(i).map(|(id, on)| (id.as_str(), *on)) else {
             return;
         };
-        commands::pick(item, Via::Menu, Some(menu.run), &cx.env(&[]), out);
+        commands::pick(item, Via::Menu, Some(menu.run), &cx.env(&cx.workflows), out);
         out.msgs.push(ui(UiIntent::CloseMenu));
     }
 
@@ -607,7 +647,7 @@ impl Input {
         let notch = if up { WHEEL_LINES } else { -WHEEL_LINES };
         match cx.keys() {
             Ctx::Transcript => return out.msgs.push(tr(TrOp::Scroll(notch))),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Workflows => {
                 return out.msgs.push(ui(UiIntent::Pick(if up { Selection::Prev } else { Selection::Next })));
             }
             _ if cx.chrome.modal.is_some() => return,
@@ -805,6 +845,8 @@ impl Input {
                         Ctx::Palette => Some(Scr::Run),
                         Ctx::Agents => Some(Scr::AgentEdit),
                         Ctx::Accounts => Some(Scr::AcctTest),
+                        Ctx::Models => Some(Scr::ModelUse),
+                        Ctx::Workflows => Some(Scr::WorkflowRun),
                         _ => None,
                     };
                     if let Some(a) = default {
@@ -999,7 +1041,7 @@ impl Input {
         }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Outcome | Ctx::Confirm => {
+            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Workflows | Ctx::Outcome | Ctx::Confirm => {
                 self.screen_key(ev, ctx, cx, prompt, &mut out);
             }
             _ => {
@@ -1026,19 +1068,19 @@ impl Input {
             (KeyCode::Enter, ..) if prompt.accept_popup() => {}
             (KeyCode::Enter, ..) => {
                 if let Some(line) = prompt.take() {
-                    match commands::send(&line, &cx.env(&[])) {
+                    match commands::send(&line, &cx.env(&cx.workflows)) {
                         Sent::Msgs(m) => out.msgs.extend(m),
                         Sent::Bad(why) => prompt.notice = Some(why),
                     }
                 }
             }
             (KeyCode::Tab, ..) => {
-                let (_, found) = prompt.candidates(&cx.env(&[]));
+                let (_, found) = prompt.candidates(&cx.env(&cx.workflows));
                 if prompt.popup.is_some() || !found.is_empty() {
                     if shift {
                         prompt.shift_tab();
                     } else {
-                        prompt.tab(&cx.env(&[]));
+                        prompt.tab(&cx.env(&cx.workflows));
                     }
                 } else if let Some(action) = keys.lookup(ev, Ctx::Prompt) {
                     self.act(action, cx, drawn, prompt, out);
@@ -1107,6 +1149,28 @@ impl Input {
                 };
                 self.screen(a, cx, prompt, out);
             }
+            Ctx::Models => {
+                let a = match (ev.code, c) {
+                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
+                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Enter, _) => Scr::ModelUse,
+                    (_, Some('a')) => Scr::ModelSeat(ModelTarget::Advisor),
+                    (_, Some('r')) => Scr::ModelSeat(ModelTarget::Router),
+                    (_, Some('s')) => Scr::ModelThisRun,
+                    (_, Some('/')) => Scr::ModelFilter,
+                    _ => return,
+                };
+                self.screen(a, cx, prompt, out);
+            }
+            Ctx::Workflows => {
+                let a = match (ev.code, c) {
+                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
+                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Enter, _) => Scr::WorkflowRun,
+                    _ => return,
+                };
+                self.screen(a, cx, prompt, out);
+            }
             Ctx::Outcome => {
                 let a = match c {
                     Some('1') => Scr::Outcome(Outcome::Succeeded),
@@ -1141,7 +1205,7 @@ impl Input {
                 let Some(id) = cx.palette.get(sel) else { return };
                 let close = cmd(Command::CloseModal);
                 match id.split_once(':') {
-                    Some(("cmd", name)) => commands::pick(name, Via::Palette, None, &cx.env(&[]), out),
+                    Some(("cmd", name)) => commands::pick(name, Via::Palette, None, &cx.env(&cx.workflows), out),
                     Some(("agent", name)) => {
                         out.msgs.extend([close, ui(UiIntent::Focus(Pane::Input))]);
                         prompt.set(&format!("@agent-{name} "));
@@ -1187,6 +1251,31 @@ impl Input {
                     out.jobs.push(Job::Account(AccountOp::Disable(name.clone())));
                 }
             }
+            Scr::ModelUse | Scr::ModelSeat(_) | Scr::ModelThisRun => {
+                let Some(opened) = cx.models_target else { return };
+                let target = match a {
+                    Scr::ModelSeat(seat) => seat,
+                    Scr::ModelThisRun if !matches!(opened, ModelTarget::Run(_)) => {
+                        self.note = "open the picker with /model @agent to change one run".into();
+                        return;
+                    }
+                    _ => opened,
+                };
+                let Some(model) = cx.model_refs.get(sel) else { return };
+                out.msgs.push(cmd(Command::SetModel { target, model: model.clone() }));
+                out.msgs.push(cmd(Command::CloseModal));
+            }
+            Scr::ModelFilter => {
+                self.entry = Some(Entry { kind: EntryKind::ModelFilter, label: "filter".into(), text: cx.palette_text.clone(), secret: false });
+            }
+            Scr::WorkflowRun => match cx.workflow_rows.get(sel) {
+                Some(name) if cx.workflows.contains(name) => {
+                    out.msgs.extend([cmd(Command::CloseModal), ui(UiIntent::Focus(Pane::Input))]);
+                    prompt.set(&format!("/workflow run {name} "));
+                }
+                Some(name) => self.note = format!("{name} does not parse, /workflow show {name} says why"),
+                None => {}
+            },
             Scr::Outcome(o) => {
                 out.msgs.extend([cmd(Command::CreateHandoff { outcome: Some(o) }), cmd(Command::Quit { force: false })]);
             }
@@ -1215,6 +1304,12 @@ impl Input {
             KeyCode::Char(c) if !ev.ctrl && !ev.alt => e.text.push(c),
             _ => {}
         }
+        // The picker's rows are narrowed by the graph, so the text goes there as it is typed.
+        if let Some(Entry { kind: EntryKind::ModelFilter, text, .. }) = &self.entry {
+            if matches!(ev.code, KeyCode::Backspace | KeyCode::Char(_)) {
+                out.msgs.push(Msg::Command(Command::PaletteText(text.clone())));
+            }
+        }
     }
 
     /// Enter in a text field: the next step of adding an account, or the result.
@@ -1235,6 +1330,7 @@ impl Input {
             }
             EntryKind::Message(run) if !text.is_empty() => out.msgs.push(cmd(Command::SendMessage { run, text })),
             EntryKind::Resume(run) if !text.is_empty() => out.msgs.push(cmd(Command::Resume { run, message: text, parent: None })),
+            EntryKind::ModelFilter => {}
             EntryKind::AgentName if !text.is_empty() => out.jobs.push(Job::NewAgent(text)),
             EntryKind::AccountName if !text.is_empty() => {
                 self.entry = Some(Entry { kind: EntryKind::AccountProvider(text), label: "provider (anthropic, openai, ...)".into(), text: String::new(), secret: false });
@@ -1269,7 +1365,7 @@ impl Input {
             FocusPrev => out.msgs.push(ui(UiIntent::FocusPrev)),
             Submit => {
                 if let Some(line) = prompt.take() {
-                    match commands::send(&line, &cx.env(&[])) {
+                    match commands::send(&line, &cx.env(&cx.workflows)) {
                         Sent::Msgs(m) => out.msgs.extend(m),
                         Sent::Bad(why) => prompt.notice = Some(why),
                     }

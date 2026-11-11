@@ -139,3 +139,17 @@ fn invalid_fixtures_fail_parse_and_validate_names_the_same_step() {
         assert_eq!(v.errors[0].step, want, "{file}");
     }
 }
+
+#[test]
+fn save_writes_the_golden_file_byte_for_byte_on_a_fixed_clock() {
+    use aibus_core::workflow::save;
+    use std::time::{Duration, SystemTime};
+    let dir = tempfile::tempdir().unwrap();
+    let dirs = vec![dir.path().join("project")];
+    let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let path = save(&dirs, false, "review", EXAMPLES[2].1, false, &roster(), at).unwrap();
+    let golden = std::fs::read_to_string(fixtures().join("saved/review.toml")).unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), golden);
+    // What `save` wrote is a valid workflow with the same steps as the example.
+    assert_eq!(Workflow::parse("review", &golden), Workflow::parse("review", EXAMPLES[2].1));
+}

@@ -1,6 +1,7 @@
 //! Provider trait, account registry, credentials and the fake provider.
 #![forbid(unsafe_code)]
 
+pub mod catalog;
 pub mod degrade;
 pub mod error;
 pub mod fake;

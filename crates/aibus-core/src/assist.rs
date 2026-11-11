@@ -5,7 +5,7 @@
 //! anyone; the other runs just keep the ledger.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use aibus_provider::{ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind, StreamChunk};
 use tokio::sync::mpsc;
@@ -15,10 +15,12 @@ use crate::advisor::Ledger;
 use crate::agent::AgentDef;
 use crate::credentials::CredentialSource;
 use crate::ids::{AccountName, ForkId, ModelId};
+use crate::msg::ModelTarget;
 use crate::run::STREAM_CAPACITY;
 
 /// A model on an account: how the advisor and the router reach theirs. Each has its own, apart
 /// from the lead's.
+#[derive(Clone)]
 pub struct Seat {
     pub provider: Arc<dyn Provider>,
     pub creds: Arc<dyn CredentialSource>,
@@ -26,6 +28,7 @@ pub struct Seat {
     pub account: AccountName,
 }
 
+#[derive(Clone)]
 pub struct AdvisorSeat {
     pub seat: Seat,
     /// The `advisor` definition: its prompt, tool list and custom checkpoints.
@@ -35,6 +38,7 @@ pub struct AdvisorSeat {
     pub packet_max_tokens: u64,
 }
 
+#[derive(Clone)]
 pub struct RouterSeat {
     pub seat: Seat,
     /// The `router` definition's prompt.
@@ -50,6 +54,9 @@ pub struct Assist {
     pub router: Option<RouterSeat>,
     pub ledger: Ledger,
     forks: AtomicU64,
+    /// What `/advisor` and `/router` chose, over the seats above: `None` is no choice yet,
+    /// `Some(None)` is the seat turned off.
+    chosen: Mutex<(Option<Option<Seat>>, Option<Option<Seat>>)>,
 }
 
 impl Assist {
@@ -59,7 +66,40 @@ impl Assist {
             router,
             ledger: Ledger::default(),
             forks: AtomicU64::new(0),
+            chosen: Mutex::default(),
         })
+    }
+
+    /// `/advisor` or `/router`: from the next consultation on, the seat uses `seat`, or is off
+    /// for `None`. A seat the session started without cannot be switched on this way, since it
+    /// has no definition to speak from.
+    pub fn switch(&self, target: ModelTarget, seat: Option<Seat>) {
+        let mut g = self.chosen.lock().unwrap_or_else(PoisonError::into_inner);
+        match target {
+            ModelTarget::Advisor => g.0 = Some(seat),
+            ModelTarget::Router => g.1 = Some(seat),
+            ModelTarget::Lead | ModelTarget::Run(_) => {}
+        }
+    }
+
+    /// The advisor as it is now: its definition with the model it was last switched to, or
+    /// `None` when it was never configured or has been turned off.
+    pub fn advisor_now(&self) -> Option<AdvisorSeat> {
+        let base = self.advisor.as_ref()?;
+        match &self.chosen.lock().unwrap_or_else(PoisonError::into_inner).0 {
+            None => Some(base.clone()),
+            Some(None) => None,
+            Some(Some(seat)) => Some(AdvisorSeat { seat: seat.clone(), ..base.clone() }),
+        }
+    }
+
+    pub fn router_now(&self) -> Option<RouterSeat> {
+        let base = self.router.as_ref()?;
+        match &self.chosen.lock().unwrap_or_else(PoisonError::into_inner).1 {
+            None => Some(base.clone()),
+            Some(None) => None,
+            Some(Some(seat)) => Some(RouterSeat { seat: seat.clone(), ..base.clone() }),
+        }
     }
 
     /// The next fork number: the session's lifetime count of router questions.

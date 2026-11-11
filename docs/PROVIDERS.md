@@ -4,7 +4,7 @@ What the real providers (B1.5) read from the config and from disk. The account f
 
 ## Providers are data
 
-A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, default_capabilities, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `openai-chat` or `openai-responses`, and that is the only part that is code (`aibus-provider-anthropic` serves the first, `aibus-provider-openai` the other two). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
+A provider is a definition, `{ id, api, base_url, env_vars, auth_methods, model_table, prefixes, default_capabilities, compat, headers, query }`. The `api` is the wire: `anthropic-messages`, `openai-chat`, `openai-responses` or `gemini-generate-content`, and that is the only part that is code (`aibus-provider-anthropic` serves the first, `aibus-provider-openai` the next two, `aibus-provider-gemini` the last). Everything else is one reviewed file, `crates/aibus-provider/src/presets.json`, so a vendor that speaks one of those wires is a few lines of data and no new crate. `aibus-core` never names a provider.
 
 An account says `provider = "<id>"`. The registry builds one instance per id, so an id carries its URL: two Ollama servers are two ids, and nothing conflicts.
 
@@ -34,7 +34,8 @@ Nothing to write for these:
 | `vllm` | `openai-chat` | `http://127.0.0.1:8000/v1` | `VLLM_API_KEY` | Local, no key needed. |
 | `llama-cpp` | `openai-chat` | `http://127.0.0.1:8080/v1` | none | Local, no key needed. |
 | `litellm` | `openai-chat` | `http://127.0.0.1:4000/v1` | `LITELLM_API_KEY` | Local, no key needed. |
-| `gemini-openai` | `openai-chat` | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | Google's `/v1beta/openai` shim, a subset of Chat Completions. |
+| `gemini` | `gemini-generate-content` | `https://generativelanguage.googleapis.com` | `GEMINI_API_KEY` | Google's native API (D-14). Key in the `x-goog-api-key` header. Keeps thought signatures, shows thought summaries, counts tokens, has a priced model table. Leave `/v1beta` off the `base_url`. Vertex for Gemini is not served. |
+| `gemini-openai` | `openai-chat` | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | Google's `/v1beta/openai` shim, a subset of Chat Completions: no thought signatures, no context cache, and it answers `store` with a 400. Use `gemini` when you need more than plain chat. |
 
 A model table is the built-in list for that vendor (a start, sizes only, no prices unless I know one), refreshed from the API and overridable as described under "Model tables". A model that is not listed still resolves when its id starts with one of the preset's `prefixes`.
 
@@ -45,7 +46,7 @@ For a server the presets do not know, or to change a preset (a gateway in front 
 ```toml
 [[provider]]
 id = "ollama-home"
-api = "openai-chat"                 # anthropic-messages | openai-chat | openai-responses
+api = "openai-chat"                 # anthropic-messages | openai-chat | openai-responses | gemini-generate-content
 base_url = "http://10.0.0.5:11434/v1"
 headers = { "x-team" = "home" }     # never a secret
 
@@ -61,7 +62,7 @@ Rules:
 * A new id with an OpenAI `api` starts from `openai-compatible` (open aliases, logprobs on, no cache or effort claims), so `id`, `api` and `base_url` are enough.
 * `headers` and `query` are checked like `auth.key` is: a name that looks like a credential (`authorization`, `api-key`, anything with `auth`, `key`, `token`, `secret`, `cookie`) is rejected, because credentials do not go in config. Azure's `api-key` header is the preset's `auth_header`, not a header you write.
 * `[[provider]]` is read from the user file only, like `[[account]]`: a project file cannot point a key at another server. It is ignored there with a warning.
-* `base_url` must start with `http://` or `https://`, and `api` must be one of the three.
+* `base_url` must start with `http://` or `https://`, and `api` must be one of the four.
 
 `aibus doctor` lists every configured provider with its wire, its URL and where the definition came from (a preset, a `[[provider]]`, or both). `aibus account add NAME --provider groq` asks for the key and names `GROQ_API_KEY` as the environment alternative (`--env GROQ_API_KEY`).
 
@@ -147,6 +148,16 @@ The files share one shape:
 
 `families` is the characters per token for a family (default 4). The counter used when a provider has no counting endpoint is that ratio plus a 10 % margin, so `auto_compact_at` fires a little early rather than late. A model with no `price` costs `n/a`: tokens are counted and the cost stays 0, it is never guessed. A dated snapshot (`claude-sonnet-4-5-20250929`, `gpt-4.1-2025-04-14`) uses the price of the model it is a snapshot of. A model that is not in a table still resolves when its id starts with the provider's own prefix (`claude-`, `gpt-`, `kimi-`, ...); `openai-compatible` has no prefix, so its models come from the server's list or from your `models.json`, and an account alias can name anything.
 
+### The catalog
+
+The built-in table is not inside a provider crate any more: it is `catalog/<name>.json` at the repo root, one file per table a preset names (`model_table` in `presets.json` is now always a name), and `aibus_provider::catalog::table` is the one place that `include_str!`s them, so there is exactly one copy. A preset that ships no models (a local server, Azure) names `empty` and has no file. A priced row always writes all four buckets (`cache_write_per_mtok: null` means the provider has no separate rate, which is different from a key that was forgotten). `crates/aibus-testkit/tests/catalog.rs` runs in the default test run and checks that every provider has a file, that every file parses, that no crate keeps a second copy, and that the files are in the layout the sync tool writes.
+
+`catalog-sync` (`cargo run -p aibus-testkit --bin catalog-sync -- --snapshot api.json`) refreshes the files from a saved copy of the [models.dev](https://models.dev) data set. It never fetches anything, it is not part of the build, and the binary never runs it: I save the snapshot myself (the licence has to be confirmed before the first sync, see D-F8 in `docs/DECISIONS.md`), run the tool, read `git diff` and commit. It maps `limit.context` and `limit.output` to the sizes, `cost.input`, `output`, `cache_read` and `cache_write` to the four buckets, and `tool_call`, `reasoning` and `modalities.input` to a `capabilities` object. By default it only updates models that are already in the catalog (`--add-new` adds the rest), it leaves rows with a `price_from` alone, it prints a note per change and writes nothing without `--write`, and it refuses to write when a model would lose a price bucket it has today unless you pass `--allow-price-removal`. Prices change only through a reviewed PR.
+
+A row can carry `price_from` (epoch seconds). Put the announced price in a second row with the same `id` and the date it starts, and `price()` picks the row with the latest `price_from` that has started, by the wall clock of the request. Usage that is already in the graph keeps the `cost_usd` it was given, it is never repriced. Your own `models.json` still wins over both rows.
+
+For a gateway that reports what a request cost (the `openrouter` preset, or any definition whose `base_url` is on `openrouter.ai`), the request asks for it with `usage: {"include": true}`, `usage.cost` in the response replaces the table's estimate, and `Usage.cost_source` is `provider` instead of `table`, so a dashboard can mark it. A response without `usage.cost` falls back to the table. Nothing changes at run time otherwise: the API's model list still refreshes into `~/.cache/aibus/models/`, and aibus still fetches no third-party catalog.
+
 The sizes for a model that only the API list knows (no table entry) are a guess (128k context, 8k output; 32k and 4k for `openai-compatible`). Put the real numbers in your `models.json`.
 
 ## Tests
@@ -155,6 +166,25 @@ The sizes for a model that only the API list knows (no table entry) are a guess 
 
 ## OAuth
 
-Off by default: v1 accounts use API keys. A provider takes part only when its factory lists `AuthMethodKind::OAuth` in `auth_methods`, and none of the built-in ones does yet, so today `aibus account add NAME --provider ID --oauth` stops with "has no OAuth login". The machinery is in place for the first one that does.
+Off by default: accounts use API keys unless the provider publishes a login for third-party applications (the rule is in `docs/SECURITY.md`, "Identity and logins"). Two generic flows exist in `crates/aibus/src/oauth/`, driven by a definition (kind, authorize and token URLs, optional client id, scopes, callback port, whether the server echoes `state`, and whether the result is tokens or a key): `pkce_loopback` (RFC 7636 with S256 and a one-request listener on 127.0.0.1, five minute timeout, the address is printed and, with a terminal, opened with the platform opener; pasting the redirect address also works) and `device_code` (RFC 8628, 5 s interval, `slow_down` adds 5 s).
 
 For an account that has it, the config line is `auth = { oauth = true }`. The access and refresh tokens are one JSON value in the keychain, in the entry a key would use (`aibus` / `account:NAME`), never in the config file, the graph, logs, transcripts or snapshots. Before each request the credential store checks the expiry and, when the access token has 60 seconds or less left, trades the refresh token for new ones and writes them back. If that fails (no refresh token, no flow, the provider says no) the request stops with an auth error (exit 4) telling you to run `aibus account add NAME --oauth` again. The token is sent as `Authorization: Bearer ...` like any bearer credential. The login (device code or loopback) sits behind the `OAuthFlow` trait in `aibus-core`; tests use `FakeOAuth`.
+
+## Gemini, native
+
+`aibus-provider-gemini` serves `gemini-generate-content` (D-14). The request goes to `POST {base_url}/v1beta/models/<model>:streamGenerateContent?alt=sse`, the key travels only in the `x-goog-api-key` header (never in the URL), and the model list and `countTokens` use the same host.
+
+* **Request.** The system prompt is `systemInstruction`. Tools are `functionDeclarations`, with `$schema`, `additionalProperties` and `default` stripped from the schema at every depth (a parameter that is itself called `default` stays) and `parameters` left out for a tool that takes none, since Gemini refuses an object with no properties. `ToolChoice` becomes `functionCallingConfig` (`AUTO`, `NONE`, `ANY`, and `ANY` with `allowedFunctionNames` for a named tool). A thinking budget becomes `thinkingConfig { thinkingBudget, includeThoughts: true }` on every model except the 2.0 and 1.x families, which refuse it.
+* **Stream.** Text parts are text, `thought: true` parts are thinking, and a `functionCall` part is one whole call (start, one input fragment, end). Gemini says `STOP` for a reply that called tools; aibus reports `ToolUse` then. A `thoughtSignature` on a call is kept on the `ToolUse` block (`signature`) and sent back unchanged with the call in the next request, which Gemini 3 insists on.
+* **Usage.** Input is `promptTokenCount` minus `cachedContentTokenCount`, output is `candidatesTokenCount` plus `thoughtsTokenCount`, cache read is the cached count, `reasoning_tokens` is the thoughts count. Caching is implicit on Google's side, so `cache_hint` is dropped.
+* **Stops.** `MAX_TOKENS` is max tokens; `SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII` and a blocked prompt are `ContentFilter`; `MALFORMED_FUNCTION_CALL` is an `InvalidRequest` that carries Google's raw text.
+* **Errors.** Google's `{ error: { code, status, message } }` maps by status: 429 `RESOURCE_EXHAUSTED` is `RateLimit` (the wait comes from `error.details[].retryDelay`, since there is no header), 401 and 403 are `Auth`, a 400 "API key not valid" is `Auth` too (Google does not send a 401 for it), 404 is `ModelNotFound`, and a 400 about the input token count is `ContextTooLong`.
+* **Models.** `catalog/gemini.json` has gemini-3-pro-preview, 2.5-pro, 2.5-flash, 2.5-flash-lite, 2.0-flash and 2.0-flash-lite with context window, max output and `reasoning`. Prices are Google's list prices for prompts up to 200k tokens, the tier aibus prices (long-context tiers are out of scope); the F8 sync is where they get re-checked. A dated snapshot id (`gemini-2.5-flash-20250617`) has the undated price, and any `gemini-` id resolves with no price until the table knows it. `refresh_models` reads `/v1beta/models`, keeps what can `generateContent`, and takes the sizes Google reports for models the table has not heard of.
+
+### OpenRouter
+
+`aibus account add NAME --provider openrouter --oauth` (until the provider list has its own `openrouter` entry: `--provider openai-compatible --base-url https://openrouter.ai/api/v1 --oauth`). It needs no client registration. The login returns a durable API key, which is stored like any key, so the account ends up as `auth = { keyring = true }` and there is nothing to refresh. The callback tries port 3000 first and falls back to a free one.
+
+### Token logins
+
+For a provider whose login returns tokens, the config line is `auth = { oauth = true }`.The access and refresh tokens are one JSON value in the keychain, in the entry a key would use (`aibus` / `account:NAME`), never in the config file, the graph, logs, transcripts or snapshots. Before each request the credential store checks the expiry and, when the access token has 60 seconds or less left, trades the refresh token for new ones and writes them back. If that fails (no refresh token, no flow, the provider says no) the request stops with an auth error (exit 4) telling you to run `aibus account add NAME --oauth` again. The token is sent as `Authorization: Bearer ...` like any bearer credential. The login sits behind the async `OAuthFlow` trait in `aibus-core` (every call takes a cancel token); tests use `FakeOAuth` and `aibus_testkit::oauth::FakeAuthServer`. Two requests that find an expired token share one refresh: a lock per account, and the second reads what the first stored. No provider uses token logins yet, so only `account add` has a flow wired in.

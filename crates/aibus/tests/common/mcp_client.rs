@@ -72,6 +72,14 @@ pub struct McpClient {
     stderr: Arc<Mutex<String>>,
     next_id: u64,
     pub protocol: Protocol,
+    /// What this client says it can do, in `initialize` and in the `_meta` of every request.
+    /// `{}` unless a test sets it (`{"elicitation": {"form": {}}}` for the confirmation tests).
+    pub capabilities: Value,
+    /// Answers a server-to-client `elicitation/create` (2025-11-25) with the `result` to send. With
+    /// none set, the client cancels.
+    pub answer_elicitation: Option<Box<dyn FnMut(&Value) -> Value>>,
+    /// The `params` of every `elicitation/create` the server sent.
+    pub elicitations: Vec<Value>,
     /// Every line the server wrote to stdout, in order.
     pub stdout: Vec<String>,
     /// The exchanges so far, for `assert_matches`.
@@ -142,6 +150,9 @@ impl McpClient {
             stderr,
             next_id: 1,
             protocol,
+            capabilities: json!({}),
+            answer_elicitation: None,
+            elicitations: Vec::new(),
             stdout: Vec::new(),
             transcript: Transcript::new(home),
         }
@@ -195,7 +206,7 @@ impl McpClient {
         if self.protocol == Protocol::V2026_07_28 {
             params["_meta"] = json!({
                 META_VERSION: self.protocol.as_str(),
-                META_CAPABILITIES: {},
+                META_CAPABILITIES: self.capabilities.clone(),
                 META_CLIENT_INFO: { "name": CLIENT_NAME, "version": "1.0.0" },
             });
         }
@@ -205,6 +216,15 @@ impl McpClient {
             let m = self.next_message();
             if m.get("id") == Some(&json!(id)) && m.get("method").is_none() {
                 break m;
+            }
+            if m.get("method") == Some(&json!("elicitation/create")) && m.get("id").is_some() {
+                self.elicitations.push(m["params"].clone());
+                let result = match self.answer_elicitation.as_mut() {
+                    Some(answer) => answer(&m["params"]),
+                    None => json!({ "action": "cancel" }),
+                };
+                let reply = json!({ "jsonrpc": "2.0", "id": m["id"], "result": result });
+                self.write_line(&reply.to_string());
             }
         };
         if !matches!(method, "server/discover" | "initialize") {
@@ -241,7 +261,7 @@ impl McpClient {
             "initialize",
             json!({
                 "protocolVersion": "2025-11-25",
-                "capabilities": {},
+                "capabilities": self.capabilities.clone(),
                 "clientInfo": { "name": CLIENT_NAME, "version": "1.0.0" },
             }),
         )?;

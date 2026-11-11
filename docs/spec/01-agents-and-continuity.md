@@ -139,6 +139,8 @@ The lead's `delegate` tool description embeds the roster: every non-built-in def
 
 CLI `--model <alias|id>` sets the lead's model for the session; `--advisor <alias|id>` and `--router <alias|id>` set those roles (the recording's prompt line reads `claude --model sonnet --advisor opus`, frames f01 to f37). A definition's `model` beats the parent's; the CLI only sets the lead's.
 
+In the TUI, `/model [@target] <ref>` changes the model of the lead (no target), of `@advisor` or `@router`, or of one run (`@<agent>`, its newest run, or `@<run id prefix>`); `/advisor <ref|off>` and `/router <ref|off>` are the seat shorthands, and `off` is only for a seat. The change applies from the **next request**: a request already in flight finishes on the model it started with, and the next one (the next turn of a tool loop included) goes to the new model on the account that serves it. An unknown reference, or one no account can serve, changes nothing and leaves one log line. The header and the cards show the new model as soon as the switch is accepted.
+
 ## 4. Delegation
 
 ### 4.1 Automatic
@@ -471,6 +473,8 @@ on_fail = "retry:2"          # re-run kraken then arbiter, twice max
 ```
 
 `/fix <text>` in the TUI or `aibus run --workflow fix "<text>"` executes the chain under the lead. Each step is an ordinary run; the lead sees each result and can stop the chain. The built-in workflows shipped as examples are `fix`, `build`, `review`, `explore`, copied from the Continuous-Claude chains with the agents renamed to aibus built-ins where no definition exists.
+
+A workflow becomes a file and comes back later through four subcommands in the TUI. `/workflow list` and `/workflow show <name>` open a modal (the rows, or the file as text with the validator's summary under it). `/workflow save <name> [--user] [--force]` takes the latest drafted workflow (`model:workflow:draft`), runs the validator over it against the real roster, refuses on errors (and shows them), and writes `.aibus/workflows/<name>.toml` (or `~/.config/aibus/workflows/` with `--user`, mode 0600) atomically. The file starts with two comment lines, `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`, which `Workflow::parse` ignores like any TOML comment. The name has to match `^[a-z0-9][a-z0-9_-]{0,63}$` and is checked before the disk is touched; the path is the directory plus that name, never the argument. An existing file is refused unless `--force`. `/workflow run <name> <input>` is `/workflow <name> <input>` under a second name.
 
 ## 9. Tools
 

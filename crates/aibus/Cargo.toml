@@ -7,26 +7,36 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[features]
-# Forwarded to the TUI; off by default, release.yml builds defaults.
-flow-diagram = ["aibus-tui/flow-diagram"]
-
 [dependencies]
 aibus-core.workspace = true
 aibus-graph.workspace = true
+aibus-mcp.workspace = true
 aibus-provider.workspace = true
 aibus-provider-anthropic.workspace = true
+aibus-provider-gemini.workspace = true
 aibus-provider-http.workspace = true
 aibus-provider-openai.workspace = true
 aibus-tui.workspace = true
 async-trait = "0.1"
+base64 = "0.22"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
 notify = "8"
+rand = "0.9"
+# `aibus mcp --http` (E11): the listener lives here and nowhere else; `aibus-mcp` stays
+# transport-free. `server` + the Streamable HTTP service, no client and no reqwest.
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-streamable-http-server"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+subtle = "2"
 rpassword = "7"
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net", "io-util"] }
 tokio-util = "0.7"
 toml = "0.8"
 toml_edit = "0.22"
@@ -42,5 +52,6 @@ signal-hook = "0.3"
 tempfile = "3"
 aibus-testkit.workspace = true
 zstd = "0.13"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net", "io-util", "test-util"] }
 regex = "1"
 ulid = "1"

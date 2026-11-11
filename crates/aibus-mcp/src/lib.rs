@@ -5,6 +5,9 @@
 
 mod audit;
 mod limits;
+pub mod prompts;
+mod read;
+pub mod resources;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -13,9 +16,11 @@ use std::time::Instant;
 use aibus_core::persist::paths::Paths;
 use aibus_core::{workflow, Redactor};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
-    ToolAnnotations,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, Implementation, JsonObject, ListPromptsResult, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+    ReadResourceResponse, ReadResourceResult, ResourceContents, ServerCapabilities, ServerConfig,
+    Tool, ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler, ServiceExt};
@@ -123,7 +128,7 @@ impl Server {
             "required": ["name", "scope", "path", "description", "ok"],
             "additionalProperties": false,
         });
-        vec![Tool::new(
+        let mut tools = vec![Tool::new(
             "workflow_list",
             "List the workflows of this project and of the user, with the parse error of any file that is broken.",
             schema(json!({
@@ -142,7 +147,9 @@ impl Server {
         })))
         .with_annotations(
             ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false),
-        )]
+        )];
+        tools.extend(read::tools());
+        tools
     }
 
     /// One `tools/call`, the only way in. It holds what a caller must not be able to skip: the
@@ -188,7 +195,9 @@ impl Server {
                 "rate limit: at most {CALLS_PER_MINUTE} tool calls a minute, try again in {secs} s"
             ))]));
         }
-        // `workflow_list` is the only tool, and takes nothing.
+        if name != "workflow_list" {
+            return self.read_tool(name, args);
+        }
         if args.as_object().is_some_and(|a| !a.is_empty()) {
             return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));
         }
@@ -201,13 +210,7 @@ impl Server {
     /// project or to `~`.
     fn list_workflows(&self) -> Value {
         let dirs = workflow::dirs(&self.project, Some(&self.config));
-        let shorten = |text: &str| -> String {
-            let mut out = text.replace(&format!("{}/", self.project.display()), "");
-            if let Some(home) = &self.home {
-                out = out.replace(&home.display().to_string(), "~");
-            }
-            out
-        };
+        let shorten = |text: &str| self.shorten(text);
         let rows: Vec<Value> = workflow::list(&dirs)
             .into_iter()
             .map(|(name, path, parsed)| {
@@ -232,10 +235,10 @@ impl Server {
 
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().enable_prompts().build())
             .with_server_info(Implementation::new("aibus", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "aibus workflows. Start with workflow_list. This server is read-only unless it was started with --allow flags.",
+                "aibus workflows. Start with workflow_list; workflow_validate checks a draft before anything is written. This server is read-only unless it was started with --allow flags.",
             )
     }
 
@@ -267,6 +270,70 @@ impl ServerHandler for Server {
         let client = context.client_info();
         self.call(client.as_ref(), &request.name, request.arguments, Instant::now())
             .map(CallToolResponse::from)
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(ListResourcesResult::with_all_items(resources::list()))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        Ok(ListResourceTemplatesResult::with_all_items(resources::templates()))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let started = Instant::now();
+        let read = self.read_resource_text(&request.uri);
+        let uri = self.redactor.redact(&request.uri).into_owned();
+        self.audit.record(
+            context.client_info().as_ref(),
+            "resources/read",
+            None,
+            &json!({ "uri": uri }),
+            read.is_ok(),
+            started.elapsed(),
+        );
+        let (mime, text) = read?;
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(text, uri).with_mime_type(mime)]).into())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(prompts::list()))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let started = Instant::now();
+        let args = request.arguments.unwrap_or_default();
+        let got = self.get_prompt_text(&request.name, &args);
+        let name = self.redactor.redact(&request.name).into_owned();
+        self.audit.record(
+            context.client_info().as_ref(),
+            "prompts/get",
+            Some(&name),
+            &Value::Object(args),
+            got.is_ok(),
+            started.elapsed(),
+        );
+        got.map(GetPromptResponse::from)
     }
 }
 

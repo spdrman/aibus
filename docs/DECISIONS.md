@@ -262,6 +262,27 @@ Gated calls, taken at the recommended default:
 
 **Why.** Each keeps the first PR to what its acceptance criteria name and leaves the next PR a place to put the write and run tools.
 
+## E5 (2026-11-11): the read tools, resources and prompts of `aibus mcp`, and where I bent the issue (#100)
+
+**Context.** #100 adds five read tools, the `aibus://` resources and three prompts to `aibus-mcp`. A few details in the issue could not be followed to the letter.
+
+**Decision.**
+
+1. `workflow_dry_run` returns `agent` as an object (`{name, role, model, tools, permission_mode}`) per step, because the issue's shape has two `agent` keys in one object. `scope` is optional on `get`, `explain`, `dry_run` and `validate`: left out, the project's file wins, as in `workflow list`.
+2. A tool that reads files puts the redacted value in `structuredContent` and a pretty-printed copy in the text block, under the one-line data header, with aibus markers escaped and a "cut at" note past `limits.result_max_bytes` (the default, 32 KiB: the server does not read config). `structuredContent` is never cut. `workflow_list` and its golden transcript are untouched. The conformance test that compared the text block to `structuredContent` now skips that header line.
+3. Budgets in `workflow_dry_run` are the built-in `Limits::default()`. The server does not read `config.toml`, so a user's own limits do not show; `docs/MCP.md` says so.
+4. The agent roster is the CLI's discovery without `agents.extra_dirs` (that setting lives in config, which the server does not read).
+5. `aibus-mcp` has no provider dependency, and `read_tools.rs` checks the manifest. That is the proof that a dry run cannot call a model, in place of a provider that panics: there is no seat to put one in.
+6. Resources are an allow-list in `resources.rs`: any `aibus://` uri not matching one of the four is `-32602`, and so is a workflow that does not exist. Names are `[A-Za-z0-9_-]{1,64}`, so `..` and `%2e%2e` never reach the file system, and a symlink or a file over 1 MiB is refused. The workflow resource returns the file redacted but not wrapped, since the mime type promises TOML.
+7. Resource reads and prompt gets are audited like tool calls (`resources/read` with the uri, `prompts/get` with the name). They do not spend rate-limit tokens: the limit in the epic is for tool calls.
+8. `aibus-core/tests/security/mcp_server.rs` cannot name `aibus-mcp` (core is below it), so the redaction tests live in `crates/aibus-mcp/tests/read_tools.rs` and `resources.rs`, as the E4 decision did for the stdio test.
+9. `workflow::reads` and `workflow::preview` are new public functions in `aibus-core`, because only that module knows the `{{...}}` syntax.
+10. The golden transcripts are written by `AIBUS_UPDATE_TRANSCRIPTS=1` on the release PR run; this PR has the tests and not the files, since the suites do not run before then.
+
+**Alternatives.** Wrap `structuredContent` strings too (rejected: it is data for a program, and the schema says string). Read `config.toml` for budgets and extra agent dirs (rejected: breaks "never reads config"). A provider that panics (rejected, 5).
+
+**Why.** Each keeps the surface small and the secret boundary where the epic put it.
+
 ## D-14: Gemini gets a native adapter crate, and the OpenAI shim stays as a preset (#114)
 
 **Context.** The epic's open decision 3 asked whether Google's OpenAI shim (`gemini-openai`, F2) is enough. The shim covers chat with tools. It does not carry thought signatures (Gemini 3 rejects a function-calling turn that lacks the signature of the previous call), does not show thought summaries, has no context cache, no `countTokens`, and answers `store` with a 400. Gemini is also the one widely used family that is neither Anthropic nor OpenAI shaped, and the owner wants no open decisions left on the epic.

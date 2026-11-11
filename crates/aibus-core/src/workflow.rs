@@ -342,6 +342,36 @@ fn render(template: &str, scope: &Scope<'_>) -> String {
     out
 }
 
+/// What the prompt of one step reads, in the order it names them and each once: `input`,
+/// `prev.summary` or `steps.<agent>.summary`. Both MCP's `workflow_explain` and `workflow_dry_run`
+/// need the template syntax and only this module may know it.
+pub fn reads(prompt: &str) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    let _ = scan(prompt, |_, key| {
+        if let Some(k) = key.filter(|k| var(k).is_some()) {
+            if !keys.iter().any(|seen| seen == k) {
+                keys.push(k.to_owned());
+            }
+        }
+    });
+    keys
+}
+
+/// Every prompt of `wf` rendered for `input`, with `<summary of step N (agent)>` where a later
+/// step would read an earlier one's summary. Nothing runs.
+pub fn preview(wf: &Workflow, input: &str) -> Vec<String> {
+    let mut steps: BTreeMap<String, String> = BTreeMap::new();
+    let mut prev: Option<String> = None;
+    let mut out = Vec::new();
+    for (i, step) in wf.steps.iter().enumerate() {
+        out.push(render(&step.prompt, &Scope { input, prev: prev.as_deref(), steps: &steps }));
+        let placeholder = format!("<summary of step {} ({})>", i + 1, step.agent);
+        steps.insert(step.agent.to_string(), placeholder.clone());
+        prev = Some(placeholder);
+    }
+    out
+}
+
 /// What a finished step handed back.
 #[derive(Clone, PartialEq, Debug)]
 pub struct StepOutcome {

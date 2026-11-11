@@ -16,6 +16,7 @@ use crate::agent::AgentDef;
 use crate::credentials::CredentialSource;
 use crate::ids::{AccountName, ForkId, ModelId};
 use crate::msg::ModelTarget;
+use crate::run::Fallback;
 use crate::run::STREAM_CAPACITY;
 
 /// A model on an account: how the advisor and the router reach theirs. Each has its own, apart
@@ -26,6 +27,8 @@ pub struct Seat {
     pub creds: Arc<dyn CredentialSource>,
     pub model: ModelId,
     pub account: AccountName,
+    /// Where a request goes when `account` fails before answering (F9).
+    pub fallback: Option<Arc<Fallback>>,
 }
 
 #[derive(Clone)]
@@ -108,18 +111,42 @@ impl Assist {
     }
 }
 
-/// One completion on `seat`. Returns the response and the logprobs the provider streamed.
+/// One completion on `seat`. Returns the response and the logprobs the provider streamed. When
+/// the seat's account fails with a kind its fallback answers to, the same request goes to the
+/// next account (F9); the lead is not waiting on this beyond the one extra request.
 pub async fn complete(
     seat: &Seat,
     req: ChatRequest,
     cancel: &CancellationToken,
 ) -> Result<(ChatResponse, Vec<(String, f32)>), ProviderError> {
-    let creds = seat
-        .creds
+    let mut tried = vec![seat.account.clone()];
+    let mut on = (seat.provider.clone(), seat.creds.clone(), seat.account.clone(), req.model.clone());
+    loop {
+        let mut req = req.clone();
+        req.model = on.3.clone();
+        let e = match complete_on(&on.0, &*on.1, req, cancel).await {
+            Ok(done) => return Ok(done),
+            Err(e) => e,
+        };
+        let Some(to) = seat.fallback.as_ref().and_then(|f| f.next(&on.2, &tried, &e)) else {
+            return Err(e);
+        };
+        tried.push(to.account.clone());
+        on = (to.provider, to.creds, to.account, to.model);
+    }
+}
+
+async fn complete_on(
+    provider: &Arc<dyn Provider>,
+    creds: &dyn CredentialSource,
+    req: ChatRequest,
+    cancel: &CancellationToken,
+) -> Result<(ChatResponse, Vec<(String, f32)>), ProviderError> {
+    let creds = creds
         .credential()
         .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
     let (out, mut chunks) = mpsc::channel(STREAM_CAPACITY);
-    let call = seat.provider.stream(&creds, req, out, cancel.clone());
+    let call = provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
     let mut logprobs = Vec::new();
     let mut keep = |chunk| {

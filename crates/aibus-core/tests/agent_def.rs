@@ -577,3 +577,16 @@ fn cli_json_errors_are_errors() {
     );
     assert_eq!(ok.warnings, ["--agents r: unknown key `extra`"]);
 }
+
+#[test]
+fn fallback_is_absent_a_list_or_an_empty_list_that_pins_the_run() {
+    let (d, w) = ok("---\nname: a\ndescription: x\n---\nBe brief.\n");
+    assert!(w.is_empty());
+    assert_eq!(d.fallback, None);
+    let (d, w) = ok("---\nname: a\ndescription: x\nfallback: [anthropic-personal, bedrock]\n---\nBe brief.\n");
+    assert!(w.is_empty());
+    assert_eq!(d.fallback, Some(vec![AccountName("anthropic-personal".into()), AccountName("bedrock".into())]));
+    let (d, w) = ok("---\nname: a\ndescription: x\nfallback: []\n---\nBe brief.\n");
+    assert!(w.is_empty());
+    assert_eq!(d.fallback, Some(Vec::new()), "[] stays put, which is not the same as absent");
+}

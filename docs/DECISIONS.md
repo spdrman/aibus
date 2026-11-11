@@ -526,3 +526,13 @@ Gated calls, taken at the recommended default:
 
 **Why.** The registry stays the only place that knows a command, and the docs fail loudly when they stop agreeing with it.
 
+## D-F9: Account fallback is a chain built at launch, a switch is a message, and cooling is in memory (#117)
+
+**Context.** Issue #117 lets a run move to another account before its first token. It left some details open and I took the recommended default for each.
+
+**Decision.** The chain is built when a run launches (`ChildLauncher::fallback_for`): each name of the definition's `fallback`, else the account's, is picked for the run's model like any account, so a missing key or an unresolvable model drops it with a log line. It travels in `RunDeps.fallback` and in `Seat.fallback` as a `Fallback { chain, on, accounts }`, whose `next(failed, tried, error)` is the one place that decides, for the run loop and for `assist::complete` alike. A run that has switched stays on the new account until it fails there or `/model` moves it, and `tried` stops a turn from going back to an account it already used. The switch is `Msg::RunSwitched`, which sets the run's `account` and `model` in `meta` and a `fallback_from` the title reads for `↷ account`; the transcript gets a `switch` line and keeps the `start` line as the first account. Cooling lives in `AccountRegistry`, keyed by account with an expiry on tokio's clock (`None` for an auth failure, which waits for `tested`), and `select` skips a cooling account at the default, inherit and pinned steps and in the scan, but not for `--account` and not when it is the only one that can serve. `fallback_on` is a closed `FallbackKind` list in config. The `Auth` cooldown ends on `tested`, which a reload (a login, a logout) reaches by building a new registry; I did not add a hook to `aibus account test` in another process.
+
+**Alternatives.** Returning to the first account at the next turn once it is no longer cooling (rejected: it makes the header flip and splits one conversation over two caches for a gain of a few turns). Putting the registry in `RunDeps` and building switches in the loop (rejected: credentials are built in the binary, so the chain has to be). Persisting cooldowns (rejected by the issue).
+
+**Why.** One decision function with one error and one clock keeps the loop change small, and a message plus a meta field is how the rest of the graph hears about a run's account.
+

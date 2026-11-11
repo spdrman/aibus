@@ -1546,6 +1546,16 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.log("error", &format!("io error in {context}"))
         }
         Msg::Shutdown { reason } => r.put(SHUTDOWN, s(reason.as_str())),
+        Msg::RunSwitched { run, from, to, model } => {
+            let id = run.to_string();
+            if r.run_exists(&id) {
+                let meta = r.cur(&run_key(&id, "meta")).clone();
+                let meta = with(&with(&meta, "model", s(&model.0)), "account", s(&to.0));
+                // The card reads this to show `↷ <account>` for the turn.
+                r.put(run_key(&id, "meta"), with(&meta, "fallback_from", s(&from.0)));
+                r.log("info", &format!("{id}: account {} -> {} ({})", from.0, to.0, model.0));
+            }
+        }
         Msg::ModelSwitched { id, target, to } => {
             let assist = r.now(SESSION_ASSIST);
             let rest: Vec<Value> = as_list(get(&assist, "pending").unwrap_or(&NULL))

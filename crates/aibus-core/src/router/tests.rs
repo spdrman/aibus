@@ -15,6 +15,7 @@ fn seat(fake: Arc<FakeProvider>) -> RouterSeat {
             creds: Arc::new(fake_credential()),
             model: aibus_provider::ModelId("fake-small".into()),
             account: crate::ids::AccountName("fake".into()),
+            fallback: None,
         },
         system: "route".into(),
         threshold: 0.85,

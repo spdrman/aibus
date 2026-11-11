@@ -60,6 +60,7 @@ Names are `snake_case` in aibus. The loader also accepts the Claude Code `camelC
 | `router` | router only | map | | `threshold` (f32, 0.85), `questions` (list), see section 7.2. |
 | `initial_prompt` | no | string | | Auto-submitted first turn when run as the session's lead (`aibus --agent name`). |
 | `auto_compact_at` | no | u32 tokens | from model's context size | Compact this run's context when input tokens pass this value. |
+| `fallback` | no | list of account names | the account's `fallback` | Accounts to try, in order, when the run's account fails before the first token (04 section 4.3). `[]` keeps the run on its account. |
 
 Unknown keys are a validation warning, not an error (`aibus agent validate` prints them). A missing `name` or `description` is an error.
 

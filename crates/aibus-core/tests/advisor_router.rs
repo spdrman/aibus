@@ -53,6 +53,7 @@ fn seat(fake: &Arc<FakeProvider>, account: &str) -> Seat {
         creds: Arc::new(fake_credential()),
         model: ModelId("fake-small".into()),
         account: AccountName(account.into()),
+        fallback: None,
     }
 }
 
@@ -154,6 +155,7 @@ async fn go(s: Setup<'_>, before: impl FnOnce(&World)) -> (World, Vec<Msg>) {
         )),
         compactor: None,
         assist: Some(assist),
+        fallback: None,
     };
     let handle = spawn(cfg, deps);
     let mut msgs = Vec::new();

@@ -218,3 +218,19 @@ For an account that has it, the config line is `auth = { oauth = true }`. The ac
 ### Token logins
 
 For a provider whose login returns tokens, the config line is `auth = { oauth = true }`.The access and refresh tokens are one JSON value in the keychain, in the entry a key would use (`aibus` / `account:NAME`), never in the config file, the graph, logs, transcripts or snapshots. Before each request the credential store checks the expiry and, when the access token has 60 seconds or less left, trades the refresh token for new ones and writes them back. If that fails (no refresh token, no flow, the provider says no) the request stops with an auth error (exit 4) telling you to run `aibus account add NAME --oauth` again. The token is sent as `Authorization: Bearer ...` like any bearer credential. The login sits behind the async `OAuthFlow` trait in `aibus-core` (every call takes a cancel token); tests use `FakeOAuth` and `aibus_testkit::oauth::FakeAuthServer`. Two requests that find an expired token share one refresh: a lock per account, and the second reads what the first stored. No provider uses token logins yet, so only `account add` has a flow wired in.
+
+## Account fallback
+
+An account can name others to try when it fails before the first token of a turn:
+
+```toml
+[defaults]
+fallback_on = ["quota", "auth", "overloaded"]   # the default
+
+[[account]]
+name = "anthropic-work"
+provider = "anthropic"
+fallback = ["anthropic-personal", "bedrock"]
+```
+
+The run asks the next account the same thing, with the model resolved again there (an account that cannot serve it, or has no key, is skipped with a log line). It never switches after the first `TextDelta`, `ThinkingDelta` or `ToolUseStart`, because the user has already seen output from the first account. The five retries of a retryable error are per account. The account that gave way sits out of selection for a while (a quota until its window resets or 30 minutes, an overload 60 seconds, a failed login until `aibus account test` passes), and that is kept in memory only. The run's header shows `↷ anthropic-personal`. An agent definition can set `fallback: []` to stay put. The advisor and the router fall back the same way. The full rules are in 04 section 4.3.

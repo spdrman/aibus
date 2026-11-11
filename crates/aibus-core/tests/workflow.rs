@@ -105,6 +105,7 @@ impl Launcher for ChainLauncher {
                 hooks: self.hooks.clone(),
                 compactor: None,
                 assist: None,
+                fallback: None,
             },
         ))
     }
@@ -231,6 +232,7 @@ impl Rig {
                 hooks: self.launcher.hooks.clone(),
                 compactor: None,
                 assist: None,
+                fallback: None,
             },
         );
         self.orch.adopt(self.lead, handle.mailbox.clone(), handle.cancel.clone());

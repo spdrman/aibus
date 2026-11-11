@@ -229,6 +229,7 @@ async fn the_page_is_a_tool_result_and_never_part_of_the_system_prompt() {
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
             assist: None,
+            fallback: None,
         },
     );
     loop {

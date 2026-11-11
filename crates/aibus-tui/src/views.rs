@@ -393,6 +393,7 @@ pub fn transcript(store: &Store, t: &mut Tracker) -> Value {
         ("role", s(&meta_s("role"))),
         ("model", s(&meta_s("model"))),
         ("account", s(&meta_s("account"))),
+        ("fallback_from", s(&meta_s("fallback_from"))),
         ("status", s(&status)),
         ("live", Value::Bool(live)),
         ("retryable", Value::Bool(retryable)),

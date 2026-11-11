@@ -64,6 +64,7 @@ fn def(allow: Option<&[&str]>, deny: &[&str]) -> AgentDef {
         router: None,
         initial_prompt: None,
         auto_compact_at: None,
+        fallback: None,
         system_prompt: String::new(),
         source: DefSource {
             path: None,

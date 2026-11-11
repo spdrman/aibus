@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::budget::Budgets;
 use super::coalesce::Coalescer;
+use super::fallback::Fallback;
 use super::result;
 use super::transcript::{self, Kind, Line, RunMeta, Transcript};
 use super::{
@@ -160,6 +161,9 @@ pub struct RunDeps {
     pub compactor: Option<Arc<dyn Compactor>>,
     /// The advisor, the router and the session ledger (B2.3). Without it nobody is consulted.
     pub assist: Option<Arc<Assist>>,
+    /// The accounts the run moves to when its own fails before the first token of a turn (F9).
+    /// Without one a failure ends or retries as it always did.
+    pub fallback: Option<Arc<Fallback>>,
 }
 
 /// Summarises the start of a conversation into a `compact_boundary` message (01 section 5.5).
@@ -675,6 +679,8 @@ impl Task<'_> {
         let mut retries = 0;
         let mut compacted = false;
         let mut waiting = false;
+        // The accounts this turn has used, so a fallback never goes back to one.
+        let mut tried = vec![self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone()];
         // The router may have named the tool to call; it holds for every attempt of this turn.
         let choice = match self.hint.lock().unwrap_or_else(PoisonError::into_inner).take() {
             Some(name) => ToolChoice::Named(name),
@@ -689,7 +695,8 @@ impl Task<'_> {
             }
             // Taken now: a switch that lands while this request runs applies to the next one.
             let to = self.now.lock().unwrap_or_else(PoisonError::into_inner).clone();
-            let e = match stream_turn(self.deps, &to, cfg.run, req, self.cancel).await {
+            let (result, emitted) = stream_turn(self.deps, &to, cfg.run, req, self.cancel).await;
+            let e = match result {
                 Ok(resp) => return Ok(resp),
                 Err(e) => e,
             };
@@ -697,6 +704,11 @@ impl Task<'_> {
                 return Err(End::of(RunStatus::Cancelled));
             }
             match e.kind {
+                ProviderErrorKind::Auth | ProviderErrorKind::Quota
+                    if self.fall_back(&e, emitted, &mut tried).await =>
+                {
+                    retries = 0;
+                }
                 ProviderErrorKind::Auth => {
                     let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
                     let what = if e.message.is_empty() {
@@ -712,7 +724,7 @@ impl Task<'_> {
                     return Err(end);
                 }
                 ProviderErrorKind::Quota => {
-                    let who = &cfg.account;
+                    let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
                     let banner = format!(
                         "account {who}: quota or billing cap reached ({}), top up the plan or switch account, then run aibus account test {who}",
                         e.message
@@ -765,6 +777,9 @@ impl Task<'_> {
                         () = sleep(wait) => {}
                     }
                 }
+                // The retries on this account are spent: an overload (or, if asked for, a rate
+                // limit) moves on to the next account.
+                _ if self.fall_back(&e, emitted, &mut tried).await => retries = 0,
                 _ => {
                     return Err(failed(
                         conv,
@@ -774,6 +789,32 @@ impl Task<'_> {
                 }
             }
         }
+    }
+
+    /// F9: `e` came from the account the run is on. When nothing of the turn has reached the
+    /// user yet and the fallback chain has an account for this kind of failure, the run moves
+    /// there (the transcript and the graph record it) and this answers true: the caller asks
+    /// again, with a fresh retry budget. Never after the first `TextDelta`, `ThinkingDelta` or
+    /// `ToolUseStart`.
+    async fn fall_back(&self, e: &ProviderError, emitted: bool, tried: &mut Vec<AccountName>) -> bool {
+        let Some(fb) = self.deps.fallback.as_ref().filter(|_| !emitted) else {
+            return false;
+        };
+        let from = self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
+        let Some(to) = fb.next(&from, tried, e) else {
+            return false;
+        };
+        tried.push(to.account.clone());
+        self.write_line(&Line::Switch { account: to.account.clone(), model: to.model.clone() }).await;
+        self.send(Msg::RunSwitched {
+            run: self.cfg.run,
+            from,
+            to: to.account.clone(),
+            model: to.model.clone(),
+        })
+        .await;
+        *self.now.lock().unwrap_or_else(PoisonError::into_inner) = to;
+        true
     }
 
     /// The card's "waiting for ..." note (empty clears it).
@@ -1392,13 +1433,13 @@ async fn stream_turn(
     run: RunId,
     req: ChatRequest,
     cancel: &CancellationToken,
-) -> Result<ChatResponse, ProviderError> {
+) -> (Result<ChatResponse, ProviderError>, bool) {
     let (out, mut chunks) = mpsc::channel::<StreamChunk>(STREAM_CAPACITY);
     // Resolved for every request, so a rotated key is picked up within the store's cache time.
-    let creds = to
-        .creds
-        .credential()
-        .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
+    let creds = match to.creds.credential() {
+        Ok(c) => c,
+        Err(e) => return (Err(ProviderError::new(ProviderErrorKind::Auth, e.to_string())), false),
+    };
     let span = tracing::trace_span!(
         target: "aibus_trace",
         "provider_call",
@@ -1410,6 +1451,14 @@ async fn stream_turn(
     let call = to.provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
 
+    // Whether anything the user could see has come out: after that the turn cannot move.
+    let mut emitted = false;
+    let mut seen = |c: &StreamChunk| {
+        emitted |= matches!(
+            c,
+            StreamChunk::TextDelta(_) | StreamChunk::ThinkingDelta(_) | StreamChunk::ToolUseStart { .. }
+        );
+    };
     let mut co = Coalescer::default();
     let send = |batch: Vec<StreamChunk>| async move {
         if deps
@@ -1430,6 +1479,7 @@ async fn stream_turn(
             }
             r = &mut call => break r,
             Some(chunk) = chunks.recv() => {
+                seen(&chunk);
                 if !std::mem::replace(&mut first, true) {
                     span.record("ttfb_ms", began.elapsed().as_millis() as u64);
                 }
@@ -1445,6 +1495,7 @@ async fn stream_turn(
         }
     };
     while let Ok(chunk) = chunks.try_recv() {
+        seen(&chunk);
         if !std::mem::replace(&mut first, true) {
             span.record("ttfb_ms", began.elapsed().as_millis() as u64);
         }
@@ -1458,7 +1509,7 @@ async fn stream_turn(
     if let Ok(resp) = &result {
         span.record("tokens", resp.usage.input_tokens + resp.usage.output_tokens);
     }
-    result
+    (result, emitted)
 }
 
 fn last_text(conv: &Conversation) -> String {

@@ -95,19 +95,27 @@ fn update_row(row: &mut Value, m: &Value, losses: &mut Vec<String>, file: &str, 
     if let Some(n) = m["limit"]["output"].as_u64().filter(|n| *n > 0) {
         row["max_output"] = n.into();
     }
-    // Only the keys the snapshot has; the names are models.dev's own until the capability
-    // fields of the model table settle.
-    let mut caps = Map::new();
-    if let Some(b) = m["tool_call"].as_bool() {
-        caps.insert("tool_call".into(), b.into());
-    }
+    // models.dev's names become aibus's (D-F3): `tool_call` is `capabilities.tools`, an `image`
+    // among the input modalities is `capabilities.images`, and `reasoning` is the row's own
+    // `reasoning`. Only what the snapshot says is written, and a hand-set capability the
+    // snapshot has no word for (`max_tools`, `logprobs`) stays. The keys an earlier version of
+    // this tool wrote under models.dev's names are dropped.
     if let Some(b) = m["reasoning"].as_bool() {
-        caps.insert("reasoning".into(), b.into());
+        row["reasoning"] = b.into();
+    }
+    let mut caps = row["capabilities"].as_object().cloned().unwrap_or_default();
+    for stale in ["tool_call", "reasoning", "input_modalities"] {
+        caps.remove(stale);
+    }
+    if let Some(b) = m["tool_call"].as_bool() {
+        caps.insert("tools".into(), b.into());
     }
     if let Some(a) = m["modalities"]["input"].as_array() {
-        caps.insert("input_modalities".into(), a.clone().into());
+        caps.insert("images".into(), a.iter().any(|x| x == "image").into());
     }
-    if !caps.is_empty() {
+    if caps.is_empty() {
+        row.as_object_mut().map(|o| o.remove("capabilities"));
+    } else {
         row["capabilities"] = caps.into();
     }
 
@@ -176,8 +184,8 @@ fn compact(v: &Value) -> String {
 /// all four buckets (`null` for one the provider does not charge separately), `families` last.
 /// Hand edits that keep this layout round-trip unchanged, so `catalog-sync` diffs stay small.
 pub fn render(file: &Value) -> String {
-    const ORDER: [&str; 8] =
-        ["id", "context_window", "max_output", "family", "deprecated", "effort", "price_from", "capabilities"];
+    const ORDER: [&str; 9] =
+        ["id", "context_window", "max_output", "family", "deprecated", "effort", "price_from", "reasoning", "capabilities"];
     let rows: Vec<String> = file["models"]
         .as_array()
         .into_iter()

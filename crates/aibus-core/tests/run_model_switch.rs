@@ -64,6 +64,7 @@ async fn the_request_after_set_model_carries_the_new_model_and_the_in_flight_one
         hooks: Arc::new(HookRunner::default()),
         compactor: None,
         assist: None,
+        fallback: None,
     };
     let handle = spawn(cfg, deps);
 

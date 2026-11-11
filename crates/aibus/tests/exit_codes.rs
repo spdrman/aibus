@@ -169,3 +169,21 @@ fn eleven_is_doctor_finding_a_problem_and_twelve_is_agent_validate() {
     let out = aibus(home.path(), &["agent", "validate"]);
     assert_eq!(code(&out), 12, "{}", String::from_utf8_lossy(&out.stdout));
 }
+
+#[test]
+fn workflow_validate_exits_twelve_on_errors_and_zero_on_warnings() {
+    let home = xdg_temp();
+    let dir = home.path().join("proj/.aibus/workflows");
+    fs::create_dir_all(&dir).unwrap();
+    // A gate is a warning: the exit code stays 0.
+    fs::write(dir.join("gated.toml"), "[[step]]\nagent = \"explore\"\nprompt = \"a\"\ngate = \"true\"\n").unwrap();
+    let warned = aibus(home.path(), &["workflow", "validate"]);
+    assert_eq!(code(&warned), 0, "{}", String::from_utf8_lossy(&warned.stdout));
+    assert!(String::from_utf8_lossy(&warned.stdout).contains("warning"));
+
+    fs::write(dir.join("bad.toml"), "[[step]]\nagent = \"ghost\"\nprompt = \"a\"\n").unwrap();
+    let bad = aibus(home.path(), &["workflow", "validate"]);
+    assert_eq!(code(&bad), 12, "{}", String::from_utf8_lossy(&bad.stdout));
+    let one = aibus(home.path(), &["workflow", "validate", "gated"]);
+    assert_eq!(code(&one), 0);
+}

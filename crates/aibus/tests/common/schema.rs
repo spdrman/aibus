@@ -2,21 +2,28 @@
 //! keywords those files use (`type`, `enum`, `const`, `required`, `properties`, `items`,
 //! `minItems`, `minimum`, `maximum`, `pattern`, `anyOf`, `allOf`, `if`/`then`/`else`, local
 //! `$ref`) and fails loudly on a keyword it does not know, so a schema cannot quietly say more
-//! than the checker enforces.
+//! than the checker enforces. `$id` was added to the known list for `workflow/v1.json`; it is
+//! an identifier and checks nothing.
 
 use std::path::Path;
 
 use serde_json::Value;
 
-const KNOWN: [&str; 21] = [
-    "$schema", "title", "description", "definitions", "type", "enum", "const", "required",
+const KNOWN: [&str; 22] = [
+    "$schema", "$id", "title", "description", "definitions", "type", "enum", "const", "required",
     "properties", "items", "minItems", "minimum", "maximum", "pattern", "anyOf", "allOf", "if",
     "then", "else", "$ref", "additionalProperties",
 ];
 
 pub fn load(name: &str) -> Value {
+    load_from("cli", name)
+}
+
+/// `docs/schemas/<dir>/<name>.json`.
+pub fn load_from(dir: &str, name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/schemas/cli")
+        .join("../../docs/schemas")
+        .join(dir)
         .join(format!("{name}.json"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
@@ -24,9 +31,12 @@ pub fn load(name: &str) -> Value {
 
 /// Every problem `value` has against the schema `name`; empty when it validates.
 pub fn check(name: &str, value: &Value) -> Vec<String> {
-    let root = load(name);
+    check_against(&load(name), value)
+}
+
+pub fn check_against(root: &Value, value: &Value) -> Vec<String> {
     let mut errors = Vec::new();
-    walk(&root, &root, value, "$", &mut errors);
+    walk(root, root, value, "$", &mut errors);
     errors
 }
 

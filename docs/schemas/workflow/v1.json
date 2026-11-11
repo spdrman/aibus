@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/workflow/v1.json",
+  "title": "aibus workflow v1",
+  "description": "A workflow file (.aibus/workflows/<name>.toml) read as JSON: a named chain of delegations. This schema covers the shape only. It cannot express the template rules (a {{...}} must close, be one of input, prev.summary or steps.<agent>.summary, have no prev.summary in the first step, and name an agent that comes earlier), and it cannot know which agents exist. `aibus workflow validate` checks both.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step"],
+  "properties": {
+    "name": {
+      "description": "The workflow's name; the file name is used when this is left out.",
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "step": {
+      "description": "The chain, run in order.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agent", "prompt"],
+        "properties": {
+          "agent": {
+            "description": "The agent that runs this step.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "prompt": {
+            "description": "What the agent is asked. May use {{input}}, {{prev.summary}} and {{steps.<agent>.summary}}.",
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "gate": {
+            "description": "A shell command run after the step with hook semantics; exit 2 stops the chain.",
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "on_fail": {
+            "description": "When this step fails, the step before it and this one run again, at most N times.",
+            "type": "string",
+            "pattern": "^retry:[1-5]$"
+          }
+        }
+      }
+    }
+  }
+}

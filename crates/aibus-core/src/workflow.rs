@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ids::AgentName;
 use crate::run::RunStatus;
@@ -161,6 +161,105 @@ impl Workflow {
             steps,
         })
     }
+}
+
+/// What `validate` found. `ok` is true when there are no errors; warnings never change it.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize)]
+pub struct Validation {
+    pub ok: bool,
+    pub errors: Vec<Problem>,
+    pub warnings: Vec<Problem>,
+}
+
+/// One finding: the 1-based step it is about (`None` for the file as a whole), the key in that
+/// step when there is one, and the sentence for the author.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct Problem {
+    pub step: Option<usize>,
+    pub field: Option<String>,
+    pub message: String,
+}
+
+/// The shapes the lead's transcript uses for its own markers (09 section 6); a prompt that
+/// contains one can be mistaken for the real thing when it comes back in a summary.
+const MARKERS: [&str; 6] = ["[hint]", "[run ", "[mcp ", "[hook ", "[web ", "[advisor]"];
+
+/// Everything `parse` rejects, plus the agents that `roster` does not have, and the warnings:
+/// a gate (it runs a shell command, so the text is quoted), a summary no later step reads, a
+/// prompt with the shape of an aibus marker, and an `on_fail` that will not do what it looks like.
+/// The same function backs `aibus workflow validate` and the MCP tools.
+pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
+    let mut out = Validation::default();
+    let mut error = |step: Option<usize>, field: Option<&str>, message: String| {
+        out.errors.push(Problem { step, field: field.map(str::to_owned), message });
+    };
+    match Workflow::parse(stem, text) {
+        Ok(_) => {}
+        Err(WorkflowError::Step { step, why }) => error(Some(step), None, why),
+        Err(e) => error(None, None, e.to_string()),
+    }
+    // `parse` stops at the first bad step; the roster and the warnings look at every step that
+    // reads as TOML, so one pass shows the author everything.
+    let Ok(file) = toml::from_str::<File>(text) else {
+        out.ok = out.errors.is_empty();
+        return out;
+    };
+    let mut warn = Vec::new();
+    for (i, raw) in file.steps.iter().enumerate() {
+        let n = i + 1;
+        let mut note = |field: Option<&str>, message: String| {
+            warn.push(Problem { step: Some(n), field: field.map(str::to_owned), message });
+        };
+        if AgentName::new(&raw.agent).is_ok_and(|a| !roster.contains(&a)) {
+            out.errors.push(Problem {
+                step: Some(n),
+                field: Some("agent".into()),
+                message: format!("no agent named `{}` in the roster", raw.agent),
+            });
+        }
+        if let Some(gate) = raw.gate.as_ref().filter(|g| !g.trim().is_empty()) {
+            note(Some("gate"), format!("runs a shell command after this step: {gate}"));
+        }
+        // The last step's summary is the workflow's result, so nobody else has to read it.
+        let read = |j: usize| {
+            let mut keys = Vec::new();
+            let _ = scan(&file.steps[j].prompt, |_, key| keys.extend(key));
+            let named = format!("steps.{}.summary", raw.agent);
+            // A step of the same name in between hides this one from `steps.<agent>.summary`.
+            let hidden = file.steps[i + 1..j].iter().any(|s| s.agent == raw.agent);
+            keys.iter().any(|k| (j == i + 1 && *k == "prev.summary") || (*k == named && !hidden))
+        };
+        if n < file.steps.len() && !(i + 1..file.steps.len()).any(read) {
+            note(
+                None,
+                format!(
+                    "nothing after this step reads its summary ({{{{prev.summary}}}} or {{{{steps.{}.summary}}}})",
+                    raw.agent
+                ),
+            );
+        }
+        for m in MARKERS.iter().filter(|m| raw.prompt.contains(**m)) {
+            note(
+                Some("prompt"),
+                format!("the prompt contains `{}`, which has the shape of an aibus marker", m.trim_end()),
+            );
+        }
+        if raw.on_fail.is_some() {
+            if n < file.steps.len() {
+                note(Some("on_fail"), "on_fail is set on a step that is not the last one".into());
+            }
+            if i > 0 && file.steps[i - 1].gate.is_some() {
+                note(
+                    Some("on_fail"),
+                    "on_fail is set and the step before it has a gate, so a retry runs that gate again".into(),
+                );
+            }
+        }
+    }
+    out.ok = out.errors.is_empty();
+    out.errors.sort_by_key(|p| p.step);
+    out.warnings = warn;
+    out
 }
 
 /// Where workflows are looked for, project first: `<project>/.aibus/workflows` and then

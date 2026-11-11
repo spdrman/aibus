@@ -1,0 +1,7 @@
+{
+  "models": [
+    {"id": "gpt-4.1", "context_window": 1047576, "max_output": 32768, "family": "gpt-4.1", "deprecated": false,
+     "price": {"input_per_mtok": 2.0, "output_per_mtok": 8.0, "cache_read_per_mtok": 0.5, "cache_write_per_mtok": null}}
+  ],
+  "families": {}
+}

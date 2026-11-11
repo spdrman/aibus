@@ -1,0 +1,6 @@
+{
+  "models": [
+    {"id": "llama-3.3-70b-versatile", "context_window": 131072, "max_output": 32768, "family": "llama", "deprecated": false}
+  ],
+  "families": {}
+}

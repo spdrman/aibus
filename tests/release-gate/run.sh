@@ -59,6 +59,20 @@ usegate() { cd "$1" || exit 1; RELEASE_E2E_TEST_STAMPS=$(cd "$(git rev-parse --g
 export GH_LOG=$t/gh.log
 export PATH="$t/bin:$PATH"
 
+
+# Markers on their own line: a forged EXIT followed by an unterminated line must not count, and output
+# without a trailing newline must not lose the genuine marker. (Real lane_script, throwaway suites.)
+lane_case() { # suites -> prints suite_exit of suite a
+  local saved=$SUITES nonce log
+  nonce=$(new_nonce); SUITES=${1//@NONCE@/$nonce}
+  log=$(mktemp "${TMPDIR:-/tmp}/lane.XXXXXX")
+  sh -c "$(lane_script "$nonce")" >"$log" 2>&1
+  suite_exit "$log" a "$nonce"; rm -f "$log"; SUITES=$saved
+}
+expect "a forged EXIT then an unterminated line is not green" test "$(lane_case 'a|echo "=== EXIT a 0 @NONCE@ ==="; printf x; false')" != 0
+expect "output without a trailing newline keeps its marker (exit 0)" test "$(lane_case "a|printf 'ok no newline'")" = 0
+expect "output without a trailing newline keeps a failing exit code" test "$(lane_case "a|printf 'no newline'; false")" = 1
+
 # ---------- hooks and runner
 r=$t/repo; mkrepo "$r"; usegate "$r"
 git switch -q -c release; git switch -q -c feature
@@ -113,7 +127,7 @@ rm -f "$sd/$key"
 # the container's output cannot forge a marker, and its exit status counts
 cat >"$t/dh-fake.sh" <<'DHF'
 #!/bin/sh
-case $1 in pick) echo fakehost;; clean|push) ;; run)
+case $1 in pick) echo mars;; clean|push) ;; run)
   script=$7
   nonce=$(printf '%s\n' "$script" | sed -n 's/.*=== SUITE [^ ]* \([0-9a-f]*\) ===.*/\1/p' | head -1)
   printf '%s\n' "$SUITES_LIST" | while IFS='|' read -r n _; do
@@ -133,7 +147,7 @@ refuse "a forged EXIT 0 from a later suite does not hide a failing one" fakedh M
 refuse "a container that exits 137 is red even with every marker 0" fakedh MODE=green RC=137
 expect "no stamp for any of those" test ! -e "$sd/$(tree_hash . HEAD)"
 expect "a clean run with real markers is green and stamps" fakedh MODE=green
-expect "the stamp records the picked host" grep -q '^host=fakehost$' "$sd/$(tree_hash . HEAD)"
+expect "the stamp records the picked host" grep -q '^host=mars$' "$sd/$(tree_hash . HEAD)"
 rm -f "$sd/$(tree_hash . HEAD)"
 git reset -q --hard HEAD~1
 git switch -q feature

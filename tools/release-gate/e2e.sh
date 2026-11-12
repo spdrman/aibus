@@ -11,7 +11,7 @@
 # Exit: 0 green (or skipped), 1 red, 2 refused.
 # RELEASE_E2E_CMD='<cmd>' replaces the container run with a local command in the exported tree. For the
 # tests of this gate only: its stamps go to release-e2e-fake/, which pre-push never reads, unless
-# RELEASE_E2E_TEST_STAMPS=1 (set only by tests/release-gate/run.sh). RELEASE_E2E_SKIP=<reason> skips the gate (docs/RELEASE.md says when).
+# RELEASE_E2E_TEST_STAMPS equals this repo's stamp directory (set only by tests/release-gate/run.sh). RELEASE_E2E_SKIP=<reason> skips the gate (docs/RELEASE.md says when).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -59,7 +59,7 @@ else
   [ -n "$host" ] || host=$("$DH" pick any)
   [ -n "$host" ] || refuse "dh.sh found no docker host up"
   cmd="suites of tools/release-attest/config.sh in $IMAGE"
-  nonce=$(new_nonce)
+  nonce=$(new_nonce); [ -n "$nonce" ] || exit 1
   lane_script "$nonce" >"$work/lane.sh"
   echo "e2e: $host, job $job (fenced: DH_MEMORY=${DH_MEMORY:-default} DH_CPUS=${DH_CPUS:-default})" >&2
   pushed=1   # before the push, so a push that dies half way still gets its volume cleaned

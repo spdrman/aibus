@@ -50,7 +50,7 @@ cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || tru
 trap cleanup EXIT
 
 lane=$work/lane.sh
-nonce=$(new_nonce)
+nonce=$(new_nonce); [ -n "$nonce" ] || exit 1
 lane_script "$nonce" >"$lane"
 
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)

@@ -32,7 +32,8 @@ stamp_ok() { # key
   [ "$(sed -n 's/^tree=//p' "$f")" = "$1" ] || return 1
   host=$(sed -n 's/^host=//p' "$f" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr 'A-Z' 'a-z')
   case $host in
-    '') return 1 ;;
-    fake-local|test) test_stamps_allowed || return 1 ;;
+    mars|nas|mercury|local) ;;   # the hosts dh.sh knows
+    fake-local) test_stamps_allowed || return 1 ;;
+    *) return 1 ;;
   esac
 }

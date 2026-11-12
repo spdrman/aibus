@@ -200,7 +200,7 @@ on every exit path. A cold run compiles the workspace, so I expect tens of minut
 is the output of the `tree_hash` function in `tools/release-attest/config.sh` (the tree without the top-level `release-attest/`, so anything under that directory is outside the stamp key by design; the signed attestation covers the rest), so adding
 the attestation commit does not invalidate the stamp. `pre-push` refuses a push whose destination is
 `refs/heads/release` unless a stamp exists for the tree being pushed. That also covers `merge
---no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. `pre-push` reads the stamp, it does not just look for the file: it must have exactly the keys the runner writes, name the tree it is filed under, and not come from a fake host. Pushes to any other
+--no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. `pre-push` reads the stamp, it does not just look for the file: it must have exactly the keys the runner writes, name the tree it is filed under, and name a host `dh.sh` knows (mars, nas, mercury, local). Pushes to any other
 branch, and deleting a branch, pass straight through. Run the e2e by hand on a clean checkout with
 `tools/release-gate/e2e.sh [--host mars]`.
 
@@ -212,7 +212,7 @@ command; it is for the tests of the gate only. It warns loudly, and its stamps g
 `pre-push` never reads (only `tests/release-gate/run.sh` sets `RELEASE_E2E_TEST_STAMPS`, to the repo's stamp directory, to get real ones, and `pre-push` rejects fake-host stamps otherwise), so a
 leftover variable in a shell cannot open the gate.
 
-**Markers.** The container script wraps each suite in SUITE and EXIT markers that carry a random per-run nonce (`lane_script` in `tools/release-attest/config.sh`, shared with `attest.sh`), so suite output cannot forge a result. A run is green only if the container itself exited 0 and every suite has exactly one genuine EXIT marker with 0.
+**Markers.** The container script wraps each suite in SUITE and EXIT markers that carry a random per-run nonce (`lane_script` in `tools/release-attest/config.sh`, shared with `attest.sh`), so a decoy a test prints or quotes (an old log, say) is not believed, and a suite with two markers is red. It does not stop suite code that reads the nonce from the container's argv, which runs with the same rights as the gate. Each EXIT marker starts on its own line. A run is green only if the container itself exited 0 and every suite has exactly one genuine EXIT marker with 0.
 
 **Failure modes.** Docker host down: `dh.sh push` fails, the runner says so and cleans up; pick another
 `--host`. OOM: a killed container leaves a suite without its `EXIT` line, so the run is red, and the

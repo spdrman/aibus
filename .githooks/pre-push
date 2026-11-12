@@ -9,8 +9,8 @@ while read -r _ local_sha remote_ref _; do
   [ "$local_sha" != "$zero" ] || continue   # deleting the branch pushes no tree
   gate_skipped "pre-push" && continue
   key=$(tree_key "$local_sha")
-  [ -f "$(stamp_file "$key")" ] || {
-    echo "pre-push: no passing e2e stamp for tree $key; run tools/release-gate/e2e.sh on a clean checkout of it (docs/RELEASE.md)" >&2
+  stamp_ok "$key" || {
+    echo "pre-push: no valid passing e2e stamp for tree $key; run tools/release-gate/e2e.sh on a clean checkout of it (docs/RELEASE.md)" >&2
     exit 1
   }
 done

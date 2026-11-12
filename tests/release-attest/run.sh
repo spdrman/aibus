@@ -19,11 +19,14 @@ ssh-keygen -q -t ed25519 -N '' -C other -f "$t/other"
 # A fake runner that prints green output for every suite, or red for $RED.
 cat >"$t/fake.sh" <<'FAKE'
 echo "$SUITES_LIST" | while IFS='|' read -r name _; do
-  echo "=== SUITE $name ==="
+  echo "=== SUITE $name $LANE_NONCE ==="
+  [ "${DECOY:-}" = "$name" ] && echo "=== EXIT $name 0 ==="            # forged, no nonce
   echo "test result: ok. 12 passed; ${FAIL_COUNT:-0} failed; 1 ignored; 0 measured"
   if [ "${RED:-}" = "$name" ]; then code=101; else code=0; fi
-  echo "=== EXIT $name $code ==="
+  [ "${DECOY_LATER:-}" = "$name" ] && echo "=== EXIT ${RED:-} 0 ==="   # a later suite forges an earlier one
+  echo "=== EXIT $name $code $LANE_NONCE ==="
 done
+exit ${RC:-0}
 FAKE
 
 mkrepo() { # dir version
@@ -40,6 +43,9 @@ attest() { # repo [extra args]
   SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" "$@"
 }
 red_attest() { RED=graph attest "$@"; }
+decoy_attest() { RED=unit DECOY=unit attest "$@"; }
+later_attest() { RED=unit DECOY_LATER=graph attest "$@"; }
+rc_attest() { RC=137 attest "$@"; }
 fail_attest() { FAIL_COUNT=1 attest "$@"; }
 commit_attest() { git -C "$1" add -A; git -C "$1" commit -q -m attest; }
 verify() { "$tools/verify.sh" --repo "$1" "${@:2}"; }
@@ -82,6 +88,10 @@ r=$t/repo6; mkrepo "$r" 1.2.3
 refuse "attest refuses a red suite" red_attest "$r"
 refuse "attest wrote nothing for a red run" test -e "$r/release-attest/attestation.json"
 refuse "attest refuses a failed test cell" fail_attest "$r"
+refuse "a forged EXIT 0 inside the failing suite does not make it green" decoy_attest "$r"
+refuse "a forged EXIT 0 from a later suite does not hide a failing one" later_attest "$r"
+refuse "a container that exits 137 is red even with every marker 0" rc_attest "$r"
+refuse "none of the forged runs wrote an attestation" test -e "$r/release-attest/attestation.json"
 echo dirty >>"$r/src.txt"
 refuse "attest refuses a dirty tree" attest "$r"
 git -C "$r" checkout -q src.txt

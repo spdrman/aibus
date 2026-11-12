@@ -24,7 +24,7 @@ chmod +x "$t/bin/gh"
 # fake attest runner: green output for every suite
 cat >"$t/fake-lane.sh" <<'FAKE'
 echo "$SUITES_LIST" | while IFS='|' read -r name _; do
-  echo "=== SUITE $name ==="; echo "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured"; echo "=== EXIT $name 0 ==="
+  echo "=== SUITE $name $LANE_NONCE ==="; echo "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured"; echo "=== EXIT $name 0 $LANE_NONCE ==="
 done
 FAKE
 . "$src/tools/release-attest/config.sh"
@@ -54,12 +54,13 @@ mkrepo() { # dir : a work repo with an origin, the gate files, version 0.1.0
   git -C "$d" remote add origin "$d.origin"; git -C "$d" push -q origin main
   git -C "$d" config core.hooksPath .githooks
 }
-export RELEASE_E2E_TEST_STAMPS=1   # the fake command may write real stamps only inside this test script
+# The fake command may write real stamps only inside this script: the flag has to equal the stamp directory.
+usegate() { cd "$1" || exit 1; RELEASE_E2E_TEST_STAMPS=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)/release-e2e; export RELEASE_E2E_TEST_STAMPS; }
 export GH_LOG=$t/gh.log
 export PATH="$t/bin:$PATH"
 
 # ---------- hooks and runner
-r=$t/repo; mkrepo "$r"; cd "$r" || exit 1
+r=$t/repo; mkrepo "$r"; usegate "$r"
 git switch -q -c release; git switch -q -c feature
 echo two >f.txt; git commit -q -am feature
 git switch -q release; echo r >r.txt; git add r.txt; git commit -q -m onrelease
@@ -89,15 +90,51 @@ env -u RELEASE_E2E_TEST_STAMPS RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >"
 expect "e2e.sh with RELEASE_E2E_CMD set warns loudly" grep -q "TEST ONLY" "$t/leak.out"
 refuse "a stamp from a leftover RELEASE_E2E_CMD does not open pre-push" git push -q -f origin release
 
-# a decoy EXIT line in a failing suite must not balance the count
-cat >"$t/dh-fake.sh" <<DHF
+
+# stamp content is checked, not just its existence
+push_nf() { env -u RELEASE_E2E_TEST_STAMPS git push -q -f origin release; }
+sd=$(git rev-parse --git-common-dir)/release-e2e
+mk_stamp() { # key tree host [lines override]
+  mkdir -p "$sd"; printf 'tree=%s\ncommand=x\nhost=%s\nstarted=a\nfinished=b\n' "$2" "$3" >"$sd/$1"
+}
+env -u RELEASE_E2E_TEST_STAMPS true; key=$(tree_hash . HEAD); rm -f "$sd/$key"
+mk_stamp "$key" "$key" fake-local;       refuse "a hand-made stamp with host=fake-local is refused" push_nf
+mk_stamp "$key" "$key" " test ";         refuse "host=test (with whitespace) is refused" push_nf
+mk_stamp "$key" "$key" "";               refuse "an empty host is refused" push_nf
+mk_stamp "$key" 0000000000000000000000000000000000000000 mars; refuse "a stamp whose tree= is another tree is refused" push_nf
+mkdir -p "$sd"; : >"$sd/$key";           refuse "an empty stamp file is refused" push_nf
+printf 'tree=%s\n' "$key" >"$sd/$key";   refuse "a stamp without the expected keys is refused" push_nf
+env -u RELEASE_E2E_TEST_STAMPS RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >/dev/null 2>&1
+RELEASE_E2E_TEST_STAMPS=1 RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >/dev/null 2>&1
+refuse "a fake run with RELEASE_E2E_TEST_STAMPS=1 left exported does not open pre-push" env RELEASE_E2E_TEST_STAMPS=1 git push -q -f origin release
+mk_stamp "$key" "$key" mars;             expect "a well-formed stamp for the tree is accepted" push_nf
+rm -f "$sd/$key"
+
+# the container's output cannot forge a marker, and its exit status counts
+cat >"$t/dh-fake.sh" <<'DHF'
 #!/bin/sh
-case \$1 in pick) echo fake;; clean) ;; push) ;; run)
-  echo "$SUITES" | while IFS="|" read -r n _; do echo "=== SUITE \$n ==="; if [ \$n = graph ]; then echo "=== EXIT graph 0 ==="; echo "=== EXIT graph 1 ==="; else echo "=== EXIT \$n 0 ==="; fi; done;;
+case $1 in pick) echo fakehost;; clean|push) ;; run)
+  script=$7
+  nonce=$(printf '%s\n' "$script" | sed -n 's/.*=== SUITE [^ ]* \([0-9a-f]*\) ===.*/\1/p' | head -1)
+  printf '%s\n' "$SUITES_LIST" | while IFS='|' read -r n _; do
+    echo "=== SUITE $n $nonce ==="
+    [ "$MODE" = decoy-inside ] && [ "$n" = graph ] && echo "=== EXIT graph 0 ==="
+    [ "$MODE" = decoy-later ] && [ "$n" = graph ] && echo "=== EXIT unit 0 ==="
+    code=0; { [ "$MODE" = decoy-inside ] && [ "$n" = graph ]; } && code=1; { [ "$MODE" = decoy-later ] && [ "$n" = unit ]; } && code=101
+    echo "=== EXIT $n $code $nonce ==="
+  done
+  exit "${RC:-0}";;
 esac
 DHF
 chmod +x "$t/dh-fake.sh"
-refuse "a failing suite with a decoy EXIT 0 line is red" env -u RELEASE_E2E_CMD DH_SH="$t/dh-fake.sh" tools/release-gate/e2e.sh
+fakedh() { env -u RELEASE_E2E_CMD -u RELEASE_E2E_TEST_STAMPS SUITES_LIST="$SUITES" DH_SH="$t/dh-fake.sh" "$@" tools/release-gate/e2e.sh; }
+refuse "a forged EXIT 0 inside the failing suite is red" fakedh MODE=decoy-inside
+refuse "a forged EXIT 0 from a later suite does not hide a failing one" fakedh MODE=decoy-later
+refuse "a container that exits 137 is red even with every marker 0" fakedh MODE=green RC=137
+expect "no stamp for any of those" test ! -e "$sd/$(tree_hash . HEAD)"
+expect "a clean run with real markers is green and stamps" fakedh MODE=green
+expect "the stamp records the picked host" grep -q '^host=fakehost$' "$sd/$(tree_hash . HEAD)"
+rm -f "$sd/$(tree_hash . HEAD)"
 git reset -q --hard HEAD~1
 git switch -q feature
 expect "pre-commit passes on a clean shell file" bash -c 'echo "#!/bin/sh" >a.sh; echo "true" >>a.sh; git add a.sh; git commit -q -m a'
@@ -107,7 +144,7 @@ git rm -q -f --cached b.sh; rm -f b.sh
 # ---------- release.sh
 keyargs=(--key "$t/key")
 rel() { RELEASE_E2E_CMD=${E2E:-true} RELEASE_ATTEST_SH=${ATT:-$t/attest-ok.sh} tools/release-gate/release.sh "$@" "${keyargs[@]}"; }
-r=$t/rel; mkrepo "$r"; cd "$r" || exit 1
+r=$t/rel; mkrepo "$r"; usegate "$r"
 for v in 1 1.2 v1.2.3 01.2.3 1.2.3.4 1.2.3-; do refuse "bad version '$v' is refused" rel "$v" --dry-run; done
 refuse "no version is refused" rel --dry-run
 git tag v0.5.0 && git push -q origin v0.5.0
@@ -140,7 +177,7 @@ git switch -q main; git branch -q -D release-prep/v0.2.0
 ATT=$t/attest-badsig.sh refuse "a failing verify stops the release" rel 0.2.0 --yes
 expect "failed verify: no push, no gh call" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release-prep/*')\" ] && [ ! -s '$GH_LOG' ]"
 git switch -q -f main; git reset -q --hard; git branch -q -D release-prep/v0.2.0; rm -rf release-attest "$(git rev-parse --git-common-dir)/release-e2e"
-expect "a green run succeeds" rel 0.2.0 --yes --closes 7
+rel 0.2.0 --yes --closes 7 >"$t/green.out" 2>&1; expect "a green run succeeds" test $? = 0
 expect "the branch is release-prep/v0.2.0 and was pushed" test -n "$(git ls-remote origin refs/heads/release-prep/v0.2.0)"
 expect "one bump commit named Release v0.2.0, then the attestation commit" test "$(git log --format=%s -2 | tr '\n' ,)" = "Attest the suites for 0.2.0,Release v0.2.0,"
 expect "gh pr create ran once, against release, titled Release v0.2.0" bash -c "[ \$(wc -l <'$GH_LOG') = 1 ] && grep -q -- '--base release' '$GH_LOG' && grep -q -- '--title Release v0.2.0' '$GH_LOG'"
@@ -151,5 +188,6 @@ expect "Cargo.toml and the path crates in Cargo.lock moved" bash -c "grep -q '^v
 expect "no old workspace version is left (the registry crate's 0.1.0 stays on purpose)" bash -c "! grep -n '0\.1\.0' Cargo.toml && [ \$(grep -c '0\.1\.0' Cargo.lock) = 1 ]"
 expect "the script made no tag, locally or on origin" test -z "$(git tag -l)$(git ls-remote --tags origin)"
 
+[ $fails = 0 ] || tail -8 "$t/green.out" >&2
 echo "$n tests, $fails failed"
 [ $fails = 0 ]

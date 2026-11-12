@@ -119,13 +119,13 @@ fi
 
 tkey=$(tree_key HEAD)
 step "4. full e2e (tree $tkey)"
-if [ $dry = 0 ] && [ -f "$(stamp_file "$tkey")" ] && [ $rerun = 0 ]; then
+if [ $dry = 0 ] && stamp_ok "$tkey" && [ $rerun = 0 ]; then
   echo "   a stamp for this tree exists, reusing it (--rerun to run again)" >&2
 elif would "tools/release-gate/e2e.sh ${host:+--host $host}"; then :
 else "$here/e2e.sh" ${host:+--host "$host"} || fail "the e2e is not green"
 fi
 stamp=$(stamp_file "$tkey")
-if [ $dry = 0 ] && [ ! -f "$stamp" ]; then fail "no e2e stamp for tree $tkey"; fi
+if [ $dry = 0 ] && ! stamp_ok "$tkey"; then fail "no e2e stamp for tree $tkey"; fi
 
 step "5. signed attestation"
 if would "$ATTEST --key $key ${host:+--host $host}"; then :

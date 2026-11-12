@@ -40,13 +40,21 @@ declared_version() { # repo commit
     in_ws && /^version[ ]*=/ { gsub(/^[^"]*"|".*$/, ""); print; exit }'
 }
 
-# One script, the suites in order between markers, so one container runs them all. attest.sh and
-# tools/release-gate/e2e.sh both build their container script with this, so the suite list and the
-# way it is run live in one place.
-lane_script() {
+# One script, the suites in order, each between a SUITE and an EXIT marker that carry a per-run random
+# nonce ($1). attest.sh and tools/release-gate/e2e.sh both build their container script with this, so the
+# suite list and the way it is run live in one place. Suite output cannot know the nonce, so it cannot
+# forge a marker; a reader only believes lines that end in the nonce.
+new_nonce() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
+lane_script() { # nonce
   echo 'set -u'
   echo 'export CARGO_TERM_COLOR=never CI=1'
   while IFS='|' read -r name cmd; do
-    printf 'echo "=== SUITE %s ==="; ( %s ) 2>&1; echo "=== EXIT %s $? ==="\n' "$name" "$cmd" "$name"
+    printf 'echo "=== SUITE %s %s ==="; ( %s ) 2>&1; echo "=== EXIT %s $? %s ==="\n' "$name" "$1" "$cmd" "$name" "$1"
   done <<<"$SUITES"
+}
+# The exit code of one suite, from the log: exactly one genuine EXIT marker or nothing.
+suite_exit() { # log name nonce
+  local lines
+  lines=$(sed -n "s/^=== EXIT $2 \([0-9][0-9]*\) $3 ===\$/\1/p" "$1")
+  [ "$(grep -c . <<<"$lines")" = 1 ] && echo "$lines"
 }

@@ -53,20 +53,26 @@ started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ -n "${RELEASE_E2E_CMD:-}" ]; then
   host=fake-local; cmd=$RELEASE_E2E_CMD
   echo "!!! RELEASE_E2E_CMD is set: TEST ONLY, nothing real runs. Unset it; the stamp goes to release-e2e-fake/ and does not open pre-push." >&2
-  [ "${RELEASE_E2E_TEST_STAMPS:-}" = 1 ] || sdir=$(stamp_dir)-fake
+  test_stamps_allowed || sdir=$(stamp_dir)-fake
   if (cd "$work/tree" && sh -c "$cmd"); then green=1; else green=0; fi
 else
   [ -n "$host" ] || host=$("$DH" pick any)
   [ -n "$host" ] || refuse "dh.sh found no docker host up"
   cmd="suites of tools/release-attest/config.sh in $IMAGE"
-  lane_script >"$work/lane.sh"
+  nonce=$(new_nonce)
+  lane_script "$nonce" >"$work/lane.sh"
   echo "e2e: $host, job $job (fenced: DH_MEMORY=${DH_MEMORY:-default} DH_CPUS=${DH_CPUS:-default})" >&2
   pushed=1   # before the push, so a push that dies half way still gets its volume cleaned
   "$DH" push "$host" "$job" "$work/tree" >/dev/null || refuse "pushing the tree to $host failed (is the docker host up?)"
-  "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$work/lane.sh")" 2>&1 | tee "$work/lane.log" | grep -E '^(=== |test result: FAILED|error)' >&2 || true
-  green=1   # every suite by name: its last EXIT marker is 0 (suite output cannot fake the last one)
+  set +e
+  "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$work/lane.sh")" 2>&1 | tee "$work/lane.log" | grep -E '^(=== |test result: FAILED|error)' >&2
+  rc=${PIPESTATUS[0]}
+  set -e
+  # green: the container exited 0 and every suite has exactly one genuine (nonce) EXIT marker, 0
+  green=1
+  [ "$rc" = 0 ] || { green=0; echo "the container run exited $rc (137 is an OOM kill)" >&2; }
   while IFS='|' read -r name _; do
-    [ "$(sed -n "s/^=== EXIT $name \([0-9][0-9]*\) ===\$/\1/p" "$work/lane.log" | tail -1)" = 0 ] || green=0
+    [ "$(suite_exit "$work/lane.log" "$name" "$nonce" || true)" = 0 ] || green=0
   done <<<"$SUITES"
   grep -q '^test result: FAILED' "$work/lane.log" && green=0
   if [ $green = 0 ]; then

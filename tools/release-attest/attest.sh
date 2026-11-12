@@ -50,17 +50,18 @@ cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || tru
 trap cleanup EXIT
 
 lane=$work/lane.sh
-lane_script >"$lane"
+nonce=$(new_nonce)
+lane_script "$nonce" >"$lane"
 
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ -n "$runner" ]; then
-  LANE_SCRIPT=$(cat "$lane") sh -c "$runner" >"$work/lane.log" 2>&1 || true
+  LANE_NONCE=$nonce LANE_SCRIPT=$(cat "$lane") sh -c "$runner" >"$work/lane.log" 2>&1 && lane_rc=0 || lane_rc=$?
 else
   mkdir "$work/tree"
   git -C "$repo" archive HEAD | tar -x -C "$work/tree"
   pushed=1   # before the push, so a push that dies half way still gets its volume cleaned
   "$DH" push "$host" "$job" "$work/tree" >/dev/null || refuse "pushing the tree to $host failed"
-  "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$lane")" >"$work/lane.log" 2>&1 || true
+  "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$lane")" >"$work/lane.log" 2>&1 && lane_rc=0 || lane_rc=$?
 fi
 finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -68,9 +69,10 @@ finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 suites_json='[]'
 while IFS='|' read -r name _; do
   part=$work/$name.log
-  awk -v n="$name" '$0 == "=== SUITE " n " ===" {on=1; next} $0 ~ "^=== EXIT " n " [0-9]+ ===$" {on=0} on' "$work/lane.log" >"$part"
-  exit_code=$(sed -n "s/^=== EXIT $name \([0-9][0-9]*\) ===$/\1/p" "$work/lane.log" | tail -1)
+  awk -v n="$name" -v x="$nonce" '$0 == "=== SUITE " n " " x " ===" {on=1; next} $0 ~ "^=== EXIT " n " [0-9]+ " x " ===$" {on=0} on' "$work/lane.log" >"$part"
+  exit_code=$(suite_exit "$work/lane.log" "$name" "$nonce" || true)
   : "${exit_code:=1}"
+  [ "$lane_rc" = 0 ] || exit_code=1   # the container itself died (OOM kill is 137): nothing it printed counts
   read -r p f i < <(awk '/^test result:/ { for (k = 1; k <= NF; k++) { if ($k ~ /^passed;/) p += $(k-1); if ($k ~ /^failed;/) f += $(k-1); if ($k ~ /^ignored;/) i += $(k-1) } } END { print p+0, f+0, i+0 }' "$part")
   echo "$host: $name exit $exit_code, $p passed, $f failed" >&2
   suites_json=$(jq -c --arg n "$name" --argjson e "$exit_code" --argjson p "$p" --argjson f "$f" --argjson i "$i" \

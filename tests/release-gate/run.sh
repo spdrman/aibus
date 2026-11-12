@@ -206,6 +206,7 @@ git merge --abort 2>/dev/null; git reset -q --hard
 expect "...with the logged skip the merge goes through" env RELEASE_E2E_SKIP="hook change asked for" git merge --no-ff -m m topicg
 git reset -q --hard HEAD~2 2>/dev/null
 # ---------- review round: the skip logs itself, tree copies ignore .gitattributes, odd stdin
+pushmsg_env() { env RELEASE_E2E_SKIP="$1" git push -q origin release; }
 base2() { r2=$t/$1; mkrepo "$r2"; usegate "$r2"; git switch -q -c release; RELEASE_E2E_SKIP="bootstrap for the test" git push -q origin release 2>/dev/null; }
 sdir() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)/release-e2e"; }
 loglines() { wc -l <"$(sdir)/skips.log" 2>/dev/null | tr -d ' '; }
@@ -298,6 +299,21 @@ echo q >q; git add q; git commit -qm q; before=$(loglines)
 RELEASE_E2E_SKIP="$(printf 'forged reason here\nwaived=none\nuser=root')" git push -q origin release 2>/dev/null
 expect "a skip reason with newlines is flattened into one record line" test "$(loglines)" = $((before + 1))
 refuse "...so no record line starts with a forged key" grep -Eq '^(waived|user)=' "$(sdir)/skips.log"
+# reasons: whitespace does not count, bad UTF-8 and line separators are handled
+base2 s11
+echo w >w; git add w; git commit -qm w
+refuse "a skip reason of 12 spaces is refused (push)" pushmsg_env "            "
+RELEASE_E2E_SKIP="$(printf '\377\376 not utf eight')" git push -q origin release 2>"$t/p.err"
+expect "an invalid UTF-8 reason gets a clear refusal" grep -qi 'utf-8' "$t/p.err"
+expect "...not a tr error" bash -c "! grep -q 'Illegal byte' '$t/p.err'"
+before=$(loglines)
+RELEASE_E2E_SKIP="$(printf 'line sep \342\200\250 and para \342\200\251 here')" git push -q origin release 2>/dev/null
+expect "U+2028 and U+2029 in a reason leave one record line" test "$(loglines)" = $((before + 1))
+refuse "...with no separator bytes in the log" grep -q "$(printf '\342\200[\250\251]')" "$(sdir)/skips.log"
+refuse "e2e.sh refuses a skip reason of 12 tabs" env RELEASE_E2E_SKIP="$(printf '\t\t\t\t\t\t\t\t\t\t\t\t')" tools/release-gate/e2e.sh
+git switch -q -c topicw; echo y >y; git add y; git commit -qm y; git switch -q release; echo z >z2; git add z2; git commit -qm z2
+refuse "a skip reason of spaces is refused (merge)" env RELEASE_E2E_SKIP="              " git merge --no-ff -q -m m topicw
+git merge --abort 2>/dev/null; git reset -q --hard
 cd "$r"
 git reset -q --hard HEAD~1
 git switch -q feature

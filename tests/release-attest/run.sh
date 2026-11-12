@@ -185,5 +185,36 @@ expect "attest.sh copies an export-ignored file into the tree it runs" test -f "
 expect "attest.sh keeps export-subst text byte for byte" grep -q 'Format:%H' "$t/copy16/tests/sub.txt"
 expect "attest.sh keeps the exec bit and symlinks" bash -c "test -x '$t/copy16/tests/x.sh' && test -L '$t/copy16/tests/link' && [ \"\$(readlink '$t/copy16/tests/link')\" = b.sh ]"
 
+# ---------- export_tree: containment (a tree is untrusted input copied on the host before anything is fenced)
+x=$t/exp; mkdir -p "$x"; git -C "$x" init -q; xg() { git -C "$x" "$@"; }
+xb=$(printf 'hi' | xg hash-object -w --stdin)
+xin=$(printf '100644 blob %s\tescaped\0' "$xb" | xg mktree -z)
+xroot() { printf '%s\0' "$@" | xg mktree -z; }   # records already shaped "mode type sha<TAB>name"
+rec() { printf '%s %s %s\t%s' "$1" "$2" "$3" "$4"; }
+mkdir -p "$t/dest1"; rm -rf "$t/dest1"
+refuse "a tree entry named .. is refused" export_tree "$x" "$(xroot "$(rec 040000 tree "$xin" ..)")" "$t/dest1"
+expect "...and nothing escaped next to the destination" test ! -e "$t/escaped"
+refuse "a .git entry is refused" export_tree "$x" "$(xroot "$(rec 040000 tree "$xin" .git)")" "$t/dest2"
+refuse "a .GIT entry is refused" export_tree "$x" "$(xroot "$(rec 040000 tree "$xin" .GIT)")" "$t/dest3"
+refuse "a nested .git component is refused" export_tree "$x" "$(xroot "$(rec 040000 tree "$(xroot "$(rec 040000 tree "$xin" .git)")" sub)")" "$t/dest3b"
+expect "a leading-dash directory is copied" export_tree "$x" "$(xroot "$(rec 040000 tree "$xin" -dash)")" "$t/dest4"
+expect "...with its file" test -f "$t/dest4/-dash/escaped"
+# the case-collision shape: symlink Z -> /abs/dir, then z/target.txt. On a case-insensitive filesystem the file goes through the link.
+victim=$t/victim; mkdir -p "$victim"; echo keep >"$victim/target.txt"
+xlink=$(printf '%s' "$victim" | xg hash-object -w --stdin)
+xt=$(printf '100644 blob %s\ttarget.txt\0' "$xb" | xg mktree -z)
+export_tree "$x" "$(xroot "$(rec 120000 blob "$xlink" Z)" "$(rec 040000 tree "$xt" z)")" "$t/dest5" >/dev/null 2>&1
+expect "Z -> /abs/dir plus z/target.txt never writes into the link's target" test "$(cat "$victim/target.txt")" = keep
+# an ordered list where a symlink precedes a path through it (impossible in git, so a direct unit test of the writer)
+printf '%s\0%s\0' "$(rec 120000 blob "$xlink" ln)" "$(rec 100644 blob "$xb" ln/target.txt)" >"$t/list6"
+refuse "a symlink followed by a path through it aborts the copy" export_entries "$x" "$t/list6" "$t/dest6"
+expect "...and the link target is untouched" test "$(cat "$victim/target.txt")" = keep
+printf '%s\0%s\0' "$(rec 100644 blob "$xb" ln/target.txt)" "$(rec 120000 blob "$xlink" ln)" >"$t/list7"
+refuse "a symlink whose path already exists as a directory aborts the copy" export_entries "$x" "$t/list7" "$t/dest7"
+expect "...and the link target is still untouched" test "$(cat "$victim/target.txt")" = keep
+expect "no list file is left next to a destination" test -z "$(ls "$t" | grep -e 'export-tree' -e '\.ls\.')"
+r=$t/repo17; mkrepo "$r" 1.2.3
+expect "the attestation tree hash is still the tree id without release-attest/" test "$(tree_hash "$r" HEAD)" = "$(git -C "$r" rev-parse 'HEAD^{tree}')"
+
 echo "$n tests, $fails failed"
 [ "$fails" = 0 ]

@@ -373,16 +373,27 @@ fn bad_regions_and_projects_are_config_errors() {
 
 // ---- the recorded cassettes through the conformance kit ----------------------------------------
 
-use aibus_testkit::conformance::{check_case, Body, Case, Expect, FakeServer, Fixture, Fixtures};
+use std::path::PathBuf;
 
-/// A Bedrock cassette as the kit's fake server plays it: the same frames `bedrock_template` makes.
-fn bedrock_fixture(c: &Cassette) -> Fixture {
-    let mut f = Fixture::http(c.status, &[], "");
-    f.headers = c.headers.clone();
+use aibus_provider::ProviderErrorKind::*;
+use aibus_testkit::conformance::{run, Body, Case, Expect, FakeServer, Fixture, Fixtures};
+use serde_json::json;
+
+fn load(sub: &str, name: &str, ext: &str) -> Fixture {
+    Fixture::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join(sub).join(format!("{name}.{ext}")))
+}
+
+/// A stream the kit plays to Bedrock: the Messages events of an SSE fixture (its `data:` lines,
+/// the same JSON Bedrock puts in a `chunk`) framed as `application/vnd.amazon.eventstream`,
+/// the way `bedrock_template` does for a cassette. The fixture's end (close, drop, hang) stays.
+fn bedrock_fixture(sse: Fixture) -> Fixture {
+    let events: Vec<String> = sse.body_text().lines().filter_map(|l| l.strip_prefix("data: ")).map(str::to_owned).collect();
+    assert!(!events.is_empty(), "no data lines to frame");
+    let mut f = sse;
+    f.headers = vec![("content-type".into(), "application/vnd.amazon.eventstream".into())];
     f.body = Body::Bytes(
-        c.body
-            .lines()
-            .filter(|l| !l.is_empty())
+        events
+            .iter()
             .flat_map(|line| {
                 let b64 = base64::engine::general_purpose::STANDARD.encode(line);
                 eventstream_frame(
@@ -395,6 +406,12 @@ fn bedrock_fixture(c: &Cassette) -> Fixture {
     f
 }
 
+/// A Bedrock cassette that already keeps one event per line (`bedrock_stream.http`).
+fn bedrock_cassette(c: &Cassette) -> Fixture {
+    let sse: String = c.body.lines().filter(|l| !l.is_empty()).map(|l| format!("data: {l}\n\n")).collect();
+    bedrock_fixture(Fixture::http(c.status, &[], &sse))
+}
+
 fn from_preset(id: &str, server: &FakeServer, tokens: Arc<dyn TokenSource>) -> Arc<dyn Provider> {
     let mut def = aibus_provider::presets::preset(id).unwrap().clone();
     def.base_url = Some(server.uri());
@@ -403,45 +420,106 @@ fn from_preset(id: &str, server: &FakeServer, tokens: Arc<dyn TokenSource>) -> A
     CloudFactory { tokens }.build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap()
 }
 
-#[tokio::test]
-async fn the_bedrock_cassettes_run_through_the_kit() {
-    let server = FakeServer::start().await;
-    // A Bedrock API key (a bearer, no colon) so the key travels in one header the kit can see.
-    let p = from_preset("bedrock", &server, Arc::new(Token(Ok("unused"))));
-    let f = Fixtures { model: "claude-sonnet-4-5", kind: AuthMethodKind::Bearer, auth: Some(("authorization", "Bearer ")), cases: vec![], skipped: vec![] };
-    let _logs = aibus_testkit::capture_logs();
-    let text = Case {
-        name: "text",
-        fixture: bedrock_fixture(&cassette("bedrock_stream")),
-        expect: Expect::Stream { text: Some("Hello, world"), stop: StopReason::EndTurn },
+/// The cases both cloud adapters share. `stream` turns an SSE fixture into what the adapter's
+/// wire carries (Vertex: itself, Bedrock: event stream frames). Error bodies are plain HTTP on
+/// both, so they pass through as they are.
+fn cloud_cases(stream: fn(Fixture) -> Fixture, text: Fixture, auth_401: Fixture, forbidden_403: Fixture) -> Vec<Case> {
+    let fail = |kind, retryable, retry_after: Option<u64>| Expect::Fail {
+        kind,
+        retryable,
+        retry_after: retry_after.map(Duration::from_secs),
+        delivered: None,
     };
-    check_case(&p, &server, &f, &text).await;
-    let denied = Case {
-        name: "http_403",
-        fixture: Fixture::load(&std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/bedrock_denied_403.http")),
-        expect: Expect::Fail { kind: ProviderErrorKind::Auth, retryable: false, retry_after: None, delivered: None },
-    };
-    check_case(&p, &server, &f, &denied).await;
+    let case = |name, fixture, expect| Case { name, fixture, expect };
+    let sse = |name: &str| load("cassettes", name, "http");
+    vec![
+        case("text", text.clone(), Expect::Stream { text: Some("Hello, world"), stop: StopReason::EndTurn }),
+        case("tool_use", stream(sse("tool_call")), Expect::Tools { calls: vec![("read_file", json!({"path": "src/main.rs"}))], min_fragments: 2 }),
+        case(
+            "parallel_tools",
+            stream(load("fixtures", "parallel_tools", "json")),
+            Expect::Tools { calls: vec![("read_file", json!({"path": "a"})), ("read_file", json!({"path": "b"}))], min_fragments: 2 },
+        ),
+        case("max_tokens", stream(sse("max_tokens")), Expect::Stream { text: None, stop: StopReason::MaxTokens }),
+        case("refusal", stream(sse("refusal")), Expect::Stream { text: None, stop: StopReason::Refusal }),
+        case("http_400_invalid", sse("invalid_400"), fail(InvalidRequest, false, None)),
+        case("http_400_context", sse("context_too_long_400"), fail(ContextTooLong, false, None)),
+        case("http_401", auth_401, fail(Auth, false, None)),
+        case("http_403", forbidden_403, fail(Auth, false, None)),
+        case("http_404", sse("not_found_404"), fail(ModelNotFound, false, None)),
+        case("http_413", sse("too_large_413"), fail(ContextTooLong, false, None)),
+        case("http_429_retry_after", sse("rate_limit_429"), fail(RateLimit, true, Some(12))),
+        case("http_429", sse("rate_limit_429_no_retry_after"), fail(RateLimit, true, None)),
+        case("http_500", sse("server_500"), fail(Server, true, None)),
+        case("http_503", sse("overloaded_503"), fail(Overloaded, true, None)),
+        case("http_529", sse("overloaded_529"), fail(Overloaded, true, None)),
+        case("stream_error", stream(sse("stream_error_overloaded")), fail(Overloaded, true, None)),
+        case(
+            "truncated",
+            stream(sse("truncated")),
+            Expect::Fail { kind: Network, retryable: true, retry_after: None, delivered: Some("Hello") },
+        ),
+        // The frames up to the first text delta, then silence with the connection open.
+        case("cancel", stream_hang(stream, sse("stream_text")), Expect::Cancel),
+        // Neither cloud has a model list or a counting endpoint here: the table is static and
+        // `count_tokens` is `None`, so these two fixtures are never asked for. `verify` is the
+        // one real request (a one token probe), played from the text stream.
+        case("models", text.clone(), Expect::Models { at_least: 3 }),
+        case("count_tokens", text.clone(), Expect::Tokens(None)),
+    ]
+}
+
+/// `stream` of the first four SSE frames, with the connection left open.
+fn stream_hang(stream: fn(Fixture) -> Fixture, sse: Fixture) -> Fixture {
+    let mut f = stream(sse.hang_after(4));
+    f.end = aibus_testkit::conformance::End::Hang;
+    f
 }
 
 #[tokio::test]
-async fn the_vertex_cassettes_run_through_the_kit() {
+async fn bedrock_passes_the_conformance_suite() {
     let server = FakeServer::start().await;
-    let token = Arc::new(Token(Ok(aibus_provider::fake::FAKE_KEY)));
-    let p = from_preset("vertex", &server, token);
-    let f = Fixtures { model: "claude-sonnet-4-5@20250929", kind: AuthMethodKind::None, auth: Some(("authorization", "Bearer ")), cases: vec![], skipped: vec![] };
-    let _logs = aibus_testkit::capture_logs();
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes");
-    let text = Case {
-        name: "text",
-        fixture: Fixture::load(&dir.join("vertex_stream.http")),
-        expect: Expect::Stream { text: Some("Hello, world"), stop: StopReason::EndTurn },
+    // A Bedrock API key (a bearer, no colon) so the key travels in one header the kit can see;
+    // the sigv4 form has its own tests above.
+    let p = from_preset("bedrock", &server, Arc::new(Token(Ok("unused"))));
+    let mut cases = cloud_cases(
+        bedrock_fixture,
+        bedrock_cassette(&cassette("bedrock_stream")),
+        load("cassettes", "auth_401", "http"),
+        load("cassettes", "bedrock_denied_403", "http"),
+    );
+    cases.push(Case { name: "verify", fixture: bedrock_cassette(&cassette("bedrock_stream")), expect: Expect::Verify { models: 11 } });
+    let f = Fixtures {
+        model: "claude-sonnet-4-5",
+        kind: AuthMethodKind::Bearer,
+        auth: Some(("authorization", "Bearer ")),
+        cases,
+        skipped: vec![
+            ("malformed_sse", "Bedrock has no SSE: a bad frame is a broken event stream (a frame that stops short is `truncated`), not a malformed line"),
+        ],
     };
-    check_case(&p, &server, &f, &text).await;
-    let unauthenticated = Case {
-        name: "http_401",
-        fixture: Fixture::load(&dir.join("vertex_unauthenticated_401.http")),
-        expect: Expect::Fail { kind: ProviderErrorKind::Auth, retryable: false, retry_after: None, delivered: None },
+    run(p, &server, &f).await;
+}
+
+#[tokio::test]
+async fn vertex_passes_the_conformance_suite() {
+    let server = FakeServer::start().await;
+    // The token source is what Vertex sends, so it is the fake key the kit looks for.
+    let p = from_preset("vertex", &server, Arc::new(Token(Ok(aibus_provider::fake::FAKE_KEY))));
+    let mut cases = cloud_cases(
+        std::convert::identity,
+        load("cassettes", "stream_text", "http"),
+        load("cassettes", "vertex_unauthenticated_401", "http"),
+        load("cassettes", "forbidden_403", "http"),
+    );
+    cases.push(Case { name: "verify", fixture: load("cassettes", "vertex_stream", "http"), expect: Expect::Verify { models: 4 } });
+    cases.push(Case { name: "malformed_sse", fixture: load("cassettes", "malformed_sse", "http"), expect: Expect::Fail { kind: Unknown, retryable: false, retry_after: None, delivered: None } });
+    let f = Fixtures {
+        model: "claude-sonnet-4-5@20250929",
+        kind: AuthMethodKind::None,
+        auth: Some(("authorization", "Bearer ")),
+        cases,
+        skipped: vec![],
     };
-    check_case(&p, &server, &f, &unauthenticated).await;
+    run(p, &server, &f).await;
 }

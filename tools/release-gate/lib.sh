@@ -30,10 +30,13 @@ host_ok() { # host (already trimmed and lower-cased)
 # RELEASE_E2E_SKIP=<reason> skips the gate. Loud, and logged next to the stamps.
 gate_skipped() { # where
   [ -n "${RELEASE_E2E_SKIP:-}" ] || return 1
-  if [ "${#RELEASE_E2E_SKIP}" -lt 12 ]; then echo "RELEASE_E2E_SKIP needs a real reason (12 characters or more); refusing." >&2; exit 2; fi
+  local reason
+  printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || { echo "RELEASE_E2E_SKIP is not valid UTF-8; refusing." >&2; exit 2; }
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f]|\xe2\x80[\xa8\xa9]/ /g; s/^\s+|\s+$//g')
+  if [ "${#reason}" -lt 12 ]; then echo "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace is trimmed); refusing." >&2; exit 2; fi
   mkdir -p "$(stamp_dir)"
-  printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$(printf '%s' "$RELEASE_E2E_SKIP" | tr '[:cntrl:]' ' ')" >>"$(stamp_dir)/skips.log"
-  echo "!!! RELEASE E2E GATE SKIPPED at $1: $RELEASE_E2E_SKIP (logged in $(stamp_dir)/skips.log)" >&2
+  printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$reason" >>"$(stamp_dir)/skips.log"
+  echo "!!! RELEASE E2E GATE SKIPPED at $1: $reason (logged in $(stamp_dir)/skips.log)" >&2
 }
 
 # Fake stamps (RELEASE_E2E_CMD) count only inside tests/release-gate/run.sh, which sets the flag to the

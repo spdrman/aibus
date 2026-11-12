@@ -36,25 +36,66 @@ tree_hash() { # repo commit
 # Writes the exact content of a tree-ish into a directory, entry by entry from the git objects. `git
 # archive` is not used on purpose: it follows the tree's own .gitattributes, so export-ignore drops
 # files and export-subst rewrites them, and the copy that runs the suites would not be the tree that
-# gets hashed. Modes (644/755), symlinks and submodule directories are kept; a failure returns 1.
+# gets hashed. The tree is untrusted input and the copy runs on the host before anything is fenced, so:
+#   - every path is checked first and the whole copy is refused if one has an empty, `.`, `..` or `.git`
+#     component (any case, and with the invisible characters HFS+ ignores taken out);
+#   - regular files and directories are written first, symlinks in a SECOND pass, and a link whose
+#     path already exists is an error, so nothing is ever written through a symlink (the case-insensitive
+#     `Z -> /dir` plus `z/file` shape);
+#   - every file's parent has to resolve (`cd -P`) to a place inside the destination, with no symlink on
+#     the way, and an existing path is never overwritten (a case collision is an error).
+# Modes (644/755), symlinks and submodule directories are kept; any violation aborts with 1.
 export_tree() { # repo tree-ish dir
-  local ls rec meta mode sha path tgt
+  local ls rc
   mkdir -p "$3" || return 1
-  ls=$(mktemp "${TMPDIR:-/tmp}/export-tree.XXXXXX") || return 1
+  # the list sits next to the destination: the caller's work dir, which it removes on every exit path
+  ls=$(mktemp "$(cd "$3" && pwd -P).ls.XXXXXX") || return 1
   git -C "$1" ls-tree -r -z "$2" >"$ls" || { rm -f "$ls"; return 1; }
-  while IFS= read -r -d '' rec; do
-    meta=${rec%%$'\t'*}; path=${rec#*$'\t'}
-    read -r mode _ sha <<<"$meta"
-    mkdir -p "$3/$(dirname "$path")" || { rm -f "$ls"; return 1; }
-    case $mode in
-      120000) tgt=$(git -C "$1" cat-file blob "$sha"; printf x) || { rm -f "$ls"; return 1; }
-              ln -s "${tgt%x}" "$3/$path" || { rm -f "$ls"; return 1; } ;;
-      160000) mkdir -p "$3/$path" ;;
-      *) git -C "$1" cat-file blob "$sha" >"$3/$path" || { rm -f "$ls"; return 1; }
-         if [ "$mode" = 100755 ]; then chmod +x "$3/$path"; fi ;;
-    esac
-  done <"$ls"
+  export_entries "$1" "$ls" "$3"; rc=$?
   rm -f "$ls"
+  return $rc
+}
+# repo, a file of NUL-separated `mode type sha<TAB>path` records (git ls-tree -r -z), dest
+export_entries() {
+  local list=$2 dest real rec meta mode sha path parent pp c bad tgt pass lastok=
+  local -a comps
+  mkdir -p "$3" || return 1
+  dest=$(cd "$3" && pwd -P) || return 1
+  # pass 0: judge every path before anything is written
+  perl -0ne 'chomp; s/^[^\t]*\t//; die "export_tree: empty path\n" if $_ eq ""; for $c (split m{/}, $_, -1) { $l = $c; $l =~ s/\xe2\x80[\x8c-\x8f\xaa-\xae]|\xe2\x81[\xaa-\xaf]|\xef\xbb\xbf//g; $l = lc $l; die "export_tree: refusing the path \x27$_\x27 (component \x27$c\x27)\n" if $l eq "" || $l eq "." || $l eq ".." || $l eq ".git"; }' "$list" || return 1
+  # pass 1: files and directories. pass 2: symlinks.
+  for pass in 1 2; do
+    lastok=
+    while IFS= read -r -d '' rec; do
+      meta=${rec%%$'\t'*}; path=${rec#*$'\t'}
+      read -r mode _ sha <<<"$meta"
+      if [ "$pass" = 1 ]; then case $mode in 120000) continue ;; esac; else [ "$mode" = 120000 ] || continue; fi
+      parent=${path%/*}; [ "$parent" != "$path" ] || parent=
+      if [ "$parent" != "$lastok" ] || [ -z "$parent" ]; then
+      mkdir -p -- "$dest/$parent" || return 1
+      real=$(cd -P -- "$dest/$parent" && pwd -P) || return 1
+      case $real in "$dest"|"$dest"/*) ;; *) echo "export_tree: '$path' resolves outside the destination" >&2; return 1 ;; esac
+      pp=$dest; bad=0
+      if [ -n "$parent" ]; then
+        IFS=/ read -r -d '' -a comps < <(printf '%s' "$parent") || true
+        for c in "${comps[@]}"; do pp=$pp/$c; if [ -L "$pp" ]; then bad=1; fi; done
+      fi
+      [ $bad = 0 ] || { echo "export_tree: a symlink on the way to '$path'" >&2; return 1; }
+      lastok=$parent
+      fi
+      case $mode in
+        160000) [ -d "$dest/$path" ] || mkdir -- "$dest/$path" || return 1 ;;
+        120000)
+          [ ! -e "$dest/$path" ] && [ ! -L "$dest/$path" ] || { echo "export_tree: '$path' already exists" >&2; return 1; }
+          tgt=$(git -C "$1" cat-file blob "$sha"; printf x) || return 1
+          ln -s -- "${tgt%x}" "$dest/$path" || return 1 ;;
+        *)
+          [ ! -e "$dest/$path" ] && [ ! -L "$dest/$path" ] || { echo "export_tree: '$path' already exists (a case collision?)" >&2; return 1; }
+          git -C "$1" cat-file blob "$sha" >"$dest/$path" || return 1
+          if [ "$mode" = 100755 ]; then chmod +x "$dest/$path"; fi ;;
+      esac
+    done <"$list"
+  done
 }
 
 # The workspace version, read the way release.yml reads it.

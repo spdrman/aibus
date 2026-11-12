@@ -47,7 +47,9 @@ have_gate=1
 git cat-file -e "$tip^{commit}" 2>/dev/null && mat "$tip" "$gate/tree" 2>/dev/null || have_gate=0
 
 if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
-  [ "${#RELEASE_E2E_SKIP}" -ge 12 ] || no "RELEASE_E2E_SKIP needs a real reason (12 characters or more)."
+  printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || no "RELEASE_E2E_SKIP is not valid UTF-8."
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f]|\xe2\x80[\xa8\xa9]/ /g; s/^\s+|\s+$//g')
+  [ "${#reason}" -ge 12 ] || no "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace is trimmed)."
   waived=stamp
   case $tip in *[!0]*) ;; *) waived="$waived,bootstrap" ;; esac
   [ "$lsha" != "$zero" ] || waived="$waived,delete"
@@ -59,7 +61,6 @@ if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
     git diff --quiet "$tip" "$lsha" -- tools/release-gate tools/release-attest .githooks || waived="$waived,gate-change"
     [ -z "$(git diff --name-only "$tip" "$lsha" -- release-attest | grep -vxF -e release-attest/attestation.json -e release-attest/attestation.json.sig || true)" ] || waived="$waived,attest-extra"
   fi
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | tr '[:cntrl:]' ' ')
   mkdir -p "$common/release-e2e"
   printf '%s skip at pre-push by %s: %s (pushed_sha=%s old_tip=%s remote_ref=refs/heads/release waived=%s user=%s branch=%s)\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git config user.email || echo unknown)" "$reason" "$lsha" "$tip" "$waived" "$(id -un)" "$(git symbolic-ref -q --short HEAD || echo detached)" \

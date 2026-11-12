@@ -47,7 +47,7 @@ cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || tru
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir "$work/tree"
-git archive "$tree" | tar -x -C "$work/tree"
+export_tree . "$tree" "$work/tree" || refuse "could not copy the tree out of git; nothing ran"
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 if [ -n "${RELEASE_E2E_CMD:-}" ]; then

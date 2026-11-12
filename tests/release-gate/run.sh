@@ -219,7 +219,8 @@ git commit -qam "quiet skip log"; git switch -q release; git merge -q --ff-only 
 RELEASE_E2E_SKIP="gate change asked for" git push -q origin release 2>/dev/null
 expect "S1: a skip push still logs when the pushed lib silences gate_skipped" test "$(loglines)" -gt "$before"
 expect "S1: the record says gate-change was waived" grep -q 'waived=.*gate-change' "$(sdir)/skips.log"
-refuse "a skip reason under 12 characters is refused (push)" env RELEASE_E2E_SKIP=short git push -q origin release:refs/heads/release
+echo more >more1.txt; git add more1.txt; git commit -qm more1
+refuse "a skip reason under 12 characters is refused (push)" env RELEASE_E2E_SKIP=short git push -q origin release
 # S1b: a lib that exits at source time
 base2 s1b
 git switch -q -c topic; printf 'exit 0\n' | cat - tools/release-gate/lib.sh >"$t/l" && cp "$t/l" tools/release-gate/lib.sh
@@ -255,7 +256,7 @@ spec=$(printf 'HEAD^{/z %s refs/heads/release %s\n}' "$good" "$tip")
 refuse "S3: a refspec with a newline cannot plant a fake release line" git push -q origin "$spec:refs/heads/release"
 # S5: a decoy GIT_COMMON_DIR holding a stamp
 base2 s5
-echo n >n; git add n; git commit -qm n; dec=$t/decoy5; git clone -q --bare "$r2" "$dec"
+echo n >n; git add n; git commit -qm n; dec=$t/decoy5; git clone -q --bare "$r2" "$dec"; git --git-dir="$dec" remote set-url origin "$r2.origin"; git --git-dir="$dec" config core.hooksPath "$r2/.githooks"
 key=$(tree_hash . HEAD); mkdir -p "$dec/release-e2e"; printf 'tree=%s\ncommand=x\nhost=mars\nstarted=s\nfinished=f\ngate_sha256=%s\n' "$key" "$(curgh)" >"$dec/release-e2e/$key"
 refuse "S5: GIT_COMMON_DIR pointing at a dir with a stamp does not open pre-push" env GIT_COMMON_DIR="$dec" git push -q origin release
 # the real first push: the remote release exists but has no gate
@@ -301,6 +302,7 @@ cd "$r"
 git reset -q --hard HEAD~1
 git switch -q feature
 expect "pre-commit passes on a clean shell file" bash -c 'echo "#!/bin/sh" >a.sh; echo "true" >>a.sh; git add a.sh; git commit -q -m a'
+expect "pre-commit passes on a .sh file whose first line is not a shebang" bash -c 'printf "exit 0\n" >c.sh; git add c.sh; git commit -q -m c'
 refuse "pre-commit blocks a shell syntax error" bash -c 'printf "#!/bin/sh\nif then\n" >b.sh; git add b.sh; git commit -q -m b'
 git rm -q -f --cached b.sh; rm -f b.sh
 

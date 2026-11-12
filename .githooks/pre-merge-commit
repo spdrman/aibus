@@ -1,23 +1,43 @@
 #!/usr/bin/env bash
 # A merge that auto-commits onto `release` runs the full e2e first; red aborts the merge.
 # The runner and the suite list come from HEAD (release as it is), not from the branch being merged,
-# so the incoming branch cannot swap out the gate. A merge that changes a gate file (tools/release-gate/*,
-# tools/release-attest/*, .githooks/*) is refused unless RELEASE_E2E_SKIP='<reason>' (logged). The hooks
-# themselves are read from the checkout (docs/RELEASE.md says where that stops).
+# so the incoming branch cannot swap out the gate. Files are read with `git show` (git archive honours
+# export-ignore). A merge that changes a gate file (tools/release-gate/*, tools/release-attest/*,
+# .githooks/*) is refused unless RELEASE_E2E_SKIP='<reason>' (12+ characters). The skip record is
+# written by this file alone and nothing from the working tree or the merged tree is run on that path.
+# The hooks themselves are read from the checkout (docs/RELEASE.md says where that stops).
 set -eu
+unset GIT_COMMON_DIR   # a hook inherits git's; a decoy must not redirect us
 [ "$(git symbolic-ref --short -q HEAD || true)" = release ] || exit 0
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-head.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+mat() { # plain files of the gate at HEAD, attributes ignored
+  git ls-tree -r -z HEAD -- tools/release-gate tools/release-attest >"$tmp/ls" || return 1
+  while IFS= read -r -d '' rec; do
+    path=${rec#*$'\t'}
+    case ${rec%% *} in 100644|100755) ;; *) continue ;; esac
+    mkdir -p "$tmp/tree/$(dirname "$path")" && git show "HEAD:$path" >"$tmp/tree/$path" || return 1
+  done <"$tmp/ls"
+  for f in tools/release-gate/lib.sh tools/release-gate/e2e.sh tools/release-attest/config.sh; do [ -s "$tmp/tree/$f" ] || return 1; done
+}
+have_gate=1; mat 2>/dev/null || have_gate=0
+changed=0
+git diff --cached --quiet HEAD -- tools/release-gate tools/release-attest .githooks || changed=1
 if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
-  # the skip is logged by e2e.sh from HEAD's gate, or from the checkout when HEAD has none (creating release)
-  if git archive --format=tar -o "$tmp/g.tar" HEAD tools/release-gate tools/release-attest 2>/dev/null; then
-    tar -xf "$tmp/g.tar" -C "$tmp"; exec "$tmp/tools/release-gate/e2e.sh" --merge-index
-  fi
-  . "$(git rev-parse --show-toplevel)/tools/release-gate/lib.sh"
-  gate_skipped "pre-merge-commit (HEAD has no gate)"; exit 0
+  [ "${#RELEASE_E2E_SKIP}" -ge 12 ] || { echo "pre-merge-commit: RELEASE_E2E_SKIP needs a real reason (12 characters or more)." >&2; exit 1; }
+  waived=e2e
+  [ "$have_gate" = 1 ] || waived="$waived,remote-gate"
+  [ "$changed" = 0 ] || waived="$waived,gate-change"
+  common=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | tr '[:cntrl:]' ' ')
+  mkdir -p "$common/release-e2e"
+  printf '%s skip at pre-merge-commit by %s: %s (head=%s merge_tree=%s waived=%s user=%s branch=release)\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git config user.email || echo unknown)" "$reason" "$(git rev-parse HEAD)" "$(git write-tree)" "$waived" "$(id -un)" \
+    >>"$common/release-e2e/skips.log"
+  echo "!!! RELEASE E2E GATE SKIPPED at pre-merge-commit: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
+  exit 0
 fi
-git archive --format=tar -o "$tmp/g.tar" HEAD tools/release-gate tools/release-attest || { echo "pre-merge-commit: HEAD (release) has no release gate; refusing the merge. RELEASE_E2E_SKIP='<reason>' creates it." >&2; exit 1; }
-tar -xf "$tmp/g.tar" -C "$tmp"
-git diff --cached --quiet HEAD -- tools/release-gate tools/release-attest .githooks \
-  || { echo "pre-merge-commit: this merge changes the release gate files (tools/release-gate/*, tools/release-attest/*, .githooks/*). A gate change needs RELEASE_E2E_SKIP='<reason>' (logged)." >&2; exit 1; }
-"$tmp/tools/release-gate/e2e.sh" --merge-index
+[ "$have_gate" = 1 ] || { echo "pre-merge-commit: HEAD (release) has no release gate; refusing the merge. RELEASE_E2E_SKIP='<reason>' (logged) creates it." >&2; exit 1; }
+[ "$changed" = 0 ] || { echo "pre-merge-commit: this merge changes the release gate files (tools/release-gate/*, tools/release-attest/*, .githooks/*). A gate change needs RELEASE_E2E_SKIP='<reason>' (logged)." >&2; exit 1; }
+rc=0; bash "$tmp/tree/tools/release-gate/e2e.sh" --merge-index || rc=$?
+exit "$rc"

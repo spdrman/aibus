@@ -30,8 +30,9 @@ host_ok() { # host (already trimmed and lower-cased)
 # RELEASE_E2E_SKIP=<reason> skips the gate. Loud, and logged next to the stamps.
 gate_skipped() { # where
   [ -n "${RELEASE_E2E_SKIP:-}" ] || return 1
+  if [ "${#RELEASE_E2E_SKIP}" -lt 12 ]; then echo "RELEASE_E2E_SKIP needs a real reason (12 characters or more); refusing." >&2; exit 2; fi
   mkdir -p "$(stamp_dir)"
-  printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$RELEASE_E2E_SKIP" >>"$(stamp_dir)/skips.log"
+  printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$(printf '%s' "$RELEASE_E2E_SKIP" | tr '[:cntrl:]' ' ')" >>"$(stamp_dir)/skips.log"
   echo "!!! RELEASE E2E GATE SKIPPED at $1: $RELEASE_E2E_SKIP (logged in $(stamp_dir)/skips.log)" >&2
 }
 

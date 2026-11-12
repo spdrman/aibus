@@ -58,7 +58,7 @@ if [ -n "$runner" ]; then
   LANE_NONCE=$nonce LANE_SCRIPT=$(cat "$lane") sh -c "$runner" >"$work/lane.log" 2>&1 && lane_rc=0 || lane_rc=$?
 else
   mkdir "$work/tree"
-  git -C "$repo" archive HEAD | tar -x -C "$work/tree"
+  export_tree "$repo" HEAD "$work/tree" || refuse "could not copy the tree out of git; nothing ran"
   pushed=1   # before the push, so a push that dies half way still gets its volume cleaned
   "$DH" push "$host" "$job" "$work/tree" >/dev/null || refuse "pushing the tree to $host failed"
   "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$lane")" >"$work/lane.log" 2>&1 && lane_rc=0 || lane_rc=$?

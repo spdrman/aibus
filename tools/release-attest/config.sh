@@ -33,6 +33,30 @@ tree_hash() { # repo commit
   git -C "$1" ls-tree -z "$2" | perl -0ne 'print unless /\A\d+ \w+ [0-9a-f]+\trelease-attest\0\z/' | git -C "$1" mktree -z
 }
 
+# Writes the exact content of a tree-ish into a directory, entry by entry from the git objects. `git
+# archive` is not used on purpose: it follows the tree's own .gitattributes, so export-ignore drops
+# files and export-subst rewrites them, and the copy that runs the suites would not be the tree that
+# gets hashed. Modes (644/755), symlinks and submodule directories are kept; a failure returns 1.
+export_tree() { # repo tree-ish dir
+  local ls rec meta mode sha path tgt
+  mkdir -p "$3" || return 1
+  ls=$(mktemp "${TMPDIR:-/tmp}/export-tree.XXXXXX") || return 1
+  git -C "$1" ls-tree -r -z "$2" >"$ls" || { rm -f "$ls"; return 1; }
+  while IFS= read -r -d '' rec; do
+    meta=${rec%%$'\t'*}; path=${rec#*$'\t'}
+    read -r mode _ sha <<<"$meta"
+    mkdir -p "$3/$(dirname "$path")" || { rm -f "$ls"; return 1; }
+    case $mode in
+      120000) tgt=$(git -C "$1" cat-file blob "$sha"; printf x) || { rm -f "$ls"; return 1; }
+              ln -s "${tgt%x}" "$3/$path" || { rm -f "$ls"; return 1; } ;;
+      160000) mkdir -p "$3/$path" ;;
+      *) git -C "$1" cat-file blob "$sha" >"$3/$path" || { rm -f "$ls"; return 1; }
+         if [ "$mode" = 100755 ]; then chmod +x "$3/$path"; fi ;;
+    esac
+  done <"$ls"
+  rm -f "$ls"
+}
+
 # The workspace version, read the way release.yml reads it.
 declared_version() { # repo commit
   git -C "$1" show "$2:Cargo.toml" | awk '

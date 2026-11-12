@@ -47,7 +47,7 @@ cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || tru
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir "$work/tree"
-git archive "$tree" | tar -x -C "$work/tree"
+export_tree . "$tree" "$work/tree" || refuse "could not copy the tree out of git; nothing ran"
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 if [ -n "${RELEASE_E2E_CMD:-}" ]; then
@@ -59,7 +59,9 @@ else
   [ -n "$host" ] || host=$("$DH" pick any)
   [ -n "$host" ] || refuse "dh.sh found no docker host up"
   cmd="suites of tools/release-attest/config.sh in $IMAGE"
-  nonce=$(new_nonce); [ -n "$nonce" ] || exit 1
+  host=$(printf '%s' "$host" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr 'A-Z' 'a-z')
+  host_ok "$host" || refuse "host '$host' is not one dh.sh knows (mars, nas, mercury, local); pre-push would refuse its stamp"
+  nonce=$(new_nonce); [ -n "$nonce" ] || refuse "could not make a nonce (od on /dev/urandom gave nothing); nothing ran"
   lane_script "$nonce" >"$work/lane.sh"
   echo "e2e: $host, job $job (fenced: DH_MEMORY=${DH_MEMORY:-default} DH_CPUS=${DH_CPUS:-default})" >&2
   pushed=1   # before the push, so a push that dies half way still gets its volume cleaned
@@ -83,6 +85,6 @@ fi
 if [ $green != 1 ]; then echo "e2e RED: no stamp written" >&2; exit 1; fi
 mkdir -p "$sdir"
 tmp=$(mktemp "$sdir/.tmp.XXXXXX")
-printf 'tree=%s\ncommand=%s\nhost=%s\nstarted=%s\nfinished=%s\n' "$key" "$cmd" "$host" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp"
+printf 'tree=%s\ncommand=%s\nhost=%s\nstarted=%s\nfinished=%s\ngate_sha256=%s\n' "$key" "$cmd" "$host" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(gate_hash)" >"$tmp"
 mv "$tmp" "$sdir/$key"
 echo "e2e green: stamp for tree $key on $host" >&2

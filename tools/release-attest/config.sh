@@ -33,6 +33,74 @@ tree_hash() { # repo commit
   git -C "$1" ls-tree -z "$2" | perl -0ne 'print unless /\A\d+ \w+ [0-9a-f]+\trelease-attest\0\z/' | git -C "$1" mktree -z
 }
 
+# Writes the exact content of a tree-ish into a directory, entry by entry from the git objects. `git
+# archive` is not used on purpose: it follows the tree's own .gitattributes, so export-ignore drops
+# files and export-subst rewrites them, and the copy that runs the suites would not be the tree that
+# gets hashed. The tree is untrusted input and the copy runs on the host before anything is fenced, so:
+#   - every path is checked first and the whole copy is refused if one has an empty, `.`, `..` or `.git`
+#     component (any case, and with the invisible characters HFS+ ignores taken out);
+#   - regular files and directories are written first, symlinks in a SECOND pass, and a link whose
+#     path already exists is an error, so nothing is ever written through a symlink (the case-insensitive
+#     `Z -> /dir` plus `z/file` shape);
+#   - every file's parent has to resolve (`cd -P`) to a place inside the destination, with no symlink on
+#     the way, and an existing path is never overwritten (a case collision is an error).
+# Modes (644/755), symlinks and submodule directories are kept; any violation aborts with 1.
+export_tree() { # repo tree-ish dir
+  local ls rc
+  mkdir -p "$3" || return 1
+  # the list sits next to the destination: the caller's work dir, which it removes on every exit path
+  ls=$(mktemp "$(cd "$3" && pwd -P).ls.XXXXXX") || return 1
+  git -C "$1" ls-tree -r -z "$2" >"$ls" || { rm -f "$ls"; return 1; }
+  export_entries "$1" "$ls" "$3"; rc=$?
+  rm -f "$ls"
+  return $rc
+}
+# repo, a file of NUL-separated `mode type sha<TAB>path` records (git ls-tree -r -z), dest
+export_entries() {
+  local list=$2 dest real rec meta mode sha entry_path parent pp c bad tgt pass lastok=
+  local -a comps
+  mkdir -p "$3" || return 1
+  dest=$(cd "$3" && pwd -P) || return 1
+  # pass 0: judge every path before anything is written
+  perl -0ne 'chomp; s/^[^\t]*\t//; die "export_tree: empty path\n" if $_ eq ""; for $c (split m{/}, $_, -1) { $l = $c; $l =~ s/\xe2\x80[\x8c-\x8f\xaa-\xae]|\xe2\x81[\xaa-\xaf]|\xef\xbb\xbf//g; $l = lc $l; die "export_tree: refusing the path \x27$_\x27 (component \x27$c\x27)\n" if $l eq "" || $l eq "." || $l eq ".." || $l eq ".git"; }' <"$list" || return 1
+  # pass 1: files and directories. pass 2: symlinks.
+  for pass in 1 2; do
+    lastok=
+    while IFS= read -r -d '' rec; do
+      meta=${rec%%$'\t'*}; entry_path=${rec#*$'\t'}
+      read -r mode _ sha <<<"$meta"
+      if [ "$pass" = 2 ] && [ "$mode" != 120000 ]; then continue; fi
+      parent=${entry_path%/*}; [ "$parent" != "$entry_path" ] || parent=
+      if [ "$parent" != "$lastok" ] || [ -z "$parent" ]; then
+      # directories are only ever made in pass 1, while the destination holds no link at all: a link
+      # made earlier in pass 2 would redirect a mkdir -p to its target before the checks below could run
+      if [ "$pass" = 1 ]; then mkdir -p -- "$dest/$parent" || return 1; fi
+      real=$(cd -P -- "$dest/$parent" && pwd -P) || return 1
+      case $real in "$dest"|"$dest"/*) ;; *) echo "export_tree: '$entry_path' resolves outside the destination" >&2; return 1 ;; esac
+      pp=$dest; bad=0
+      if [ -n "$parent" ]; then
+        IFS=/ read -r -d '' -a comps < <(printf '%s' "$parent") || true
+        for c in "${comps[@]}"; do pp=$pp/$c; if [ -L "$pp" ]; then bad=1; fi; done
+      fi
+      [ $bad = 0 ] || { echo "export_tree: a symlink on the way to '$entry_path'" >&2; return 1; }
+      lastok=$parent
+      fi
+      if [ "$pass" = 1 ] && [ "$mode" = 120000 ]; then continue; fi
+      case $mode in
+        160000) [ -d "$dest/$entry_path" ] || mkdir -- "$dest/$entry_path" || return 1 ;;
+        120000)
+          [ ! -e "$dest/$entry_path" ] && [ ! -L "$dest/$entry_path" ] || { echo "export_tree: '$entry_path' already exists" >&2; return 1; }
+          tgt=$(git -C "$1" cat-file blob "$sha"; printf x) || return 1
+          ln -s -- "${tgt%x}" "$dest/$entry_path" || return 1 ;;
+        *)
+          [ ! -e "$dest/$entry_path" ] && [ ! -L "$dest/$entry_path" ] || { echo "export_tree: '$entry_path' already exists (a case collision?)" >&2; return 1; }
+          git -C "$1" cat-file blob "$sha" >"$dest/$entry_path" || return 1
+          if [ "$mode" = 100755 ]; then chmod +x "$dest/$entry_path"; fi ;;
+      esac
+    done <"$list"
+  done
+}
+
 # The workspace version, read the way release.yml reads it.
 declared_version() { # repo commit
   git -C "$1" show "$2:Cargo.toml" | awk '
@@ -51,8 +119,12 @@ new_nonce() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
 lane_script() { # nonce
   echo 'set -u'
   echo 'export CARGO_TERM_COLOR=never CI=1'
+  local name cmd qn qx
+  qx=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
   while IFS='|' read -r name cmd; do
-    printf 'echo "=== SUITE %s %s ==="; ( %s ) 2>&1; rc=$?; printf "\\n=== EXIT %s %%s %s ===\\n" "$rc"\n' "$name" "$1" "$cmd" "$name" "$1"
+    # names and nonce travel as printf arguments (single-quoted), never inside a format string
+    qn=$(printf '%s' "$name" | sed "s/'/'\\\\''/g")
+    printf "printf '=== SUITE %%s %%s ===\\\\n' '%s' '%s'; ( %s ) 2>&1; rc=\$?; printf '\\\\n=== EXIT %%s %%s %%s ===\\\\n' '%s' \"\$rc\" '%s'\n" "$qn" "$qx" "$cmd" "$qn" "$qx"
   done <<<"$SUITES"
 }
 # The exit code of one suite, from the log: exactly one genuine EXIT marker or nothing.

@@ -10,5 +10,5 @@ if [ -n "$rs" ] && command -v rustfmt >/dev/null 2>&1; then
   rustfmt --check --edition 2021 $rs >/dev/null || { echo "pre-commit: rustfmt would change the staged Rust files (run rustfmt on them)" >&2; exit 1; }
 fi
 git diff --cached --name-only --diff-filter=ACM -z -- '*.sh' .githooks | while IFS= read -r -d '' f; do
-  head -1 "$f" | grep -q 'sh' && { bash -n "$f" || { echo "pre-commit: syntax error in $f" >&2; exit 1; }; }
+  if head -1 "$f" | grep -q 'sh'; then bash -n "$f" || { echo "pre-commit: syntax error in $f" >&2; exit 1; }; fi   # no `&&`: a file without a shebang must not fail the hook
 done

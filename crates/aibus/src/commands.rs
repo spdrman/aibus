@@ -34,6 +34,7 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                     let tty = std::io::stdin().is_terminal();
                     let mut login = crate::oauth::Login::new(def);
                     (login.open_browser, login.paste) = (tty, tty);
+                    login.redactor = redactor.clone();
                     Arc::new(login) as Arc<dyn aibus_core::OAuthFlow>
                 })
             }

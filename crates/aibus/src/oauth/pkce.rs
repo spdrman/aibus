@@ -38,6 +38,7 @@ impl Login {
     ) -> Result<OAuthTokens, String> {
         let d = &self.def;
         let verifier = random_b64();
+        self.hold("oauth-flow:verifier", &verifier);
         let state = random_b64();
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
 
@@ -83,6 +84,7 @@ impl Login {
             .await
             .map_err(|_| "timed out after 5 minutes waiting for the browser; run the command again".to_owned())??;
 
+        self.hold("oauth-flow:code", &code);
         let (body, json) = if d.result == Outcome::ApiKey {
             let b = serde_json::json!({ "code": code, "code_verifier": verifier, "code_challenge_method": "S256" });
             (b.to_string(), true)

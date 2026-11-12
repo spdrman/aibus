@@ -186,7 +186,11 @@ fn account_op(
             // The browser is opened by `o` in the modal, and there is no stdin to paste on.
             oauth: match &cmd {
                 AccountCmd::Add(a) if a.oauth => crate::oauth::definition(&a.provider, None)
-                    .map(|def| Arc::new(crate::oauth::Login::new(def)) as Arc<dyn aibus_core::OAuthFlow>),
+                    .map(|def| {
+                        let mut login = crate::oauth::Login::new(def);
+                        login.redactor = redactor.clone();
+                        Arc::new(login) as Arc<dyn aibus_core::OAuthFlow>
+                    }),
                 _ => None,
             },
             cancel,

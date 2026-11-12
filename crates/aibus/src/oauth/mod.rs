@@ -12,7 +12,7 @@ mod tests;
 
 use std::time::Duration;
 
-use aibus_core::{OAuthFlow, OAuthTokens};
+use aibus_core::{AccountName, OAuthFlow, OAuthTokens, Redactor};
 use aibus_provider::Secret;
 use aibus_provider_http::reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use aibus_provider_http::reqwest::{Client, Url};
@@ -96,9 +96,22 @@ pub struct Login {
     pub open_browser: bool,
     /// Also accept the redirect address pasted on stdin (a terminal is attached).
     pub paste: bool,
+    /// Where the flow's short-lived secrets are registered while it runs. A caller passes the
+    /// process's own; the default one only serves a test.
+    pub redactor: Redactor,
 }
 
+/// The names the flow's short-lived secrets are registered under: the PKCE verifier, the
+/// authorization code and the device code.
+const FLOW_SECRETS: &[&str] = &["oauth-flow:verifier", "oauth-flow:code", "oauth-flow:device-code"];
+
 impl Login {
+    /// Registers `secret` under one of `FLOW_SECRETS` until the flow ends.
+    fn hold(&self, name: &str, secret: &str) {
+        debug_assert!(FLOW_SECRETS.contains(&name));
+        self.redactor.register(&AccountName(name.into()), secret);
+    }
+
     pub fn new(def: Def) -> Self {
         let http = Client::builder()
             .use_rustls_tls()
@@ -106,7 +119,7 @@ impl Login {
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_default();
-        Self { def, http, open_browser: false, paste: false }
+        Self { def, http, open_browser: false, paste: false, redactor: Redactor::new() }
     }
 
     /// A POST to the token or device endpoint. The answer is cut off at 64 KiB, and only the
@@ -169,10 +182,17 @@ impl OAuthFlow for Login {
         notify: &(dyn for<'n> Fn(&'n str) + Send + Sync),
         cancel: &CancellationToken,
     ) -> Result<OAuthTokens, String> {
-        match self.def.kind {
+        let done = match self.def.kind {
             Kind::PkceLoopback => self.pkce(notify, cancel).await,
             Kind::DeviceCode => self.device(notify, cancel).await,
+        };
+        // An error text can carry what a server echoed back; it goes out redacted, and the
+        // flow's secrets are let go of on every way out.
+        let done = done.map_err(|e| self.redactor.redact(&e).into_owned());
+        for name in FLOW_SECRETS {
+            self.redactor.unregister(&AccountName((*name).into()));
         }
+        done
     }
 
     async fn refresh(&self, refresh_token: &str, cancel: &CancellationToken) -> Result<OAuthTokens, String> {

@@ -149,7 +149,11 @@ mod tests {
     #[test]
     fn patterns_compile() {
         let r = Redactor::new();
-        assert_eq!(r.0.patterns.len(), 13);
+        let in_file = include_str!("patterns.toml")
+            .lines()
+            .filter(|l| l.trim_start().starts_with("[[pattern]]"))
+            .count();
+        assert_eq!(r.0.patterns.len(), in_file, "every [[pattern]] in patterns.toml compiles");
     }
 
     #[test]

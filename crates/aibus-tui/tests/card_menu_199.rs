@@ -121,13 +121,16 @@ fn a_right_click_beside_the_menu_that_is_on_no_card_still_just_closes_it() {
 }
 
 #[test]
-fn a_right_click_on_the_menu_itself_closes_it() {
+fn a_right_click_on_the_menu_acts_on_the_card_that_is_under_it() {
     let mut r = rig8();
-    let at = r.centre(HitId::Card(1));
+    let at = r.centre(HitId::Card(0));
     right_click(&mut r, at);
-    let inside = r.centre(HitId::MenuItem(0));
-    right_click(&mut r, inside);
-    assert!(!r.text().contains("Open transcript"), "{}", r.text());
+    // The menu opens at the pointer and is 21 cells wide, so it covers part of card 1.
+    let under_menu = (55, 24);
+    assert!(matches!(r.ui.drawn.hits.at(under_menu.0, under_menu.1).map(|h| h.id), Some(HitId::MenuBox | HitId::MenuItem(_))));
+    right_click(&mut r, under_menu);
+    assert!(menu_for(&r, 1), "{}", r.text());
+    assert_eq!(r.int(SELECTED_CARD), Some(1));
 }
 
 #[test]

@@ -267,3 +267,17 @@ fn ci_has_the_capability_matrix_job_and_every_provider_crate() {
         assert!(provider.split_whitespace().any(|w| w == krate), "provider-contract leaves out {krate}");
     }
 }
+
+/// `aibus-graph-causl` sits outside the workspace with its own lock and deny.toml, and takes the
+/// test kit as a dev-dependency, so it has to move with the root: ratatui 0.30, no paste, no
+/// advisory ignore.
+#[test]
+fn the_causl_crate_lock_and_deny_follow_the_root() {
+    let dir = root().join("crates/aibus-graph-causl");
+    let lock = std::fs::read_to_string(dir.join("Cargo.lock")).expect("read the causl crate lock");
+    assert!(!lock.contains("name = \"ratatui\"\nversion = \"0.29"), "the causl crate lock still pins ratatui 0.29");
+    assert!(!lock.contains("name = \"crossterm\"\nversion = \"0.28"), "the causl crate lock still pins crossterm 0.28");
+    assert!(!lock.contains("name = \"paste\""), "the causl crate lock still has paste");
+    let deny = std::fs::read_to_string(dir.join("deny.toml")).expect("read the causl crate deny.toml");
+    assert!(!deny.contains("RUSTSEC-2024-0436"), "the causl crate deny.toml still ignores the paste advisory");
+}

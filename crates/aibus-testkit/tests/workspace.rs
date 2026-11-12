@@ -241,7 +241,7 @@ fn no_production_tokio_runtime_is_built_without_io() {
             let stmt = &stmt[..stmt.find(".build(").expect("a Builder is built")];
             let name = f.strip_prefix(root().join("crates")).unwrap().to_string_lossy().into_owned();
             let excused = exceptions.iter().any(|(s, _)| name.ends_with(s));
-            if !(stmt.contains("enable_all()") || stmt.contains("enable_io()")) && !excused {
+            if !stmt.contains("enable_all()") && !stmt.contains("enable_io()") && !excused {
                 let line = prod[..i].matches('\n').count() + 1;
                 bad.push(format!("{name}:{line}"));
             }

@@ -306,7 +306,7 @@ impl CredentialStore {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_time()
+                    .enable_all()
                     .build()
                     .map_err(|e| CredentialError::OAuth(format!("no runtime for the refresh: {e}")))?;
                 rt.block_on(self.refresh_once(name, &CancellationToken::new()))

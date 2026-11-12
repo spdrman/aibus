@@ -5,6 +5,10 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ## [0.2.0] - unreleased
 
+### Fixed
+
+* `aibus account add` and `account test` no longer panic with "IO is disabled" (#181). The runtimes that run provider calls (account verify, the OAuth refresh, the background model refresh, and the one `aibus run`, `run --workflow` and the TUI share) were built with `enable_time()` only; they use `enable_all()` now, and a test fails if a production runtime is built without IO.
+
 ### Added
 
 * `aibus mcp`: an MCP server over stdio, in a new `aibus-mcp` crate on `rmcp` 3.9 (D-13). It answers `2026-07-28` (`server/discover`) and `2025-11-25` (`initialize`) as `aibus` plus the crate version, starts read-only, and lists the read tools below. `--allow write|gates|run` and `--allow-tool` are parsed (`gates` needs `write`, exit 2 otherwise; the run budget flags are refused as not available yet). Every call leaves one redacted line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (0600), 60 calls a minute are allowed and arguments are capped at 256 KiB. stdout carries JSON-RPC only; the log goes to stderr. `aibus doctor` lists the audit directory.

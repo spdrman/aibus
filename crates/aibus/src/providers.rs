@@ -128,7 +128,7 @@ pub fn refresh_stale_models(
         return;
     }
     std::thread::spawn(move || {
-        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_time().build() else {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
             return;
         };
         for a in &stale {

@@ -48,7 +48,7 @@ git cat-file -e "$tip^{commit}" 2>/dev/null && mat "$tip" "$gate/tree" 2>/dev/nu
 
 if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
   printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || no "RELEASE_E2E_SKIP is not valid UTF-8."
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f]|\xe2\x80[\xa8\xa9]/ /g; s/^\s+|\s+$//g')
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f\xa0]|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80/ /g; s/^\s+|\s+$//g')
   [ "${#reason}" -ge 12 ] || no "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace is trimmed)."
   waived=stamp
   case $tip in *[!0]*) ;; *) waived="$waived,bootstrap" ;; esac

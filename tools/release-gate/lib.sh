@@ -32,7 +32,7 @@ gate_skipped() { # where
   [ -n "${RELEASE_E2E_SKIP:-}" ] || return 1
   local reason
   printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || { echo "RELEASE_E2E_SKIP is not valid UTF-8; refusing." >&2; exit 2; }
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f]|\xe2\x80[\xa8\xa9]/ /g; s/^\s+|\s+$//g')
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f\xa0]|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80/ /g; s/^\s+|\s+$//g')
   if [ "${#reason}" -lt 12 ]; then echo "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace is trimmed); refusing." >&2; exit 2; fi
   mkdir -p "$(stamp_dir)"
   printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$reason" >>"$(stamp_dir)/skips.log"

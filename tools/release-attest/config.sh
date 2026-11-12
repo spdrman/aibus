@@ -57,42 +57,45 @@ export_tree() { # repo tree-ish dir
 }
 # repo, a file of NUL-separated `mode type sha<TAB>path` records (git ls-tree -r -z), dest
 export_entries() {
-  local list=$2 dest real rec meta mode sha path parent pp c bad tgt pass lastok=
+  local list=$2 dest real rec meta mode sha entry_path parent pp c bad tgt pass lastok=
   local -a comps
   mkdir -p "$3" || return 1
   dest=$(cd "$3" && pwd -P) || return 1
   # pass 0: judge every path before anything is written
-  perl -0ne 'chomp; s/^[^\t]*\t//; die "export_tree: empty path\n" if $_ eq ""; for $c (split m{/}, $_, -1) { $l = $c; $l =~ s/\xe2\x80[\x8c-\x8f\xaa-\xae]|\xe2\x81[\xaa-\xaf]|\xef\xbb\xbf//g; $l = lc $l; die "export_tree: refusing the path \x27$_\x27 (component \x27$c\x27)\n" if $l eq "" || $l eq "." || $l eq ".." || $l eq ".git"; }' "$list" || return 1
+  perl -0ne 'chomp; s/^[^\t]*\t//; die "export_tree: empty path\n" if $_ eq ""; for $c (split m{/}, $_, -1) { $l = $c; $l =~ s/\xe2\x80[\x8c-\x8f\xaa-\xae]|\xe2\x81[\xaa-\xaf]|\xef\xbb\xbf//g; $l = lc $l; die "export_tree: refusing the path \x27$_\x27 (component \x27$c\x27)\n" if $l eq "" || $l eq "." || $l eq ".." || $l eq ".git"; }' <"$list" || return 1
   # pass 1: files and directories. pass 2: symlinks.
   for pass in 1 2; do
     lastok=
     while IFS= read -r -d '' rec; do
-      meta=${rec%%$'\t'*}; path=${rec#*$'\t'}
+      meta=${rec%%$'\t'*}; entry_path=${rec#*$'\t'}
       read -r mode _ sha <<<"$meta"
-      if [ "$pass" = 1 ]; then case $mode in 120000) continue ;; esac; else [ "$mode" = 120000 ] || continue; fi
-      parent=${path%/*}; [ "$parent" != "$path" ] || parent=
+      if [ "$pass" = 2 ] && [ "$mode" != 120000 ]; then continue; fi
+      parent=${entry_path%/*}; [ "$parent" != "$entry_path" ] || parent=
       if [ "$parent" != "$lastok" ] || [ -z "$parent" ]; then
-      mkdir -p -- "$dest/$parent" || return 1
+      # directories are only ever made in pass 1, while the destination holds no link at all: a link
+      # made earlier in pass 2 would redirect a mkdir -p to its target before the checks below could run
+      if [ "$pass" = 1 ]; then mkdir -p -- "$dest/$parent" || return 1; fi
       real=$(cd -P -- "$dest/$parent" && pwd -P) || return 1
-      case $real in "$dest"|"$dest"/*) ;; *) echo "export_tree: '$path' resolves outside the destination" >&2; return 1 ;; esac
+      case $real in "$dest"|"$dest"/*) ;; *) echo "export_tree: '$entry_path' resolves outside the destination" >&2; return 1 ;; esac
       pp=$dest; bad=0
       if [ -n "$parent" ]; then
         IFS=/ read -r -d '' -a comps < <(printf '%s' "$parent") || true
         for c in "${comps[@]}"; do pp=$pp/$c; if [ -L "$pp" ]; then bad=1; fi; done
       fi
-      [ $bad = 0 ] || { echo "export_tree: a symlink on the way to '$path'" >&2; return 1; }
+      [ $bad = 0 ] || { echo "export_tree: a symlink on the way to '$entry_path'" >&2; return 1; }
       lastok=$parent
       fi
+      if [ "$pass" = 1 ] && [ "$mode" = 120000 ]; then continue; fi
       case $mode in
-        160000) [ -d "$dest/$path" ] || mkdir -- "$dest/$path" || return 1 ;;
+        160000) [ -d "$dest/$entry_path" ] || mkdir -- "$dest/$entry_path" || return 1 ;;
         120000)
-          [ ! -e "$dest/$path" ] && [ ! -L "$dest/$path" ] || { echo "export_tree: '$path' already exists" >&2; return 1; }
+          [ ! -e "$dest/$entry_path" ] && [ ! -L "$dest/$entry_path" ] || { echo "export_tree: '$entry_path' already exists" >&2; return 1; }
           tgt=$(git -C "$1" cat-file blob "$sha"; printf x) || return 1
-          ln -s -- "${tgt%x}" "$dest/$path" || return 1 ;;
+          ln -s -- "${tgt%x}" "$dest/$entry_path" || return 1 ;;
         *)
-          [ ! -e "$dest/$path" ] && [ ! -L "$dest/$path" ] || { echo "export_tree: '$path' already exists (a case collision?)" >&2; return 1; }
-          git -C "$1" cat-file blob "$sha" >"$dest/$path" || return 1
-          if [ "$mode" = 100755 ]; then chmod +x "$dest/$path"; fi ;;
+          [ ! -e "$dest/$entry_path" ] && [ ! -L "$dest/$entry_path" ] || { echo "export_tree: '$entry_path' already exists (a case collision?)" >&2; return 1; }
+          git -C "$1" cat-file blob "$sha" >"$dest/$entry_path" || return 1
+          if [ "$mode" = 100755 ]; then chmod +x "$dest/$entry_path"; fi ;;
       esac
     done <"$list"
   done

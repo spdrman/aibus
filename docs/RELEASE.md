@@ -85,8 +85,9 @@ On a push to `release` it runs these jobs, each one only if the ones before it s
 
 1. `prepare` reads the version from `[workspace.package]` in `Cargo.toml`, makes the tag
    `v<version>`, and stops if the tag already exists, if `CHANGELOG.md` has no entry for the
-   version, if the release commit is not a descendant of the tip of `main`, or if `install.sh`,
-   `install.ps1` or `packaging/homebrew/render-formula.sh` is missing.
+   version, if the release commit is not a descendant of the tip of `main`, if `install.sh`,
+   `install.ps1` or `packaging/homebrew/render-formula.sh` is missing, or if the release commit has
+   no valid signed attestation (see "The release attestation" below).
 2. `build` runs `cargo build --release --locked -p aibus` on six runners (aarch64 and x86_64 macOS,
    x86_64 and aarch64 Linux glibc, x86_64 Linux musl, x86_64 Windows) with `AIBUS_TAG` and
    `AIBUS_COMMIT` set, runs the binary once (`aibus version` must show the commit, and the tag on a
@@ -113,7 +114,8 @@ On a push to `release` it runs these jobs, each one only if the ones before it s
 The dry run (`gh workflow run release.yml --ref <branch>`) runs `prepare` (problems become
 warnings), `build` and `package`. `publish`, `verify`, `finalize` and `summary` carry the
 push-to-`release` condition on the job itself, so a dispatch skips them whatever the ref is: it
-never tags, signs, publishes or merges.
+never tags, signs, publishes or merges. A dry run reports a missing or invalid attestation as a
+warning too, so a branch without one still builds.
 
 Pushes made with `GITHUB_TOKEN` (the formula commit, the merge into main) do not start new runs, so
 there is no loop. If that ever changed, the second run would stop in `prepare` because the tag
@@ -130,11 +132,51 @@ Not proven by a dry run: signing, publishing, `verify` and `finalize` only run o
 the first release is their first run. The keyless bundle format, the `install.sh` run and the
 formula render are the parts most likely to need a fix on that run.
 
+### The release attestation
+
+Nothing on Actions runs the suites, so the proof that they ran is a signed file I make before the
+push. `tools/release-attest/attest.sh` archives `HEAD`, pushes it to a docker host with `dh.sh`
+and runs the "every push" rows of `docs/TESTING.md` in one fenced container (memory limit, swap
+equal to it so none, CPU quota; `DH_MEMORY` and `DH_CPUS` override the defaults, the host is
+`--host`, default `mercury`). It refuses a dirty tree, a missing key, an existing attestation
+(without `--replace`) and a red run. When it is green it writes `release-attest/attestation.json`
+(commit, tree hash, version, per-suite exit and counts) and a detached `ssh-keygen -Y sign`
+signature next to it. Benchmarks, fuzzing, the live provider run and the `aibus-graph-causl`
+backend are not part of it.
+
+```
+tools/release-attest/attest.sh --key <private key>     # on the release candidate, tree clean
+git add release-attest && git commit -m "Attest the suites for <version>"
+tools/release-attest/verify.sh --expect-version <version>            # the same check `prepare` makes
+```
+
+The hash is the id of the commit's top-level git tree with the one entry named exactly
+`release-attest` removed, rebuilt with `git mktree -z` (algorithm `mktree-top-level-sans-release-attest-v2`).
+Nothing is split on newlines or tabs, so no file name can fake an entry, and only that top-level
+entry is left out: committing the two files does not invalidate them, and any other change after the
+run (a nested `release-attest` directory included) does ("the code changed after the run").
+`verify.sh` checks the signature against `packaging/release-attest.pub`, that the tree hash is this
+commit's, that the version is the one `Cargo.toml` declares, and that every suite is present, exited
+0 and passed cells. It prints ok only if the signature check actually ran, and a `--pubkey` that is
+not a readable file is a failure. `prepare` runs it on the release commit with the key read from
+`main`, so the push cannot bring its own. It proves the key holder signed a green run of this tree;
+it cannot stop someone with write access editing the script or the workflow in the same push.
+
+The signing key is `ssh-ed25519` (public half committed in `packaging/release-attest.pub`,
+fingerprint `SHA256:VqX4OVIeEX8cDiNWiwMIJdcBqZtpGyiUNiOpztMzHT8`); the private half is never
+committed. `attest.sh` looks for the private key at `~/.ssh/aibus-release-attest` with its `.pub`
+beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must sit next to it) or set
+`AIBUS_ATTEST_KEY`. Tests for the
+tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.
+
 ### Release procedure
 
 * [ ] `main` is green locally (the automatic part above) and a dry run of the workflow is green.
 * [ ] `version` in the root `Cargo.toml` is the release version, `Cargo.lock` is committed, and
       `CHANGELOG.md` has the entry for it.
+* [ ] `tools/release-attest/attest.sh` is green on the commit that goes to `release`, the two files
+      are committed, and `tools/release-attest/verify.sh --expect-version <version>` says ok. The
+      merge into `release` must leave the same tree (fast-forward, or a merge that changes nothing).
 * [ ] Open a pull request from `main` (or a branch of it) into `release`, and merge it. The merge
       is the trigger. If `release` does not exist yet, create it at the tip of `main` once.
 * [ ] Watch the run (`gh run watch`). The run summary says which job stopped it, if any.

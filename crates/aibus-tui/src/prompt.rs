@@ -590,6 +590,17 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_keeps_its_line_breaks_whatever_newline_the_terminal_sent() {
+        // Issue #197: xterm style terminals put a bare CR for each newline inside a bracketed
+        // paste. LF and CRLF always worked; the CR was deleted and the lines ran together.
+        for (name, pasted) in [("LF", "one\ntwo\nthree"), ("CRLF", "one\r\ntwo\r\nthree"), ("CR", "one\rtwo\rthree")] {
+            let mut p = Prompt::default();
+            p.paste(pasted);
+            assert_eq!(p.text, "one\ntwo\nthree", "{name} newlines");
+        }
+    }
+
+    #[test]
     fn a_pasted_path_is_inserted_as_a_path_and_not_run() {
         let mut p = Prompt::default().with_text("read ");
         p.paste("/home/me/my file.txt\n");

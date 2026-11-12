@@ -163,7 +163,7 @@ expect "...and says so" grep -qi 'nonce' "$t/nonce.out"
 # ---------- gate integrity: judged with the gate of the remote release tip
 pushmsg() { git push -q "$@" 2>"$t/p.err"; }
 git switch -q release; git reset -q --hard HEAD 2>/dev/null
-RELEASE_E2E_SKIP=sync git push -q -f origin release 2>/dev/null
+RELEASE_E2E_SKIP="sync with the remote" git push -q -f origin release 2>/dev/null
 base=$(git rev-parse HEAD)
 git switch -q -c topic3; printf '%s\n' 'stamp_ok() { return 0; }' >>tools/release-gate/lib.sh; git commit -q -am "topic edits lib.sh"
 git switch -q release; git merge -q --ff-only topic3
@@ -189,15 +189,15 @@ expect "...and names the file" grep -q 'release-attest/note' "$t/p.err"
 git reset -q --hard HEAD~1
 # a stale clone: the remote tip is not here
 git clone -q "$r.origin" "$t/clone2" 2>/dev/null
-(cd "$t/clone2" && git config user.email t@example.com && git config user.name t && git config core.hooksPath .githooks && git switch -q release && echo c2 >c2.txt && git add c2.txt && git commit -q -m c2 && RELEASE_E2E_SKIP=other git push -q origin release 2>/dev/null)
+(cd "$t/clone2" && git config user.email t@example.com && git config user.name t && git config core.hooksPath .githooks && git switch -q release && echo c2 >c2.txt && git add c2.txt && git commit -q -m c2 && RELEASE_E2E_SKIP="another clone pushed" git push -q origin release 2>/dev/null)
 echo mine >mine.txt; git add mine.txt; git commit -q -m mine
 key=$(tree_hash . HEAD); mk_stamp "$key" "$key" mars
 refuse "a push judged against a remote tip that is not in this clone is refused" pushmsg origin release
 expect "...and says to fetch first" grep -q 'fetch first' "$t/p.err"
 git fetch -q origin; git reset -q --hard origin/release
 refuse "deleting release is refused" pushmsg origin :refs/heads/release
-expect "deleting release with the logged skip passes" env RELEASE_E2E_SKIP="owner asked" git push -q origin :refs/heads/release
-RELEASE_E2E_SKIP=rebootstrap git push -q origin release 2>/dev/null; true
+expect "deleting release with the logged skip passes" env RELEASE_E2E_SKIP="owner asked for the delete" git push -q origin :refs/heads/release
+RELEASE_E2E_SKIP="bootstrap again after delete" git push -q origin release 2>/dev/null; true
 # a merge that changes a gate file
 git switch -q -c topicg; echo '# hook note' >>.githooks/pre-commit; git commit -q -am "hook change"
 git switch -q release; echo m >m.txt; git add m.txt; git commit -q -m m2
@@ -205,6 +205,99 @@ refuse "a merge into release that changes a gate file is refused" env RELEASE_E2
 git merge --abort 2>/dev/null; git reset -q --hard
 expect "...with the logged skip the merge goes through" env RELEASE_E2E_SKIP="hook change asked for" git merge --no-ff -m m topicg
 git reset -q --hard HEAD~2 2>/dev/null
+# ---------- review round: the skip logs itself, tree copies ignore .gitattributes, odd stdin
+base2() { r2=$t/$1; mkrepo "$r2"; usegate "$r2"; git switch -q -c release; RELEASE_E2E_SKIP="bootstrap for the test" git push -q origin release 2>/dev/null; }
+sdir() { echo "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)/release-e2e"; }
+loglines() { wc -l <"$(sdir)/skips.log" 2>/dev/null | tr -d ' '; }
+base2 s0
+expect "the bootstrap skip record lists what it waived (bootstrap)" grep -q 'waived=.*bootstrap' "$(sdir)/skips.log"
+expect "...and carries the pushed sha, old tip and remote ref" grep -Eq 'pushed_sha=[0-9a-f]{40} old_tip=0{40} remote_ref=refs/heads/release' "$(sdir)/skips.log"
+# S1: a lib that silences gate_skipped, fast-forwarded into release
+base2 s1
+git switch -q -c topic; perl -0pi -e 's/gate_skipped\(\) \{ # where\n/gate_skipped() { # where\n  return 0\n/' tools/release-gate/lib.sh
+git commit -qam "quiet skip log"; git switch -q release; git merge -q --ff-only topic; before=$(loglines)
+RELEASE_E2E_SKIP="gate change asked for" git push -q origin release 2>/dev/null
+expect "S1: a skip push still logs when the pushed lib silences gate_skipped" test "$(loglines)" -gt "$before"
+expect "S1: the record says gate-change was waived" grep -q 'waived=.*gate-change' "$(sdir)/skips.log"
+refuse "a skip reason under 12 characters is refused (push)" env RELEASE_E2E_SKIP=short git push -q origin release:refs/heads/release
+# S1b: a lib that exits at source time
+base2 s1b
+git switch -q -c topic; printf 'exit 0\n' | cat - tools/release-gate/lib.sh >"$t/l" && cp "$t/l" tools/release-gate/lib.sh
+git commit -qam "exit early"; git switch -q release; git merge -q --ff-only topic; before=$(loglines)
+RELEASE_E2E_SKIP="gate change asked for" git push -q origin release 2>/dev/null
+expect "S1b: a skip push still logs when the pushed lib exits on source" test "$(loglines)" -gt "$before"
+# S2: release made from a commit with no gate, merged topic carries a silenced lib
+r2=$t/s2; rm -rf "$r2"; mkdir -p "$r2"; cd "$r2"; git init -q -b main; git config user.email t@example.com; git config user.name t
+echo a >a; git add a; git commit -qm old; git switch -q -c release; git switch -q -c topic main
+cp -R "$src/.githooks" .; mkdir -p tools; cp -R "$src/tools/release-gate" "$src/tools/release-attest" tools/
+perl -0pi -e 's/gate_skipped\(\) \{ # where\n/gate_skipped() { # where\n  return 0\n/' tools/release-gate/lib.sh
+git add -A; git commit -qm gate; git config core.hooksPath .githooks; git switch -q release
+refuse "a short skip reason is refused (merge)" env RELEASE_E2E_SKIP=short git merge --no-ff -q -m m topic
+git merge --abort 2>/dev/null; git reset -q --hard
+RELEASE_E2E_SKIP="create release branch" git merge --no-ff -q -m m topic 2>/dev/null
+expect "S2: creating release (HEAD has no gate) with a skip logs a record" grep -q 'create release branch' "$(sdir)/skips.log"
+expect "S2: ...listing remote-gate among what was waived" grep -q 'waived=.*remote-gate' "$(sdir)/skips.log"
+# no temp dirs left behind by the merge hook's skip path
+base2 s8; git switch -q -c topic; echo t >t.txt; git add t.txt; git commit -qm topic; git switch -q release; echo r >r2.txt; git add r2.txt; git commit -qm r2
+mkdir "$t/tmpL"; TMPDIR=$t/tmpL RELEASE_E2E_SKIP="leak check for the merge" git merge --no-ff -q -m m topic 2>/dev/null
+expect "pre-merge-commit with a skip leaves no temp dir" test -z "$(ls "$t/tmpL")"
+git switch -q -c topic2 HEAD~1; echo u >u.txt; git add u.txt; git commit -qm topic2; git switch -q release; git merge -q -s ours --no-ff -m m2 topic2 >/dev/null 2>&1
+rm -rf "$t/tmpL"; mkdir "$t/tmpL"; TMPDIR=$t/tmpL RELEASE_E2E_CMD=true git merge --no-ff -q -m m3 topic2 >/dev/null 2>&1
+expect "pre-merge-commit on a normal merge leaves no temp dir" test -z "$(ls "$t/tmpL")"
+echo p >p.txt; git add p.txt; git commit -qm p; mkdir "$t/tmpP"; TMPDIR=$t/tmpP RELEASE_E2E_SKIP="leak check for the push" git push -q origin release 2>/dev/null
+expect "pre-push with a skip leaves no temp dir" test -z "$(ls "$t/tmpP")"
+# S3: a newline in a refspec plants a fake ref line ahead of the real one
+base2 s3
+echo good >g; git add g; git commit -qm good; key=$(tree_hash . HEAD); mk_stamp "$key" "$key" mars; good=$(git rev-parse HEAD)
+git push -q origin release 2>/dev/null; tip=$(git rev-parse release)
+echo bad >g; git commit -qam bad; git commit -q --allow-empty -m "z $good refs/heads/release $tip"
+spec=$(printf 'HEAD^{/z %s refs/heads/release %s\n}' "$good" "$tip")
+refuse "S3: a refspec with a newline cannot plant a fake release line" git push -q origin "$spec:refs/heads/release"
+# S5: a decoy GIT_COMMON_DIR holding a stamp
+base2 s5
+echo n >n; git add n; git commit -qm n; dec=$t/decoy5; git clone -q --bare "$r2" "$dec"
+key=$(tree_hash . HEAD); mkdir -p "$dec/release-e2e"; printf 'tree=%s\ncommand=x\nhost=mars\nstarted=s\nfinished=f\ngate_sha256=%s\n' "$key" "$(curgh)" >"$dec/release-e2e/$key"
+refuse "S5: GIT_COMMON_DIR pointing at a dir with a stamp does not open pre-push" env GIT_COMMON_DIR="$dec" git push -q origin release
+# the real first push: the remote release exists but has no gate
+r2=$t/s7; rm -rf "$r2" "$r2.origin"; mkdir -p "$r2"; git init -q --bare -b main "$r2.origin"; cd "$r2"; git init -q -b main; git config user.email t@example.com; git config user.name t
+echo a >a; git add a; git commit -qm old; git remote add origin "$r2.origin"; git push -q origin main; git push -q origin main:refs/heads/release
+cp -R "$src/.githooks" .; mkdir -p tools; cp -R "$src/tools/release-gate" "$src/tools/release-attest" tools/; git add -A; git commit -qm gate; git config core.hooksPath .githooks
+git fetch -q origin; git switch -q -c release; git branch -q -u origin/release 2>/dev/null
+git push origin release 2>"$t/p.err" >/dev/null
+expect "a remote release without a gate is refused and the message names the skip" grep -q 'RELEASE_E2E_SKIP' "$t/p.err"
+RELEASE_E2E_SKIP="first gated push of release" git push -q origin release 2>/dev/null
+expect "...the logged skip lets the first gated push through, listing remote-gate" grep -q 'waived=.*remote-gate' "$(sdir)/skips.log"
+# the trusted gate is read with git show, so export-ignore in the tip cannot drop it
+base2 s9
+printf 'tools/release-gate export-ignore\ntools/release-attest export-ignore\n' >.gitattributes; git add .gitattributes; git commit -qm attrs
+RELEASE_E2E_SKIP="move the tip for the test" git push -q origin release 2>/dev/null
+echo more >more.txt; git add more.txt; git commit -qm more; key=$(tree_hash . HEAD); mk_stamp "$key" "$key" mars
+expect "a tip whose .gitattributes export-ignores the gate still supplies the gate" git push -q origin release
+# S4: git archive honours the tree's own .gitattributes; the copy must not
+base2 s4
+mkdir tests; echo 'exit 1' >tests/b.sh; echo 'exit 0' >tests/a.sh; git add -A; git commit -qm t
+refuse "S4 control: the e2e is red while the failing test is in the tree" env RELEASE_E2E_CMD='for f in tests/*.sh; do sh $f || exit 1; done' tools/release-gate/e2e.sh
+echo 'tests/b.sh export-ignore' >.gitattributes; git add -A; git commit -qm hide
+refuse "S4: an export-ignored failing test is still in the copy, so the e2e stays red" env RELEASE_E2E_CMD='for f in tests/*.sh; do sh $f || exit 1; done' tools/release-gate/e2e.sh
+expect "S4: no stamp for it" test -z "$(ls "$(sdir)" 2>/dev/null | grep -v -e skips.log -e '^\.')"
+printf 'tests/sub.txt export-subst\n' >.gitattributes; printf 'id $Format:%%H$\n' >tests/sub.txt; printf '#!/bin/sh\nexit 0\n' >tests/x.sh; chmod +x tests/x.sh; ln -s tests/a.sh tests/link; rm tests/b.sh
+git add -A; git commit -qm modes
+expect "the copy keeps modes, symlinks and export-subst text byte for byte" env RELEASE_E2E_CMD='test -x tests/x.sh && test -L tests/link && [ "$(readlink tests/link)" = tests/a.sh ] && grep -q "Format:%H" tests/sub.txt' tools/release-gate/e2e.sh
+# a newline inside the source ref plants a fake line; line count and field count are both checked
+base2 s3b
+echo f >f2; git add f2; git commit -qm F; F=$(git rev-parse HEAD); key=$(tree_hash . HEAD); mk_stamp "$key" "$key" mars
+git push -q origin release 2>/dev/null; tipb=$(git rev-parse release)
+echo e >e2; git add e2; git commit -q -am E 2>/dev/null || { git add e2; git commit -qm E; }
+git commit -q --allow-empty -m "$(printf 'evil\nlocal %s refs/heads/release %s' "$F" "$F")"
+spec=$(printf 'HEAD^{/evil\nlocal %s refs/heads/release %s}' "$F" "$F")
+refuse "a newline in the source cannot make the hook judge a planted line (fake line before the real one)" git push -q origin "$spec:refs/heads/release"
+# a reason with newlines cannot forge record lines
+base2 s10
+echo q >q; git add q; git commit -qm q; before=$(loglines)
+RELEASE_E2E_SKIP="$(printf 'forged reason here\nwaived=none\nuser=root')" git push -q origin release 2>/dev/null
+expect "a skip reason with newlines is flattened into one record line" test "$(loglines)" = $((before + 1))
+refuse "...so no record line starts with a forged key" grep -Eq '^(waived|user)=' "$(sdir)/skips.log"
+cd "$r"
 git reset -q --hard HEAD~1
 git switch -q feature
 expect "pre-commit passes on a clean shell file" bash -c 'echo "#!/bin/sh" >a.sh; echo "true" >>a.sh; git add a.sh; git commit -q -m a'

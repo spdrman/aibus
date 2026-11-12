@@ -171,5 +171,19 @@ PATH="$t/noodbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --k
 expect "attest.sh with an empty nonce exits 2" test $rc = 2
 expect "...and says why" grep -qi 'nonce' "$t/nonce.out"
 
+# git archive honours the tree's .gitattributes (export-ignore drops files, export-subst rewrites them); the copy attest.sh sends must not.
+r=$t/repo16; mkrepo "$r" 1.2.3; mkdir "$r/tests"; echo 'exit 1' >"$r/tests/b.sh"; printf '#!/bin/sh\n' >"$r/tests/x.sh"; chmod +x "$r/tests/x.sh"; ln -s b.sh "$r/tests/link"
+printf 'id $Format:%%H$\n' >"$r/tests/sub.txt"; printf 'tests/b.sh export-ignore\ntests/sub.txt export-subst\n' >"$r/.gitattributes"
+git -C "$r" add -A; git -C "$r" commit -q -m attrs
+cat >"$t/dhcopy.sh" <<'DHC'
+#!/bin/sh
+case $1 in push) mkdir -p "$DH_COPY"; cp -a "$4/." "$DH_COPY/";; run) exit 1;; esac
+DHC
+chmod +x "$t/dhcopy.sh"
+DH_COPY=$t/copy16 DH_SH=$t/dhcopy.sh "$tools/attest.sh" --repo "$r" --key "$t/key" --host mars >/dev/null 2>&1
+expect "attest.sh copies an export-ignored file into the tree it runs" test -f "$t/copy16/tests/b.sh"
+expect "attest.sh keeps export-subst text byte for byte" grep -q 'Format:%H' "$t/copy16/tests/sub.txt"
+expect "attest.sh keeps the exec bit and symlinks" bash -c "test -x '$t/copy16/tests/x.sh' && test -L '$t/copy16/tests/link' && [ \"\$(readlink '$t/copy16/tests/link')\" = b.sh ]"
+
 echo "$n tests, $fails failed"
 [ "$fails" = 0 ]

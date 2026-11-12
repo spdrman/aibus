@@ -176,7 +176,7 @@ plus one runner. Install them once per clone with `tools/release-gate/install.sh
 `core.hooksPath` to `.githooks`; there were no hooks before, so nothing else is replaced).
 
 **Flow.** A feature branch (`feature/...`, `fix/...`, `lane/...`) merges onto `main` as before. A
-release is cut on a branch named `release/v<version>`, and that branch is merged into `release`.
+release is cut on a branch named `release-prep/v<version>`, and that branch is merged into `release`.
 That merge is what `release.yml` publishes from.
 
 **On a feature branch** (`pre-commit`): fast checks on the staged files only, `rustfmt --check` on
@@ -232,7 +232,7 @@ the tag `v<version>` when the PR lands on `release`.
    `--allow-downgrade`; `CHANGELOG.md` has the entry (I write it first); the tree is clean; the key
    exists at `~/.ssh/aibus-release-attest` (or `--key`) and its `.pub` is the one committed in
    `packaging/release-attest.pub`. The private key is only checked for existing, never read.
-2. Cuts `release/v<version>` from `origin/main`.
+2. Cuts `release-prep/v<version>` from `origin/main`.
 3. One commit `Release v<version>`: `version` in `[workspace.package]` in `Cargo.toml` and the path
    crates in `Cargo.lock` (what `lane/version-0.2.0` did). `Formula/aibus.rb` stays, `finalize` renders
    it. This is before the e2e, so the e2e and the attestation cover the tree that gets released.
@@ -258,7 +258,7 @@ fake runner, throwaway key, fake `gh`; no container).
       are committed, and `tools/release-attest/verify.sh --expect-version <version>` says ok. The
       merge into `release` must leave the same tree (fast-forward, or a merge that changes nothing).
 * [ ] Open a pull request from `main` (or a branch of it) into `release`, and merge it. The merge
-      is the trigger. If `release` does not exist yet, create it at the tip of `main` once.
+      is the trigger. If `release` does not exist yet, create it once from `main` (the one-time bootstrap; the stamp does not exist for that tree, so the skip is logged): `RELEASE_E2E_SKIP="bootstrap release branch" git push origin main:refs/heads/release`. A branch named `release/...` cannot exist next to `release`, so per-release work uses `release-prep/v<version>`.
 * [ ] Watch the run (`gh run watch`). The run summary says which job stopped it, if any.
 * [ ] When it is green: `main` has the merge commit and `Formula/aibus.rb`, the release has the
       assets listed above (six archives, SBOM, `SHA256SUMS`, two installers, and a bundle for

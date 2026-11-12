@@ -9,7 +9,7 @@
 #   workspace version, and its tag v<version> must not exist locally or on origin.
 #   1. preconditions: clean tree, the CHANGELOG entry, the signing key whose .pub equals the committed
 #      packaging/release-attest.pub (the private key is never read, only its presence is checked), gh
-#   2. branch release/v<version>, cut from origin/main (or the existing one, which must contain it)
+#   2. branch release-prep/v<version>, cut from origin/main (or the existing one, which must contain it)
 #   3. ONE commit "Release v<version>": [workspace.package] version in Cargo.toml and the path crates in
 #      Cargo.lock (what lane/version-0.2.0 did). Skipped when the manifest already has the version.
 #      Formula/aibus.rb stays: the release renders it from the published checksums.
@@ -61,6 +61,8 @@ tag=v$ver
 [ -z "$(git tag -l "$tag")" ] || refuse "tag $tag already exists locally"
 [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ] || refuse "tag $tag already exists on origin"
 [ -z "$(git status --porcelain)" ] || refuse "the tree is dirty"
+clash=$({ git for-each-ref --format='%(refname:short)' 'refs/heads/release/*'; git ls-remote --heads origin 'refs/heads/release/*' | sed 's|.*refs/heads/||'; } | head -1)
+[ -z "$clash" ] || refuse "a branch named '$clash' exists (locally or on origin); git cannot hold it next to the branch release. Rename it to release-prep/${clash#release/} and delete the old one"
 main_sha=$(git ls-remote origin refs/heads/main | cut -f1)
 [ -n "$main_sha" ] || refuse "could not read origin/main"
 current=$(git show "$main_sha:Cargo.toml" 2>/dev/null | awk '/^\[/{w=($0=="[workspace.package]")} w&&/^version[ ]*=/{gsub(/^[^"]*"|".*$/,"");print;exit}' || true)
@@ -79,7 +81,7 @@ committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}'
 command -v gh >/dev/null || refuse "gh is not installed"
 echo "   version $ver (workspace is $current), tag $tag is made by release.yml on the push to release, not here" >&2
 
-branch=release/$tag
+branch=release-prep/$tag
 step "2. branch $branch"
 if git show-ref -q --verify "refs/heads/$branch"; then
   would "git switch $branch" || git switch -q "$branch"

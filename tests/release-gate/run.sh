@@ -106,16 +106,25 @@ RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/releas
 expect "--dry-run succeeds and prints the steps" grep -q 'dry run done' "$t/dry.out"
 after=$(git for-each-ref | md5; git status --porcelain)
 expect "--dry-run changes no ref and no file" test "$before" = "$after"
-expect "--dry-run makes no branch, no stamp, no attestation, no gh call" bash -c "! git show-ref -q refs/heads/release/v0.2.0 && [ ! -d .git/release-e2e ] && [ ! -e release-attest ] && [ ! -s '$GH_LOG' ] && [ -z \"\$(git ls-remote origin 'refs/heads/release/*')\" ]"
+expect "--dry-run makes no branch, no stamp, no attestation, no gh call" bash -c "! git show-ref -q refs/heads/release-prep/v0.2.0 && [ ! -d .git/release-e2e ] && [ ! -e release-attest ] && [ ! -s '$GH_LOG' ] && [ -z \"\$(git ls-remote origin 'refs/heads/release-prep/*')\" ]"
+
+git branch release/old
+refuse "a local release/... branch makes release.sh refuse" rel 0.2.0 --dry-run
+rel 0.2.0 --dry-run >"$t/clash.err" 2>&1
+git branch -q -D release/old
+expect "the clash message points at the rename" grep -q "Rename it to release-prep/old" "$t/clash.err"
+git push -q origin main:refs/heads/release/remote
+refuse "a remote release/... branch makes release.sh refuse" rel 0.2.0 --dry-run
+git push -q origin :refs/heads/release/remote
 
 E2E=false refuse "a red e2e stops the release" rel 0.2.0 --yes
-expect "red e2e: bump commit made, nothing pushed, no gh call" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release/*')\" ] && [ ! -s '$GH_LOG' ] && [ ! -e release-attest ]"
-git switch -q main; git branch -q -D release/v0.2.0
+expect "red e2e: bump commit made, nothing pushed, no gh call" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release-prep/*')\" ] && [ ! -s '$GH_LOG' ] && [ ! -e release-attest ]"
+git switch -q main; git branch -q -D release-prep/v0.2.0
 ATT=$t/attest-badsig.sh refuse "a failing verify stops the release" rel 0.2.0 --yes
-expect "failed verify: no push, no gh call" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release/*')\" ] && [ ! -s '$GH_LOG' ]"
-git switch -q -f main; git reset -q --hard; git branch -q -D release/v0.2.0; rm -rf release-attest "$(git rev-parse --git-common-dir)/release-e2e"
+expect "failed verify: no push, no gh call" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release-prep/*')\" ] && [ ! -s '$GH_LOG' ]"
+git switch -q -f main; git reset -q --hard; git branch -q -D release-prep/v0.2.0; rm -rf release-attest "$(git rev-parse --git-common-dir)/release-e2e"
 expect "a green run succeeds" rel 0.2.0 --yes --closes 7
-expect "the branch is release/v0.2.0 and was pushed" test -n "$(git ls-remote origin refs/heads/release/v0.2.0)"
+expect "the branch is release-prep/v0.2.0 and was pushed" test -n "$(git ls-remote origin refs/heads/release-prep/v0.2.0)"
 expect "one bump commit named Release v0.2.0, then the attestation commit" test "$(git log --format=%s -2 | tr '\n' ,)" = "Attest the suites for 0.2.0,Release v0.2.0,"
 expect "gh pr create ran once, against release, titled Release v0.2.0" bash -c "[ \$(wc -l <'$GH_LOG') = 1 ] && grep -q -- '--base release' '$GH_LOG' && grep -q -- '--title Release v0.2.0' '$GH_LOG'"
 expect "the attestation records the version" jq -e '.version.declared == "0.2.0"' release-attest/attestation.json

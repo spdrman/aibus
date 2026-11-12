@@ -39,3 +39,14 @@ declared_version() { # repo commit
     /^\[/ { in_ws = ($0 == "[workspace.package]") }
     in_ws && /^version[ ]*=/ { gsub(/^[^"]*"|".*$/, ""); print; exit }'
 }
+
+# One script, the suites in order between markers, so one container runs them all. attest.sh and
+# tools/release-gate/e2e.sh both build their container script with this, so the suite list and the
+# way it is run live in one place.
+lane_script() {
+  echo 'set -u'
+  echo 'export CARGO_TERM_COLOR=never CI=1'
+  while IFS='|' read -r name cmd; do
+    printf 'echo "=== SUITE %s ==="; ( %s ) 2>&1; echo "=== EXIT %s $? ==="\n' "$name" "$cmd" "$name"
+  done <<<"$SUITES"
+}

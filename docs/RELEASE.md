@@ -169,11 +169,91 @@ beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must s
 `AIBUS_ATTEST_KEY`. Tests for the
 tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.
 
+## The local release gate
+
+Actions are off for this repo on purpose, so the gate on `release` is local: committed git hooks
+plus one runner. Install them once per clone with `tools/release-gate/install.sh` (it sets
+`core.hooksPath` to `.githooks`; there were no hooks before, so nothing else is replaced).
+
+**Flow.** A feature branch (`feature/...`, `fix/...`, `lane/...`) merges onto `main` as before. A
+release is cut on a branch named `release/v<version>`, and that branch is merged into `release`.
+That merge is what `release.yml` publishes from.
+
+**On a feature branch** (`pre-commit`): fast checks on the staged files only, `rustfmt --check` on
+`.rs` and `bash -n` on shell. Clippy, the tests and the e2e are not run here (they compile, and
+compiles run in a container, see `docs/BUILD.md`), and a PR runs its own specific tests by hand. The hook
+does nothing while merging and on `release` itself.
+
+**Merging into `release`** (`pre-merge-commit`): when the current branch is `release`, a merge that
+auto-commits runs the full e2e first and is aborted if it is red. The e2e is
+`tools/release-gate/e2e.sh`. It runs the suites in `tools/release-attest/config.sh` (the "every
+push" rows of `docs/TESTING.md`, the same list as the attestation, built by the same `lane_script`) in
+one container through `/Users/rom/workspace/dh.sh`. The container is fenced: memory limit (60% of the host's RAM,
+16g at most), swap equal to it so none, CPU quota (two thirds of the CPUs). `DH_MEMORY` and `DH_CPUS`
+override that. The host is `--host`, `RELEASE_E2E_HOST`, or `dh.sh pick` (least loaded, the MacBook
+last). The tree is archived from git, pushed into a named docker volume, and the volume is removed
+on every exit path. A cold run compiles the workspace, so I expect tens of minutes and a few GB
+(I have not timed it here yet). It refuses a dirty tree. There is no Playwright in this repo.
+
+**The stamp.** A green run writes `$(git rev-parse --git-common-dir)/release-e2e/<tree key>`
+(tree, command, host, start and finish time). It lives inside `.git` and is never committed. The key
+is the tree hash of `tools/release-attest/config.sh` (the tree without `release-attest/`), so adding
+the attestation commit does not invalidate the stamp. `pre-push` refuses a push whose destination is
+`refs/heads/release` unless a stamp exists for the tree being pushed. That also covers `merge
+--no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. Pushes to any other
+branch, and deleting a branch, pass straight through. Run the e2e by hand on a clean checkout with
+`tools/release-gate/e2e.sh [--host mars]`.
+
+**Override.** `RELEASE_E2E_SKIP='<reason>'` skips the gate in the hooks and the runner. It prints
+the reason loudly and appends it to `release-e2e/skips.log` next to the stamps. It is legitimate for
+a docs-only change to `release`, or when every docker host is down and the release is urgent and I
+accept it. I do not use `--no-verify`. `RELEASE_E2E_CMD` replaces the container run with a local
+command; it is for the tests of the gate only.
+
+**Failure modes.** Docker host down: `dh.sh push` fails, the runner says so and cleans up; pick another
+`--host`. OOM: a killed container leaves a suite without its `EXIT` line, so the run is red, and the
+log is kept (path printed); lower `DH_CPUS` or move to a bigger host, do not retry in a loop. Dirty
+tree: refused (in the merge hook it means unstaged or untracked files while the merge is pending).
+Red: no stamp.
+
+**How it relates to the attestation.** The stamp gates the merge and push into `release`; the signed
+attestation gates the publish (`prepare` in `release.yml` verifies it). They run the same suites. The
+stamp is local and unsigned, the attestation is signed and committed.
+
+### The release script
+
+`tools/release-gate/release.sh <version> [--dry-run] [--yes] [--closes N] [--host h] [--rerun]` does a
+release up to the PR and stops. It never tags, publishes or merges: `publish` in `release.yml` makes
+the tag `v<version>` when the PR lands on `release`.
+
+1. Checks: `<version>` is `X.Y.Z` or `X.Y.Z-pre.N`; the tag `v<version>` does not exist locally or on
+   origin; it is greater than the latest `v*` tag and not lower than the workspace version (a
+   version equal to the workspace one means the bump was already made, like 0.2.0 now), or pass
+   `--allow-downgrade`; `CHANGELOG.md` has the entry (I write it first); the tree is clean; the key
+   exists at `~/.ssh/aibus-release-attest` (or `--key`) and its `.pub` is the one committed in
+   `packaging/release-attest.pub`. The private key is only checked for existing, never read.
+2. Cuts `release/v<version>` from `origin/main`.
+3. One commit `Release v<version>`: `version` in `[workspace.package]` in `Cargo.toml` and the path
+   crates in `Cargo.lock` (what `lane/version-0.2.0` did). `Formula/aibus.rb` stays, `finalize` renders
+   it. This is before the e2e, so the e2e and the attestation cover the tree that gets released.
+4. The full e2e (above). A stamp already there for the same tree is reused (`--rerun` forces it).
+5. `tools/release-attest/attest.sh`, then it checks the attestation covers the tree the e2e ran on.
+6. Commits `release-attest/`, runs `verify.sh --expect-version <version>` (the check `prepare` makes),
+   asks once (`--yes` skips), pushes the branch and runs `gh pr create --base release --title "Release
+   v<version>"`. The body names the attestation, the stamp (tree, host, time) and the tag.
+
+`--dry-run` prints every step and writes, pushes and opens nothing. To review in the PR: the bump
+commit, the attestation (version and tree), the CHANGELOG entry, then merge it myself. The attestation
+runs the same suites as the e2e, so a full release runs them twice; the e2e is the gate for the
+merge, the attestation is the proof for publish. Tests: `bash tests/release-gate/run.sh` (fake e2e,
+fake runner, throwaway key, fake `gh`; no container).
+
 ### Release procedure
 
 * [ ] `main` is green locally (the automatic part above) and a dry run of the workflow is green.
 * [ ] `version` in the root `Cargo.toml` is the release version, `Cargo.lock` is committed, and
       `CHANGELOG.md` has the entry for it.
+* [ ] (or all of the steps below up to the PR with `tools/release-gate/release.sh <version>`, see above.)
 * [ ] `tools/release-attest/attest.sh` is green on the commit that goes to `release`, the two files
       are committed, and `tools/release-attest/verify.sh --expect-version <version>` says ok. The
       merge into `release` must leave the same tree (fast-forward, or a merge that changes nothing).

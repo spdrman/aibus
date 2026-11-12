@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# A merge that auto-commits onto `release` runs the full e2e first; red aborts the merge.
+set -eu
+[ "$(git symbolic-ref --short -q HEAD || true)" = release ] || exit 0
+exec "$(git rev-parse --show-toplevel)/tools/release-gate/e2e.sh" --merge-index

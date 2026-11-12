@@ -49,15 +49,8 @@ pushed=0
 cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
 
-# One script, the suites in order between markers, so one container runs them all.
 lane=$work/lane.sh
-{
-  echo 'set -u'
-  echo 'export CARGO_TERM_COLOR=never CI=1'
-  while IFS='|' read -r name cmd; do
-    printf 'echo "=== SUITE %s ==="; ( %s ) 2>&1; echo "=== EXIT %s $? ==="\n' "$name" "$cmd" "$name"
-  done <<<"$SUITES"
-} >"$lane"
+lane_script >"$lane"
 
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ -n "$runner" ]; then

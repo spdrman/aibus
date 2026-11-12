@@ -407,7 +407,7 @@ pub const REGISTRY: &[Spec] = &[
         label: "",
         hint: "",
         scope: Scope::Global,
-        needs: WORKFLOWS,
+        needs: WORKFLOWS | LEAD,
         surfaces: at(14, 0, 0),
         run: shorthand,
     },
@@ -419,7 +419,7 @@ pub const REGISTRY: &[Spec] = &[
         label: "",
         hint: "",
         scope: Scope::Global,
-        needs: WORKFLOWS,
+        needs: WORKFLOWS | LEAD,
         surfaces: at(15, 0, 0),
         run: shorthand,
     },
@@ -431,7 +431,7 @@ pub const REGISTRY: &[Spec] = &[
         label: "",
         hint: "",
         scope: Scope::Global,
-        needs: WORKFLOWS,
+        needs: WORKFLOWS | LEAD,
         surfaces: at(16, 0, 0),
         run: shorthand,
     },
@@ -443,7 +443,7 @@ pub const REGISTRY: &[Spec] = &[
         label: "",
         hint: "",
         scope: Scope::Global,
-        needs: WORKFLOWS,
+        needs: WORKFLOWS | LEAD,
         surfaces: at(17, 0, 0),
         run: shorthand,
     },
@@ -690,6 +690,9 @@ fn open_status(c: &Call, target: Option<ModelTarget>, out: &mut Out) -> Result<(
 fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
     let (sub, rest) = c.args.split_once(char::is_whitespace).map_or((c.args, ""), |(w, r)| (w, r.trim()));
     let run = |args: &str, out: &mut Out| match args.split_once(char::is_whitespace) {
+        _ if c.env.lacking(c.name, LEAD, None).is_some() => {
+            Err(format!("/{} is not available: no lead is running", c.name))
+        }
         Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
         None if !args.is_empty() => command(out, Command::Workflow { name: args.to_owned(), input: String::new() }),
         None => need(c, "a workflow name"),
@@ -773,14 +776,16 @@ impl Env<'_> {
     /// is. A subcommand that needs more than its row (`/workflow new`) asks this directly.
     fn lacking(&self, name: &str, needs: u8, run: Option<RunId>) -> Option<String> {
         let missing = |bit: u8| needs & bit != 0;
-        if missing(LEAD) && self.lead.is_none() {
-            return Some("no lead is running".into());
-        }
         if missing(RUNS) && self.runs.is_empty() {
             return Some("no run yet".into());
         }
         if missing(WORKFLOWS) && !self.workflows.iter().any(|w| w == name) {
             return Some(format!("no workflow named {name}"));
+        }
+        // The lead is the run these commands hand a call to, and a finished one takes none.
+        let lead_runs = self.lead.is_some_and(|l| self.states.iter().find(|(id, _)| *id == l).is_none_or(|(_, st)| !st.is_terminal()));
+        if missing(LEAD) && !lead_runs {
+            return Some("no lead is running".into());
         }
         let state = run.and_then(|r| self.states.iter().find(|(id, _)| *id == r)).map(|(_, st)| *st);
         if let Some(st) = state {
@@ -1020,7 +1025,7 @@ mod tests {
     }
 
     fn msgs(line: &str, agents: &[String], workflows: &[String]) -> String {
-        match send(line, &Env::bare(agents, workflows)) {
+        match send(line, &Env { lead: Some(lead_run()), ..Env::bare(agents, workflows) }) {
             Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
             Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
@@ -1216,7 +1221,8 @@ mod tests {
         let env = Env::bare(&[], &[]);
         assert!(slash_offered(&env).iter().all(|(n, _)| n != "/fix"));
         let wf = ["fix".to_owned()];
-        assert!(slash_offered(&Env::bare(&[], &wf)).iter().any(|(n, _)| n == "/fix"));
+        assert!(slash_offered(&Env::bare(&[], &wf)).iter().all(|(n, _)| n != "/fix"), "a workflow command needs a lead as well");
+        assert!(slash_offered(&Env { lead: Some(lead_run()), ..Env::bare(&[], &wf) }).iter().any(|(n, _)| n == "/fix"));
         assert_eq!(slash_offered(&env).len(), 15);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
@@ -1308,6 +1314,24 @@ mod tests {
         assert_eq!(sent("/cost", &focused), "Command(OpenScreen(Cost))", "a focused card does not turn it into a status");
         assert_eq!(sent("/cost @grep", &e), format!("Command(OpenScreen(RunStatus({:?})))", s.runs[1].0));
         assert_eq!(sent("/message @grep", &e), "BAD /message needs a message");
+    }
+
+    #[test]
+    fn workflow_commands_need_a_lead_that_is_still_running() {
+        let s = session();
+        let wf = ["review".to_owned()];
+        let lead = s.runs[0].0;
+        let done: Vec<(RunId, RunStatus)> = s.states.iter().map(|(id, st)| (*id, if *id == lead { RunStatus::Completed } else { *st })).collect();
+        let finished = Env { runs: &s.runs, states: &done, lead: Some(lead), ..Env::bare(&[], &wf) };
+        let running = Env { runs: &s.runs, states: &s.states, lead: Some(lead), ..Env::bare(&[], &wf) };
+        for line in ["/review the diff", "/workflow review the diff", "/workflow run review the diff", "/workflow new a goal", "/workflow edit review add a step"] {
+            assert!(sent(line, &finished).starts_with("BAD /") && sent(line, &finished).ends_with("is not available: no lead is running"), "{line}: {}", sent(line, &finished));
+            assert!(!sent(line, &running).starts_with("BAD"), "{line}: {}", sent(line, &running));
+        }
+        assert!(slash_offered(&finished).iter().all(|(n, _)| n != "/review"));
+        assert!(slash_offered(&running).iter().any(|(n, _)| n == "/review"));
+        // A workflow that does not exist is still the first thing the notice says.
+        assert_eq!(sent("/build x", &finished), "BAD /build is not available: no workflow named build");
     }
 
     #[test]

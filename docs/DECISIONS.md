@@ -641,3 +641,13 @@ Snapshots: regenerated with `AIBUS_UPDATE_SNAPSHOTS=1` on arm64 (MERCURY) after 
 **Alternatives.** Hand-write the goldens (rejected: they would encode what I expected, not what the server says).
 
 **Why.** The goldens are what a client author reads to see the wire, so they are checked by eye once and by diff every time after.
+
+## D-199: a right click with a menu open moves the menu (#199)
+
+**Context.** In a real pty at 98x46 with eight workers streaming, twenty right clicks on three cards opened the card menu in ten trials, strictly every other one. I reproduced it on a release build without any help from the workers: the clicks never closed the menu between trials, and a right click with a menu open only closed that menu (and a left click did the same without selecting). So the next click found it closed. The streaming, the ticks, the hit rects and the `cards:x` clamp had nothing to do with it; I stepped worker output and ticks between the press and the release in a test and nothing changed.
+
+**Decision.** With a menu open, a right click looks through the menu and its backdrop at the hit map below them and acts on the card or row it finds: select it, open the menu there. Anything else closes the menu as before. A left click still only closes it and does not reach what is behind, as the spec says.
+
+**Alternatives.** Open the menu on the press and ignore the release (what the issue offered): it changes nothing, the release was never used. Let the left click through as well: a click that dismisses a popup and also presses whatever is under it is how mis-clicks on buttons happen, so I left that alone.
+
+**Why.** A right click always means "this card", whether or not another menu is up, and that is what the issue expected. I could not tell what the one "opened, then gone 0.8 s later" in the second session was; the same toggle explains it if the click reached the loop late (the old menu was still on screen until it was handled), but I did not prove that.

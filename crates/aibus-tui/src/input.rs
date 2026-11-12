@@ -21,7 +21,7 @@ use aibus_graph::{Graph, Value};
 use aibus_provider::Secret;
 use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::hit::{HitId, HitKind, Segment};
+use crate::hit::{z, HitId, HitKind, Segment};
 use crate::keys::{Action, Ctx, Keymap};
 use crate::layout::{log_for_drag, rail_for_drag};
 use crate::commands::{self, Env, Via};
@@ -640,7 +640,7 @@ impl Input {
                 set_hover(self, &mut out);
                 self.resting = hover.map(|id| (id, now));
                 self.pinned = None;
-                self.context(hit, (col, row), cx, &mut out);
+                self.context(hit, (col, row), drawn, cx, &mut out);
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 set_hover(self, &mut out);
@@ -677,25 +677,43 @@ impl Input {
         out
     }
 
-    /// Right click: on a run's card or row it selects it and opens the menu; with a menu open it
-    /// closes it.
-    fn context(&mut self, hit: Option<(HitId, HitKind)>, (col, row): (u16, u16), cx: &Context, out: &mut Out) {
+    /// Right click: on a run's card or row it selects it and opens the menu. With a menu open it
+    /// looks through the menu and its backdrop at what is under the pointer: a card or row there
+    /// gets the menu instead (it moves), anything else just closes it. Otherwise every other right
+    /// click would only dismiss the menu the one before left open (#199).
+    fn context(&mut self, hit: Option<(HitId, HitKind)>, (col, row): (u16, u16), drawn: &Drawn, cx: &Context, out: &mut Out) {
+        let mut id = hit.map(|h| h.0);
         if cx.menu.is_some() {
-            out.msgs.push(ui(UiIntent::CloseMenu));
+            // The backdrop and the menu sit above the dashboard, so `hit` is not the card under them.
+            id = match id {
+                Some(HitId::Backdrop | HitId::MenuBox | HitId::MenuItem(_)) if cx.chrome.modal.is_none() => drawn
+                    .hits
+                    .regions()
+                    .iter()
+                    .filter(|r| r.z < z::BACKDROP && r.rect.contains((col, row).into()))
+                    .max_by_key(|r| r.z)
+                    .map(|r| r.id),
+                _ => None,
+            };
+        } else if cx.chrome.modal.is_some() {
             return;
         }
-        if cx.chrome.modal.is_some() {
-            return;
-        }
-        let (pane, i, run) = match hit.map(|h| h.0) {
+        let (pane, i, run) = match id {
             Some(HitId::Card(i)) => (Pane::Cards, i, cx.cards.get(i).copied().flatten()),
             Some(HitId::LogRow(i)) => (Pane::Log, i, cx.log_runs.get(i).copied().flatten()),
-            _ => return,
+            _ => {
+                if cx.menu.is_some() {
+                    out.msgs.push(ui(UiIntent::CloseMenu));
+                }
+                return;
+            }
         };
         out.msgs.push(ui(UiIntent::Focus(pane)));
         out.msgs.push(ui(UiIntent::Select(pane, Selection::Index(i as i64))));
-        if let Some(run) = run {
-            out.msgs.push(ui(UiIntent::OpenMenu { run, col, row }));
+        match run {
+            Some(run) => out.msgs.push(ui(UiIntent::OpenMenu { run, col, row })),
+            None if cx.menu.is_some() => out.msgs.push(ui(UiIntent::CloseMenu)),
+            None => {}
         }
     }
 

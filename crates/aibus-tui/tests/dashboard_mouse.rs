@@ -145,10 +145,12 @@ fn a_click_outside_closes_the_menu_and_does_not_reach_what_is_behind() {
     assert_eq!(names(&msgs), ["Ui(CloseMenu)"]);
     assert_eq!(r.int(SELECTED_CARD), Some(0), "card 2 was not selected");
     assert!(!r.text().contains("Open transcript"));
-    // A second right click closes it too.
+    // A right click is the exception (#199): the menu moves to the card under it.
     opened(&mut r, 0);
     let (c, row) = r.centre(HitId::Card(2));
-    assert_eq!(names(&r.right_down(c, row)), ["Ui(CloseMenu)"]);
+    let msgs = names(&r.right_down(c, row));
+    assert_eq!(&msgs[..2], ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(2)))"]);
+    assert!(msgs[2].starts_with("Ui(OpenMenu { run: "), "{msgs:?}");
 }
 
 #[test]

@@ -349,14 +349,19 @@ fn bash_completes_account_names_dynamically() {
             "source {}; COMP_WORDS=({words}); COMP_CWORD={cword}; _aibus_dynamic; printf '%s\\n' \"${{COMPREPLY[@]}}\"",
             path.display()
         );
-        let out = std::process::Command::new("bash")
-            .arg("-c")
+        let mut cmd = std::process::Command::new("bash");
+        cmd.arg("-c")
             .arg(body)
             .env("HOME", home.path())
             .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap()))
-            .current_dir(home.path().join("proj"))
-            .output()
-            .unwrap();
+            .current_dir(home.path().join("proj"));
+        // The `aibus` the script calls must read this test's home, not an XDG directory the
+        // host happens to export (a hosted runner does).
+        for v in common::XDG {
+            cmd.env_remove(v);
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "bash failed: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned).collect()
     };
     // `aibus account show w<TAB>` offers the two accounts that start with w.

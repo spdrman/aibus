@@ -198,3 +198,55 @@ fn rataflow_brings_no_layout_or_network_crates() {
     }
     assert!(tui.contains("rataflow"));
 }
+
+/// Issue #181: the 0.2.0 binary panicked on `account add` because the runtime that runs the
+/// provider call was built with `enable_time()` only, and every test builds its own runtime with
+/// `enable_all()`. So no production runtime may be built without IO.
+#[test]
+fn no_production_tokio_runtime_is_built_without_io() {
+    // (file suffix, reason) for a runtime that really never touches a socket. Empty on purpose:
+    // every runtime in the product runs provider or server code.
+    let exceptions: &[(&str, &str)] = &[];
+
+    fn sources(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                sources(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for c in std::fs::read_dir(root().join("crates")).unwrap() {
+        let src = c.unwrap().path().join("src");
+        if src.is_dir() {
+            sources(&src, &mut files);
+        }
+    }
+    let mut bad = Vec::new();
+    let mut seen = 0;
+    for f in files {
+        if f.file_name().is_some_and(|n| n == "tests.rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&f).unwrap();
+        // Inline unit tests sit at the bottom, in `#[cfg(test)] mod tests`. Other `cfg(test)`
+        // items higher up are production files' helpers, so only that module ends the scan.
+        let prod = text.split("#[cfg(test)]\nmod ").next().unwrap();
+        for (i, _) in prod.match_indices("runtime::Builder::new_") {
+            seen += 1;
+            let stmt = &prod[i..];
+            let stmt = &stmt[..stmt.find(".build(").expect("a Builder is built")];
+            let name = f.strip_prefix(root().join("crates")).unwrap().to_string_lossy().into_owned();
+            let excused = exceptions.iter().any(|(s, _)| name.ends_with(s));
+            if !(stmt.contains("enable_all()") || stmt.contains("enable_io()")) && !excused {
+                let line = prod[..i].matches('\n').count() + 1;
+                bad.push(format!("{name}:{line}"));
+            }
+        }
+    }
+    assert!(seen >= 6, "the scan found only {seen} runtime builders; is it looking in the right place?");
+    assert!(bad.is_empty(), "tokio runtimes built without IO (call enable_all): {bad:?}");
+}

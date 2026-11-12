@@ -97,7 +97,7 @@ refuse "a validly signed attestation missing a suite is refused" verify "$r" --e
 
 # Fail closed while the committed key is still the placeholder.
 r=$t/repo8; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1
-cp "$tools/../../$PUBKEY_PATH" "$r/$PUBKEY_PATH"; commit_attest "$r"
+echo "PLACEHOLDER-NOT-A-KEY: replace me" >"$r/$PUBKEY_PATH"; commit_attest "$r"
 refuse "the placeholder public key fails closed" verify "$r" --expect-version 1.2.3
 verify "$r" 2>&1 | grep -q 'not an ssh-ed25519 key' && ok "placeholder says why" || bad "placeholder says why"
 rm "$r/$PUBKEY_PATH"; git -C "$r" add -A; git -C "$r" commit -q -m nokey
@@ -106,6 +106,38 @@ r=$t/repo9; mkrepo "$r" 1.2.3; git -C "$r" rm -q "$PUBKEY_PATH"; git -C "$r" com
 refuse "no committed key and no --pubkey fails closed" verify "$r" --expect-version 1.2.3
 expect "an explicit --pubkey verifies" verify "$r" --expect-version 1.2.3 --pubkey "$t/key.pub"
 refuse "an explicit wrong --pubkey is refused" verify "$r" --expect-version 1.2.3 --pubkey "$t/other.pub"
+
+# Tree hash attacks: the hash is a git tree id, never text split on newlines or tabs.
+r=$t/repo10; mkrepo "$r" 1.2.3; echo A >"$r/a"; echo B >"$r/b"; git -C "$r" add -A; git -C "$r" commit -q -m ab
+attest "$r" >/dev/null 2>&1; commit_attest "$r"
+expect "baseline with a and b verifies" verify "$r" --expect-version 1.2.3
+bsha=$(git -C "$r" rev-parse HEAD:b)
+git -C "$r" rm -q a b
+printf 'A\n' >"$r/$(printf 'a\n100644 blob %s\tb' "$bsha")"
+git -C "$r" add -A; git -C "$r" commit -q -m evil
+refuse "a file name faking two ls-tree entries is refused" verify "$r" --expect-version 1.2.3
+r=$t/repo11; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"
+d="$r/src/x$(printf "\t")release-attest"; mkdir -p "$d"; echo evil >"$d/main.rs"
+git -C "$r" add -A; git -C "$r" commit -q -m nested
+refuse "a path with tab and release-attest/ inside it is not hidden from the hash" verify "$r" --expect-version 1.2.3
+
+# --pubkey that is not a readable file.
+r=$t/repo12; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"
+refuse "--pubkey on a missing file is refused" verify "$r" --expect-version 1.2.3 --pubkey "$t/does-not-exist"
+refuse "--pubkey on a directory is refused" verify "$r" --expect-version 1.2.3 --pubkey "$t"
+verify "$r" --expect-version 1.2.3 --pubkey "$t/does-not-exist" 2>&1 | grep -q 'attestation ok' && bad "no ok without a signature check" || ok "no ok without a signature check"
+
+# A string-typed count is not a count.
+r=$t/repo13; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1
+jq '.suites[0].passed |= tostring' "$r/release-attest/attestation.json" >"$r/x" && mv "$r/x" "$r/release-attest/attestation.json"
+rm -f "$r/release-attest/attestation.json.sig"; ssh-keygen -q -Y sign -f "$t/key" -n "$NAMESPACE" "$r/release-attest/attestation.json" 2>/dev/null; commit_attest "$r"
+refuse "a validly signed string count is refused" verify "$r" --expect-version 1.2.3
+
+# The attester cleans up its work dir and ignores DH_UNFENCED from the shell.
+r=$t/repo14; mkrepo "$r" 1.2.3; mkdir "$t/tmp14"
+refuse "attest refuses a dirty tree" env TMPDIR="$t/tmp14" bash -c 'echo x >> "$1/src.txt"; SUITES_LIST="$2" "$3/attest.sh" --repo "$1" --key "$4" --runner-cmd "sh $5"' _ "$r" "$SUITES" "$tools" "$t/key" "$t/fake.sh"
+expect "a refused attest leaves no work dir" test -z "$(ls "$t/tmp14")"
+grep -q 'unset DH_UNFENCED' "$tools/attest.sh" && ok "attest.sh unsets DH_UNFENCED" || bad "attest.sh unsets DH_UNFENCED"
 
 echo "$n tests, $fails failed"
 [ "$fails" = 0 ]

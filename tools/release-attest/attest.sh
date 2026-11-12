@@ -16,6 +16,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/config.sh"
 DH=${DH_SH:-/Users/rom/workspace/dh.sh}
+unset DH_UNFENCED   # the run is always fenced, whatever the calling shell exports
 
 repo=. key=$KEY_HINT host=${DH_HOST:-mercury} out= replace=0 runner=
 while [ $# -gt 0 ]; do
@@ -45,7 +46,7 @@ commit=$(git -C "$repo" rev-parse HEAD)
 work=$(mktemp -d "${TMPDIR:-/tmp}/attest.XXXXXX")
 job=attest-aibus-${commit:0:8}-$$
 pushed=0
-cleanup() { [ $pushed = 1 ] && "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; }
+cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
 
 # One script, the suites in order between markers, so one container runs them all.
@@ -64,8 +65,8 @@ if [ -n "$runner" ]; then
 else
   mkdir "$work/tree"
   git -C "$repo" archive HEAD | tar -x -C "$work/tree"
+  pushed=1   # before the push, so a push that dies half way still gets its volume cleaned
   "$DH" push "$host" "$job" "$work/tree" >/dev/null || refuse "pushing the tree to $host failed"
-  pushed=1
   "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$lane")" >"$work/lane.log" 2>&1 || true
 fi
 finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -97,7 +98,7 @@ verdict=$(jq -r .result.verdict <<<"$att")
 if [ "$verdict" != green ]; then
   keep=${TMPDIR:-/tmp}/attest-logs-$$; mkdir -p "$keep"; cp "$work"/*.log "$keep"/
   echo "not green: $(jq -c .result <<<"$att"); logs kept in $keep" >&2
-  rm -rf "$work"; exit 1
+  exit 1
 fi
 
 mkdir -p "$out"
@@ -107,4 +108,3 @@ ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$out/$ATTEST_FILE" >/dev/null
 [ -f "$out/$ATTEST_FILE.sig" ] || { echo "ssh-keygen -Y sign failed" >&2; exit 1; }
 "$here/verify.sh" --signature-only --file "$out/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || { echo "the signature does not verify against $key.pub" >&2; exit 1; }
 echo "signed $out/$ATTEST_FILE: $(jq -r '.result.passed' <<<"$att") passed, tree $(jq -r '.tree.hash[0:12]' <<<"$att")"
-rm -rf "$work"

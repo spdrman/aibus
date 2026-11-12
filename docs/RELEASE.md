@@ -145,23 +145,29 @@ signature next to it. Benchmarks, fuzzing, the live provider run and the `aibus-
 backend are not part of it.
 
 ```
-tools/release-attest/attest.sh --key ~/.ssh/aibus-release-attest     # on the release candidate, tree clean
+tools/release-attest/attest.sh --key <private key>     # on the release candidate, tree clean
 git add release-attest && git commit -m "Attest the suites for <version>"
 tools/release-attest/verify.sh --expect-version <version>            # the same check `prepare` makes
 ```
 
-The tree hash leaves out `release-attest/`, so committing the two files does not invalidate them,
-and any other change after the run does (the verifier says "the code changed after the run").
+The hash is the id of the commit's top-level git tree with the one entry named exactly
+`release-attest` removed, rebuilt with `git mktree -z` (algorithm `mktree-top-level-sans-release-attest-v2`).
+Nothing is split on newlines or tabs, so no file name can fake an entry, and only that top-level
+entry is left out: committing the two files does not invalidate them, and any other change after the
+run (a nested `release-attest` directory included) does ("the code changed after the run").
 `verify.sh` checks the signature against `packaging/release-attest.pub`, that the tree hash is this
 commit's, that the version is the one `Cargo.toml` declares, and that every suite is present, exited
-0 and passed cells. `prepare` runs it on the release commit with the key read from `main`, so the
-push cannot bring its own. It proves the key holder signed a green run of this tree; it cannot stop
-someone with write access editing the script or the workflow in the same push.
+0 and passed cells. It prints ok only if the signature check actually ran, and a `--pubkey` that is
+not a readable file is a failure. `prepare` runs it on the release commit with the key read from
+`main`, so the push cannot bring its own. It proves the key holder signed a green run of this tree;
+it cannot stop someone with write access editing the script or the workflow in the same push.
 
-The signing key is `ssh-ed25519`, kept at `~/.ssh/aibus-release-attest` (private, never committed)
-with the public half in `packaging/release-attest.pub`. Until I provision it that file is a
-placeholder, and `verify.sh` refuses it, so a real push to `release` stops in `prepare`. Tests for
-the tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.
+The signing key is `ssh-ed25519` (public half committed in `packaging/release-attest.pub`,
+fingerprint `SHA256:VqX4OVIeEX8cDiNWiwMIJdcBqZtpGyiUNiOpztMzHT8`); the private half is never
+committed. `attest.sh` looks for the private key at `~/.ssh/aibus-release-attest` with its `.pub`
+beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must sit next to it) or set
+`AIBUS_ATTEST_KEY`. Tests for the
+tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.
 
 ### Release procedure
 

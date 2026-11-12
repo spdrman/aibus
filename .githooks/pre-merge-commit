@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 # A merge that auto-commits onto `release` runs the full e2e first; red aborts the merge.
 # The runner and the suite list come from HEAD (release as it is), not from the branch being merged,
-# so the incoming branch cannot swap out the gate. (The hooks themselves are read from the checkout.)
+# so the incoming branch cannot swap out the gate. A merge that changes a gate file (tools/release-gate/*,
+# tools/release-attest/*, .githooks/*) is refused unless RELEASE_E2E_SKIP='<reason>' (logged). The hooks
+# themselves are read from the checkout (docs/RELEASE.md says where that stops).
 set -eu
 [ "$(git symbolic-ref --short -q HEAD || true)" = release ] || exit 0
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-head.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
-git archive HEAD tools/release-gate tools/release-attest | tar -x -C "$tmp"
+if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
+  # the skip is logged by e2e.sh from HEAD's gate, or from the checkout when HEAD has none (creating release)
+  if git archive --format=tar -o "$tmp/g.tar" HEAD tools/release-gate tools/release-attest 2>/dev/null; then
+    tar -xf "$tmp/g.tar" -C "$tmp"; exec "$tmp/tools/release-gate/e2e.sh" --merge-index
+  fi
+  . "$(git rev-parse --show-toplevel)/tools/release-gate/lib.sh"
+  gate_skipped "pre-merge-commit (HEAD has no gate)"; exit 0
+fi
+git archive --format=tar -o "$tmp/g.tar" HEAD tools/release-gate tools/release-attest || { echo "pre-merge-commit: HEAD (release) has no release gate; refusing the merge. RELEASE_E2E_SKIP='<reason>' creates it." >&2; exit 1; }
+tar -xf "$tmp/g.tar" -C "$tmp"
+git diff --cached --quiet HEAD -- tools/release-gate tools/release-attest .githooks \
+  || { echo "pre-merge-commit: this merge changes the release gate files (tools/release-gate/*, tools/release-attest/*, .githooks/*). A gate change needs RELEASE_E2E_SKIP='<reason>' (logged)." >&2; exit 1; }
 "$tmp/tools/release-gate/e2e.sh" --merge-index

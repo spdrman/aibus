@@ -50,7 +50,7 @@ cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || tru
 trap cleanup EXIT
 
 lane=$work/lane.sh
-nonce=$(new_nonce); [ -n "$nonce" ] || exit 1
+nonce=$(new_nonce); [ -n "$nonce" ] || refuse "could not make a nonce (od on /dev/urandom gave nothing); nothing ran"
 lane_script "$nonce" >"$lane"
 
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)

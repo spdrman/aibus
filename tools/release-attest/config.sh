@@ -51,8 +51,12 @@ new_nonce() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
 lane_script() { # nonce
   echo 'set -u'
   echo 'export CARGO_TERM_COLOR=never CI=1'
+  local name cmd qn qx
+  qx=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
   while IFS='|' read -r name cmd; do
-    printf 'echo "=== SUITE %s %s ==="; ( %s ) 2>&1; rc=$?; printf "\\n=== EXIT %s %%s %s ===\\n" "$rc"\n' "$name" "$1" "$cmd" "$name" "$1"
+    # names and nonce travel as printf arguments (single-quoted), never inside a format string
+    qn=$(printf '%s' "$name" | sed "s/'/'\\\\''/g")
+    printf "printf '=== SUITE %%s %%s ===\\\\n' '%s' '%s'; ( %s ) 2>&1; rc=\$?; printf '\\\\n=== EXIT %%s %%s %%s ===\\\\n' '%s' \"\$rc\" '%s'\n" "$qn" "$qx" "$cmd" "$qn" "$qx"
   done <<<"$SUITES"
 }
 # The exit code of one suite, from the log: exactly one genuine EXIT marker or nothing.

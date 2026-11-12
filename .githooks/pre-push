@@ -1,16 +1,43 @@
 #!/usr/bin/env bash
 # Refuse a push to refs/heads/release unless a passing e2e stamp exists for the tree being pushed.
 # Covers --no-commit merges, squash merges and fast-forwards, which skip pre-merge-commit.
+#
+# The push is judged with the gate files (tools/release-gate, tools/release-attest) taken from the
+# REMOTE release tip, the old sha git hands this hook, never from the tree being pushed, so a topic
+# that edits the gate cannot vouch for itself. Refused unless RELEASE_E2E_SKIP='<reason>' (logged):
+#   - the remote has no release yet (the one-time bootstrap), or deleting release;
+#   - the push changes a gate file (tools/release-gate/*, tools/release-attest/*, .githooks/*);
+#   - the push touches release-attest/ beyond attestation.json and its signature.
+# A remote tip that is not in this clone is refused: fetch first. No fallback to refs/remotes.
+# This hook itself is read from the working tree (docs/RELEASE.md says where that stops).
 set -eu
-. "$(git rev-parse --show-toplevel)/tools/release-gate/lib.sh"
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE   # a hook inherits git's; a decoy must not redirect us
 zero=0000000000000000000000000000000000000000
-while read -r _ local_sha remote_ref _; do
-  [ "$remote_ref" = refs/heads/release ] || continue
-  [ "$local_sha" != "$zero" ] || continue   # deleting the branch pushes no tree
-  gate_skipped "pre-push" && continue
-  key=$(tree_key "$local_sha")
-  stamp_ok "$key" || {
-    echo "pre-push: no valid passing e2e stamp for tree $key; run tools/release-gate/e2e.sh on a clean checkout of it (docs/RELEASE.md)" >&2
-    exit 1
-  }
-done
+gate=$(mktemp -d "${TMPDIR:-/tmp}/release-prepush.XXXXXX")
+trap 'rm -rf "$gate"' EXIT
+no() { echo "pre-push: refusing to push to release: $*" >&2; exit 1; }
+cat >"$gate/refs"
+# A local ref may hold spaces (HEAD^{/some message}), so the fields are read from the END of the line:
+# <local ref> <local sha> <remote ref> <remote sha>.
+line=$(awk '$(NF-1) == "refs/heads/release" { print $(NF-2), $NF; exit }' "$gate/refs")
+[ -n "$line" ] || exit 0
+lsha=${line% *}
+tip=${line#* }
+if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$(git rev-parse --show-toplevel)/tools/release-gate/lib.sh"
+  gate_skipped "pre-push"
+  exit 0
+fi
+[ "$lsha" != "$zero" ] || no "deleting release needs RELEASE_E2E_SKIP='<reason>' (logged)."
+[ "$tip" != "$zero" ] || no "the remote has no release branch (or I cannot see it), so this is the one-time bootstrap. Set RELEASE_E2E_SKIP='<reason>' (logged) to create it."
+git cat-file -e "$tip^{commit}" 2>/dev/null || no "the remote's release tip ${tip} is not in this clone. fetch first (git fetch), then push again."
+git archive --format=tar -o "$gate/g.tar" "$tip" tools/release-gate tools/release-attest || no "the remote release tip ${tip} has no release gate to judge with."
+tar -xf "$gate/g.tar" -C "$gate" || no "could not unpack the release gate from ${tip}."
+git diff --quiet "$tip" "$lsha" -- tools/release-gate tools/release-attest .githooks \
+  || no "this push changes the release gate files (tools/release-gate/*, tools/release-attest/*, .githooks/*). A gate change needs RELEASE_E2E_SKIP='<reason>' (logged)."
+extra=$(git diff --name-only "$tip" "$lsha" -- release-attest | grep -vxF -e release-attest/attestation.json -e release-attest/attestation.json.sig || true)
+[ -z "$extra" ] || no "this push touches release-attest/ beyond the attestation and its signature: $extra. RELEASE_E2E_SKIP='<reason>' if the owner asked for it."
+key=$(bash -c '. "$1/tools/release-gate/lib.sh"; tree_key "$2"' _ "$gate" "$lsha") || no "could not compute the tree key of ${lsha} with the remote tip's gate."
+bash -c '. "$1/tools/release-gate/lib.sh"; stamp_ok "$2"' _ "$gate" "$key" \
+  || no "no valid passing e2e stamp for tree $key (made by the release tip's gate); run tools/release-gate/e2e.sh on a clean checkout of it (docs/RELEASE.md)"

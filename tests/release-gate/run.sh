@@ -71,7 +71,7 @@ expect "the bootstrap push with the logged skip passes" env RELEASE_E2E_SKIP="bo
 expect "the bootstrap skip is logged" grep -q 'bootstrap release' "$(git rev-parse --git-common-dir)/release-e2e/skips.log"
 refuse "merge into release with a red e2e is blocked" env RELEASE_E2E_CMD=false git merge --no-ff -m m feature
 expect "a blocked merge leaves HEAD where it was" test "$(git rev-parse HEAD)" = "$(git rev-parse release)"
-expect "red e2e writes no stamp" test -z "$(ls "$(git rev-parse --git-common-dir)/release-e2e" 2>/dev/null)"
+expect "red e2e writes no stamp" test -z "$(ls "$(git rev-parse --git-common-dir)/release-e2e" 2>/dev/null | grep -v skips.log)"
 git merge --abort 2>/dev/null; git reset -q --hard
 expect "merge into release with a green e2e is allowed" env RELEASE_E2E_CMD=true git merge --no-ff -m m feature
 expect "green e2e writes a stamp for the merged tree" test -f "$(git rev-parse --git-common-dir)/release-e2e/$(tree_hash . HEAD)"
@@ -127,7 +127,7 @@ cat >"$t/dh-fake.sh" <<'DHF'
 echo "$1" >>"${DH_LOG:-/dev/null}"
 case $1 in pick) echo "${PICK:-mars}";; clean|push) ;; run)
   script=$7
-  nonce=$(printf '%s\n' "$script" | sed -n 's/.*=== SUITE [^ ]* \([0-9a-f]*\) ===.*/\1/p' | head -1)
+  nonce=$(printf '%s\n' "$script" | sed -n "s/.*' '\([0-9a-f]*\)'; (.*/\1/p" | head -1)
   printf '%s\n' "$SUITES_LIST" | while IFS='|' read -r n _; do
     echo "=== SUITE $n $nonce ==="
     [ "$MODE" = decoy-inside ] && [ "$n" = graph ] && echo "=== EXIT graph 0 ==="

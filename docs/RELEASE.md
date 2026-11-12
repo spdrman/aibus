@@ -196,17 +196,19 @@ on every exit path. A cold run compiles the workspace, so I expect tens of minut
 (I have not timed it here yet). It refuses a dirty tree. There is no Playwright in this repo.
 
 **The stamp.** A green run writes `$(git rev-parse --git-common-dir)/release-e2e/<tree key>`
-(tree, command, host, start and finish time). It lives inside `.git` and is never committed. The key
-is the output of the `tree_hash` function in `tools/release-attest/config.sh` (the tree without the top-level `release-attest/`, so anything under that directory is outside the stamp key by design; the signed attestation covers the rest), so adding
-the attestation commit does not invalidate the stamp. `pre-push` refuses a push whose destination is
+(tree, command, host, start and finish time, and `gate_sha256`). It lives inside `.git` and is never committed. The key
+is the tree id with the top-level `release-attest/` directory left out (the `tree_hash` function in `tools/release-attest/config.sh`), so adding
+the attestation commit does not invalidate the stamp. That also means anything under `release-attest/` is outside the stamp key by design; the signed attestation covers the rest, and `pre-push` refuses a push that touches that directory beyond the two attestation files. `pre-push` refuses a push whose destination is
 `refs/heads/release` unless a stamp exists for the tree being pushed. That also covers `merge
---no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. `pre-push` reads the stamp, it does not just look for the file: it must have exactly the keys the runner writes, name the tree it is filed under, and name a host `dh.sh` knows (mars, nas, mercury, local). Pushes to any other
-branch, and deleting a branch, pass straight through. Run the e2e by hand on a clean checkout with
+--no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. `pre-push` reads the stamp, it does not just look for the file: it must have exactly the keys the runner writes, name the tree it is filed under, name a host `dh.sh` knows (mars, nas, mercury, local; `e2e.sh` checks the same list before it spends a run), and carry a `gate_sha256` equal to the hash of the gate it judges with. Pushes to any other
+branch pass straight through.
+
+**Which gate judges a push.** `pre-push` does not trust the files in the tree being pushed. It takes `tools/release-gate` and `tools/release-attest` from the remote release tip (the old sha git hands the hook) with `git archive` into a temp dir, and runs the stamp check from that copy; if the archive fails it refuses. `gate_sha256` is a hash over the conf (`config.sh`), `e2e.sh`, `lib.sh`, `attest.sh` and `verify.sh`, so a stamp made by a gate the topic edited does not match. Besides the missing stamp, the push is refused when: it changes a gate file (`tools/release-gate/*`, `tools/release-attest/*`, `.githooks/*`); it touches `release-attest/` beyond `attestation.json` and its signature; it deletes `release`; the remote has no `release` yet (zero old sha, the one-time bootstrap); or the remote tip is not in the clone (`fetch first`, there is no fallback to `refs/remotes`). Every one of those is lifted only by the logged `RELEASE_E2E_SKIP`. The hook reads the ref lines from the end, so a local ref with spaces in it (`HEAD^{/some message}`) cannot hide the release line. `pre-merge-commit` does the same for a merge: it runs the gate from `HEAD` and refuses a merge that changes a gate file. Run the e2e by hand on a clean checkout with
 `tools/release-gate/e2e.sh [--host mars]`.
 
 **Override.** `RELEASE_E2E_SKIP='<reason>'` skips the gate in the hooks and the runner. It prints
 the reason loudly and appends it to `release-e2e/skips.log` next to the stamps. It is legitimate for
-a docs-only change to `release`, or when every docker host is down and the release is urgent and I
+a docs-only change to `release`, a change to the gate itself, creating the `release` branch, or when every docker host is down and the release is urgent and I
 accept it. I do not use `--no-verify`. `RELEASE_E2E_CMD` replaces the container run with a local
 command; it is for the tests of the gate only. It warns loudly, and its stamps go to `release-e2e-fake/`, which
 `pre-push` never reads (only `tests/release-gate/run.sh` sets `RELEASE_E2E_TEST_STAMPS`, to the repo's stamp directory, to get real ones, and `pre-push` rejects fake-host stamps otherwise), so a
@@ -220,11 +222,13 @@ log is kept (path printed); lower `DH_CPUS` or move to a bigger host, do not ret
 tree: refused (in the merge hook it means unstaged or untracked files while the merge is pending).
 Red: no stamp.
 
-**What the hooks cannot do.** With `core.hooksPath=.githooks`, the hooks are read from the checkout, so a
-merge into `release` runs the incoming branch's own hooks (inherent to git). `pre-merge-commit` at least
-takes `e2e.sh` and the suite list from `HEAD` (release as it is), not from the merged branch. A merge done
-in the GitHub web UI skips every local hook; publish stays fail-closed because `prepare` in `release.yml`
-verifies the signed attestation.
+**What the hooks cannot do.**
+
+* The hooks themselves come from the working tree (`core.hooksPath=.githooks`). A topic that edits `.githooks` and is merged into `release` runs its own hooks, so that merge goes through ungated. The runner, conf and attest files are taken from the release tip, the hooks are not.
+* The logged skip also waives the e2e. After a gate change, or when I create `release`, I run `tools/release-gate/e2e.sh` by hand on the merged tree first.
+* A gate change needs the skip on both the merge (`pre-merge-commit`) and the push (`pre-push`). Creating the `release` branch needs it on the merge and on the push too (the bootstrap).
+* A merge done in the GitHub web UI runs no local hook at all.
+* The real boundary is GitHub branch protection on `release`, plus the signed attestation check in the `prepare` job of `release.yml`, which stays fail-closed. The local gate catches mistakes, it does not stop someone with write access.
 
 **How it relates to the attestation.** The stamp gates the merge and push into `release`; the signed
 attestation gates the publish (`prepare` in `release.yml` verifies it). They run the same suites. The

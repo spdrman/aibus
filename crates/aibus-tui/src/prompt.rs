@@ -192,9 +192,11 @@ impl Prompt {
     /// Pasted text: a dropped file path stays a path (quoted when it has spaces) and is never
     /// run as a command; newlines stay newlines.
     pub fn paste(&mut self, pasted: &str) {
-        let trimmed = pasted.trim_end_matches(['\n', '\r']);
+        // A terminal sends CRLF, LF or (xterm style) a bare CR for each newline of a paste.
+        let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+        let trimmed = pasted.trim_end_matches('\n');
         let one_line = !trimmed.contains('\n');
-        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.replace('\r', "") };
+        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.to_owned() };
         self.drop_selection();
         let at = char_at(&self.text, self.at());
         self.text.insert_str(at, &insert);

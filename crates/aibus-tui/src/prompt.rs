@@ -192,9 +192,11 @@ impl Prompt {
     /// Pasted text: a dropped file path stays a path (quoted when it has spaces) and is never
     /// run as a command; newlines stay newlines.
     pub fn paste(&mut self, pasted: &str) {
-        let trimmed = pasted.trim_end_matches(['\n', '\r']);
+        // A terminal sends CRLF, LF or (xterm style) a bare CR for each newline of a paste.
+        let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+        let trimmed = pasted.trim_end_matches('\n');
         let one_line = !trimmed.contains('\n');
-        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.replace('\r', "") };
+        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.to_owned() };
         self.drop_selection();
         let at = char_at(&self.text, self.at());
         self.text.insert_str(at, &insert);
@@ -587,6 +589,17 @@ mod tests {
     fn the_cursor_blinks_on_a_two_second_period_from_the_tick_counter() {
         let phases: Vec<bool> = [0, 29, 30, 59, 60, 89, 90].map(Prompt::blink_on).to_vec();
         assert_eq!(phases, [true, true, false, false, true, true, false]);
+    }
+
+    #[test]
+    fn a_paste_keeps_its_line_breaks_whatever_newline_the_terminal_sent() {
+        // Issue #197: xterm style terminals put a bare CR for each newline inside a bracketed
+        // paste. LF and CRLF always worked; the CR was deleted and the lines ran together.
+        for (name, pasted) in [("LF", "one\ntwo\nthree"), ("CRLF", "one\r\ntwo\r\nthree"), ("CR", "one\rtwo\rthree")] {
+            let mut p = Prompt::default();
+            p.paste(pasted);
+            assert_eq!(p.text, "one\ntwo\nthree", "{name} newlines");
+        }
     }
 
     #[test]

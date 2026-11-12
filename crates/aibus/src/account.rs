@@ -92,7 +92,7 @@ fn verify(
     let configs = provider_configs(std::slice::from_ref(account), &defs, &io.paths)?;
     let provider = ProviderRegistry::new(&io.factories, &configs)?.get(&account.provider)?;
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
+        .enable_all()
         .build()?;
     let t0 = Instant::now();
     let info = rt.block_on(provider.verify(cred)).map_err(|e| match e.kind {

@@ -26,6 +26,7 @@ impl Login {
         let (Some(device_code), Some(user_code)) = (d["device_code"].as_str(), d["user_code"].as_str()) else {
             return Err("the device endpoint sent no code".into());
         };
+        self.hold("oauth-flow:device-code", device_code);
         let uri = d["verification_uri"].as_str().or(d["verification_url"].as_str()).unwrap_or_default();
         notify(&format!("open {uri} and enter the code {user_code}"));
 

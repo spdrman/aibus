@@ -118,6 +118,27 @@ body = '{"detail":"upstream refused the request","request":{"headers":{"authoriz
 registered = ["3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9"]
 secrets = ["3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9"]
 
+# The secrets of a login in flight (#191): registered by the flow for as long as it runs, so an
+# authorization server that echoes one in an error cannot get it into the error text.
+
+[[case]]
+name = "token endpoint echoes the pkce verifier"
+body = '{"error":"invalid_grant","error_description":"code_verifier dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk does not match the challenge"}'
+registered = ["dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"]
+secrets = ["dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"]
+
+[[case]]
+name = "token endpoint echoes the authorization code"
+body = '{"error":"invalid_grant","error_description":"authorization code auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9 was already used"}'
+registered = ["auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9"]
+secrets = ["auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9"]
+
+[[case]]
+name = "device endpoint echoes the device code"
+body = '{"error":"expired_token","error_description":"device_code dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf has expired"}'
+registered = ["dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+secrets = ["dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+
 # Bodies with nothing to hide. The redactor has to leave them alone (a billing message or a
 # policy code is not a credential), and the kind table in aibus-provider reads their codes.
 

@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod common;
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -57,4 +59,46 @@ fn the_readme_config_snippet_parses_and_names_the_binary() {
     let config: Value = serde_json::from_str(fenced.trim()).expect("the snippet is JSON");
     assert_eq!(config["command"], "aibus");
     assert_eq!(config["args"], serde_json::json!(["mcp"]));
+}
+
+/// #182: every long flag `aibus mcp --help` lists is in docs/MCP.md, the confirmation has its own
+/// section, and the README and both help texts no longer read as stdio only.
+#[test]
+fn mcp_md_names_every_flag_and_describes_the_confirmation() {
+    let home = aibus_testkit::xdg_temp();
+    let flag = regex::Regex::new(r"(?m)^\s+(?:-\w, )?(--[a-z][a-z-]*)").unwrap();
+    let flags_of = |args: &[&str]| -> Vec<String> {
+        let help = String::from_utf8(common::aibus(home.path(), args).stdout).unwrap();
+        flag.captures_iter(&help).map(|c| c[1].to_owned()).collect()
+    };
+    // The global flags belong to the CLI page; the rest are the server's own.
+    let global = flags_of(&["--help"]);
+    let found: Vec<String> = flags_of(&["mcp", "--help"]).into_iter().filter(|f| !global.contains(f)).collect();
+    assert!(found.iter().any(|f| f == "--confirm") && found.iter().any(|f| f == "--http"), "{found:?}");
+    let md = fs::read_to_string(root().join("docs/MCP.md")).unwrap();
+    let missing: Vec<&String> = found.iter().filter(|f| !md.contains(&format!("`{f}"))).collect();
+    assert!(missing.is_empty(), "docs/MCP.md does not mention {missing:?}");
+    let section = md.split("\n## Confirmation").nth(1).expect("a Confirmation section in docs/MCP.md");
+    let section = section.split("\n## ").next().unwrap();
+    for word in ["elicitation", "retype", "--confirm never", "input_required", "requestState"] {
+        assert!(section.contains(word), "the Confirmation section does not say {word:?}");
+    }
+    assert!(md.contains("permission relay") || md.contains("Relaying a run's permission prompts"));
+}
+
+#[test]
+fn the_readme_and_the_help_text_say_http_and_confirmation() {
+    let readme = fs::read_to_string(root().join("README.md")).unwrap();
+    let section = readme.split("### Author workflows from an MCP client").nth(1).unwrap();
+    let section = section.split("\n### ").next().unwrap();
+    for word in ["--http", "--confirm"] {
+        assert!(section.contains(word), "the README section does not mention {word}");
+    }
+    let home = aibus_testkit::xdg_temp();
+    let top = String::from_utf8(common::aibus(home.path(), &["--help"]).stdout).unwrap();
+    let line = top.lines().find(|l| l.trim_start().starts_with("mcp ")).expect("an mcp line in --help");
+    assert!(line.contains("HTTP"), "{line}");
+    let own = String::from_utf8(common::aibus(home.path(), &["mcp", "--help"]).stdout).unwrap();
+    let first = own.lines().next().unwrap();
+    assert!(first.contains("HTTP"), "{first}");
 }

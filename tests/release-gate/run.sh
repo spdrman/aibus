@@ -372,6 +372,46 @@ expect "Cargo.toml and the path crates in Cargo.lock moved" bash -c "grep -q '^v
 expect "no old workspace version is left (the registry crate's 0.1.0 stays on purpose)" bash -c "! grep -n '0\.1\.0' Cargo.toml && [ \$(grep -c '0\.1\.0' Cargo.lock) = 1 ]"
 expect "the script made no tag, locally or on origin" test -z "$(git tag -l)$(git ls-remote --tags origin)"
 
+# ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
+base2 s20
+echo fu >fu; git add fu; git commit -qm fu
+fu_l=$(git rev-parse HEAD); fu_t=$(git rev-parse origin/release)
+printf 'refs/heads/x %s refs/heads/release %s\n' "$fu_l" "$fu_t" >"$t/fu-line.txt"
+expect "control, no size limit: a skipped release push passes the hook" bash -c "RELEASE_E2E_SKIP='a long enough reason' bash .githooks/pre-push origin url <'$t/fu-line.txt'"
+out=$( (trap '' XFSZ; ulimit -f 0; RELEASE_E2E_SKIP='a long enough reason' bash .githooks/pre-push origin url <"$t/fu-line.txt") 2>&1 ); rc=$?
+expect "a push-line save that cannot be written is refused, even with the skip set" test $rc != 0
+expect "...and the refusal says the lines could not be saved" bash -c "printf '%s' \"\$1\" | grep -q 'cannot save the push lines'" _ "$out"
+out=$(TMPDIR=$t/no-such-tmp bash .githooks/pre-push origin url <"$t/fu-line.txt" 2>&1); rc=$?
+expect "an unusable TMPDIR (mktemp fails) refuses the push with a message of its own" bash -c "test $rc != 0 && printf '%s' \"\$1\" | grep -q 'cannot make a temp'" _ "$out"
+# the test runners must not carry on with an empty temp dir: rm -rf "$t/..." would aim at paths under /
+for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  expect "$runner stops when mktemp fails" bash -c "grep -A1 '^t=\$(mktemp' '$src/$runner' | grep -q '|| exit 1'"
+  expect "$runner checks the temp dir is a non-empty directory" bash -c "grep -q '\[ -n \"\$t\" \] && \[ -d \"\$t\" \]' '$src/$runner'"
+done
+expect "e2e.sh no longer copies the red log to a predictable name" bash -c "! grep -q 'release-e2e-log-\\\$\\\$' '$src/tools/release-gate/e2e.sh'"
+mkdir -p "$t/kt"
+out=$(env -u RELEASE_E2E_CMD -u RELEASE_E2E_TEST_STAMPS TMPDIR=$t/kt SUITES_LIST="$SUITES" DH_SH="$t/dh-fake.sh" MODE=decoy-inside tools/release-gate/e2e.sh 2>&1); kept=$(printf '%s' "$out" | sed -n 's/^log kept in \([^ ]*\) .*/\1/p')
+expect "...the kept log has a mktemp name (random suffix, not the pid)" bash -c "[ -f '$kept' ] && ! printf '%s' '$kept' | grep -Eq 'release-e2e-log-[0-9]+\$'"
+# characters, not bytes, and invisible characters do not count
+rep() { local i out=; for ((i = 0; i < $2; i++)); do out=$out$1; done; printf '%s' "$out"; }
+EA='\303\251'; ZW='\342\200\213'; BOM='\357\273\277'; WJ='\342\201\240'; HF='\343\205\244'; BR='\342\240\200'; MV='\341\240\216'
+fu_hook() { printf 'refs/heads/x %s refs/heads/release %s\n' "$fu_l" "$fu_t" | env LC_ALL="$1" RELEASE_E2E_SKIP="$2" bash .githooks/pre-push origin url; }
+for loc in C en_US.UTF-8; do
+  refuse "[$loc] six e-acute (6 characters, 12 bytes) are refused (push)" fu_hook $loc "$(printf "$(rep "$EA" 6)")"
+  refuse "[$loc] six e-acute are refused by e2e.sh too" env LC_ALL=$loc RELEASE_E2E_SKIP="$(printf "$(rep "$EA" 6)")" tools/release-gate/e2e.sh
+  expect "[$loc] twelve e-acute (12 characters) pass (push)" fu_hook $loc "$(printf "$(rep "$EA" 12)")"
+  for inv in ZW BOM WJ HF BR MV; do
+    refuse "[$loc] twelve invisible characters ($inv) are refused (push)" fu_hook $loc "$(printf "$(rep "${!inv}" 12)")"
+    refuse "[$loc] 'ab' plus ten invisible characters ($inv) are refused (push)" fu_hook $loc "$(printf "ab$(rep "${!inv}" 10)")"
+  done
+  refuse "[$loc] twelve zero-width spaces are refused by e2e.sh" env LC_ALL=$loc RELEASE_E2E_SKIP="$(printf "$(rep "$ZW" 12)")" tools/release-gate/e2e.sh
+  expect "[$loc] a real reason with a zero-width space inside still passes" fu_hook $loc "$(printf "bootstrap${ZW} release now")"
+done
+git switch -q -c topicfu; echo y >yfu; git add yfu; git commit -qm yfu; git switch -q release; echo z >zfu; git add zfu; git commit -qm zfu
+refuse "twelve zero-width spaces are refused (merge)" env RELEASE_E2E_SKIP="$(printf "$(rep "$ZW" 12)")" git merge --no-ff -q -m m topicfu
+refuse "six e-acute are refused under LC_ALL=C (merge)" env LC_ALL=C RELEASE_E2E_SKIP="$(printf "$(rep "$EA" 6)")" git merge --no-ff -q -m m topicfu
+git merge --abort 2>/dev/null; git reset -q --hard
+
 [ $fails = 0 ] || tail -8 "$t/green.out" >&2
 echo "$n tests, $fails failed"
 [ $fails = 0 ]

@@ -1,6 +1,13 @@
 //! #115: the two login flows against a scripted authorization server and a browser played by
-//! the test. No network beyond 127.0.0.1, no real browser. Time is paused, so the five minute
-//! timeout and the 5 s device interval cost nothing.
+//! the test. No network beyond 127.0.0.1, no real browser. Time is paused where a test measures
+//! a wait (the five minute timeout, the device interval), so those cost nothing.
+//!
+//! A PKCE test where the browser completes the login runs on the real clock instead (#217).
+//! The flow keeps the five minute timeout and the 5 s head timeout armed while the browser's
+//! request is out, and with a paused clock tokio jumps to the next timer whenever the runtime
+//! waits on a real socket: the five minute timeout fired mid-request, dropped the listener and
+//! the browser got a reset. None of those tests measure time, and on the real clock the login
+//! is over in milliseconds, long before any of the flow's or the client's timers.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -72,7 +79,7 @@ fn http() -> Client {
     Client::new()
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn the_openrouter_style_flow_trades_the_code_and_the_verifier_for_a_key() {
     let auth = FakeAuthServer::start().await;
     auth.token_status(200, json!({ "key": KEY })).await;
@@ -98,7 +105,7 @@ async fn the_openrouter_style_flow_trades_the_code_and_the_verifier_for_a_key() 
     assert!(!url.as_str().contains(verifier), "the verifier never travels in the URL");
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn the_listener_refuses_a_wrong_state_a_wrong_path_and_a_foreign_host_then_takes_the_real_one() {
     let auth = FakeAuthServer::start().await;
     auth.token_status(200, json!({ "access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600 })).await;
@@ -172,7 +179,7 @@ async fn cancelling_ends_the_wait_and_frees_the_port() {
     assert!(http().get(format!("{cb}?code=late")).send().await.is_err());
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_busy_preferred_port_falls_back_unless_the_definition_pins_it() {
     let auth = FakeAuthServer::start().await;
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -194,7 +201,7 @@ async fn a_busy_preferred_port_falls_back_unless_the_definition_pins_it() {
     assert!(e.contains(&port.to_string()) && e.contains("in use"), "{e}");
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_token_endpoint_refusal_is_an_error_that_does_not_echo_the_code_or_the_verifier() {
     let auth = FakeAuthServer::start().await;
     auth.token_status(400, json!({ "error": "invalid_grant" })).await;
@@ -343,7 +350,7 @@ fn field(body: &str, name: &str) -> String {
 /// #191: the PKCE verifier and the authorization code are short-lived credentials, and while the
 /// token request is out they are registered with the redactor, so a server that echoes them in
 /// its error cannot get them into the error text. They are unregistered when the flow ends.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn the_pkce_verifier_and_the_code_are_registered_while_the_token_request_is_out() {
     let redactor = Redactor::new();
     let in_flight = redactor.clone();

@@ -5,6 +5,10 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ## [0.2.0] - unreleased
 
+### Fixed
+
+* `aibus account add` and `account test` no longer panic with "IO is disabled" (#181). The runtimes that run provider calls (account verify, the OAuth refresh, the background model refresh, and the one `aibus run`, `run --workflow` and the TUI share) were built with `enable_time()` only; they use `enable_all()` now, and a test fails if a production runtime is built without IO.
+
 ### Added
 
 * New end-to-end tests drive the real `aibus mcp` for the write round trip, the run round trip, a planted-key check and the flags-off tripwires (#183).

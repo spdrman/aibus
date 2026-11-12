@@ -609,11 +609,14 @@ async fn add_oauth_for_openrouter_runs_the_real_login_against_a_fake_authorizati
     })
     .await
     .unwrap();
-    let page = browser.await.unwrap();
-
     assert_eq!(exit(&ran.result), 0, "{:?}\n{}", ran.result.err(), ran.out);
+    let page = tokio::time::timeout(std::time::Duration::from_secs(5), browser)
+        .await
+        .expect("the browser never reached the callback")
+        .unwrap();
     assert!(page.starts_with("HTTP/1.1 200") && page.contains("logged in"), "{page}");
     let challenge = ran.out.split("code_challenge=").nth(1).and_then(|r| r.split(['&', '\n']).next()).expect("the printed address carries a challenge");
+    assert!(!ran.out.contains("state="), "{}", ran.out);
     assert!(ran.out.contains("code_challenge_method=S256") && ran.out.contains(&format!("callback_url=http%3A%2F%2F127.0.0.1%3A{port}%2Fcallback")), "{}", ran.out);
 
     let sent = auth.bodies().await;

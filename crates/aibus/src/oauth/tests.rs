@@ -228,8 +228,14 @@ async fn device_run(auth: &FakeAuthServer) -> (Result<aibus_core::OAuthTokens, S
     let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = lines.clone();
     let notify = move |l: &str| sink.lock().unwrap().push(l.to_owned());
+    // A plain client, without the product's 10 s connect and 30 s request timers (#215). With
+    // the clock paused, tokio jumps to the next timer whenever the runtime waits, and a request
+    // to the fake server is a real socket wait. With those timers armed the clock ran ahead
+    // mid-request and fired them; with no timer armed during a request there is nothing to jump
+    // to, so the runtime blocks on the socket and only the flow's own sleeps move the clock.
+    let login = Login { http: http(), ..Login::new(device_def(auth)) };
     let t0 = tokio::time::Instant::now();
-    let out = Login::new(device_def(auth)).authorize(&notify, &CancellationToken::new()).await;
+    let out = login.authorize(&notify, &CancellationToken::new()).await;
     let seen = lines.lock().unwrap().clone();
     (out, t0.elapsed(), seen)
 }
@@ -391,8 +397,8 @@ async fn the_device_code_is_registered_while_the_token_request_is_out() {
     .await;
     let mut def = device_def(&auth);
     def.token_url = token_url;
-    let mut login = Login::new(def);
-    login.redactor = redactor.clone();
+    // The plain client for the same reason as in `device_run`.
+    let login = Login { http: http(), redactor: redactor.clone(), ..Login::new(def) };
     let notify = |_: &str| {};
     let e = login.authorize(&notify, &CancellationToken::new()).await.unwrap_err();
     let code = probe.await.unwrap();

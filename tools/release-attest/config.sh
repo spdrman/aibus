@@ -39,3 +39,25 @@ declared_version() { # repo commit
     /^\[/ { in_ws = ($0 == "[workspace.package]") }
     in_ws && /^version[ ]*=/ { gsub(/^[^"]*"|".*$/, ""); print; exit }'
 }
+
+# One script, the suites in order, each between a SUITE and an EXIT marker that carry a per-run random
+# nonce ($1). attest.sh and tools/release-gate/e2e.sh both build their container script with this, so the
+# suite list and the way it is run live in one place. The nonce stops accidental and log-embedded decoys
+# (a test that prints or quotes an old log); a reader only believes a marker that carries it, and a
+# suite with two markers is red. It does not stop suite code that reads the nonce out of the container's
+# argv: that code runs with the same rights as the script and is out of scope. The EXIT marker starts on
+# a fresh line, so output without a trailing newline cannot swallow it.
+new_nonce() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
+lane_script() { # nonce
+  echo 'set -u'
+  echo 'export CARGO_TERM_COLOR=never CI=1'
+  while IFS='|' read -r name cmd; do
+    printf 'echo "=== SUITE %s %s ==="; ( %s ) 2>&1; rc=$?; printf "\\n=== EXIT %s %%s %s ===\\n" "$rc"\n' "$name" "$1" "$cmd" "$name" "$1"
+  done <<<"$SUITES"
+}
+# The exit code of one suite, from the log: exactly one genuine EXIT marker or nothing.
+suite_exit() { # log name nonce
+  local lines
+  lines=$(sed -n "s/^=== EXIT $2 \([0-9][0-9]*\) $3 ===\$/\1/p" "$1")
+  [ "$(grep -c . <<<"$lines")" = 1 ] && echo "$lines"
+}

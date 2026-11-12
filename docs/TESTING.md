@@ -28,7 +28,9 @@ the same command, started by hand.
 
 Before a release I run the "every push" rows above as one signed attestation, fenced in docker:
 `tools/release-attest/attest.sh`, then `tools/release-attest/verify.sh` (the suite list is
-`tools/release-attest/config.sh`, kept in step with this table; `docs/RELEASE.md` has the rest).
+`tools/release-attest/config.sh`, kept in step with this table; `docs/RELEASE.md` has the rest). Merging into `release` runs the same rows as a local e2e through the git hooks
+and `tools/release-gate/e2e.sh` ("The local release gate" in `docs/RELEASE.md`); the hooks are installed with
+`tools/release-gate/install.sh`.
 
 The conformance row says "both backends when available": the `causl-differential` job in
 `.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and

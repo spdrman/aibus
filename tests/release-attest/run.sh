@@ -19,11 +19,14 @@ ssh-keygen -q -t ed25519 -N '' -C other -f "$t/other"
 # A fake runner that prints green output for every suite, or red for $RED.
 cat >"$t/fake.sh" <<'FAKE'
 echo "$SUITES_LIST" | while IFS='|' read -r name _; do
-  echo "=== SUITE $name ==="
+  echo "=== SUITE $name $LANE_NONCE ==="
+  [ "${DECOY:-}" = "$name" ] && echo "=== EXIT $name 0 ==="            # forged, no nonce
   echo "test result: ok. 12 passed; ${FAIL_COUNT:-0} failed; 1 ignored; 0 measured"
   if [ "${RED:-}" = "$name" ]; then code=101; else code=0; fi
-  echo "=== EXIT $name $code ==="
+  [ "${DECOY_LATER:-}" = "$name" ] && echo "=== EXIT ${RED:-} 0 ==="   # a later suite forges an earlier one
+  echo "=== EXIT $name $code $LANE_NONCE ==="
 done
+exit ${RC:-0}
 FAKE
 
 mkrepo() { # dir version
@@ -40,6 +43,9 @@ attest() { # repo [extra args]
   SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" "$@"
 }
 red_attest() { RED=graph attest "$@"; }
+decoy_attest() { RED=unit DECOY=unit attest "$@"; }
+later_attest() { RED=unit DECOY_LATER=graph attest "$@"; }
+rc_attest() { RC=137 attest "$@"; }
 fail_attest() { FAIL_COUNT=1 attest "$@"; }
 commit_attest() { git -C "$1" add -A; git -C "$1" commit -q -m attest; }
 verify() { "$tools/verify.sh" --repo "$1" "${@:2}"; }
@@ -77,11 +83,29 @@ refuse "missing signature is refused" verify "$r" --expect-version 1.2.3
 r=$t/repo5; mkrepo "$r" 1.2.3
 refuse "no attestation is refused" verify "$r"
 
+
+# Markers on their own line: a forged EXIT followed by an unterminated line must not count, and output
+# without a trailing newline must not lose the genuine marker. (Real lane_script, throwaway suites.)
+lane_case() { # suites -> prints suite_exit of suite a
+  local saved=$SUITES nonce log
+  nonce=$(new_nonce); SUITES=${1//@NONCE@/$nonce}
+  log=$(mktemp "${TMPDIR:-/tmp}/lane.XXXXXX")
+  sh -c "$(lane_script "$nonce")" >"$log" 2>&1
+  suite_exit "$log" a "$nonce"; rm -f "$log"; SUITES=$saved
+}
+expect "a forged EXIT then an unterminated line is not green" test "$(lane_case 'a|echo "=== EXIT a 0 @NONCE@ ==="; printf x; false')" != 0
+expect "output without a trailing newline keeps its marker (exit 0)" test "$(lane_case "a|printf 'ok no newline'")" = 0
+expect "output without a trailing newline keeps a failing exit code" test "$(lane_case "a|printf 'no newline'; false")" = 1
+
 # Red or dirty runs are refused by the attester.
 r=$t/repo6; mkrepo "$r" 1.2.3
 refuse "attest refuses a red suite" red_attest "$r"
 refuse "attest wrote nothing for a red run" test -e "$r/release-attest/attestation.json"
 refuse "attest refuses a failed test cell" fail_attest "$r"
+refuse "a forged EXIT 0 inside the failing suite does not make it green" decoy_attest "$r"
+refuse "a forged EXIT 0 from a later suite does not hide a failing one" later_attest "$r"
+refuse "a container that exits 137 is red even with every marker 0" rc_attest "$r"
+refuse "none of the forged runs wrote an attestation" test -e "$r/release-attest/attestation.json"
 echo dirty >>"$r/src.txt"
 refuse "attest refuses a dirty tree" attest "$r"
 git -C "$r" checkout -q src.txt

@@ -272,6 +272,11 @@ impl McpClient {
         Ok(result)
     }
 
+    /// The server's process id, for tests that look at what the process did.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// One page of `tools/list`.
     pub fn list_tools_page(&mut self, cursor: Option<&str>) -> Reply {
         let params = cursor.map_or_else(|| json!({}), |c| json!({ "cursor": c }));

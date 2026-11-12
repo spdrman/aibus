@@ -11,6 +11,7 @@ mod common;
 use std::collections::HashSet;
 use std::fs;
 
+use aibus_core::workflow::Workflow;
 use aibus_testkit::xdg_temp;
 use common::mcp_client::{lines_that_are_not_json_rpc, mcp_command, McpClient, Protocol};
 use common::schema;
@@ -413,4 +414,168 @@ fn the_run_resources_scenario_matches_its_golden_transcript() {
     let r = c.request("resources/templates/list", json!({})).expect("resources/templates/list");
     assert!(!r.to_string().contains("aibus://runs"), "{r}");
     assert_eq!(c.read_resource("aibus://runs/run-x").expect_err("off").code, -32602);
+}
+
+/// #183: the write round trip against the binary. What `workflow_create` wrote is what
+/// `workflow_get` returns (byte for byte, with the provenance line on top), it parses, the
+/// revision `create` gave is the one `get` gives and the one `update` insists on, and
+/// `aibus workflow list --json` shows the file.
+#[test]
+fn the_write_round_trip_matches_what_get_returns_and_the_cli_lists_it() {
+    const PROVENANCE: &str = "# written through aibus mcp, ";
+    for p in Protocol::BOTH {
+        let home = xdg_temp();
+        fs::create_dir_all(home.path().join("proj/.aibus")).unwrap();
+        let on_disk = home.path().join("proj/.aibus/workflows/ship.toml");
+        let mut c = client(home.path(), p, &["--allow", "write"]);
+        c.list_tools();
+
+        let draft = c.call("workflow_validate", json!({ "toml": SHIP })).expect("validate a draft");
+        assert_eq!(draft["structuredContent"]["ok"], true, "{p:?}: {draft}");
+
+        let made = c
+            .call("workflow_create", json!({ "name": "ship", "scope": "project", "toml": SHIP }))
+            .expect("create");
+        assert_ne!(made["isError"], true, "{p:?}: {made}");
+        let rev1 = made["structuredContent"]["revision"].as_str().expect("a revision").to_owned();
+
+        let got = c.call("workflow_get", json!({ "name": "ship", "scope": "project" })).expect("get");
+        let text = got["structuredContent"]["toml"].as_str().expect("the file text").to_owned();
+        assert_eq!(text, fs::read_to_string(&on_disk).unwrap(), "{p:?}: get is not the file");
+        assert_eq!(got["structuredContent"]["revision"], rev1.as_str(), "{p:?}");
+        let (first, rest) = text.split_once('\n').expect("a provenance line and a body");
+        assert!(first.starts_with(PROVENANCE), "{p:?}: {first}");
+        assert_eq!(rest, SHIP, "{p:?}: the body is not what was submitted");
+        let parsed = Workflow::parse("ship", &text).expect("the written file parses");
+        assert_eq!(parsed.steps.len(), 2);
+        assert_eq!(fs::read_dir(on_disk.parent().unwrap()).unwrap().count(), 1, "{p:?}: a temp file is left");
+
+        // An update with the revision goes through and keeps the first line; the old revision
+        // then conflicts and writes nothing.
+        let v2 = SHIP.replace("Plan, then build", "Plan, build, check");
+        let updated = c
+            .call("workflow_update", json!({ "name": "ship", "scope": "project", "toml": v2, "expected_revision": rev1 }))
+            .expect("update");
+        assert_ne!(updated["isError"], true, "{p:?}: {updated}");
+        let rev2 = updated["structuredContent"]["revision"].as_str().unwrap().to_owned();
+        assert_ne!(rev1, rev2);
+        let now = fs::read_to_string(&on_disk).unwrap();
+        assert_eq!(now.split_once('\n').unwrap(), (first, v2.as_str()), "{p:?}");
+        let stale = c
+            .call("workflow_update", json!({ "name": "ship", "scope": "project", "toml": SHIP, "expected_revision": rev1 }))
+            .expect("a tool error");
+        assert_eq!(stale["isError"], true, "{p:?}: {stale}");
+        assert_eq!(fs::read_to_string(&on_disk).unwrap(), now, "{p:?}: a stale update wrote");
+
+        let checked = c.call("workflow_validate", json!({ "name": "ship", "scope": "project" })).expect("validate");
+        assert_eq!(checked["structuredContent"]["ok"], true, "{p:?}: {checked}");
+        let listed = c.call("workflow_list", json!({})).expect("list");
+        assert!(listed.to_string().contains("\"ship\""), "{p:?}: {listed}");
+
+        // The CLI sees the same file.
+        let out = common::aibus(home.path(), &["workflow", "list", "--json"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let rows: Vec<Value> = serde_json::from_slice(&out.stdout).unwrap();
+        let row = rows.iter().find(|r| r["name"] == "ship").unwrap_or_else(|| panic!("{p:?}: ship not in {rows:?}"));
+        assert_eq!(row["steps"], json!(["explore", "plan"]), "{p:?}");
+        assert_eq!(row["description"], "Plan, build, check", "{p:?}");
+        assert!(row.get("error").is_none_or(Value::is_null), "{p:?}: {row}");
+    }
+}
+
+/// Every file named `name` below `dir`.
+fn find(dir: &std::path::Path, name: &str, out: &mut Vec<std::path::PathBuf>) {
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = e.path();
+        if path.is_dir() {
+            find(&path, name, out);
+        } else if path.file_name().is_some_and(|n| n == name) {
+            out.push(path);
+        }
+    }
+}
+
+/// #183: the run round trip against the binary, on the fake provider: `starting` to `completed`
+/// through `run_status`, the report at `aibus://runs/{run}/log`, the commit log in the session
+/// directory, a cancel of the finished run that changes nothing, and one audit line per call.
+#[test]
+fn the_run_round_trip_leaves_a_session_a_log_resource_and_one_audit_line_per_call() {
+    for p in Protocol::BOTH {
+        let home = xdg_temp();
+        let dir = home.path().join("proj/.aibus/workflows");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("ship.toml"), SHIP).unwrap();
+        let mut c = client(home.path(), p, &["--allow", "run"]);
+        c.list_tools();
+        let mut tools: Vec<&str> = Vec::new();
+        let mut reads = 0;
+
+        let started = c
+            .call("workflow_run", json!({ "name": "ship", "scope": "project", "input": "the repo" }))
+            .expect("workflow_run");
+        tools.push("workflow_run");
+        assert_eq!(started["structuredContent"]["status"], "starting", "{p:?}: {started}");
+        let run = started["structuredContent"]["run"].as_str().unwrap().to_owned();
+
+        let mut seen = vec!["starting".to_owned()];
+        let done = loop {
+            let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).expect("run_status");
+            tools.push("run_status");
+            assert_ne!(r["isError"], true, "{p:?}: {r}");
+            let body = r["structuredContent"].clone();
+            let status = body["status"].as_str().unwrap().to_owned();
+            if seen.last() != Some(&status) {
+                seen.push(status.clone());
+            }
+            if !body["exit_code"].is_null() && !matches!(status.as_str(), "starting" | "running") {
+                break body;
+            }
+            assert!(tools.len() < 200, "{p:?}: the run never finished, saw {seen:?}");
+        };
+        assert_eq!(done["status"], "completed", "{p:?}: {done}");
+        assert_eq!(done["exit_code"], 0, "{p:?}: {done}");
+        assert_eq!(seen.first().map(String::as_str), Some("starting"));
+        assert_eq!(seen.last().map(String::as_str), Some("completed"));
+        let session = done["session"].as_str().expect("a session id").to_owned();
+
+        let log = c.read_resource(&format!("aibus://runs/{run}/log")).expect("the log resource");
+        reads += 1;
+        let log_text = log["contents"][0]["text"].as_str().expect("log text");
+        assert!(log_text.contains("Done."), "{p:?}: the fake provider's report is not in the log: {log_text}");
+        let status_res = c.read_resource(&format!("aibus://runs/{run}")).expect("the status resource");
+        reads += 1;
+        assert!(status_res.to_string().contains("completed"), "{p:?}: {status_res}");
+
+        let cancelled = c.call("run_cancel", json!({ "run": run })).expect("run_cancel");
+        tools.push("run_cancel");
+        assert_eq!(cancelled["structuredContent"]["status"], "completed", "{p:?}: {cancelled}");
+
+        // The session directory the run made holds the commit log.
+        let mut logs = Vec::new();
+        find(home.path(), "commits.jsonl.zst", &mut logs);
+        assert_eq!(logs.len(), 1, "{p:?}: {logs:?}");
+        assert!(logs[0].to_string_lossy().contains(&session), "{p:?}: {logs:?} is not session {session}");
+
+        // One audit line for the server start and one for each call and each resource read.
+        let (finished, lines) = c.finish();
+        assert!(finished.status.success(), "{p:?}: {}", finished.stderr);
+        assert_eq!(lines_that_are_not_json_rpc(&lines), Vec::<String>::new(), "{p:?}");
+        let mut files: Vec<_> = fs::read_dir(home.path().join(".local/state/aibus/logs/mcp"))
+            .expect("the audit directory")
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        files.sort();
+        assert_eq!(files.len(), 1, "{p:?}: one audit file per process: {files:?}");
+        let audit: Vec<Value> =
+            fs::read_to_string(&files[0]).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(audit[0]["method"], "server/start");
+        assert_eq!(audit[0]["args"]["run"], true, "{p:?}: {}", audit[0]);
+        let calls: Vec<&str> = audit.iter().filter(|l| l["method"] == "tools/call").map(|l| l["tool"].as_str().unwrap()).collect();
+        assert_eq!(calls, tools, "{p:?}: one audit line per tool call, in order");
+        let resource_reads = audit.iter().filter(|l| l["method"] == "resources/read").count();
+        assert_eq!(resource_reads, reads, "{p:?}");
+        assert_eq!(audit.len(), 1 + tools.len() + reads, "{p:?}: {audit:?}");
+        assert!(audit.iter().filter(|l| l["tool"] == "workflow_run").all(|l| l["run"].is_string() || l["ok"] == true));
+    }
 }

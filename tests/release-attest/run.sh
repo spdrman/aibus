@@ -83,19 +83,21 @@ refuse "missing signature is refused" verify "$r" --expect-version 1.2.3
 r=$t/repo5; mkrepo "$r" 1.2.3
 refuse "no attestation is refused" verify "$r"
 
-
 # Markers on their own line: a forged EXIT followed by an unterminated line must not count, and output
 # without a trailing newline must not lose the genuine marker. (Real lane_script, throwaway suites.)
-lane_case() { # suites -> prints suite_exit of suite a
+lane_case() { # suites [name, default a] -> prints suite_exit of that suite
   local saved=$SUITES nonce log
   nonce=$(new_nonce); SUITES=${1//@NONCE@/$nonce}
   log=$(mktemp "${TMPDIR:-/tmp}/lane.XXXXXX")
   sh -c "$(lane_script "$nonce")" >"$log" 2>&1
-  suite_exit "$log" a "$nonce"; rm -f "$log"; SUITES=$saved
+  suite_exit "$log" "${2:-a}" "$nonce"; rm -f "$log"; SUITES=$saved
 }
 expect "a forged EXIT then an unterminated line is not green" test "$(lane_case 'a|echo "=== EXIT a 0 @NONCE@ ==="; printf x; false')" != 0
 expect "output without a trailing newline keeps its marker (exit 0)" test "$(lane_case "a|printf 'ok no newline'")" = 0
 expect "output without a trailing newline keeps a failing exit code" test "$(lane_case "a|printf 'no newline'; false")" = 1
+
+expect "a % in a suite name does not garble its marker" test "$(lane_case 'p%s|printf ok' 'p%s')" = 0
+expect "a % in a suite name keeps a failing exit code" test "$(lane_case 'p%d|false' 'p%d')" = 1
 
 # Red or dirty runs are refused by the attester.
 r=$t/repo6; mkrepo "$r" 1.2.3
@@ -162,6 +164,12 @@ r=$t/repo14; mkrepo "$r" 1.2.3; mkdir "$t/tmp14"
 refuse "attest refuses a dirty tree" env TMPDIR="$t/tmp14" bash -c 'echo x >> "$1/src.txt"; SUITES_LIST="$2" "$3/attest.sh" --repo "$1" --key "$4" --runner-cmd "sh $5"' _ "$r" "$SUITES" "$tools" "$t/key" "$t/fake.sh"
 expect "a refused attest leaves no work dir" test -z "$(ls "$t/tmp14")"
 grep -q 'unset DH_UNFENCED' "$tools/attest.sh" && ok "attest.sh unsets DH_UNFENCED" || bad "attest.sh unsets DH_UNFENCED"
+
+# An empty nonce (od gave nothing) is refused with a message, not a silent exit.
+r=$t/repo15; mkrepo "$r" 1.2.3; mkdir "$t/noodbin"; printf '#!/bin/sh\nexit 0\n' >"$t/noodbin/od"; chmod +x "$t/noodbin/od"
+PATH="$t/noodbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/nonce.out" 2>&1; rc=$?
+expect "attest.sh with an empty nonce exits 2" test $rc = 2
+expect "...and says why" grep -qi 'nonce' "$t/nonce.out"
 
 echo "$n tests, $fails failed"
 [ "$fails" = 0 ]

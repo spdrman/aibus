@@ -2,11 +2,11 @@
 
 `aibus mcp` is an MCP server. A client (an editor, a chat app, a coding assistant) starts it, and from then on it can read your workflows and your agent roster, check a draft, and see what a workflow would do, all without a model being called. It is the other direction from the `[mcp.<server>]` tables in your config: those make aibus a client of somebody else's tools, and this makes aibus a server for yours. The two do not share anything.
 
-Out of the box the server is read-only. `--allow write` and `--allow run` add the write and run tools, each described below.
+Out of the box the server is read-only. `--allow write` and `--allow run` add the write and run tools, each described below. When the client can be asked, the write and run tools also stop and ask you to confirm first (see Confirmation), and `--confirm never` turns that off.
 
 ## Setting it up
 
-The server speaks stdio, so the client only needs the command:
+The server speaks stdio by default (and loopback HTTP on request, see the end of this page), so the client only needs the command:
 
 ```json
 {"command": "aibus", "args": ["mcp"]}
@@ -35,7 +35,9 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 | `--allow-tool <pattern>` | pre-approves a tool for runs (the only pre-approvals a run gets) | yes |
 | `--max-runs N`, `--max-concurrent-runs N`, `--max-cost-usd X` | the run caps below (10, 1 and `limits.max_cost_usd`); need `--allow run` | yes |
 | `--no-provenance` | leave the `# written through aibus mcp` line out of written files | yes |
+| `--confirm elicit\|never` | whether a write or a run asks you first when the client can be asked; `elicit` is the default, see Confirmation | yes |
 | `--http <ip:port>` | the same server over Streamable HTTP on loopback, see below | yes |
+| `--origin <value>` | one more `Origin` the HTTP server accepts (repeatable, needs `--http`) | yes |
 
 ## Read tools
 
@@ -90,6 +92,19 @@ The caps are process flags, so a model can neither see nor change them:
 
 When stdin closes (or the HTTP server stops) every live run gets SIGINT, 10 seconds to write its snapshot, and then a kill. Handles live as long as the process; a handle from an earlier process is an unknown one.
 
+## Confirmation
+
+`workflow_create`, `workflow_update` and `workflow_run` can stop and ask you before they do anything. This is a second check on top of the flags, not a replacement: a tool that is off is still not listed, whatever you answer.
+
+* **When.** Only when the tool is listed (its flag is on) and the client declared `elicitation` in form mode when it connected. A client that did not declare it is never asked, and the call goes on as it always did, because the flags are then the only gate. A bare `elicitation: {}` counts as form mode.
+* **What is asked.** A form with one field, the workflow name, which you have to retype exactly. For `workflow_run` under a cost cap it also holds `max_cost_usd`, with the cap as its maximum, so the cost line of a run is in front of you before it starts. Only `accept` with the exact name goes on. `decline`, `cancel`, a different name or a cost that is missing or over the cap ends the call as an `isError` and nothing is written or started. The form never asks for a credential, and the answer is compared on the server.
+* **How, per protocol.** A `2025-11-25` client gets an `elicitation/create` request in the middle of the call. A `2026-07-28` client gets an `input_required` result (multi round-trip requests, MRTR) carrying a `requestState`, and retries the same call with its answer. The `requestState` is sealed with an HMAC under a key made when the process starts and never stored. It is bound to the tool, the exact arguments and the client, it is good once for 10 minutes, and a state that was edited, expired, replayed or taken from another client is one `isError`.
+* **Turning it off.** `aibus mcp --confirm never` skips the form, for scripted use where nobody is there to answer. The flags stay the only gate. The default is `--confirm elicit`.
+
+Each ask and each refusal leaves a `confirm/ask` or `confirm/refused` line in the audit log.
+
+Relaying a run's own permission prompts to the client through the same mechanism was considered and is a recorded no-go (E12 in `DECISIONS.md`): a run stays on `dont_ask`, and a tool call that would ask is denied. There is no flag for it.
+
 ## Resources
 
 `resources/list` returns three and `resources/templates/list` one. With `--allow run` the templates become three and the list also holds one entry per run this process started. Nothing else under `aibus://` exists: a uri outside this table, a workflow that is not there and a name with a path in it (`../x`, `%2e%2e`) are all `-32602`. No resource reaches config, accounts or sessions on disk.
@@ -128,7 +143,7 @@ There are no subscriptions. A client that wants to follow a run polls `run_statu
 
 `agents.extra_dirs` on the roster of the write and run tools, and resource subscriptions for runs.
 
-Relaying a run's permission prompts to the client is not built. See E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
+Relaying a run's permission prompts to the client is a recorded no-go, not a gap to fill later by flag. See Confirmation and E12 in `DECISIONS.md`: runs stay on `dont_ask` and anything that would prompt is denied.
 
 ## aibus as its own client: the workflow author
 

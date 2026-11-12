@@ -5,7 +5,8 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/../.." && pwd)
-t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX")
+t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
+[ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
 fails=0 n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
@@ -387,6 +388,11 @@ expect "an unusable TMPDIR (mktemp fails) refuses the push with a message of its
 for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
   expect "$runner stops when mktemp fails" bash -c "grep -A1 '^t=\$(mktemp' '$src/$runner' | grep -q '|| exit 1'"
   expect "$runner checks the temp dir is a non-empty directory" bash -c "grep -q '\[ -n \"\$t\" \] && \[ -d \"\$t\" \]' '$src/$runner'"
+done
+mkdir -p "$t/failmk"; printf '#!/bin/sh\nexit 1\n' >"$t/failmk/mktemp"; chmod +x "$t/failmk/mktemp"
+for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  out=$(PATH="$t/failmk:$PATH" bash "$src/$runner" 2>&1); rc=$?
+  expect "$runner exits 1 at once, running nothing, when mktemp fails" bash -c "test $rc = 1 && test -z \"\$1\"" _ "$out"
 done
 expect "e2e.sh no longer copies the red log to a predictable name" bash -c "! grep -q 'release-e2e-log-\\\$\\\$' '$src/tools/release-gate/e2e.sh'"
 mkdir -p "$t/kt"

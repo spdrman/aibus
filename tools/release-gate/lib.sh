@@ -32,10 +32,11 @@ gate_skipped() { # where
   [ -n "${RELEASE_E2E_SKIP:-}" ] || return 1
   local reason
   printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || { echo "RELEASE_E2E_SKIP is not valid UTF-8; refusing." >&2; exit 2; }
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f\xa0]|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80/ /g; s/^\s+|\s+$//g')
-  if [ "${#reason}" -lt 12 ]; then echo "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace is trimmed); refusing." >&2; exit 2; fi
-  mkdir -p "$(stamp_dir)"
-  printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$reason" >>"$(stamp_dir)/skips.log"
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -e 'use Encode qw(decode FB_CROAK); local $/; my $d = decode("UTF-8", <STDIN>, FB_CROAK); $d =~ s/[\x{ad}\x{34f}\x{61c}\x{115f}\x{1160}\x{17b4}\x{17b5}\x{180b}-\x{180e}\x{200b}-\x{200f}\x{202a}-\x{202e}\x{2060}-\x{206f}\x{2800}\x{3164}\x{fe00}-\x{fe0f}\x{feff}\x{ffa0}\x{fff9}-\x{fffb}\x{e0000}-\x{e007f}]//g; $d =~ s/[\x00-\x1f\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]/ /g; $d =~ s/^\s+|\s+$//g; binmode(STDOUT, ":utf8"); print $d;') || { echo "RELEASE_E2E_SKIP could not be normalised (perl missing?); refusing." >&2; exit 2; }
+  nchars=$(printf '%s' "$reason" | perl -e 'use Encode qw(decode); local $/; print length(decode("UTF-8", <STDIN>));') || { echo "cannot count the characters of RELEASE_E2E_SKIP; refusing." >&2; exit 2; }
+  if [ "$nchars" -lt 12 ]; then echo "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace and invisible characters are trimmed); refusing." >&2; exit 2; fi
+  mkdir -p "$(stamp_dir)" || { echo "cannot make the stamp directory; refusing." >&2; exit 2; }
+  printf '%s skip at %s by %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$(git config user.email || echo unknown)" "$reason" >>"$(stamp_dir)/skips.log" || { echo "cannot write the skip record; nothing was skipped." >&2; exit 2; }
   echo "!!! RELEASE E2E GATE SKIPPED at $1: $reason (logged in $(stamp_dir)/skips.log)" >&2
 }
 

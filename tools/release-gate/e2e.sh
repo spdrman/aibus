@@ -40,7 +40,8 @@ fi
 key=$(tree_key "$tree")
 
 sdir=$(stamp_dir)
-work=$(mktemp -d "${TMPDIR:-/tmp}/release-e2e.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/release-e2e.XXXXXX") || refuse "could not make a temp directory; nothing ran"
+[ -n "$work" ] && [ -d "$work" ] || refuse "the temp directory is unusable; nothing ran"
 job=aibus-reh-${key:0:8}-$$
 pushed=0
 cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; rm -rf "$work"; }
@@ -78,13 +79,16 @@ else
   done <<<"$SUITES"
   grep -q '^test result: FAILED' "$work/lane.log" && green=0
   if [ $green = 0 ]; then
-    keep=${TMPDIR:-/tmp}/release-e2e-log-$$; cp "$work/lane.log" "$keep"; echo "log kept in $keep (a container killed for memory shows up as a missing EXIT line)" >&2
+    keep=$(mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX") && cp "$work/lane.log" "$keep" || keep="(could not keep it: mktemp or cp failed)"; echo "log kept in $keep (a container killed for memory shows up as a missing EXIT line)" >&2
   fi
 fi
 
 if [ $green != 1 ]; then echo "e2e RED: no stamp written" >&2; exit 1; fi
 mkdir -p "$sdir"
-tmp=$(mktemp "$sdir/.tmp.XXXXXX")
-printf 'tree=%s\ncommand=%s\nhost=%s\nstarted=%s\nfinished=%s\ngate_sha256=%s\n' "$key" "$cmd" "$host" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(gate_hash)" >"$tmp"
-mv "$tmp" "$sdir/$key"
+tmp=$(mktemp "$sdir/.tmp.XXXXXX") || refuse "could not make the stamp file; no stamp written"
+[ -n "$tmp" ] && [ -f "$tmp" ] || refuse "the stamp file is unusable; no stamp written"
+printf 'tree=%s\ncommand=%s\nhost=%s\nstarted=%s\nfinished=%s\ngate_sha256=%s\n' "$key" "$cmd" "$host" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(gate_hash)" >"$tmp" || { rm -f "$tmp"; refuse "could not write the stamp; no stamp written"; }
+# a stamp has exactly six lines; a short write (disk full) must not become one
+[ "$(wc -l <"$tmp" | tr -d ' ')" = 6 ] || { rm -f "$tmp"; refuse "the stamp came out incomplete; no stamp written"; }
+mv "$tmp" "$sdir/$key" || { rm -f "$tmp"; refuse "could not file the stamp; no stamp written"; }
 echo "e2e green: stamp for tree $key on $host" >&2

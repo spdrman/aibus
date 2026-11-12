@@ -5,7 +5,8 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 tools=$(cd "$here/../../tools/release-attest" && pwd)
 . "$tools/config.sh"
-t=$(mktemp -d "${TMPDIR:-/tmp}/attest-test.XXXXXX")
+t=$(mktemp -d "${TMPDIR:-/tmp}/attest-test.XXXXXX") || exit 1
+[ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
 fails=0 n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }

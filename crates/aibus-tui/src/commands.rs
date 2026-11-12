@@ -1311,6 +1311,24 @@ mod tests {
     }
 
     #[test]
+    fn workflow_commands_need_a_lead_that_is_still_running() {
+        let s = session();
+        let wf = ["review".to_owned()];
+        let lead = s.runs[0].0;
+        let done: Vec<(RunId, RunStatus)> = s.states.iter().map(|(id, st)| (*id, if *id == lead { RunStatus::Completed } else { *st })).collect();
+        let finished = Env { runs: &s.runs, states: &done, lead: Some(lead), ..Env::bare(&[], &wf) };
+        let running = Env { runs: &s.runs, states: &s.states, lead: Some(lead), ..Env::bare(&[], &wf) };
+        for line in ["/review the diff", "/workflow review the diff", "/workflow run review the diff", "/workflow new a goal", "/workflow edit review add a step"] {
+            assert!(sent(line, &finished).starts_with("BAD /") && sent(line, &finished).ends_with("is not available: no lead is running"), "{line}: {}", sent(line, &finished));
+            assert!(!sent(line, &running).starts_with("BAD"), "{line}: {}", sent(line, &running));
+        }
+        assert!(slash_offered(&finished).iter().all(|(n, _)| n != "/review"));
+        assert!(slash_offered(&running).iter().any(|(n, _)| n == "/review"));
+        // A workflow that does not exist is still the first thing the notice says.
+        assert_eq!(sent("/build x", &finished), "BAD /build is not available: no workflow named build");
+    }
+
+    #[test]
     fn the_run_commands_send_the_existing_variants() {
         // No new `Command` variant: each row maps onto one the keys already use.
         let s = session();

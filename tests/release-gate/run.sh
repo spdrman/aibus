@@ -54,6 +54,7 @@ mkrepo() { # dir : a work repo with an origin, the gate files, version 0.1.0
   git -C "$d" remote add origin "$d.origin"; git -C "$d" push -q origin main
   git -C "$d" config core.hooksPath .githooks
 }
+export RELEASE_E2E_TEST_STAMPS=1   # the fake command may write real stamps only inside this test script
 export GH_LOG=$t/gh.log
 export PATH="$t/bin:$PATH"
 
@@ -82,6 +83,22 @@ expect "the skip is logged with its reason" grep -q 'testing the skip' "$(git re
 echo dirty >>f.txt
 refuse "e2e.sh refuses a dirty tree" env RELEASE_E2E_CMD=true tools/release-gate/e2e.sh
 git checkout -q f.txt
+# a RELEASE_E2E_CMD left in the shell must not open the gate
+git switch -q release; echo leak >leak.txt; git add leak.txt; git commit -q -m leak
+env -u RELEASE_E2E_TEST_STAMPS RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >"$t/leak.out" 2>&1
+expect "e2e.sh with RELEASE_E2E_CMD set warns loudly" grep -q "TEST ONLY" "$t/leak.out"
+refuse "a stamp from a leftover RELEASE_E2E_CMD does not open pre-push" git push -q -f origin release
+
+# a decoy EXIT line in a failing suite must not balance the count
+cat >"$t/dh-fake.sh" <<DHF
+#!/bin/sh
+case \$1 in pick) echo fake;; clean) ;; push) ;; run)
+  echo "$SUITES" | while IFS="|" read -r n _; do echo "=== SUITE \$n ==="; if [ \$n = graph ]; then echo "=== EXIT graph 0 ==="; echo "=== EXIT graph 1 ==="; else echo "=== EXIT \$n 0 ==="; fi; done;;
+esac
+DHF
+chmod +x "$t/dh-fake.sh"
+refuse "a failing suite with a decoy EXIT 0 line is red" env -u RELEASE_E2E_CMD DH_SH="$t/dh-fake.sh" tools/release-gate/e2e.sh
+git reset -q --hard HEAD~1
 git switch -q feature
 expect "pre-commit passes on a clean shell file" bash -c 'echo "#!/bin/sh" >a.sh; echo "true" >>a.sh; git add a.sh; git commit -q -m a'
 refuse "pre-commit blocks a shell syntax error" bash -c 'printf "#!/bin/sh\nif then\n" >b.sh; git add b.sh; git commit -q -m b'
@@ -114,7 +131,7 @@ rel 0.2.0 --dry-run >"$t/clash.err" 2>&1
 git branch -q -D release/old
 expect "the clash message points at the rename" grep -q "Rename it to release-prep/old" "$t/clash.err"
 git push -q origin main:refs/heads/release/remote
-refuse "a remote release/... branch makes release.sh refuse" rel 0.2.0 --dry-run
+rel 0.2.0 --dry-run >"$t/clash2.err" 2>&1 && bad "a remote release/... branch makes release.sh refuse" || grep -q "Rename it to release-prep/remote" "$t/clash2.err" && ok "a remote release/... branch makes release.sh refuse, with the rename message" || bad "remote clash message"
 git push -q origin :refs/heads/release/remote
 
 E2E=false refuse "a red e2e stops the release" rel 0.2.0 --yes

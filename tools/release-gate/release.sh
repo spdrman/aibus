@@ -65,6 +65,7 @@ clash=$({ git for-each-ref --format='%(refname:short)' 'refs/heads/release/*'; g
 [ -z "$clash" ] || refuse "a branch named '$clash' exists (locally or on origin); git cannot hold it next to the branch release. Rename it to release-prep/${clash#release/} and delete the old one"
 main_sha=$(git ls-remote origin refs/heads/main | cut -f1)
 [ -n "$main_sha" ] || refuse "could not read origin/main"
+[ $dry = 1 ] || git fetch -q origin main   # the objects for $main_sha, before anything reads them
 current=$(git show "$main_sha:Cargo.toml" 2>/dev/null | awk '/^\[/{w=($0=="[workspace.package]")} w&&/^version[ ]*=/{gsub(/^[^"]*"|".*$/,"");print;exit}' || true)
 [ -n "$current" ] || current=$(declared_version . HEAD)
 if [ $down = 0 ]; then
@@ -72,7 +73,6 @@ if [ $down = 0 ]; then
   if [ -n "$top" ]; then semver_gt "$ver" "$top" || refuse "$ver is not greater than the latest tag v$top (--allow-downgrade overrides)"; fi
   [ "$ver" = "$current" ] || semver_gt "$ver" "$current" || refuse "$ver is lower than the workspace version $current (--allow-downgrade overrides)"
 fi
-grep -Eq "^## \[?${ver//./\\.}\]?([[:space:]]|$)" CHANGELOG.md || refuse "CHANGELOG.md has no entry for $ver (write it first, release.yml needs it too)"
 [ -f "$key" ] || refuse "no signing key at $key (provision it; this script never creates one)"
 [ -f "$key.pub" ] || refuse "no $key.pub next to the signing key"
 committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}' || true)
@@ -81,7 +81,13 @@ committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}'
 command -v gh >/dev/null || refuse "gh is not installed"
 echo "   version $ver (workspace is $current), tag $tag is made by release.yml on the push to release, not here" >&2
 
+# the CHANGELOG the release branch will have: its own tip if it exists, else origin/main's
 branch=release-prep/$tag
+if git show-ref -q --verify "refs/heads/$branch"; then cl=$(git show "refs/heads/$branch:CHANGELOG.md")
+elif git cat-file -e "$main_sha:CHANGELOG.md" 2>/dev/null; then cl=$(git show "$main_sha:CHANGELOG.md")
+else cl=$(cat CHANGELOG.md); fi
+grep -Eq "^## \[?${ver//./\\.}\]?([[:space:]]|$)" <<<"$cl" || refuse "CHANGELOG.md on $branch has no entry for $ver (write it on main first, release.yml needs it too)"
+
 step "2. branch $branch"
 if git show-ref -q --verify "refs/heads/$branch"; then
   would "git switch $branch" || git switch -q "$branch"

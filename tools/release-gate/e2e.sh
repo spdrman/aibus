@@ -10,7 +10,8 @@
 # The stamp ($(git rev-parse --git-common-dir)/release-e2e/<tree key>) is written only on green.
 # Exit: 0 green (or skipped), 1 red, 2 refused.
 # RELEASE_E2E_CMD='<cmd>' replaces the container run with a local command in the exported tree. For the
-# tests of this gate only. RELEASE_E2E_SKIP=<reason> skips the gate (docs/RELEASE.md says when).
+# tests of this gate only: its stamps go to release-e2e-fake/, which pre-push never reads, unless
+# RELEASE_E2E_TEST_STAMPS=1 (set only by tests/release-gate/run.sh). RELEASE_E2E_SKIP=<reason> skips the gate (docs/RELEASE.md says when).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -38,6 +39,7 @@ else
 fi
 key=$(tree_key "$tree")
 
+sdir=$(stamp_dir)
 work=$(mktemp -d "${TMPDIR:-/tmp}/release-e2e.XXXXXX")
 job=aibus-reh-${key:0:8}-$$
 pushed=0
@@ -50,7 +52,8 @@ started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 if [ -n "${RELEASE_E2E_CMD:-}" ]; then
   host=fake-local; cmd=$RELEASE_E2E_CMD
-  echo "e2e (fake command): $cmd" >&2
+  echo "!!! RELEASE_E2E_CMD is set: TEST ONLY, nothing real runs. Unset it; the stamp goes to release-e2e-fake/ and does not open pre-push." >&2
+  [ "${RELEASE_E2E_TEST_STAMPS:-}" = 1 ] || sdir=$(stamp_dir)-fake
   if (cd "$work/tree" && sh -c "$cmd"); then green=1; else green=0; fi
 else
   [ -n "$host" ] || host=$("$DH" pick any)
@@ -61,16 +64,19 @@ else
   pushed=1   # before the push, so a push that dies half way still gets its volume cleaned
   "$DH" push "$host" "$job" "$work/tree" >/dev/null || refuse "pushing the tree to $host failed (is the docker host up?)"
   "$DH" run "$host" "$job" "$IMAGE" sh -c "$(cat "$work/lane.sh")" 2>&1 | tee "$work/lane.log" | grep -E '^(=== |test result: FAILED|error)' >&2 || true
-  want=$(grep -c . <<<"$SUITES")
-  got=$(grep -cE '^=== EXIT [^ ]+ 0 ===$' "$work/lane.log" || true)
-  if [ "$got" = "$want" ] && ! grep -q '^test result: FAILED' "$work/lane.log"; then green=1; else green=0
+  green=1   # every suite by name: its last EXIT marker is 0 (suite output cannot fake the last one)
+  while IFS='|' read -r name _; do
+    [ "$(sed -n "s/^=== EXIT $name \([0-9][0-9]*\) ===\$/\1/p" "$work/lane.log" | tail -1)" = 0 ] || green=0
+  done <<<"$SUITES"
+  grep -q '^test result: FAILED' "$work/lane.log" && green=0
+  if [ $green = 0 ]; then
     keep=${TMPDIR:-/tmp}/release-e2e-log-$$; cp "$work/lane.log" "$keep"; echo "log kept in $keep (a container killed for memory shows up as a missing EXIT line)" >&2
   fi
 fi
 
 if [ $green != 1 ]; then echo "e2e RED: no stamp written" >&2; exit 1; fi
-mkdir -p "$(stamp_dir)"
-tmp=$(mktemp "$(stamp_dir)/.tmp.XXXXXX")
+mkdir -p "$sdir"
+tmp=$(mktemp "$sdir/.tmp.XXXXXX")
 printf 'tree=%s\ncommand=%s\nhost=%s\nstarted=%s\nfinished=%s\n' "$key" "$cmd" "$host" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp"
-mv "$tmp" "$(stamp_file "$key")"
+mv "$tmp" "$sdir/$key"
 echo "e2e green: stamp for tree $key on $host" >&2

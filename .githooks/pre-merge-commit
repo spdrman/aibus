@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # A merge that auto-commits onto `release` runs the full e2e first; red aborts the merge.
+# The runner and the suite list come from HEAD (release as it is), not from the branch being merged,
+# so the incoming branch cannot swap out the gate. (The hooks themselves are read from the checkout.)
 set -eu
 [ "$(git symbolic-ref --short -q HEAD || true)" = release ] || exit 0
-exec "$(git rev-parse --show-toplevel)/tools/release-gate/e2e.sh" --merge-index
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-head.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+git archive HEAD tools/release-gate tools/release-attest | tar -x -C "$tmp"
+"$tmp/tools/release-gate/e2e.sh" --merge-index

@@ -197,7 +197,7 @@ on every exit path. A cold run compiles the workspace, so I expect tens of minut
 
 **The stamp.** A green run writes `$(git rev-parse --git-common-dir)/release-e2e/<tree key>`
 (tree, command, host, start and finish time). It lives inside `.git` and is never committed. The key
-is the tree hash of `tools/release-attest/config.sh` (the tree without `release-attest/`), so adding
+is the output of the `tree_hash` function in `tools/release-attest/config.sh` (the tree without the top-level `release-attest/`, so anything under that directory is outside the stamp key by design; the signed attestation covers the rest), so adding
 the attestation commit does not invalidate the stamp. `pre-push` refuses a push whose destination is
 `refs/heads/release` unless a stamp exists for the tree being pushed. That also covers `merge
 --no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. Pushes to any other
@@ -208,13 +208,21 @@ branch, and deleting a branch, pass straight through. Run the e2e by hand on a c
 the reason loudly and appends it to `release-e2e/skips.log` next to the stamps. It is legitimate for
 a docs-only change to `release`, or when every docker host is down and the release is urgent and I
 accept it. I do not use `--no-verify`. `RELEASE_E2E_CMD` replaces the container run with a local
-command; it is for the tests of the gate only.
+command; it is for the tests of the gate only. It warns loudly, and its stamps go to `release-e2e-fake/`, which
+`pre-push` never reads (only `tests/release-gate/run.sh` sets `RELEASE_E2E_TEST_STAMPS=1` to get real ones), so a
+leftover variable in a shell cannot open the gate.
 
 **Failure modes.** Docker host down: `dh.sh push` fails, the runner says so and cleans up; pick another
 `--host`. OOM: a killed container leaves a suite without its `EXIT` line, so the run is red, and the
 log is kept (path printed); lower `DH_CPUS` or move to a bigger host, do not retry in a loop. Dirty
 tree: refused (in the merge hook it means unstaged or untracked files while the merge is pending).
 Red: no stamp.
+
+**What the hooks cannot do.** With `core.hooksPath=.githooks`, the hooks are read from the checkout, so a
+merge into `release` runs the incoming branch's own hooks (inherent to git). `pre-merge-commit` at least
+takes `e2e.sh` and the suite list from `HEAD` (release as it is), not from the merged branch. A merge done
+in the GitHub web UI skips every local hook; publish stays fail-closed because `prepare` in `release.yml`
+verifies the signed attestation.
 
 **How it relates to the attestation.** The stamp gates the merge and push into `release`; the signed
 attestation gates the publish (`prepare` in `release.yml` verifies it). They run the same suites. The

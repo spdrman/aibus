@@ -588,7 +588,7 @@ impl Step for StartRuntime {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
+            .enable_all()
             .build()?;
         // Registered now, so a signal during steps 8 to 10 is queued rather than killing us.
         ctx.signals = Some(Signals::new()?);

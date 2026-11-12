@@ -212,6 +212,40 @@ expect "...and the link target is untouched" test "$(cat "$victim/target.txt")" 
 printf '%s\0%s\0' "$(rec 100644 blob "$xb" ln/target.txt)" "$(rec 120000 blob "$xlink" ln)" >"$t/list7"
 refuse "a symlink whose path already exists as a directory aborts the copy" export_entries "$x" "$t/list7" "$t/dest7"
 expect "...and the link target is still untouched" test "$(cat "$victim/target.txt")" = keep
+# nothing may exist outside the destination after a refused copy, not even an empty directory made while checking
+snap() { # dir pruned-subtree: everything under dir except the destination
+  find "$1" -path "$2" -prune -o -print | sort; }
+nul() { printf '%s' "$1"; }
+nfc=$(printf '\303\251'); nfd=$(printf 'e\314\201')
+check_shape() { # name  link-target-blob-expr  link-name  deep-path
+  local name=$1 target=$2 lname=$3 deep=$4 o=$t/o-$1 dest before after blob
+  rm -rf "$o"; mkdir -p "$o/victim" "$o/work"; echo keep >"$o/victim/target.txt"; dest=$o/work/dest
+  case $target in ABS) blob=$(printf '%s' "$o/victim" | xg hash-object -w --stdin) ;; *) blob=$(printf '%s' "$target" | xg hash-object -w --stdin) ;; esac
+  : >"$o/list"; printf '%s\0%s\0' "$(rec 120000 blob "$blob" "$lname")" "$(rec 120000 blob "$xb" "$deep")" >"$o/list"
+  before=$(snap "$o" "$dest")
+  export_entries "$x" "$o/list" "$dest" >/dev/null 2>&1
+  after=$(snap "$o" "$dest")
+  [ "$before" = "$after" ]
+}
+expect "a link then a link under the same name (absolute target): nothing created outside the copy" check_shape sameabs ABS zz zz/newd/deeper/L
+expect "...relative target ../../victim" check_shape samerel ../../victim zz zz/newd/deeper/L
+expect "...a case-different name (Z / z)" check_shape caseabs ABS Z z/newd/deeper/L
+expect "...an NFD link and an NFC directory" check_shape nfd ABS "$nfd" "$nfc/newd/L"
+expect "...a link to .. and a path through it" check_shape up .. ll ll/sub/M
+expect "...a link to ../.. and a path through it" check_shape up2 ../.. ll ll/sub/M
+expect "...a link to .. and a case-different name" check_shape upcase .. L l/sub/M
+# the same hostile shape, end to end through e2e.sh (a repo whose HEAD tree has Z -> victim and z/newd/deeper/L)
+er=$t/o-e2e; rm -rf "$er"; mkdir -p "$er/victim" "$er/repo"; echo keep >"$er/victim/target.txt"; git -C "$er/repo" init -q -b main
+git -C "$er/repo" config user.email t@example.com; git -C "$er/repo" config user.name t
+eb=$(printf 'x' | git -C "$er/repo" hash-object -w --stdin); ev=$(printf '%s' "$er/victim" | git -C "$er/repo" hash-object -w --stdin)
+e1=$(printf '120000 blob %s\tL\0' "$eb" | git -C "$er/repo" mktree -z)
+e2=$(printf '040000 tree %s\tdeeper\0' "$e1" | git -C "$er/repo" mktree -z)
+e3=$(printf '040000 tree %s\tnewd\0' "$e2" | git -C "$er/repo" mktree -z)
+e4=$({ printf '120000 blob %s\tZ\0' "$ev"; printf '040000 tree %s\tz\0' "$e3"; } | git -C "$er/repo" mktree -z)
+ec=$(git -C "$er/repo" commit-tree -m hostile "$e4"); git -C "$er/repo" update-ref refs/heads/main "$ec"; git -C "$er/repo" reset -q --hard 2>/dev/null; git -C "$er/repo" update-index --assume-unchanged Z z/newd/deeper/L 2>/dev/null   # a case-insensitive checkout cannot hold both
+esnap=$(snap "$er" "$er/repo")
+(cd "$er/repo" && RELEASE_E2E_CMD=true "$here/../../tools/release-gate/e2e.sh" >/dev/null 2>&1)
+expect "e2e.sh on a tree with Z -> victim and z/newd/deeper/L creates nothing outside its copy" test "$esnap" = "$(snap "$er" "$er/repo")"
 expect "no list file is left next to a destination" test -z "$(ls "$t" | grep -e 'export-tree' -e '\.ls\.')"
 r=$t/repo17; mkrepo "$r" 1.2.3
 expect "the attestation tree hash is still the tree id without release-attest/" test "$(tree_hash "$r" HEAD)" = "$(git -C "$r" rev-parse 'HEAD^{tree}')"

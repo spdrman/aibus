@@ -310,6 +310,8 @@ before=$(loglines)
 RELEASE_E2E_SKIP="$(printf 'line sep \342\200\250 and para \342\200\251 here')" git push -q origin release 2>/dev/null
 expect "U+2028 and U+2029 in a reason leave one record line" test "$(loglines)" = $((before + 1))
 refuse "...with no separator bytes in the log" grep -q "$(printf '\342\200[\250\251]')" "$(sdir)/skips.log"
+refuse "a skip reason of 12 non-breaking spaces is refused (push)" pushmsg_env "$(printf '\302\240\302\240\302\240\302\240\302\240\302\240\302\240\302\240\302\240\302\240\302\240\302\240')"
+refuse "a skip reason of ideographic spaces is refused (push)" pushmsg_env "$(printf '\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200\343\200\200')"
 refuse "e2e.sh refuses a skip reason of 12 tabs" env RELEASE_E2E_SKIP="$(printf '\t\t\t\t\t\t\t\t\t\t\t\t')" tools/release-gate/e2e.sh
 git switch -q -c topicw; echo y >y; git add y; git commit -qm y; git switch -q release; echo z >z2; git add z2; git commit -qm z2
 refuse "a skip reason of spaces is refused (merge)" env RELEASE_E2E_SKIP="              " git merge --no-ff -q -m m topicw

@@ -201,6 +201,45 @@ fn a_registered_secret_never_reaches_the_transcript_or_msgs() {
     assert!(!decoded.contains("SECRET-0123456789"));
 }
 
+#[test]
+fn every_credential_kind_stays_out_of_the_transcript_msgs_and_every_file() {
+    use aibus_testkit::{register_credential_kinds, CREDENTIAL_KINDS};
+    let dir = xdg_temp();
+    let redactor = Redactor::new();
+    register_credential_kinds(&redactor);
+    let planted: String = CREDENTIAL_KINDS.iter().map(|k| format!("{} {} ", k.0, k.1)).collect();
+    // The control: a redactor that was not told about the registered kinds lets them through,
+    // so the file check below has something to catch.
+    let blind = Redactor::new().redact(&planted).into_owned();
+    for (kind, value, pattern) in CREDENTIAL_KINDS {
+        assert_eq!(blind.contains(value), pattern.is_none(), "{kind}: the control does not tell the layers apart");
+    }
+    let mut a = app();
+    let mut w = writer(dir.path(), redactor, &Persist::default());
+    let msgs = recorded();
+    let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
+    let run = *run;
+    drive(&mut w, &mut a, msgs[..1].to_vec());
+    w.prompt(run, SystemTime::now(), &planted).unwrap();
+    drive(
+        &mut w,
+        &mut a,
+        [Msg::Stream {
+            run,
+            chunks: vec![StreamChunk::TextDelta(planted.clone()), StreamChunk::Done(aibus_provider::StopReason::EndTurn)],
+        }],
+    );
+    w.finish(&mut a).unwrap();
+    let t = std::fs::read_to_string(run_dir(dir.path()).join("transcript.jsonl")).unwrap();
+    let mut files = vec![t, read_lines(&dir.path().join(MSGS)).unwrap().join("\n")];
+    files.extend(walk(dir.path()).iter().map(|f| String::from_utf8_lossy(&std::fs::read(f).unwrap()).into_owned()));
+    for text in files {
+        for (kind, value, _) in CREDENTIAL_KINDS {
+            assert!(!text.contains(value), "{kind} reached a file");
+        }
+    }
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir).unwrap().flatten() {

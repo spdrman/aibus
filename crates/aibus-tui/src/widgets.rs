@@ -315,10 +315,12 @@ pub fn lead_box(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
     let x = put(buf, inner, x, 1, &th.g("▮").repeat(filled), Style::new().fg(th.lead));
     let x = put(buf, inner, x, 1, &th.g("·").repeat(4 - filled), Style::new().fg(th.dim_text));
     let x = if effort == "max" { put(buf, inner, x, 1, "+", Style::new().fg(th.lead)) } else { x };
-    put(buf, inner, x + 1, 1, effort, Style::new().fg(th.fg));
+    let x = put(buf, inner, x + 1, 1, effort, Style::new().fg(th.fg));
     let flag_text = text(v, "model_flag");
-    if !flag_text.is_empty() {
-        put_right(buf, inner, 1, flag_text, Style::new().fg(th.dim_text));
+    // The flag gets what is left of the row after the effort text and one cell of gap.
+    let room = usize::from(inner.width.saturating_sub(x + 1));
+    if !flag_text.is_empty() && room > 0 {
+        put_right(buf, inner, 1, &clip(flag_text, room), Style::new().fg(th.dim_text));
     }
 }
 

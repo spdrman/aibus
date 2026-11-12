@@ -250,3 +250,20 @@ fn no_production_tokio_runtime_is_built_without_io() {
     assert!(seen >= 6, "the scan found only {seen} runtime builders; is it looking in the right place?");
     assert!(bad.is_empty(), "tokio runtimes built without IO (call enable_all): {bad:?}");
 }
+
+/// docs/TESTING.md promises one ci.yml job per layer row, so the capability matrix and every
+/// provider crate's cassettes have to be named there, not only reached through the workspace job.
+#[test]
+fn ci_has_the_capability_matrix_job_and_every_provider_crate() {
+    let ci = std::fs::read_to_string(root().join(".github/workflows/ci.yml")).expect("read ci.yml");
+    let has = |cmd: &str| ci.lines().any(|l| l.trim_start().strip_prefix("- run: ").is_some_and(|c| c == cmd));
+    assert!(has("cargo test --locked -p aibus-testkit --test capability_matrix"), "ci.yml has no capability-matrix command");
+    let provider = ci
+        .lines()
+        .filter_map(|l| l.trim_start().strip_prefix("- run: cargo test --locked -p aibus-provider "))
+        .next()
+        .expect("provider-contract command");
+    for krate in ["aibus-provider-http", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini"] {
+        assert!(provider.split_whitespace().any(|w| w == krate), "provider-contract leaves out {krate}");
+    }
+}

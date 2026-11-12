@@ -161,6 +161,10 @@ A fixture comes in two forms and the kit reads both:
 `ToolUseEnd`, swallows cancel, or logs the key must turn it red. Each adapter has one conformance
 test (`tests/conformance.rs` in its crate); what is specific to a provider (cache breakpoints,
 thinking signatures, effort headers, Kimi's reasoning round trip) stays in its `cassettes.rs`.
+The two cloud adapters (Bedrock and Vertex) run the same `run` from `tests/cloud.rs`: Vertex replays the
+Anthropic cassettes, Bedrock the same events framed as an event stream. `malformed_sse` is skipped on
+Bedrock with a reason (there is no SSE to malform); `models` and `count_tokens` play against the static
+table and the `None` answer, and `verify` is the one real one-token probe.
 
 To record a case from a real account, run the live suite with `AIBUS_LIVE_ACCOUNT=<name>`, the
 account's key in `AIBUS_LIVE_KEY_<NAME>` and `AIBUS_RECORD=1`:

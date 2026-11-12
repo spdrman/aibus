@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aibus_core::OAuthFlow;
+use aibus_core::{OAuthFlow, Redactor};
 use aibus_provider_http::reqwest::{Client, Url};
 use aibus_testkit::oauth::FakeAuthServer;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -289,4 +289,114 @@ async fn device_code_gives_up_when_the_code_lifetime_runs_out() {
     auth.token_status(400, json!({ "error": "authorization_pending" })).await;
     let (out, _, _) = device_run(&auth).await;
     assert!(out.unwrap_err().contains("expired"));
+}
+
+/// A token endpoint that stops at the request: it hands the body to `look` while the flow is
+/// still waiting for the answer, then replies 400 with `reply(body)` as the error code. The
+/// handle gives back whatever `look` returned (and re-raises its panic).
+async fn probe<T: Send + 'static>(
+    reply: impl FnOnce(&str) -> String + Send + 'static,
+    look: impl FnOnce(&str) -> T + Send + 'static,
+) -> (String, tokio::task::JoinHandle<T>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/token", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let body = loop {
+            let n = sock.read(&mut chunk).await.unwrap();
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf).into_owned();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let want = head.to_ascii_lowercase().lines().find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap())).unwrap_or(0);
+                if body.len() >= want {
+                    break body.to_owned();
+                }
+            }
+        };
+        let seen = look(&body);
+        let reply = json!({ "error": reply(&body) }).to_string();
+        let head = format!("HTTP/1.1 400 X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", reply.len());
+        sock.write_all(head.as_bytes()).await.unwrap();
+        sock.write_all(reply.as_bytes()).await.unwrap();
+        sock.shutdown().await.unwrap();
+        seen
+    });
+    (url, task)
+}
+
+fn field(body: &str, name: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v[name].as_str().map(str::to_owned))
+        .or_else(|| body.split('&').find_map(|kv| kv.strip_prefix(&format!("{name}=")).map(str::to_owned)))
+        .unwrap_or_else(|| panic!("no {name} in {body}"))
+}
+
+/// #191: the PKCE verifier and the authorization code are short-lived credentials, and while the
+/// token request is out they are registered with the redactor, so a server that echoes them in
+/// its error cannot get them into the error text. They are unregistered when the flow ends.
+#[tokio::test(start_paused = true)]
+async fn the_pkce_verifier_and_the_code_are_registered_while_the_token_request_is_out() {
+    let redactor = Redactor::new();
+    let in_flight = redactor.clone();
+    let (token_url, probe) = probe(
+        |b| format!("bad grant for code {} with verifier {}", field(b, "code"), field(b, "code_verifier")),
+        move |b| {
+            let (code, verifier) = (field(b, "code"), field(b, "code_verifier"));
+            for (what, v) in [("code", &code), ("verifier", &verifier)] {
+                assert_ne!(in_flight.redact(v), v.as_str(), "the {what} is not registered while the token request is out");
+            }
+            (code, verifier)
+        },
+    )
+    .await;
+    let auth = FakeAuthServer::start().await;
+    let mut def = pkce_def(&auth, StateMode::None);
+    def.token_url = token_url;
+    let mut login = Login::new(def);
+    login.redactor = redactor.clone();
+    let (out, _) = login_with(login, |_, cb| async move {
+        http().get(format!("{cb}?code=auth-code-Zq81KpLw0Nn5Vd3E")).send().await.unwrap();
+    })
+    .await;
+    let (code, verifier) = probe.await.unwrap();
+    let e = out.unwrap_err();
+    assert!(e.contains("400") && e.contains("bad grant"), "{e}");
+    assert!(!e.contains(&code) && !e.contains(&verifier), "the server's echo reached the error text: {e}");
+    for v in [&code, &verifier] {
+        assert_eq!(redactor.redact(v), v.as_str(), "still registered after the flow ended");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_device_code_is_registered_while_the_token_request_is_out() {
+    let redactor = Redactor::new();
+    let in_flight = redactor.clone();
+    let (token_url, probe) = probe(
+        |b| format!("denied for device {}", field(b, "device_code")),
+        move |b| {
+            let code = field(b, "device_code");
+            assert_ne!(in_flight.redact(&code), code.as_str(), "the device code is not registered while the token request is out");
+            code
+        },
+    )
+    .await;
+    let auth = FakeAuthServer::start().await;
+    auth.device_start(json!({
+        "device_code": "dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9", "user_code": "WDJB-MJHT",
+        "verification_uri": "https://auth.invalid/activate", "expires_in": 900, "interval": 1
+    }))
+    .await;
+    let mut def = device_def(&auth);
+    def.token_url = token_url;
+    let mut login = Login::new(def);
+    login.redactor = redactor.clone();
+    let notify = |_: &str| {};
+    let e = login.authorize(&notify, &CancellationToken::new()).await.unwrap_err();
+    let code = probe.await.unwrap();
+    assert!(e.contains("denied for device"), "{e}");
+    assert!(!e.contains(&code), "the server's echo reached the error text: {e}");
+    assert_eq!(redactor.redact(&code), code.as_str(), "still registered after the flow ended");
 }

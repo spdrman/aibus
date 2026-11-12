@@ -52,7 +52,7 @@ pub fn xdg_temp() -> Xdg {
     Xdg {
         dir,
         paths,
-        forbidden: vec![FAKE_KEY.to_owned()],
+        forbidden: std::iter::once(FAKE_KEY).chain(crate::CREDENTIAL_KINDS.iter().map(|k| k.1)).map(str::to_owned).collect(),
         _logs: crate::capture_unless_live(),
     }
 }

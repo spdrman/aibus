@@ -567,7 +567,8 @@ mod tests {
         let mut p = Prompt::default().with_text("/fi");
         p.tab(&Env::bare(&[], &[]));
         assert_eq!(p.text, "/fi");
-        p.tab(&Env::bare(&[], &["fix".to_owned()]));
+        let wf = ["fix".to_owned()];
+        p.tab(&Env { lead: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap()), ..Env::bare(&[], &wf) });
         assert_eq!(p.text, "/fix ");
     }
 

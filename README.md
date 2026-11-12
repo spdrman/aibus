@@ -115,7 +115,7 @@ target/release/aibus version
 
 ## Inside a session
 
-Everything below is typed in the prompt line of the dashboard. `/` lists what is on offer right now, and a command that cannot run says why in a notice (`/retry` on a run that did not fail, `/resume` on one that is still going). The table is generated from the command registry, the one place a command is declared, so it cannot drift from `/help` or from the spec (a test fails with the diff when it does).
+Everything below is typed in the prompt line of the dashboard. `/` and then `Tab` lists what is on offer right now, and a command that cannot run says why in a notice (`/retry` on a run that did not fail, `/resume` on one that is still going, `/workflow new` and `/review` once the lead has finished, since they hand their call to the lead). The table is generated from the command registry, the one place a command is declared, so it cannot drift from `/help` or from the spec (a test fails with the diff when it does).
 
 <!-- aibus:commands:start -->
 | Command | Arguments | What it does | Asks first |

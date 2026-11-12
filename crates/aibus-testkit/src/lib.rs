@@ -56,6 +56,37 @@ impl Default for FakeClock {
     }
 }
 
+/// Every credential kind the code can hold, each planted as a made-up value of the real shape:
+/// `(kind, value, the pattern that knows its shape)`. A kind with no pattern (an AWS secret key,
+/// a refresh token, the MCP bearer) is only caught once it is registered, and
+/// `register_credential_kinds` does that for those. `capture_logs` and `xdg_temp` forbid all of
+/// them, so a test that plants one and lets it reach a log line or a file fails on its own.
+/// `fixtures/redact/provider-errors.toml` must have a row for each (a test in `aibus-core` checks).
+pub const CREDENTIAL_KINDS: &[(&str, &str, Option<&str>)] = &[
+    ("anthropic-api-key", "sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P", Some("anthropic-key")),
+    ("openai-api-key", "sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12", Some("openai-project-key")),
+    ("oauth-access-token", "oat-Hq7Zk2Vm9Xc4Lp1Ws8Nd3Rf6Tb0Yg5Jx", None),
+    ("oauth-refresh-token", "rt-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf", None),
+    ("aws-access-key-id", "AKIAIOSFODNN7EXAMPLE", Some("aws-access-key")),
+    ("aws-secret-access-key", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", None),
+    ("aws-session-token", "IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQD3ExampleSessionTokenOnly", None),
+    ("bedrock-api-key", "ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLTAxMjM0NTY3ODlhYmNkZWY", None),
+    ("vertex-access-token", "ya29.a0AfB_byC-Example0123456789abcdefGHIJKLmnopQRSTuv", Some("google-access-token")),
+    ("gemini-api-key", "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q", Some("google-api-key")),
+    ("openrouter-key", "sk-or-v1-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6MfZq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf", Some("openrouter-key")),
+    ("mcp-http-token", "3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9", None),
+];
+
+/// Registers the kinds no pattern knows with `r`, the way the credential store does when it
+/// resolves them.
+pub fn register_credential_kinds(r: &aibus_core::Redactor) {
+    for (kind, value, pattern) in CREDENTIAL_KINDS {
+        if pattern.is_none() {
+            r.register(&AccountName((*kind).into()), value);
+        }
+    }
+}
+
 /// A credential for `account` carrying `key`, for handing to a provider under test.
 pub fn credential(account: &str, key: &str) -> Credential {
     Credential {
@@ -127,7 +158,9 @@ pub fn capture_logs() -> LogCapture {
         tracing::subscriber::set_global_default(subscriber).unwrap();
     });
     let buf: Buffer = Arc::default();
-    let forbidden: Forbidden = Arc::new(Mutex::new(vec![FAKE_KEY.to_owned()]));
+    let forbidden: Forbidden = Arc::new(Mutex::new(
+        std::iter::once(FAKE_KEY).chain(CREDENTIAL_KINDS.iter().map(|k| k.1)).map(str::to_owned).collect(),
+    ));
     ACTIVE.with(|a| {
         *a.borrow_mut() = Some(Active {
             buf: buf.clone(),

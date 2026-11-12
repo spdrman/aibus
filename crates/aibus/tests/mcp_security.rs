@@ -13,8 +13,11 @@ const KEY: &str = "sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P";
 #[test]
 fn no_secret_leaves_over_stdio() {
     let mut home = xdg_temp();
-    // The temp tree is searched for it when the test ends, the audit log included.
+    // The temp tree is searched for it when the test ends, the audit log included. Every kind in
+    // `CREDENTIAL_KINDS` that a pattern knows is forbidden by `xdg_temp` already; they ride along
+    // as arguments below, next to KEY.
     home.forbid(KEY);
+    let by_shape: Vec<&str> = aibus_testkit::CREDENTIAL_KINDS.iter().filter(|k| k.2.is_some()).map(|k| k.1).collect();
     for p in Protocol::BOTH {
         let mut cmd = mcp_command(home.path(), &[]);
         cmd.env("AIBUS_LOG", "trace");
@@ -25,6 +28,14 @@ fn no_secret_leaves_over_stdio() {
         }
         // The key as an argument, as a tool name and as a made-up cursor.
         let refused = c.call("workflow_list", json!({ "api_key": KEY })).unwrap_err();
+        // Every kind with a shape the redactor knows, as an argument and as a cursor.
+        let many = c.call("workflow_list", json!({ "notes": by_shape })).unwrap_err();
+        let paged_many = c.list_tools_page(Some(&by_shape.join(" "))).unwrap_err();
+        for e in [&many, &paged_many] {
+            for v in &by_shape {
+                assert!(!e.message.contains(v), "{p:?}: {v} came back in an error");
+            }
+        }
         let unknown = c.call(&format!("tool-{KEY}"), json!({})).unwrap_err();
         let paged = c.list_tools_page(Some(KEY)).unwrap_err();
         for e in [&refused, &unknown, &paged] {
@@ -34,6 +45,9 @@ fn no_secret_leaves_over_stdio() {
         let (done, lines) = c.finish();
         assert_eq!(lines_that_are_not_json_rpc(&lines), Vec::<String>::new(), "{p:?}");
         assert!(!lines.join("\n").contains(KEY), "{p:?}: the key came back over stdout");
+        for v in &by_shape {
+            assert!(!lines.join("\n").contains(v) && !done.stderr.contains(v), "{p:?}: {v} reached stdio");
+        }
         assert!(!done.stderr.contains(KEY), "{p:?}: the key reached stderr");
     }
     // One audit file per process, each with the key redacted by pattern.
@@ -42,6 +56,9 @@ fn no_secret_leaves_over_stdio() {
     for f in std::fs::read_dir(&dir).expect("the audit directory").flatten() {
         let text = std::fs::read_to_string(f.path()).unwrap();
         assert!(!text.contains(KEY), "{}", f.path().display());
+        for v in &by_shape {
+            assert!(!text.contains(v), "{}: {v} is in the audit file", f.path().display());
+        }
         seen += text.matches("[redacted:pattern:anthropic-key]").count();
     }
     assert!(seen >= 2, "the audit log did not record the redacted arguments ({seen})");

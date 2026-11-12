@@ -1,0 +1,1 @@
+PLACEHOLDER-NOT-A-KEY: replace this whole file with the release public key (one line, ssh-ed25519 AAAA... aibus-release-attest). verify.sh refuses anything that does not start with ssh-ed25519. See docs/RELEASE.md.

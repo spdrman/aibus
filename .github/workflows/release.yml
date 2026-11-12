@@ -6,6 +6,9 @@ name: release
 # `release` and merges `release` into `main`. docs/RELEASE.md has the procedure, the failure story
 # and the rollback steps.
 #
+# prepare also runs tools/release-attest/verify.sh: the release commit must carry a signed local run of
+# the suites in docs/TESTING.md, or a push stops there and publish never starts (a dry run only warns).
+#
 # `workflow_dispatch` is a dry run: prepare, build and package run, and nothing else. Every job that
 # tags, signs, publishes or merges has the push-to-release condition on the job itself (and the
 # steps that do the writing repeat it), so a dispatch, from any ref, skips them whatever the inputs.
@@ -86,6 +89,14 @@ jobs:
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor origin/main "$SHA"; then
             problem "$SHA is not a descendant of the tip of main ($(git rev-parse --short origin/main))"
+          fi
+          # The release commit has to carry a signed attestation that the "every push" suites of
+          # docs/TESTING.md passed on exactly this tree. The key is read from main, not from the
+          # release commit, so the push cannot bring its own. A dry run reports it as a warning.
+          if ! git show origin/main:packaging/release-attest.pub > "$RUNNER_TEMP/release-attest.pub" 2>/dev/null; then
+            problem "main has no packaging/release-attest.pub, so the attestation cannot be checked"
+          elif ! out=$(tools/release-attest/verify.sh --commit "$SHA" --expect-version "$version" --pubkey "$RUNNER_TEMP/release-attest.pub"); then
+            while IFS= read -r line; do problem "$line"; done <<<"$out"
           fi
           if [ "$publish" = true ]; then
             for f in install.sh install.ps1 packaging/homebrew/render-formula.sh; do

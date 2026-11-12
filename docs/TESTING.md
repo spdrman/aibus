@@ -26,6 +26,10 @@ the same command, started by hand.
 | Security | `cargo test --locked -p aibus-core --test security`, `-p aibus-tui --test security_commands` and `-p aibus --test mcp_security` (the rows of `docs/SECURITY.md`; `security/commands.rs` and `security_commands.rs` are the cross-cutting rules for the registry's commands) | every push |
 | Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` (`commands_send` included, seeded with every documented command) | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
 
+Before a release I run the "every push" rows above as one signed attestation, fenced in docker:
+`tools/release-attest/attest.sh`, then `tools/release-attest/verify.sh` (the suite list is
+`tools/release-attest/config.sh`, kept in step with this table; `docs/RELEASE.md` has the rest).
+
 The conformance row says "both backends when available": the `causl-differential` job in
 `.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and
 differential tests with `--features causl-rs`, plus the side-by-side `commit_stream` bench. The

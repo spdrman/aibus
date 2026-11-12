@@ -338,4 +338,62 @@ mod tests {
             assert!(aibus_provider::presets::preset(id).is_some(), "{id}");
         }
     }
+
+    /// #184: one config, two servers. Each provider streams a turn against its own fake server;
+    /// the other server must hear nothing.
+    #[tokio::test]
+    async fn two_servers_from_one_config_each_get_their_own_requests() {
+        use aibus_provider::{AuthMethodKind, StopReason};
+        use aibus_testkit::conformance::{check_case, Case, Expect, FakeServer, Fixture, Fixtures};
+
+        let (home, work) = (FakeServer::start().await, FakeServer::start().await);
+        let text = format!(
+            r#"
+[[provider]]
+id = "ollama-home"
+api = "openai-chat"
+base_url = "{}"
+
+[[provider]]
+id = "ollama-work"
+api = "openai-chat"
+base_url = "{}"
+
+[[account]]
+name = "home"
+provider = "ollama-home"
+auth = {{ none = true }}
+
+[[account]]
+name = "work"
+provider = "ollama-work"
+auth = {{ none = true }}
+"#,
+            home.uri(),
+            work.uri()
+        );
+        let (table, warnings) = aibus_core::config::parse_file(Path::new("two.toml"), &text).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let cfg: aibus_core::config::Config = toml::Value::Table(table).try_into().unwrap();
+        assert!(cfg.problems().is_empty(), "{:?}", cfg.problems());
+        let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths()).unwrap();
+        let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
+
+        let cassette = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aibus-provider-openai/tests/cassettes/local_stream_text.http");
+        let fixtures = Fixtures { model: "llama3.2", kind: AuthMethodKind::None, auth: None, cases: vec![], skipped: vec![] };
+        let case = Case {
+            name: "text",
+            fixture: Fixture::load(&cassette),
+            expect: Expect::Stream { text: Some("Hi there"), stop: StopReason::EndTurn },
+        };
+        let _logs = aibus_testkit::capture_logs();
+        for (id, mine, other) in [("ollama-home", &home, &work), ("ollama-work", &work, &home)] {
+            let provider = registry.get(id).unwrap();
+            assert_eq!(provider.id().0, id);
+            let before = (mine.requests().len(), other.requests().len());
+            check_case(&provider, mine, &fixtures, &case).await;
+            assert_eq!(mine.requests().len(), before.0 + 1, "{id}: its own server got the request");
+            assert_eq!(other.requests().len(), before.1, "{id}: the other server heard nothing");
+        }
+    }
 }

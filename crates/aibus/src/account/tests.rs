@@ -51,6 +51,23 @@ impl ProviderFactory for Oauthy {
 
 const TOKEN: &str = "oauth-access-1-abcdef";
 
+const OR_KEY: &str = "sk-or-v1-0123456789abcdef0123456789abcdef";
+
+/// OpenRouter's account: the key its login hands back is the one the fake provider accepts.
+struct Router;
+
+impl ProviderFactory for Router {
+    fn id(&self) -> ProviderId {
+        ProviderId("openrouter")
+    }
+    fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", OR_KEY)))
+    }
+    fn auth_methods(&self) -> &'static [AuthMethodKind] {
+        &[AuthMethodKind::ApiKey, AuthMethodKind::OAuth]
+    }
+}
+
 /// The strict fake, except that its verify call reports what the one request cost (Bedrock and
 /// Vertex have no cheap call, so they make a real one).
 struct Priced;
@@ -74,6 +91,7 @@ struct Rig {
     oauth: Option<Arc<dyn OAuthFlow>>,
     offers_oauth: bool,
     priced: bool,
+    openrouter: bool,
 }
 
 struct Ran {
@@ -90,6 +108,7 @@ impl Rig {
             oauth: None,
             offers_oauth: false,
             priced: false,
+            openrouter: false,
         }
     }
 
@@ -121,9 +140,10 @@ impl Rig {
             })
             .unwrap(),
             keychain: self.keychain.clone(),
-            factories: match (self.offers_oauth, self.priced) {
-                (true, _) => vec![Box::new(Oauthy)],
-                (_, true) => vec![Box::new(Priced)],
+            factories: match (self.openrouter, self.offers_oauth, self.priced) {
+                (true, _, _) => vec![Box::new(Router)],
+                (_, true, _) => vec![Box::new(Oauthy)],
+                (_, _, true) => vec![Box::new(Priced)],
                 _ => vec![Box::new(Strict)],
             },
             env: Arc::new(move |v| env.get(v).cloned()),
@@ -540,4 +560,73 @@ fn add_writes_the_region_and_project_it_was_given() {
     assert!(text.contains("region = \"us-east5\"") && text.contains("project = \"my-project\""), "{text}");
     let acct = &config::load(&rig.config(), None).unwrap().config.accounts[0];
     assert_eq!((acct.region.as_deref(), acct.project.as_deref()), (Some("us-east5"), Some("my-project")));
+}
+
+/// #186: `aibus account add NAME --provider openrouter --oauth` with the real OpenRouter login
+/// definition (only its hosts and port are swapped for a fake authorization server's), a browser
+/// played by the test, and the command's own verify, store and config steps.
+#[tokio::test]
+async fn add_oauth_for_openrouter_runs_the_real_login_against_a_fake_authorization_server() {
+    use aibus_testkit::oauth::FakeAuthServer;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let auth = FakeAuthServer::start().await;
+    auth.token_status(200, serde_json::json!({ "key": OR_KEY })).await;
+    let real = crate::oauth::definition("openrouter", None).unwrap();
+    assert_eq!((real.authorize_url.as_str(), real.token_url.as_str()), ("https://openrouter.ai/auth", "https://openrouter.ai/api/v1/auth/keys"));
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let def = crate::oauth::Def {
+        authorize_url: auth.url("/auth"),
+        token_url: auth.url("/api/v1/auth/keys"),
+        callback_port: Some(port),
+        ..real
+    };
+    let rig = Rig { oauth: Some(Arc::new(crate::oauth::Login::new(def))), openrouter: true, ..Rig::new() };
+    let cmd = add_cmd(|a| {
+        a.provider = "openrouter".into();
+        a.oauth = true;
+    });
+
+    // The browser: knock on the callback until the listener is up, then arrive with a code.
+    let browser = tokio::spawn(async move {
+        loop {
+            if let Ok(mut s) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+                let head = format!("GET /callback?code=the-code HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+                s.write_all(head.as_bytes()).await.unwrap();
+                let mut page = String::new();
+                s.read_to_string(&mut page).await.unwrap();
+                return page;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    });
+    let (rig, ran) = tokio::task::spawn_blocking(move || {
+        let ran = rig.run(&cmd, "", None);
+        (rig, ran)
+    })
+    .await
+    .unwrap();
+    let page = browser.await.unwrap();
+
+    assert_eq!(exit(&ran.result), 0, "{:?}\n{}", ran.result.err(), ran.out);
+    assert!(page.starts_with("HTTP/1.1 200") && page.contains("logged in"), "{page}");
+    let challenge = ran.out.split("code_challenge=").nth(1).and_then(|r| r.split(['&', '\n']).next()).expect("the printed address carries a challenge");
+    assert!(ran.out.contains("code_challenge_method=S256") && ran.out.contains(&format!("callback_url=http%3A%2F%2F127.0.0.1%3A{port}%2Fcallback")), "{}", ran.out);
+
+    let sent = auth.bodies().await;
+    let [exchange] = &sent[..] else { panic!("one exchange, got {sent:?}") };
+    assert_eq!(exchange["code"], "the-code");
+    let verifier = exchange["code_verifier"].as_str().unwrap();
+    assert_eq!(URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())), challenge);
+    assert!(!ran.out.contains(verifier));
+
+    // The key is an ordinary keychain key afterwards, in no file and not on the screen.
+    assert_eq!(rig.keychain.get("aibus", "account:work").unwrap().unwrap().expose(), OR_KEY);
+    let cfg = std::fs::read_to_string(rig.config()).unwrap();
+    assert!(cfg.contains("provider = \"openrouter\"") && cfg.contains("auth = { keyring = true }") && !cfg.contains("oauth"), "{cfg}");
+    assert_eq!(rig.secret_in_files(OR_KEY), Vec::<PathBuf>::new());
+    assert!(!ran.out.contains(OR_KEY));
 }

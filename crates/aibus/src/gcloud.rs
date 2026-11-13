@@ -231,7 +231,9 @@ mod tests {
     /// Closing our handle is not enough: a thread forking elsewhere in this process can hand a
     /// child a copy of the write handle until that child execs, and exec then fails with ETXTBSY
     /// (#232). New forks cannot copy a handle that is already closed, so once one start of the file
-    /// succeeds, none can fail that way. That start is killed at once, so the body never matters.
+    /// succeeds, none can fail that way. That start is a probe: `AIBUS_FAKE_PROBE` is set for it
+    /// only, and the first line of the script exits 0 when it sees it, so the body never runs, no
+    /// file is touched and nothing outlives the wait below.
     #[cfg(unix)]
     fn script(dir: &std::path::Path, body: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
@@ -239,29 +241,38 @@ mod tests {
         let dir = dir.join(format!("s{}", N.fetch_add(1, Ordering::SeqCst)));
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("gcloud-fake");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\n[ -n \"$AIBUS_FAKE_PROBE\" ] && exit 0\n{body}\n"),
+        )
+        .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let began = Instant::now();
-        loop {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut probe = loop {
             match std::process::Command::new(&path)
+                .env("AIBUS_FAKE_PROBE", "1")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
             {
-                Ok(mut probe) => {
-                    let _ = probe.kill();
-                    let _ = probe.wait();
-                    break;
-                }
+                Ok(probe) => break probe,
                 Err(e)
                     if e.kind() == std::io::ErrorKind::ExecutableFileBusy
-                        && began.elapsed() < Duration::from_secs(10) =>
+                        && Instant::now() < deadline =>
                 {
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 Err(e) => panic!("the fake {} would not start: {e}", path.display()),
             }
+        };
+        while probe.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                let _ = probe.kill();
+                let _ = probe.wait();
+                panic!("the probe of {} did not exit", path.display());
+            }
+            std::thread::sleep(Duration::from_millis(1));
         }
         path.display().to_string()
     }

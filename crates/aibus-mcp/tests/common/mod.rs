@@ -47,6 +47,7 @@ pub fn audit_lines(home: &Xdg) -> Vec<serde_json::Value> {
 pub fn fake_aibus(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
+[ -n "$AIBUS_FAKE_PROBE" ] && exit 0
 printf '%s\n' "$@" > "DIR/argv.txt"
 env > "DIR/env.txt"
 mkdir -p "DIR/session"
@@ -110,29 +111,35 @@ esac
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     // Another thread forking right now can give a child a copy of the write handle until it execs,
     // and starting the script then fails with ETXTBSY (#232). A handle that is already closed
-    // cannot be copied, so once one start succeeds none can fail that way. The probe is killed
-    // at once; it only has to get past exec.
-    let began = std::time::Instant::now();
-    loop {
-        let probe = std::process::Command::new(&path)
+    // cannot be copied, so once one start succeeds none can fail that way. That start is a probe:
+    // `AIBUS_FAKE_PROBE` is set for it only, and the first line of the script exits 0 when it sees
+    // it, so the body never runs, no file is written and nothing outlives the wait below.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut probe = loop {
+        let started = std::process::Command::new(&path)
+            .env("AIBUS_FAKE_PROBE", "1")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
-        match probe {
-            Ok(mut child) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break;
-            }
+        match started {
+            Ok(child) => break child,
             Err(e)
                 if e.kind() == std::io::ErrorKind::ExecutableFileBusy
-                    && began.elapsed().as_secs() < 10 =>
+                    && std::time::Instant::now() < deadline =>
             {
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
             Err(e) => panic!("the fake {} would not start: {e}", path.display()),
         }
+    };
+    while probe.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            let _ = probe.kill();
+            let _ = probe.wait();
+            panic!("the probe of {} did not exit", path.display());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
     path
 }

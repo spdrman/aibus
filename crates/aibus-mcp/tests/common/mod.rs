@@ -15,8 +15,14 @@ pub fn server(caps: Caps, redactor: Redactor) -> (Server, Xdg) {
     let home = xdg_temp();
     let project = home.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
-    let server = Server::new(caps, project, &home.paths, Some(home.path().join("home")), redactor)
-        .expect("a server");
+    let server = Server::new(
+        caps,
+        project,
+        &home.paths,
+        Some(home.path().join("home")),
+        redactor,
+    )
+    .expect("a server");
     (server, home)
 }
 
@@ -34,18 +40,24 @@ pub fn audit_lines(home: &Xdg) -> Vec<serde_json::Value> {
 
 /// A stand-in for `aibus run --workflow <name> --json -- <input>` that plays one scripted
 /// chain, chosen by the input (the last argument): `ok`, `slow`, `ask`, `costly`, `step`, `echo:<text>` (puts its input in the output) or `loud` (a long log).
-/// It writes its arguments and its environment to `<dir>/argv.txt` and `<dir>/env.txt`, and an
+/// It writes its arguments (the input of an `echo:` step left out, since a test plants a key there) and its environment to `<dir>/argv.txt` and `<dir>/env.txt`, and an
 /// empty `commits.jsonl.zst` to `<dir>/session/`, so a test can tell whether (and how) it was
 /// started. Returns the path of the script.
 #[cfg(unix)]
 pub fn fake_aibus(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
-printf '%s\n' "$@" > "DIR/argv.txt"
+for last; do :; done
+# The input is the caller's text and a test may plant a key in it on purpose (`echo:<key>`), so the
+# record keeps the shape of the line but not that text, or the secret scan on drop would find the
+# fake's own copy of it.
+case "$last" in
+  echo:*) { for a; do [ "$a" = "$last" ] && printf 'echo:<input kept out of this file>\n' || printf '%s\n' "$a"; done; } > "DIR/argv.txt" ;;
+  *) printf '%s\n' "$@" > "DIR/argv.txt" ;;
+esac
 env > "DIR/env.txt"
 mkdir -p "DIR/session"
 : > "DIR/session/commits.jsonl.zst"
-for last; do :; done
 ev() { printf '%s\n' "$1"; }
 fin() { ev '{"type":"RunFinished","run":"'"$1"'","status":"'"$2"'","turns":1,"usage":{"input_tokens":'"$3"',"output_tokens":'"$4"',"cost_usd":'"$5"'},"summary":"'"$6"'"}'; }
 case "$last" in

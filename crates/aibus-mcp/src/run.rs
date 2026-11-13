@@ -238,10 +238,57 @@ fn signal(pid: u32, hard: bool) {
         .status();
 }
 
-/// Appends `more` to `text`, keeping the last `cap` bytes from a character boundary. For the log
-/// the cut also moves on to the next line start, so a half line never leads.
-fn keep_last(text: &mut String, more: &str, cap: usize, whole_lines: bool) {
+/// How much more than `TAIL_BYTES` (and `LOG_BYTES`) of raw text is kept, so that what is shown is
+/// cut from text the redactor has seen whole: the buffers are redacted first and cut after, and
+/// the start of the raw window, which may hold half of something, ends up far outside the part
+/// that is shown.
+const RAW_MARGIN: usize = 32 * 1024;
+
+/// A character a key or token is made of.
+fn is_token(c: char) -> bool {
+    matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '+' | '/' | '=' | ':' | '~')
+}
+
+/// The raw buffers are trimmed once they are this much over `cap + RAW_MARGIN`, so the scan for a
+/// cut and the move of the rest happen once per this many bytes instead of once per event.
+const TRIM_SLACK: usize = 4096;
+
+/// Appends `more` to `text` and, once it is `TRIM_SLACK` over `cap + RAW_MARGIN` bytes, keeps
+/// the last `cap + RAW_MARGIN` from a character boundary. The cut is moved on to a line start
+/// when there is one in the next 4 KiB, or else, when it falls inside a token, past the first
+/// character a token cannot contain, so a key that began before the window leaves no end of
+/// itself at its start. The text is raw: it is redacted when it is read (`window`), never cut
+/// first, so that a key sent in pieces, a private key block sent a line at a time and a value
+/// that follows its context are whole when the redactor sees them.
+fn keep_raw(text: &mut String, more: &str, cap: usize) {
     text.push_str(more);
+    let keep = cap + RAW_MARGIN;
+    if text.len() > keep + TRIM_SLACK {
+        let mut cut = text.len() - keep;
+        while !text.is_char_boundary(cut) {
+            cut += 1;
+        }
+        let mut near = (cut + 4096).min(text.len());
+        while !text.is_char_boundary(near) {
+            near -= 1;
+        }
+        let inside = text[..cut].chars().next_back().is_some_and(is_token)
+            && text[cut..].chars().next().is_some_and(is_token);
+        if let Some(nl) = text[cut..near].find('\n') {
+            cut += nl + 1;
+        } else if inside {
+            if let Some((at, c)) = text[cut..near].char_indices().find(|(_, c)| !is_token(*c)) {
+                cut += at + c.len_utf8();
+            }
+        }
+        text.drain(..cut);
+    }
+}
+
+/// What is shown of a raw buffer: all of it through the redactor, then its last `cap` bytes from
+/// a character boundary (for the log, from a line start, so a half line never leads).
+fn window(raw: &str, cap: usize, whole_lines: bool, redactor: &Redactor) -> String {
+    let mut text = redactor.redact(raw).into_owned();
     if text.len() > cap {
         let mut cut = text.len() - cap;
         while !text.is_char_boundary(cut) {
@@ -254,19 +301,53 @@ fn keep_last(text: &mut String, more: &str, cap: usize, whole_lines: bool) {
         }
         text.drain(..cut);
     }
+    text
 }
 
-/// Appends to the tail `run_status` shows and to the log the run resource shows.
+/// Appends to the raw tail and to the raw log.
 fn push_both(tail: &mut String, log: &mut String, more: &str) {
-    keep_last(tail, more, TAIL_BYTES, false);
-    keep_last(log, more, LOG_BYTES, true);
+    keep_raw(tail, more, TAIL_BYTES);
+    keep_raw(log, more, LOG_BYTES);
 }
 
 impl View {
+    /// The end of the run's report as shown: the raw tail through the redactor, then cut.
+    fn tail_text(&self, redactor: &Redactor) -> String {
+        window(&self.tail, TAIL_BYTES, false, redactor)
+    }
+
     /// Folds one NDJSON event of the child into the view. `steps` are the workflow's agents in
     /// order. True when something `run_status` shows changed.
-    fn apply(&mut self, ev: &Value, steps: &[String]) -> bool {
-        let str_of = |k: &str| ev.get(k).and_then(Value::as_str).map(str::to_owned);
+    ///
+    /// What the server redacts, and when. The strings of an attempt (name, status, failure), the
+    /// run id and the session are redacted whole, as the child sent them, before they are stored
+    /// (the failure before its 300 byte cut). Text for the tail and the log (the stream, a
+    /// summary, a failure of no attempt, stdout and stderr lines) is stored raw, about
+    /// `RAW_MARGIN` more than what is shown (up to `TRIM_SLACK` more again), and redacted when it
+    /// is read: all of the buffer first, then the cut. So the redactor sees a key sent in pieces, a private key block sent a line at a time,
+    /// a token of any length and a value that follows its context (a header or field name) whole,
+    /// and a cut falls in text it has already replaced.
+    ///
+    /// What is not covered:
+    /// - A key split by other text in between (a stderr line between two stream pieces) is not one
+    ///   string to any pattern, as before.
+    /// - The context patterns (`bearer`, `api-key-field`, `assignment`) match a name with its
+    ///   value, so a value whose name was cut off at the start of the stored window is missed.
+    /// - The start of the stored window can hold the rest of something that began before it. The
+    ///   cut is moved to a line start, or past the first character a token cannot contain when it
+    ///   falls inside a token (`keep_raw`), which removes the rest of a key; but an unterminated
+    ///   BEGIN line is enough for the redaction to shrink the buffer so that the start is shown,
+    ///   and the body lines of a private key whose BEGIN line was cut off then show.
+    /// - A read during a run can show the first piece of a key still arriving, as a piece too
+    ///   short for any pattern matches none.
+    /// - The raw text sits in memory until it is cut off, which a read redacts but the process
+    ///   does not.
+    /// - This redactor is the server's: its patterns are in it, but the secrets a child registered
+    ///   with its own are not, because the server process registers none, so those are covered
+    ///   only by the child's own redaction of each event.
+    fn apply(&mut self, ev: &Value, steps: &[String], redactor: &Redactor) -> bool {
+        let raw_of = |k: &str| ev.get(k).and_then(Value::as_str).map(str::to_owned);
+        let str_of = |k: &str| raw_of(k).map(|t| redactor.redact(&t).into_owned());
         let run = str_of("run");
         match ev.get("type").and_then(Value::as_str) {
             Some("RunStarted") if self.lead.is_none() => {
@@ -300,7 +381,8 @@ impl View {
                 true
             }
             Some("RunFailed") => {
-                let message = str_of("message").unwrap_or_default();
+                let raw = raw_of("message").unwrap_or_default();
+                let message = redactor.redact(&raw).into_owned();
                 let mut cut = message.len().min(FAILURE_BYTES);
                 while !message.is_char_boundary(cut) {
                     cut -= 1;
@@ -311,7 +393,7 @@ impl View {
                     .find(|a| Some(&a.run) == run.as_ref())
                 {
                     Some(a) => a.failure = Some(message[..cut].to_owned()),
-                    None => push_both(&mut self.tail, &mut self.log, &format!("\n{message}\n")),
+                    None => push_both(&mut self.tail, &mut self.log, &format!("\n{raw}\n")),
                 }
                 true
             }
@@ -325,7 +407,7 @@ impl View {
                         n("output_tokens"),
                         ev["usage"]["cost_usd"].as_f64().unwrap_or(0.0),
                     );
-                    if let Some(summary) = ev.get("summary").and_then(Value::as_str) {
+                    if let Some(summary) = raw_of("summary") {
                         push_both(&mut self.tail, &mut self.log, &format!("\n{summary}\n"));
                     }
                     self.ended_as = Some(status);
@@ -349,8 +431,8 @@ impl View {
                 true
             }
             Some("Stream") => {
-                if let Some(t) = ev.get("text").and_then(Value::as_str) {
-                    push_both(&mut self.tail, &mut self.log, t);
+                if let Some(t) = raw_of("text") {
+                    push_both(&mut self.tail, &mut self.log, &t);
                 }
                 false
             }
@@ -483,18 +565,14 @@ impl Runs {
         let redactor = redactor.clone();
         thread::spawn(move || {
             let events = {
-                let (entry, redactor) = (entry.clone(), redactor.clone());
+                let (entry, redactor) = (entry.clone(), redactor);
                 thread::spawn(move || {
                     for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                         if let Ok(ev) = serde_json::from_str::<Value>(&line) {
-                            entry.update(|v| v.apply(&ev, &steps));
+                            entry.update(|v| v.apply(&ev, &steps, &redactor));
                         } else {
                             entry.update(|v| {
-                                push_both(
-                                    &mut v.tail,
-                                    &mut v.log,
-                                    &format!("{}\n", redactor.redact(&line)),
-                                );
+                                push_both(&mut v.tail, &mut v.log, &format!("{line}\n"));
                                 false
                             });
                         }
@@ -502,15 +580,11 @@ impl Runs {
                 })
             };
             let notes = {
-                let (entry, redactor) = (entry.clone(), redactor);
+                let entry = entry.clone();
                 thread::spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                         entry.update(|v| {
-                            push_both(
-                                &mut v.tail,
-                                &mut v.log,
-                                &format!("{}\n", redactor.redact(&line)),
-                            );
+                            push_both(&mut v.tail, &mut v.log, &format!("{line}\n"));
                             false
                         });
                     }
@@ -544,7 +618,7 @@ impl Runs {
     pub(crate) fn body(&self, id: &str, redactor: &Redactor) -> Option<Value> {
         let entry = self.entry(id)?;
         let v = entry.view.lock().unwrap_or_else(|e| e.into_inner());
-        let tail = redactor.redact(&v.tail).into_owned();
+        let tail = v.tail_text(redactor);
         let attempts: Vec<Value> = v
             .attempts
             .iter()
@@ -597,7 +671,7 @@ impl Runs {
             let v = entry.view.lock().unwrap_or_else(|e| e.into_inner());
             (v.log.clone(), v.ended)
         };
-        let log = redactor.redact(&log);
+        let log = window(&log, LOG_BYTES, true, redactor);
         let mut start = log.len().saturating_sub(max);
         while !log.is_char_boundary(start) {
             start += 1;
@@ -820,6 +894,401 @@ impl Server {
             Some(body) => Ok(self.done(body)),
             None => Ok(self
                 .fail("no run with that handle (it is unknown, or from another server process)")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: &str = "sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P";
+    const SECRET: &str = "Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P";
+
+    fn view() -> View {
+        View {
+            status: "running".into(),
+            ended_as: None,
+            step: None,
+            pointer: 0,
+            attempts: Vec::new(),
+            lead: None,
+            session: None,
+            usage: (0, 0, 0.0),
+            exit_code: None,
+            tail: String::new(),
+            log: String::new(),
+            cancelled: false,
+            ended: false,
+        }
+    }
+
+    fn stream(v: &mut View, redactor: &Redactor, text: &str) {
+        v.apply(&json!({ "type": "Stream", "text": text }), &[], redactor);
+    }
+
+    /// No seven-byte piece of the secret part of the key, and not the start of the key, shows.
+    fn assert_no_piece(what: &str, text: &str) {
+        for i in 0..=SECRET.len() - 7 {
+            assert!(
+                !text.contains(&SECRET[i..i + 7]),
+                "{what} shows a piece of the key: {:?}",
+                &SECRET[i..i + 7]
+            );
+        }
+        assert!(
+            !text.contains("sk-ant-api03-Zq"),
+            "{what} shows the start of the key"
+        );
+    }
+
+    /// What `body()` shows of the tail, and what the log resource shows of the log.
+    fn shown(v: &View, redactor: &Redactor) -> String {
+        v.tail_text(redactor)
+    }
+
+    fn shown_log(v: &View, redactor: &Redactor) -> String {
+        window(&v.log, LOG_BYTES, true, redactor)
+    }
+
+    #[test]
+    fn a_key_split_across_two_events_is_redacted_when_the_tail_cut_lands_inside_it() {
+        let redactor = Redactor::new();
+        // Every position of the cut inside the key, and a little either side of it.
+        for after in 4060..4090 {
+            let mut v = view();
+            stream(&mut v, &redactor, &KEY[..25]);
+            stream(
+                &mut v,
+                &redactor,
+                &format!("{}{}", &KEY[25..], ".".repeat(after)),
+            );
+            assert!(shown(&v, &redactor).len() <= TAIL_BYTES);
+            assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
+            assert_no_piece(&format!("log ({after})"), &shown_log(&v, &redactor));
+        }
+    }
+
+    #[test]
+    fn a_key_split_across_three_events_is_redacted_when_the_tail_cut_lands_inside_it() {
+        let redactor = Redactor::new();
+        for after in 4060..4090 {
+            let mut v = view();
+            stream(&mut v, &redactor, &KEY[..14]);
+            stream(&mut v, &redactor, &KEY[14..30]);
+            stream(
+                &mut v,
+                &redactor,
+                &format!("{}{}", &KEY[30..], ".".repeat(after)),
+            );
+            assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
+        }
+    }
+
+    #[test]
+    fn the_fields_of_an_event_are_redacted_before_they_are_stored() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        let steps = ["plan".to_owned()];
+        for ev in [
+            json!({ "type": "RunStarted", "run": "L1", "agent": "lead" }),
+            json!({ "type": "RunStarted", "run": "C1", "agent": KEY }),
+            json!({ "type": "RunFailed", "run": "C1", "message": format!("failed with {KEY}") }),
+            json!({ "type": "RunFinished", "run": "C1", "status": KEY, "summary": "s" }),
+            json!({ "type": "SessionEnd", "session": KEY, "exit_code": 1 }),
+        ] {
+            v.apply(&ev, &steps, &redactor);
+        }
+        let a = &v.attempts[0];
+        for (what, text) in [
+            ("agent", a.agent.as_str()),
+            ("status", a.status.as_str()),
+            ("failure", a.failure.as_deref().unwrap()),
+            ("session", v.session.as_deref().unwrap()),
+        ] {
+            assert_no_piece(what, text);
+            assert!(!text.is_empty(), "{what} is kept, redacted");
+        }
+    }
+
+    #[test]
+    fn a_read_in_the_middle_of_a_run_redacts_what_the_buffers_hold_raw() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &format!("a key: {}", &KEY[..30]));
+        // The end of a key that has not all arrived is redacted by the read, as far as it goes.
+        assert_no_piece("tail", &shown(&v, &redactor));
+        assert_no_piece("log", &shown_log(&v, &redactor));
+        stream(&mut v, &redactor, &format!("{}\n", &KEY[30..]));
+        assert_no_piece("tail", &shown(&v, &redactor));
+        // What is stored is raw, so the read is what keeps it from a client.
+        assert!(v.tail.contains(SECRET) && v.log.contains(SECRET));
+        assert!(!shown(&v, &redactor).contains(SECRET));
+        assert!(!shown_log(&v, &redactor).contains(SECRET));
+    }
+
+    #[test]
+    fn the_body_and_the_log_text_redact_what_they_read_without_help_from_the_edge() {
+        // `body` is redacted again by the server on the way out, so only a direct call shows
+        // that it does its own part.
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &format!("key {}", &KEY[..25]));
+        stream(
+            &mut v,
+            &redactor,
+            &format!("{} {}\n", &KEY[25..], "z ".repeat(1000)),
+        );
+        let runs = Runs::new(RunConfig::new(PathBuf::from("unused"), 1.0));
+        let entry = Entry {
+            view: Mutex::new(v),
+            changed: watch::channel(0).0,
+            pid: 0,
+            done: AtomicBool::new(true),
+        };
+        runs.entries
+            .lock()
+            .unwrap()
+            .insert("run-x".into(), Arc::new(entry));
+        let body = runs.body("run-x", &redactor).unwrap();
+        let tail = body["tail"].as_str().unwrap();
+        assert_no_piece("body tail", tail);
+        assert!(
+            tail.len() < TAIL_BYTES + 200,
+            "the tail is cut: {}",
+            tail.len()
+        );
+        assert_no_piece(
+            "log text",
+            &runs.log_text("run-x", &redactor, 1 << 20).unwrap(),
+        );
+    }
+
+    #[test]
+    fn a_key_that_starts_before_the_stored_window_leaves_no_fragment_when_the_buffer_shrinks() {
+        let redactor = Redactor::new();
+        let keep = TAIL_BYTES + RAW_MARGIN;
+        // The buffer is trimmed once it is 4 KiB over `keep`. Push it one byte over, so the cut
+        // is at 4097 and the key, which starts at 4077, has its first 20 bytes before it.
+        let slack = 4096;
+        let mut v = view();
+        // No newline for a long way after the cut, and an unterminated BEGIN line right behind the
+        // key makes the redaction swallow everything after it, so the start of the window is what
+        // is shown.
+        let first = format!(
+            "{}{KEY} -----BEGIN PRIVATE KEY-----",
+            ".".repeat(slack - 19)
+        );
+        stream(&mut v, &redactor, &first);
+        stream(
+            &mut v,
+            &redactor,
+            &" ".repeat(keep + slack + 1 - first.len()),
+        );
+        assert!(v.tail.len() <= keep, "the window was cut: {}", v.tail.len());
+        assert_no_piece("tail", &shown(&v, &redactor));
+    }
+
+    #[test]
+    fn a_name_that_starts_at_the_cut_is_kept_whole() {
+        let redactor = Redactor::new();
+        let keep = TAIL_BYTES + RAW_MARGIN;
+        let slack = 4096;
+        let mut v = view();
+        // The cut is at 4097, exactly where `Bearer` starts, so nothing of the name is in a token
+        // that began before the window and the window starts there.
+        let first = format!(
+            "{}Bearer abcdefghijklmnopqrstuvwxyz0123456789 ",
+            " ".repeat(slack + 1)
+        );
+        stream(&mut v, &redactor, &first);
+        stream(
+            &mut v,
+            &redactor,
+            &" ".repeat(keep + slack + 1 - first.len()),
+        );
+        assert!(v.tail.starts_with("Bearer "), "{:?}", &v.tail[..20]);
+        assert!(v.tail.len() <= keep);
+        assert!(shown_log(&v, &redactor).contains("[redacted:pattern:bearer]"));
+    }
+
+    const PEM_BODY: [&str; 2] = [
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj",
+        "MzEfYyjiWA4R4/M2bS1GB4t7NXp98C3SC6dVMvDuictGeurT8jNbvJZHtCSuYEvu",
+    ];
+
+    #[test]
+    fn a_private_key_whose_begin_line_is_before_the_shown_window_is_redacted() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &"older line\n".repeat(400));
+        stream(&mut v, &redactor, "-----BEGIN PRIVATE KEY-----\n");
+        for line in PEM_BODY {
+            stream(&mut v, &redactor, &format!("{line}\n"));
+        }
+        stream(&mut v, &redactor, "-----END PRIVATE KEY-----\n");
+        stream(&mut v, &redactor, &"later line\n".repeat(359));
+        for body in PEM_BODY {
+            assert!(!shown(&v, &redactor).contains(&body[..20]), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_private_key_sent_a_line_at_a_time_is_redacted_whole_or_as_far_as_it_has_come() {
+        let redactor = Redactor::new();
+        for after in [0usize, 100, 5000] {
+            let mut v = view();
+            let lines = [
+                "-----BEGIN PRIVATE KEY-----\n".to_owned(),
+                format!("{}\n", PEM_BODY[0]),
+                format!("{}\n", PEM_BODY[1]),
+                "-----END PRIVATE KEY-----\n".to_owned(),
+            ];
+            for (n, line) in lines.iter().enumerate() {
+                stream(&mut v, &redactor, line);
+                // At every point of the run, a read shows none of the body that has come.
+                for body in &PEM_BODY[..n.min(2)] {
+                    assert!(
+                        !shown(&v, &redactor).contains(&body[..20]),
+                        "after line {n}"
+                    );
+                    assert!(
+                        !shown_log(&v, &redactor).contains(&body[..20]),
+                        "after line {n}"
+                    );
+                }
+            }
+            stream(
+                &mut v,
+                &redactor,
+                &"\nplain text after\n".repeat(after / 18),
+            );
+            for body in PEM_BODY {
+                assert!(!shown(&v, &redactor).contains(&body[..20]), "after {after}");
+                assert!(
+                    !shown_log(&v, &redactor).contains(&body[..20]),
+                    "after {after}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_jwt_over_512_bytes_split_after_its_second_dot_is_redacted() {
+        let redactor = Redactor::new();
+        let payload = "A1b2C3".repeat(100);
+        let mut v = view();
+        stream(
+            &mut v,
+            &redactor,
+            &format!("token eyJhbGciOiJIUzI1NiJ9.eyJ{payload}."),
+        );
+        stream(&mut v, &redactor, "SIGNATUREpart1234567890 done\n");
+        for text in [shown(&v, &redactor), shown_log(&v, &redactor)] {
+            assert!(
+                !text.contains("A1b2C3A1b2C3") && !text.contains("SIGNATURE"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_after_a_long_run_of_token_characters_and_split_over_two_events_is_redacted() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(
+            &mut v,
+            &redactor,
+            &format!("{}{}", "/".repeat(600), &KEY[..25]),
+        );
+        stream(&mut v, &redactor, &format!("{}\n", &KEY[25..]));
+        assert_no_piece("tail", &shown(&v, &redactor));
+        assert_no_piece("log", &shown_log(&v, &redactor));
+    }
+
+    #[test]
+    fn many_events_without_a_separator_cost_about_what_one_does() {
+        // A run of text with no separator in it, as one very long token, a few thousand events.
+        let redactor = Redactor::new();
+        let mut v = view();
+        let began = std::time::Instant::now();
+        for _ in 0..20_000 {
+            stream(&mut v, &redactor, &"x".repeat(1024));
+        }
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            began.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_split_key_that_no_cut_touches_is_redacted_too() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &format!("before {}", &KEY[..25]));
+        stream(&mut v, &redactor, &format!("{} after\n", &KEY[25..]));
+        let tail = shown(&v, &redactor);
+        assert_no_piece("tail", &tail);
+        assert!(
+            tail.starts_with("before ") && tail.ends_with(" after\n"),
+            "{tail}"
+        );
+        assert_no_piece("log", &shown_log(&v, &redactor));
+    }
+
+    #[test]
+    fn the_log_stays_clean_when_it_overflows_with_a_split_key_in_it() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        // The key arrives in two halves in the middle of lines near the start, then enough lines
+        // to push the start of the log out several times over.
+        stream(
+            &mut v,
+            &redactor,
+            &format!("first line\nthe key is {}", &KEY[..25]),
+        );
+        stream(
+            &mut v,
+            &redactor,
+            &format!("{} and that is it\n", &KEY[25..]),
+        );
+        for i in 0..6000 {
+            stream(
+                &mut v,
+                &redactor,
+                &format!("filler line number {i} xxxxxxxxxxxxxxxxxxxxxxxx\n"),
+            );
+            if i % 2000 == 0 {
+                assert_no_piece("log", &shown_log(&v, &redactor));
+            }
+        }
+        assert_no_piece("log", &shown_log(&v, &redactor));
+        assert!(
+            shown_log(&v, &redactor).len() <= LOG_BYTES,
+            "the log is capped"
+        );
+        assert!(
+            !shown_log(&v, &redactor).contains("first line"),
+            "the start was cut off"
+        );
+    }
+
+    #[test]
+    fn a_multibyte_character_at_the_cut_neither_panics_nor_leaves_a_piece() {
+        let redactor = Redactor::new();
+        for after in 4040..4110 {
+            let mut v = view();
+            stream(&mut v, &redactor, &"\u{e9}".repeat(100));
+            stream(&mut v, &redactor, &KEY[..25]);
+            stream(
+                &mut v,
+                &redactor,
+                &format!("{}{}", &KEY[25..], "\u{20ac}".repeat(after / 3)),
+            );
+            stream(&mut v, &redactor, &".".repeat(after % 3));
+            assert!(std::str::from_utf8(v.tail.as_bytes()).is_ok());
+            assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
         }
     }
 }

@@ -39,7 +39,11 @@ pub fn audit_lines(home: &Xdg) -> Vec<serde_json::Value> {
 }
 
 /// A stand-in for `aibus run --workflow <name> --json -- <input>` that plays one scripted
-/// chain, chosen by the input (the last argument): `ok`, `slow`, `ask`, `costly`, `step`, `echo:<text>` (puts its input in the output) or `loud` (a long log).
+/// chain, chosen by the input. The input is the last argument, or stdin when that argument is `-`
+/// (what the server uses, so a key in it is never on a command line); `<dir>/input-via.txt` says
+/// which, and `<dir>/input-len.txt` is its length in bytes. `deaf` (when `<dir>/deaf` exists and
+/// the input is on stdin) exits 3 without reading it. `big:<text>` plays a short chain and keeps
+/// the first and last 40 bytes of the input in `<dir>/input-ends.txt`. The chains are `ok`, `slow`, `ask`, `costly`, `step`, `echo:<text>` (puts its input in the output) or `loud` (a long log).
 /// It writes its arguments (the input of an `echo:` step left out, since a test plants a key there) and its environment to `<dir>/argv.txt` and `<dir>/env.txt`, and an
 /// empty `commits.jsonl.zst` to `<dir>/session/`, so a test can tell whether (and how) it was
 /// started. Returns the path of the script.
@@ -49,8 +53,15 @@ pub fn fake_aibus(dir: &std::path::Path) -> std::path::PathBuf {
     let script = r#"#!/bin/sh
 [ "$1" = --aibus-fake-probe ] && exit 0
 for last; do :; done
-input=$last
-[ "$last" = "-" ] && input=$(cat)
+if [ "$last" = "-" ]; then
+  via=stdin
+  if [ -e "DIR/deaf" ]; then input=deaf; else input=$(cat); fi
+else
+  via=argv
+  input=$last
+fi
+printf '%s\n' "$via" > "DIR/input-via.txt"
+printf '%s' "$input" | wc -c | tr -d ' ' > "DIR/input-len.txt"
 # The input is the caller's text and a test may plant a key in it on purpose (`echo:<key>`), so the
 # record keeps the shape of the line but not that text, or the secret scan on drop would find the
 # fake's own copy of it.
@@ -89,6 +100,13 @@ case "$input" in
     fin L1 partial 3 3 0.02 "bash was denied"
     ev '{"type":"SessionEnd","session":"SESSION1","exit_code":10}'
     exit 10 ;;
+  deaf) exit 3 ;;
+  big:*)
+    { printf '%s' "$input" | head -c 40; echo; printf '%s' "$input" | tail -c 40; echo; } > "DIR/input-ends.txt"
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    fin L1 completed 1 1 0.01 "read ${#input} bytes"
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":0}'
+    exit 0 ;;
   echo:*)
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     printf '{"type":"Stream","text":"the step saw %s and kept going\\n"}\n' "$input"

@@ -18,10 +18,38 @@ use std::path::Path;
 use serde_json::Value;
 
 const KNOWN: [&str; 32] = [
-    "$schema", "$id", "title", "description", "definitions", "type", "enum", "const", "required",
-    "properties", "items", "minItems", "minimum", "maximum", "pattern", "anyOf", "allOf", "if",
-    "then", "else", "$ref", "additionalProperties", "$defs", "oneOf", "minLength", "maxLength",
-    "maxItems", "uniqueItems", "format", "default", "examples", "$comment",
+    "$schema",
+    "$id",
+    "title",
+    "description",
+    "definitions",
+    "type",
+    "enum",
+    "const",
+    "required",
+    "properties",
+    "items",
+    "minItems",
+    "minimum",
+    "maximum",
+    "pattern",
+    "anyOf",
+    "allOf",
+    "if",
+    "then",
+    "else",
+    "$ref",
+    "additionalProperties",
+    "$defs",
+    "oneOf",
+    "minLength",
+    "maxLength",
+    "maxItems",
+    "uniqueItems",
+    "format",
+    "default",
+    "examples",
+    "$comment",
 ];
 
 pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -74,10 +102,17 @@ fn walk(root: &Value, schema: &Value, v: &Value, at: &str, errors: &mut Vec<Stri
         return;
     };
     for key in obj.keys() {
-        assert!(KNOWN.contains(&key.as_str()), "the checker does not know the keyword {key}");
+        assert!(
+            KNOWN.contains(&key.as_str()),
+            "the checker does not know the keyword {key}"
+        );
     }
     if let Some(r) = obj.get("$ref") {
-        let path = r.as_str().unwrap().strip_prefix("#/").expect("only local refs");
+        let path = r
+            .as_str()
+            .unwrap()
+            .strip_prefix("#/")
+            .expect("only local refs");
         let target = path.split('/').fold(root, |s, k| &s[k]);
         return walk(root, target, v, at, errors);
     }
@@ -109,28 +144,54 @@ fn walk(root: &Value, schema: &Value, v: &Value, at: &str, errors: &mut Vec<Stri
     }
     if let Some(text) = v.as_str() {
         let len = text.chars().count() as u64;
-        if obj.get("minLength").and_then(Value::as_u64).is_some_and(|m| len < m) {
+        if obj
+            .get("minLength")
+            .and_then(Value::as_u64)
+            .is_some_and(|m| len < m)
+        {
             errors.push(format!("{at}: shorter than minLength"));
         }
-        if obj.get("maxLength").and_then(Value::as_u64).is_some_and(|m| len > m) {
+        if obj
+            .get("maxLength")
+            .and_then(Value::as_u64)
+            .is_some_and(|m| len > m)
+        {
             errors.push(format!("{at}: longer than maxLength"));
         }
     }
     if let Some(n) = v.as_f64() {
-        if obj.get("minimum").and_then(Value::as_f64).is_some_and(|m| n < m) {
+        if obj
+            .get("minimum")
+            .and_then(Value::as_f64)
+            .is_some_and(|m| n < m)
+        {
             errors.push(format!("{at}: {n} is below the minimum"));
         }
-        if obj.get("maximum").and_then(Value::as_f64).is_some_and(|m| n > m) {
+        if obj
+            .get("maximum")
+            .and_then(Value::as_f64)
+            .is_some_and(|m| n > m)
+        {
             errors.push(format!("{at}: {n} is above the maximum"));
         }
     }
     if let Some(map) = v.as_object() {
-        for r in obj.get("required").and_then(Value::as_array).into_iter().flatten() {
+        for r in obj
+            .get("required")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if !map.contains_key(r.as_str().unwrap()) {
                 errors.push(format!("{at}: missing {r}"));
             }
         }
-        for (k, sub) in obj.get("properties").and_then(Value::as_object).into_iter().flatten() {
+        for (k, sub) in obj
+            .get("properties")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
             if let Some(child) = map.get(k) {
                 walk(root, sub, child, &format!("{at}.{k}"), errors);
             }
@@ -160,11 +221,18 @@ fn walk(root: &Value, schema: &Value, v: &Value, at: &str, errors: &mut Vec<Stri
                 errors.push(format!("{at}: fewer than {min} items"));
             }
         }
-        if obj.get("maxItems").and_then(Value::as_u64).is_some_and(|m| items.len() as u64 > m) {
+        if obj
+            .get("maxItems")
+            .and_then(Value::as_u64)
+            .is_some_and(|m| items.len() as u64 > m)
+        {
             errors.push(format!("{at}: more than maxItems"));
         }
         if obj.get("uniqueItems") == Some(&Value::Bool(true))
-            && items.iter().enumerate().any(|(i, a)| items[..i].contains(a))
+            && items
+                .iter()
+                .enumerate()
+                .any(|(i, a)| items[..i].contains(a))
         {
             errors.push(format!("{at}: items are not unique"));
         }
@@ -187,10 +255,17 @@ fn walk(root: &Value, schema: &Value, v: &Value, at: &str, errors: &mut Vec<Stri
     if let Some(all) = obj.get("oneOf").and_then(Value::as_array) {
         let n = all.iter().filter(|b| passes(b)).count();
         if n != 1 {
-            errors.push(format!("{at}: matches {n} branches of oneOf, want exactly one"));
+            errors.push(format!(
+                "{at}: matches {n} branches of oneOf, want exactly one"
+            ));
         }
     }
-    for sub in obj.get("allOf").and_then(Value::as_array).into_iter().flatten() {
+    for sub in obj
+        .get("allOf")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         walk(root, sub, v, at, errors);
     }
     if let Some(cond) = obj.get("if") {
@@ -219,7 +294,9 @@ pub fn lint_2020_12(root: &Value) -> Vec<String> {
 fn lint(root: &Value, schema: &Value, at: &str, problems: &mut Vec<String>) {
     let Some(obj) = schema.as_object() else {
         if !schema.is_boolean() {
-            problems.push(format!("{at}: a schema is an object or a boolean, got {schema}"));
+            problems.push(format!(
+                "{at}: a schema is an object or a boolean, got {schema}"
+            ));
         }
         return;
     };
@@ -228,16 +305,23 @@ fn lint(root: &Value, schema: &Value, at: &str, problems: &mut Vec<String>) {
             problems.push(format!("{at}: unknown keyword {key}"));
         }
     }
-    let types = ["object", "array", "string", "boolean", "null", "number", "integer"];
+    let types = [
+        "object", "array", "string", "boolean", "null", "number", "integer",
+    ];
     match obj.get("type") {
         None => {}
         Some(Value::String(t)) if types.contains(&t.as_str()) => {}
         Some(Value::Array(all))
-            if all.iter().all(|t| t.as_str().is_some_and(|t| types.contains(&t))) => {}
+            if all
+                .iter()
+                .all(|t| t.as_str().is_some_and(|t| types.contains(&t))) => {}
         Some(other) => problems.push(format!("{at}: bad type {other}")),
     }
     if let Some(req) = obj.get("required") {
-        match req.as_array().map(|a| a.iter().map(Value::as_str).collect::<Option<Vec<_>>>()) {
+        match req
+            .as_array()
+            .map(|a| a.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
+        {
             Some(Some(names)) => {
                 // A `$ref` or a branch may declare the property elsewhere.
                 let declared = obj.get("properties").and_then(Value::as_object);
@@ -259,9 +343,10 @@ fn lint(root: &Value, schema: &Value, at: &str, problems: &mut Vec<String>) {
         }
     }
     if let Some(r) = obj.get("$ref") {
-        let target = r.as_str().and_then(|r| r.strip_prefix("#/")).and_then(|path| {
-            path.split('/').try_fold(root, |s, k| s.get(k))
-        });
+        let target = r
+            .as_str()
+            .and_then(|r| r.strip_prefix("#/"))
+            .and_then(|path| path.split('/').try_fold(root, |s, k| s.get(k)));
         if target.is_none() {
             problems.push(format!("{at}: $ref {r} does not resolve inside the schema"));
         }
@@ -284,7 +369,13 @@ fn lint(root: &Value, schema: &Value, at: &str, problems: &mut Vec<String>) {
         }
     }
     for key in ["anyOf", "oneOf", "allOf"] {
-        for (i, sub) in obj.get(key).and_then(Value::as_array).into_iter().flatten().enumerate() {
+        for (i, sub) in obj
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
             lint(root, sub, &format!("{at}/{key}/{i}"), problems);
         }
     }

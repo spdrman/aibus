@@ -2,13 +2,14 @@
 //!
 //! A run is a child `aibus run --workflow <name> --json` of this process, started with the
 //! permission mode `dont-ask` on the command line, `AIBUS_I_KNOW` removed from its environment,
-//! the `--allow-tool` patterns as its only pre-approvals, and stdin closed, so nothing it does
+//! the `--allow-tool` patterns as its only pre-approvals, and its input on stdin (never on the
+//! command line, where `ps` shows it to other users) which is then closed, so nothing it does
 //! can ask a question that a model could answer. Its NDJSON events (06 section 2) are folded into
 //! the view `run_status` returns. Each child keeps its own session directory, commit log and
 //! redacted transcript; the first one starts on the first `workflow_run`, never earlier.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -516,11 +517,12 @@ impl Runs {
         for pattern in allow_tools {
             cmd.arg("--allow").arg(pattern);
         }
-        cmd.args(["run", "--workflow", name, "--"])
-            .arg(input)
+        // The input goes to the child on stdin (`-`), never as an argument: a command line is
+        // readable by every local user for as long as the child lives, and the input may hold a key.
+        cmd.args(["run", "--workflow", name, "--", "-"])
             .env_remove("AIBUS_I_KNOW")
             .env("AIBUS_MAX_COST_USD", format!("{left}"))
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd
@@ -550,6 +552,14 @@ impl Runs {
         entries.insert(id.clone(), entry.clone());
         drop(entries);
 
+        // Written from a thread of its own: a pipe holds 64 KiB, and a child that exits without
+        // reading it (or is killed) must not leave this call stuck. The write ends with the pipe
+        // (an error here is only that, so it is dropped) and closing it is the child's end of input.
+        let mut stdin = child.stdin.take().expect("piped");
+        let input = input.to_owned();
+        thread::spawn(move || {
+            let _ = stdin.write_all(input.as_bytes());
+        });
         let stdout = child.stdout.take().expect("piped");
         let stderr = child.stderr.take().expect("piped");
         let redactor = redactor.clone();

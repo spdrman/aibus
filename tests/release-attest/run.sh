@@ -267,6 +267,7 @@ case ${STUB_MODE:-} in
   truncate)  "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; print substr($d, 0, length($d) - 3)'; exit 0 ;;
   missing)   read -r first; echo "$first missing"; exit 0 ;;
   wrongsha)  "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^[0-9a-f]{40}/0000000000000000000000000000000000000000/; print $d'; exit 0 ;;
+  extra)     "$REAL_GIT" "$@"; echo junk; exit 0 ;;
   shortsize) "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^([0-9a-f]+ blob )(\d+)/$1.($2+4)/e; print $d'; exit 0 ;;
   *)         exec "$REAL_GIT" "$@" ;;
 esac
@@ -313,7 +314,7 @@ expect "...exec bit kept" test -x "$t/bw/exec.sh" -a ! -x "$t/bw/binary"
 expect "...symlink kept with its exact target" test "$(readlink "$t/bw/link")" = "target dir/"
 # fail closed: a missing object, a short stream, a wrong header sha, a header with a wrong size, a non-zero exit
 tr=$(mkn 600)
-for m in missing truncate wrongsha shortsize fail; do
+for m in missing truncate wrongsha shortsize extra fail; do
   rm -rf "$t/bf-$m"
   refuse "stub git ($m): the copy is refused" env STUB_MODE=$m PATH=$sb:$PATH bash -c ". '$tools/config.sh'; export_tree '$bx' '$tr' '$t/bf-$m'"
 done
@@ -321,6 +322,8 @@ done
 gone=$(printf 'never stored\n' | bg hash-object --stdin)
 trm=$(printf '100644 blob %s\tgone\0' "$gone" | bg mktree -z --missing)
 refuse "a blob missing from the repository aborts the copy" export_tree "$bx" "$trm" "$t/bmiss"
+nulink=$(printf 'a\0b' | bsha)
+refuse "a symlink whose target holds a NUL aborts the copy" export_tree "$bx" "$(printf '120000 blob %s\tl\0' "$nulink" | bg mktree -z)" "$t/bnul"
 # a gitlink is never sent to cat-file
 trg=$(printf '160000 commit %s\tsub\0' 1111111111111111111111111111111111111111 | bg mktree -z --missing); : >"$STUB_LOG"
 PATH=$sb:$PATH export_tree "$bx" "$trg" "$t/bgl" >/dev/null 2>&1

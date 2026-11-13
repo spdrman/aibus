@@ -166,7 +166,45 @@ The signing key is `ssh-ed25519` (public half committed in `packaging/release-at
 fingerprint `SHA256:VqX4OVIeEX8cDiNWiwMIJdcBqZtpGyiUNiOpztMzHT8`); the private half is never
 committed. `attest.sh` looks for the private key at `~/.ssh/aibus-release-attest` with its `.pub`
 beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must sit next to it) or set
-`AIBUS_ATTEST_KEY`. Tests for the
+`AIBUS_ATTEST_KEY`.
+
+**The key has to sign without a prompt.** `attest.sh` signs with `ssh-keygen -Y sign -f <private key path>`,
+and nobody is there to type a passphrase during a 15 minute run, so a passphrase-protected key has to be
+loaded in `ssh-agent`: run `ssh-add ~/.ssh/aibus-release-attest` once before the release. A key in the
+agent signs silently even though the script passes the private key path (checked with a throwaway key:
+with the key in the agent `ssh-keygen -Y sign -f <private path>` signs without asking, without it the same
+command prompts). `release.sh` and `attest.sh` both sign a small scratch file first (same key and namespace,
+`SSH_ASKPASS_REQUIRE=never`, stdin from `/dev/null`) and stop with "the key cannot sign without a prompt:
+load it with ssh-add <key> first" before the container starts. `ssh-keygen` opens `/dev/tty` by itself, so
+the call runs through a small `perl` wrapper that forks and calls `setsid` in the child (a new session has no
+controlling terminal, so it cannot prompt, even when the shell has job control on). The wrapper runs in the
+background and the script waits for it, so INT, TERM or HUP sent to the script alone, or Ctrl-C to the whole
+group, reach it: it sends TERM to the child's session, kills it after 2 seconds, and the script exits 130,
+143 or 129 without leaving an orphan. The wrapper returns the child's exit status, and its own failure shows as "cannot
+detach the terminal for the key check" instead. perl is a prerequisite of both scripts. The real signature
+at the end of `attest.sh` goes through the same wrapper, so a key that dropped out of the agent mid-run
+(`ssh-add -t`, a locked agent) makes it stop with exit 1 and a message to load the key, not prompt. On 0.2.0
+the failure was found out at the very end of a 7 minute attestation.
+
+The signed files are made in a temp directory, copied into a stage directory inside `release-attest/`,
+verified there, the existing files are backed up (to a temp name, renamed only when the copy succeeded),
+and then the two files are renamed into place. Undo acts only on a file whose rename was started: it is
+restored from its backup, or removed when this run created it. A failure or INT/TERM/HUP before the first
+rename (during the copies or the backups) therefore touches nothing in `release-attest/`, and a `--replace`
+keeps the committed attestation byte for byte, mode included. A failed attestation leaves no untracked
+`attestation.json` behind (it used to, and the next run stopped with "the tree is dirty"). If a restore
+itself fails the stage directory is kept (it holds the old copy) and the message says where. SIGKILL cannot
+be caught, so a kill -9 between the two renames can leave a stage directory or a half pair; remove
+`release-attest/.attest-stage.*` then, and delete an untracked `release-attest/attestation.json` by hand
+(`git checkout release-attest` restores tracked files only, it does not remove an untracked one). Ctrl-C to the
+whole group stops `release.sh` with status 130 at every step, and `attest.sh` dies by the signal too, so
+`release.sh` reports "interrupted" and not "did not sign a green run". A TERM sent to `release.sh`'s own PID (not
+the group) during step 4 or 5 leaves `attest.sh` or the e2e running; an untracked `release-attest/` left after it
+makes the next run refuse with "the tree is dirty", as it did before this change: look at `git status` and remove
+it. `release-attest`
+being a regular file is refused up front. A red run keeps its logs in a `mktemp -d` directory and says where.
+
+Tests for the
 tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.
 
 ## The local release gate
@@ -243,7 +281,8 @@ stamp is local and unsigned, the attestation is signed and committed.
 
 ### The release script
 
-`tools/release-gate/release.sh <version> [--dry-run] [--yes] [--closes N] [--host h] [--rerun]` does a
+`tools/release-gate/release.sh <version> [--dry-run] [--yes] [--closes N] [--host h] [--rerun]` (the issue
+flag is `--closes N`, there is no `--issue`; `ssh-add` the key first, see above) does a
 release up to the PR and stops. It never tags, publishes or merges: `publish` in `release.yml` makes
 the tag `v<version>` when the PR lands on `release`.
 
@@ -252,7 +291,8 @@ the tag `v<version>` when the PR lands on `release`.
    version equal to the workspace one means the bump was already made, like 0.2.0 now), or pass
    `--allow-downgrade`; `CHANGELOG.md` has the entry (I write it first); the tree is clean; the key
    exists at `~/.ssh/aibus-release-attest` (or `--key`) and its `.pub` is the one committed in
-   `packaging/release-attest.pub`. The private key is only checked for existing, never read.
+   `packaging/release-attest.pub`. The private key is only checked for existing here; then a scratch
+   file is signed with it to prove it signs without a prompt (the sign preflight, see above).
 2. Cuts `release-prep/v<version>` from `origin/main`.
 3. One commit `Release v<version>`: `version` in `[workspace.package]` in `Cargo.toml` and the path
    crates in `Cargo.lock` (what `lane/version-0.2.0` did). `Formula/aibus.rb` stays, `finalize` renders
@@ -261,12 +301,24 @@ the tag `v<version>` when the PR lands on `release`.
 5. `tools/release-attest/attest.sh`, then it checks the attestation covers the tree the e2e ran on.
 6. Commits `release-attest/`, runs `verify.sh --expect-version <version>` (the check `prepare` makes),
    asks once (`--yes` skips), pushes the branch and runs `gh pr create --base release --title "Release
-   v<version>"`. The body names the attestation, the stamp (tree, host, time) and the tag.
+   v<version>"`. The body names the attestation, the stamp (tree, host, time) and the tag. When the
+   manifest already said the version there is no bump commit: the dry run prints "no bump commit
+   needed, the manifest is already X" and the PR body says so instead of "I bumped the version".
 
 `--dry-run` prints every step and writes, pushes and opens nothing. To review in the PR: the bump
 commit, the attestation (version and tree), the CHANGELOG entry, then merge it myself. The attestation
 runs the same suites as the e2e, so a full release runs them twice; the e2e is the gate for the
-merge, the attestation is the proof for publish. Tests: `bash tests/release-gate/run.sh` (fake e2e,
+merge, the attestation is the proof for publish.
+
+Two things about the PR into `release`. It must be merged with a **merge commit**: squash and rebase
+both fail in `prepare` of `release.yml`, because the pushed commit no longer descends from main's tip
+(GitHub's test merge commit passes). And a PR into `release` does not close its issue, since GitHub
+only closes on merges into the default branch, so `Closes #N` in the body does nothing there: close the
+release issue by hand after the merge.
+
+Timing, measured once on the 0.2.0 run (one run, one host, so a rough guide and not a promise): the e2e
+took 7m17s in the container on mars, and the e2e plus the attestation about 15 minutes in total. Plan
+the key and the terminal for that, not for a quick command. Tests: `bash tests/release-gate/run.sh` (fake e2e,
 fake runner, throwaway key, fake `gh`; no container).
 
 ### Release procedure
@@ -278,7 +330,8 @@ fake runner, throwaway key, fake `gh`; no container).
 * [ ] `tools/release-attest/attest.sh` is green on the commit that goes to `release`, the two files
       are committed, and `tools/release-attest/verify.sh --expect-version <version>` says ok. The
       merge into `release` must leave the same tree (fast-forward, or a merge that changes nothing).
-* [ ] Open a pull request from `main` (or a branch of it) into `release`, and merge it. The merge
+* [ ] Open a pull request from `main` (or a branch of it) into `release`, and merge it with a merge
+      commit (squash and rebase fail in `prepare`). It does not close its issue: close that by hand. The merge
       is the trigger. If `release` does not exist yet, create it once from `main` (the one-time bootstrap; the stamp does not exist for that tree, so the skip is logged): `RELEASE_E2E_SKIP="bootstrap release branch" git push origin main:refs/heads/release`. A branch named `release/...` cannot exist next to `release`, so per-release work uses `release-prep/v<version>`.
 * [ ] Watch the run (`gh run watch`). The run summary says which job stopped it, if any.
 * [ ] When it is green: `main` has the merge commit and `Formula/aibus.rb`, the release has the

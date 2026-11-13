@@ -231,8 +231,9 @@ mod tests {
     /// Closing our handle is not enough: a thread forking elsewhere in this process can hand a
     /// child a copy of the write handle until that child execs, and exec then fails with ETXTBSY
     /// (#232). New forks cannot copy a handle that is already closed, so once one start of the file
-    /// succeeds, none can fail that way. That start is a probe: `AIBUS_FAKE_PROBE` is set for it
-    /// only, and the first line of the script exits 0 when it sees it, so the body never runs, no
+    /// succeeds, none can fail that way. That start is a probe: `--aibus-fake-probe` is its only
+    /// argument (a real run starts with `auth`, and an environment variable would be inherited by
+    /// real runs), and the first line of the script exits 0 when it sees it, so the body never runs, no
     /// file is touched and nothing outlives the wait below.
     #[cfg(unix)]
     fn script(dir: &std::path::Path, body: &str) -> String {
@@ -243,14 +244,14 @@ mod tests {
         let path = dir.join("gcloud-fake");
         std::fs::write(
             &path,
-            format!("#!/bin/sh\n[ -n \"$AIBUS_FAKE_PROBE\" ] && exit 0\n{body}\n"),
+            format!("#!/bin/sh\n[ \"$1\" = --aibus-fake-probe ] && exit 0\n{body}\n"),
         )
         .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut probe = loop {
             match std::process::Command::new(&path)
-                .env("AIBUS_FAKE_PROBE", "1")
+                .arg("--aibus-fake-probe")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -359,7 +360,15 @@ mod tests {
     #[test]
     fn the_readiness_check_of_a_fake_script_leaves_no_trace_under_load() {
         use std::sync::atomic::AtomicBool;
+        // Sets `stop` on every way out, so a panic in `script` does not leave the burners spinning.
+        struct Stop(Arc<AtomicBool>);
+        impl Drop for Stop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
         let stop = Arc::new(AtomicBool::new(false));
+        let _stop_on_exit = Stop(stop.clone());
         let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
         let burners: Vec<_> = (0..cpus * 2)
             .map(|_| {

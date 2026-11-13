@@ -11,7 +11,15 @@ use std::time::Duration;
 
 #[test]
 fn the_readiness_check_of_a_fake_script_leaves_no_trace_under_load() {
+    // Sets `stop` on every way out, so a panic does not leave the busy threads spinning.
+    struct Stop(Arc<AtomicBool>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
     let stop = Arc::new(AtomicBool::new(false));
+    let _stop_on_exit = Stop(stop.clone());
     let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut background = Vec::new();
     // Four threads that fork in a loop, and twice as many busy threads as there are cpus, so a

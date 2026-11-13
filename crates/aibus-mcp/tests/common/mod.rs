@@ -47,7 +47,7 @@ pub fn audit_lines(home: &Xdg) -> Vec<serde_json::Value> {
 pub fn fake_aibus(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
-[ -n "$AIBUS_FAKE_PROBE" ] && exit 0
+[ "$1" = --aibus-fake-probe ] && exit 0
 for last; do :; done
 # The input is the caller's text and a test may plant a key in it on purpose (`echo:<key>`), so the
 # record keeps the shape of the line but not that text, or the secret scan on drop would find the
@@ -123,7 +123,7 @@ esac
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut probe = loop {
         let started = std::process::Command::new(&path)
-            .env("AIBUS_FAKE_PROBE", "1")
+            .arg("--aibus-fake-probe")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

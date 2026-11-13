@@ -44,6 +44,7 @@ done
 step() { echo "== $*" >&2; }
 refuse() { echo "refused: $1" >&2; exit 2; }
 fail() { echo "stopped: $1" >&2; exit 1; }
+interrupted() { echo "interrupted ($1 ended with status $2, a signal)" >&2; exit "$2"; }
 would() { if [ $dry = 1 ]; then echo "   (dry run) would: $*" >&2; return 0; fi; return 1; }
 # a > b by semver precedence (a prerelease sorts below its release)
 semver_gt() {
@@ -103,10 +104,16 @@ if ($p) {
 }
 POSIX::setsid() > 0 or do { warn "setsid: $!\n"; exit 125 }; exec @ARGV or do { warn "exec: $!\n"; exit 125 }'
 dpid=
-detach_sig() { [ -z "$dpid" ] || { kill -TERM "$dpid" 2>/dev/null; wait "$dpid" 2>/dev/null || true; }; exit "$1"; }
+# die_by SIG: clean up, then die BY the signal so a parent shell sees an interrupted child (exit only if it is ignored).
+die_by() {
+  trap - INT TERM HUP EXIT; pf_clean
+  kill -s "$1" $$ 2>/dev/null || true
+  case $1 in INT) exit 130 ;; TERM) exit 143 ;; *) exit 129 ;; esac
+}
+detach_sig() { [ -z "$dpid" ] || { kill -TERM "$dpid" 2>/dev/null || true; wait "$dpid" 2>/dev/null || true; }; die_by "$1"; }
 detach() {
   local rc
-  trap 'detach_sig 130' INT; trap 'detach_sig 143' TERM; trap 'detach_sig 129' HUP
+  trap 'detach_sig INT' INT; trap 'detach_sig TERM' TERM; trap 'detach_sig HUP' HUP
   SSH_ASKPASS_REQUIRE=never perl -e "$DETACH_PL" -- "$@" </dev/null & dpid=$!
   wait "$dpid" && rc=0 || rc=$?
   trap - INT TERM HUP; dpid=
@@ -170,7 +177,10 @@ step "4. full e2e (tree $tkey)"
 if [ $dry = 0 ] && stamp_ok "$tkey" && [ $rerun = 0 ]; then
   echo "   a stamp for this tree exists, reusing it (--rerun to run again)" >&2
 elif would "tools/release-gate/e2e.sh ${host:+--host $host}"; then :
-else "$here/e2e.sh" ${host:+--host "$host"} || fail "the e2e is not green"
+else
+  "$here/e2e.sh" ${host:+--host "$host"} && erc=0 || erc=$?
+  [ "$erc" -lt 128 ] || interrupted "e2e.sh" "$erc"
+  [ "$erc" = 0 ] || fail "the e2e is not green"
 fi
 stamp=$(stamp_file "$tkey")
 if [ $dry = 0 ] && ! stamp_ok "$tkey"; then fail "no e2e stamp for tree $tkey"; fi
@@ -180,7 +190,9 @@ if would "$ATTEST --key $key ${host:+--host $host}"; then :
 else
   replace=; [ -e release-attest/attestation.json ] && replace=--replace
   # shellcheck disable=SC2086
-  "$ATTEST" --key "$key" ${host:+--host "$host"} $replace || fail "attest.sh did not sign a green run"
+  "$ATTEST" --key "$key" ${host:+--host "$host"} $replace && arc=0 || arc=$?
+  [ "$arc" -lt 128 ] || interrupted "attest.sh" "$arc"
+  [ "$arc" = 0 ] || fail "attest.sh did not sign a green run"
   [ "$(jq -r .tree.hash release-attest/attestation.json)" = "$tkey" ] || fail "the attestation covers a different tree than the e2e ran on"
 fi
 

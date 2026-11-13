@@ -77,10 +77,17 @@ if ($p) {
 }
 POSIX::setsid() > 0 or do { warn "setsid: $!\n"; exit 125 }; exec @ARGV or do { warn "exec: $!\n"; exit 125 }'
 dpid=
-detach_sig() { [ -z "$dpid" ] || { kill -TERM "$dpid" 2>/dev/null; wait "$dpid" 2>/dev/null || true; }; exit "$1"; }
+# die_by SIG: clean up, then die BY the signal (not exit 130), so a parent shell sees an interrupted child. The exit
+# afterwards is only for a signal that is ignored.
+die_by() {
+  trap - INT TERM HUP EXIT; cleanup
+  kill -s "$1" $$ 2>/dev/null || true
+  case $1 in INT) exit 130 ;; TERM) exit 143 ;; *) exit 129 ;; esac
+}
+detach_sig() { [ -z "$dpid" ] || { kill -TERM "$dpid" 2>/dev/null || true; wait "$dpid" 2>/dev/null || true; }; die_by "$1"; }
 detach() {
   local rc
-  trap 'detach_sig 130' INT; trap 'detach_sig 143' TERM; trap 'detach_sig 129' HUP
+  trap 'detach_sig INT' INT; trap 'detach_sig TERM' TERM; trap 'detach_sig HUP' HUP
   SSH_ASKPASS_REQUIRE=never perl -e "$DETACH_PL" -- "$@" </dev/null & dpid=$!
   wait "$dpid" && rc=0 || rc=$?
   trap - INT TERM HUP; dpid=
@@ -165,6 +172,8 @@ undo() {
   for i in 0 1; do
     if [ $i = 0 ]; then f=$ATTEST_FILE placed=$placed_0 bak=$bak_0; else f=$ATTEST_FILE.sig placed=$placed_1 bak=$bak_1; fi
     [ "$placed" = 1 ] || continue
+    # an unchanged file needs no restore (a rename that failed leaves it as it was)
+    [ "$bak" = 1 ] && cmp -s "$stage/old.$i" "$out/$f" && continue
     if [ "$bak" = 1 ]; then
       { cp -p "$stage/old.$i" "$stage/restore.$i" && mv -f "$stage/restore.$i" "$out/$f"; } \
         || { keepstage=1; echo "could not restore $out/$f; the old copy is in $stage/old.$i" >&2; }
@@ -179,7 +188,7 @@ leave() {
   if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi
 }
 failmove() { undo; leave; echo "${1:-could not move the signed attestation into $out}" >&2; exit 1; }
-trap 'undo; leave; exit 130' INT; trap 'undo; leave; exit 143' TERM; trap 'undo; leave; exit 129' HUP
+trap 'undo; leave; die_by INT' INT; trap 'undo; leave; die_by TERM' TERM; trap 'undo; leave; die_by HUP' HUP
 cp "$work/$ATTEST_FILE" "$stage/$ATTEST_FILE" && cp "$work/$ATTEST_FILE.sig" "$stage/$ATTEST_FILE.sig" || failmove
 "$here/verify.sh" --signature-only --file "$stage/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || failmove "the signature does not verify against $key.pub"
 for i in 0 1; do

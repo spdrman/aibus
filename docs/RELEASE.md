@@ -195,7 +195,13 @@ keeps the committed attestation byte for byte, mode included. A failed attestati
 `attestation.json` behind (it used to, and the next run stopped with "the tree is dirty"). If a restore
 itself fails the stage directory is kept (it holds the old copy) and the message says where. SIGKILL cannot
 be caught, so a kill -9 between the two renames can leave a stage directory or a half pair; remove
-`release-attest/.attest-stage.*` and `git checkout release-attest` then. `release-attest`
+`release-attest/.attest-stage.*` then, and delete an untracked `release-attest/attestation.json` by hand
+(`git checkout release-attest` restores tracked files only, it does not remove an untracked one). Ctrl-C to the
+whole group stops `release.sh` with status 130 at every step, and `attest.sh` dies by the signal too, so
+`release.sh` reports "interrupted" and not "did not sign a green run". A TERM sent to `release.sh`'s own PID (not
+the group) during step 4 or 5 leaves `attest.sh` or the e2e running; an untracked `release-attest/` left after it
+makes the next run refuse with "the tree is dirty", as it did before this change: look at `git status` and remove
+it. `release-attest`
 being a regular file is refused up front. A red run keeps its logs in a `mktemp -d` directory and says where.
 
 Tests for the

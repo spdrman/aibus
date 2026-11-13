@@ -500,7 +500,7 @@ esac
 exec $realsk "\$@"
 TRD
 chmod +x "$t/third/ssh-keygen"
-r=$t/rel236s; mkrepo "$r"; usegate "$r"; rm -f "$t/sign.count"
+r=$t/rel236s; mkrepo "$r"; usegate "$r"; rm -f "$t/sign.count"; : >"$GH_LOG"
 hang_run group INT "$t/h-step5.out" env PATH="$t/third:$PATH" RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --yes
 expect "release.sh: INT to the group while attest.sh signs (3rd sign call) exits 130" test "$hrc" = 130
 expect "...and does not say attest.sh did not sign a green run" bash -c "! grep -q 'did not sign' '$t/h-step5.out'"

@@ -123,7 +123,7 @@ detach() {
 # Sign preflight: the e2e and the attestation take about 15 minutes, so find out now that the key signs
 # without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation.
 command -v perl >/dev/null || refuse "perl is not installed"
-pf=$(mktemp -d "${TMPDIR:-/tmp}/release-signcheck.XXXXXX") && [ -n "$pf" ] && [ -d "$pf" ] || refuse "could not make a temp directory for the sign check; nothing ran"
+pf=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/release-signcheck.XXXXXX") && [ -n "$pf" ] && [ -d "$pf" ] || refuse "could not make a temp directory for the sign check; nothing ran"
 pf_clean() { rm -f "$pf/probe" "$pf/probe.sig" "$pf/err"; rmdir "$pf" 2>/dev/null || true; }
 trap pf_clean EXIT   # detach_sig exits, which runs this too
 echo preflight >"$pf/probe"
@@ -208,7 +208,7 @@ if [ $yes = 0 ]; then
   [ "$a" = y ] || fail "not confirmed (the commits stay local)"
 fi
 git push -q -u origin "$branch"
-body=$(mktemp "${TMPDIR:-/tmp}/release-pr.XXXXXX") || refuse "could not make a temp file for the PR body; nothing was pushed"
+body=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/release-pr.XXXXXX") || refuse "could not make a temp file for the PR body; nothing was pushed"
 [ -n "$body" ] && [ -f "$body" ] || refuse "the temp file for the PR body is unusable; nothing was pushed"
 trap 'rm -f "$body"' EXIT
 {

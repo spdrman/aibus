@@ -32,6 +32,8 @@ Before a release I run the "every push" rows above as one signed attestation, fe
 and `tools/release-gate/e2e.sh` ("The local release gate" in `docs/RELEASE.md`); the hooks are installed with
 `tools/release-gate/install.sh`.
 
+A red e2e run keeps its container log as `release-e2e-log.*` in the caller's `TMPDIR` on purpose (a container killed for memory shows up as a missing EXIT line there); I delete those by hand once I have read them. The scripts call `/usr/bin/mktemp` by absolute path, so a `mktemp` earlier on `PATH` cannot choose what the exit trap removes.
+
 The conformance row says "both backends when available": the `causl-differential` job in
 `.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and
 differential tests with `--features causl-rs`, plus the side-by-side `commit_stream` bench. The

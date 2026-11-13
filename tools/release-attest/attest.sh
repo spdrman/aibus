@@ -47,7 +47,7 @@ for f in "$ATTEST_FILE" "$ATTEST_FILE.sig"; do
 done
 
 commit=$(git -C "$repo" rev-parse HEAD)
-work=$(mktemp -d "${TMPDIR:-/tmp}/attest.XXXXXX") || { echo "refused: could not make a temp directory; nothing ran" >&2; exit 2; }
+work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/attest.XXXXXX") || { echo "refused: could not make a temp directory; nothing ran" >&2; exit 2; }
 [ -n "$work" ] && [ -d "$work" ] || { echo "refused: the temp directory is unusable; nothing ran" >&2; exit 2; }
 job=attest-aibus-${commit:0:8}-$$
 pushed=0
@@ -144,7 +144,7 @@ att=$(jq -n --argjson s "$suites_json" --arg commit "$commit" --arg kind "$KIND"
             total: ($passed + $failed + $ignored), passed: $passed, failed: $failed, ignored: $ignored}}')
 verdict=$(jq -r .result.verdict <<<"$att")
 if [ "$verdict" != green ]; then
-  keep=$(mktemp -d "${TMPDIR:-/tmp}/attest-logs.XXXXXX") && [ -n "$keep" ] && [ -d "$keep" ] || { echo "not green: $(jq -c .result <<<"$att"); could not make a directory for the logs" >&2; exit 1; }
+  keep=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/attest-logs.XXXXXX") && [ -n "$keep" ] && [ -d "$keep" ] || { echo "not green: $(jq -c .result <<<"$att"); could not make a directory for the logs" >&2; exit 1; }
   cp "$work"/*.log "$keep"/
   echo "not green: $(jq -c .result <<<"$att"); logs kept in $keep" >&2
   exit 1
@@ -165,7 +165,7 @@ detach ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/$ATTEST_FILE" >/dev/n
 # fails the stage directory is kept, it holds the old copy.
 made=0
 if [ ! -d "$out" ]; then mkdir -p "$out" || { echo "could not make $out" >&2; exit 1; }; made=1; fi
-stage=$(mktemp -d "$out/.attest-stage.XXXXXX") && [ -n "$stage" ] && [ -d "$stage" ] || { echo "could not make a stage directory in $out" >&2; if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi; exit 1; }
+stage=$(/usr/bin/mktemp -d "$out/.attest-stage.XXXXXX") && [ -n "$stage" ] && [ -d "$stage" ] || { echo "could not make a stage directory in $out" >&2; if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi; exit 1; }
 keepstage=0 placed_0=0 placed_1=0 bak_0=0 bak_1=0
 undo() {
   local i f placed bak

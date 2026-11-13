@@ -40,7 +40,7 @@ fi
 key=$(tree_key "$tree")
 
 sdir=$(stamp_dir)
-work=$(mktemp -d "${TMPDIR:-/tmp}/release-e2e.XXXXXX") || refuse "could not make a temp directory; nothing ran"
+work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/release-e2e.XXXXXX") || refuse "could not make a temp directory; nothing ran"
 [ -n "$work" ] && [ -d "$work" ] || refuse "the temp directory is unusable; nothing ran"
 job=aibus-reh-${key:0:8}-$$
 pushed=0
@@ -79,13 +79,13 @@ else
   done <<<"$SUITES"
   grep -q '^test result: FAILED' "$work/lane.log" && green=0
   if [ $green = 0 ]; then
-    keep=$(mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX") && cp "$work/lane.log" "$keep" || keep="(could not keep it: mktemp or cp failed)"; echo "log kept in $keep (a container killed for memory shows up as a missing EXIT line)" >&2
+    keep=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX") && cp "$work/lane.log" "$keep" || keep="(could not keep it: mktemp or cp failed)"; echo "log kept in $keep (a container killed for memory shows up as a missing EXIT line)" >&2
   fi
 fi
 
 if [ $green != 1 ]; then echo "e2e RED: no stamp written" >&2; exit 1; fi
 mkdir -p "$sdir"
-tmp=$(mktemp "$sdir/.tmp.XXXXXX") || refuse "could not make the stamp file; no stamp written"
+tmp=$(/usr/bin/mktemp "$sdir/.tmp.XXXXXX") || refuse "could not make the stamp file; no stamp written"
 [ -n "$tmp" ] && [ -f "$tmp" ] || refuse "the stamp file is unusable; no stamp written"
 printf 'tree=%s\ncommand=%s\nhost=%s\nstarted=%s\nfinished=%s\ngate_sha256=%s\n' "$key" "$cmd" "$host" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(gate_hash)" >"$tmp" || { rm -f "$tmp"; refuse "could not write the stamp; no stamp written"; }
 # a stamp has exactly six lines; a short write (disk full) must not become one

@@ -416,6 +416,7 @@ if [ $pty_ok = 1 ]; then
     r=$t/repo61; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
     SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 14 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sleep 5; sh $t/fake.sh" >"$t/pty-d.out" 2>&1; rc=$?
     expect "a key that drops out of the agent mid-run fails the real signature (exit 1), no prompt, no hang" test $rc = 1
+    expect "#252 the key-drop message has no passphrase wording at all (it is not a prompt) and names the exit status" bash -c "! grep -qi 'passphrase' '$t/pty-d.out' && grep -q 'ssh-keygen -Y sign failed (exit [0-9]*)' '$t/pty-d.out'"
     expect "...without a passphrase prompt text, with a message to load the key, and a clean tree" bash -c "! grep -qi 'enter passphrase' '$t/pty-d.out' && grep -q 'ssh-add' '$t/pty-d.out' && [ -z \"\$(git -C '$r' status --porcelain)\" ]"
     SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
   fi
@@ -615,6 +616,22 @@ for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
   expect "attest.sh, $2 to the $1 during a hung preflight: exit $3" test "$hrc" = "$3"
   expect "...no wrong message, no orphan (the stub and the wrapper are gone)" bash -c "! grep -q 'the key cannot sign\|ssh-keygen exited' '$t/h-$1-$2.out'" 
   expect "...the hung ssh-keygen and its wrapper are gone" gone
+done
+
+# #252: a ssh-keygen that ignores TERM/INT/HUP is KILLed after the grace period, and the exit codes stay 130/143/129
+mkdir "$t/ignbin"
+cat >"$t/ignbin/ssh-keygen" <<IGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) trap '' INT TERM HUP; echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; sleep 30 ;; esac
+exec "$realsk" "\$@"
+IGS
+chmod +x "$t/ignbin/ssh-keygen"
+r=$t/repo91; mkrepo "$r" 1.2.3
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/i-$1-$2.out" env PATH="$t/ignbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"
+  expect "#252 attest.sh, $2 to the $1 with a child that ignores it: exit $3 within 8 s" test "$hrc" = "$3"
+  expect "...the child that ignored the signal and its wrapper are gone" gone
 done
 
 # ---------- fourth review of #242: a signal after the wrapper is gone, and a restore that was never needed

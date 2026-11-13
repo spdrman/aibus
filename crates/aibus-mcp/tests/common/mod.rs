@@ -52,7 +52,7 @@ for last; do :; done
 # record keeps the shape of the line but not that text, or the secret scan on drop would find the
 # fake's own copy of it.
 case "$last" in
-  echo:*) { for a; do [ "$a" = "$last" ] && printf 'echo:<input kept out of this file>\n' || printf '%s\n' "$a"; done; } > "DIR/argv.txt" ;;
+  echo:*|leak:*) { for a; do [ "$a" = "$last" ] && printf '%s:<input kept out of this file>\n' "${last%%:*}" || printf '%s\n' "$a"; done; } > "DIR/argv.txt" ;;
   *) printf '%s\n' "$@" > "DIR/argv.txt" ;;
 esac
 env > "DIR/env.txt"
@@ -92,6 +92,22 @@ case "$last" in
     fin L1 completed 1 1 0.01 "echoed $last, then the last line of the report"
     ev '{"type":"SessionEnd","session":"SESSION1","exit_code":0}'
     exit 0 ;;
+  leak:*)
+    # The input after `leak:` is a key. It comes back in every string a child event can carry (a
+    # step's name, status and failure, the session, a stray failure, the stream and the summary),
+    # with the padding that makes the failure and the stream cut the key in two.
+    key="${last#leak:}"
+    pad=$(printf 'x%.0s' $(seq 1 280))
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    ev '{"type":"RunStarted","run":"C1","agent":"'"$key"'"}'
+    ev '{"type":"RunFailed","run":"C1","kind":"provider","message":"'"$pad$key"' and more"}'
+    ev '{"type":"RunFinished","run":"C1","status":"'"$key"'","turns":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":0.01},"summary":"s"}'
+    ev '{"type":"RunFailed","run":"NOSUCH","kind":"provider","message":"'"$key"'"}'
+    pad=$(printf 'y%.0s' $(seq 1 4080))
+    ev '{"type":"Stream","text":"'"$key $pad"'\n"}'
+    fin L1 failed 1 1 0.01 "gave up on $key"
+    ev '{"type":"SessionEnd","session":"'"$key"'","exit_code":1}'
+    exit 1 ;;
   loud)
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     i=0

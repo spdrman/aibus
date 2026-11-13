@@ -246,6 +246,36 @@ fn a_step_that_echoes_a_key_never_reaches_the_log_resource() {
 }
 
 #[test]
+fn a_key_in_any_string_a_child_reports_never_reaches_a_client() {
+    let rig = rig();
+    let (run, status) = rig.finished(&format!("leak:{KEY}"));
+    let (_, log) = rig.read(&format!("aibus://runs/{run}/log"));
+    let (_, json) = rig.read(&format!("aibus://runs/{run}"));
+    // The failure is cut at 300 bytes and the stream at 4 KiB, and both cuts land inside the key,
+    // so a key found only at the edge would leave a piece of it behind: no piece may show.
+    for (what, text) in [("log", log), ("status", json), ("tool", status.to_string())] {
+        for piece in ["Zq8wLm2X", "Gf9Jk3P", "sk-ant-api03"] {
+            assert!(!text.contains(piece), "{what} shows {piece}: {text}");
+        }
+    }
+    // The fields are still there, only the key is gone.
+    let attempt = &status["attempts"][0];
+    assert!(
+        attempt["failure"].as_str().unwrap().starts_with("xxxx"),
+        "{status}"
+    );
+    assert!(status["session"].is_string(), "{status}");
+    assert_eq!(status["exit_code"], 1);
+    // The fake keeps the key out of its argv record, so the scan on drop has nothing of the
+    // test's own making.
+    let argv = fs::read_to_string(rig.home.path().join("fake/argv.txt")).unwrap();
+    assert!(
+        argv.contains("leak:<input kept out of this file>"),
+        "{argv}"
+    );
+}
+
+#[test]
 #[should_panic(expected = "a secret reached")]
 fn the_scan_still_finds_a_key_in_any_other_file_the_fake_wrote() {
     let rig = rig();

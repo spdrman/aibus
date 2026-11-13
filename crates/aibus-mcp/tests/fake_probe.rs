@@ -71,3 +71,22 @@ fn the_readiness_check_of_a_fake_script_leaves_no_trace_under_load() {
         &left[..left.len().min(3)]
     );
 }
+
+#[test]
+fn a_real_run_still_runs_when_the_caller_has_the_probe_marker_in_its_environment() {
+    // A real run is started by product code, which passes the caller's environment on, so the
+    // marker of the readiness check must not be something a caller's environment can carry.
+    let dir = aibus_testkit::xdg_temp();
+    let fake = common::fake_aibus(dir.path());
+    let status = std::process::Command::new(&fake)
+        .args(["--cwd", "/", "--json", "--", "ok"])
+        .env("AIBUS_FAKE_PROBE", "1")
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(
+        dir.path().join("argv.txt").exists(),
+        "the fake exited before its body ran"
+    );
+}

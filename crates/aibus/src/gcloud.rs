@@ -403,6 +403,23 @@ mod tests {
         );
     }
 
+    /// #232: a real run is started by product code with the caller's environment, so the marker of
+    /// the readiness check in `script` must not be something that environment can carry.
+    #[cfg(unix)]
+    #[test]
+    fn a_real_run_still_runs_when_the_caller_has_the_probe_marker_in_its_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran");
+        let fake = script(dir.path(), &format!(": > {}", marker.display()));
+        let status = std::process::Command::new(&fake)
+            .args(["auth", "print-access-token"])
+            .env("AIBUS_FAKE_PROBE", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(marker.exists(), "the fake exited before its body ran");
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_runner_gives_up_after_its_timeout_and_never_echoes_stderr() {

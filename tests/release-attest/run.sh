@@ -276,6 +276,7 @@ case " \$* " in *" -Y sign "*)
   case \${SK_MODE:-ok} in
     nosign) echo "incorrect passphrase supplied to decrypt private key" >&2; exit 255 ;;
     late) [ "\$c" = 1 ] || exit 255 ;;   # the preflight signs, the real signing fails
+    werr) [ "\$c" = 1 ] || { echo "Couldn't write signature: No space left on device" >&2; echo "Enter passphrase for key: incorrect passphrase supplied" >&2; exit 255; } ;;
     junk) [ "\$c" = 1 ] || { for a; do f=\$a; done; echo junk >"\$f.sig"; exit 0; } ;;
   esac ;;
 esac
@@ -317,6 +318,13 @@ expect "a signing failure after the run exits 1" test $rc = 1
 expect "...leaves no unsigned attestation.json or .sig" bash -c "[ ! -e '$r/release-attest/attestation.json' ] && [ ! -e '$r/release-attest/attestation.json.sig' ]"
 expect "...and the tree is clean" test -z "$(git -C "$r" status --porcelain)"
 expect "...so the next run goes through" sk_attest ok "$r" --runner-cmd "sh $t/fake.sh"
+# issue #260: a signing failure keeps its reason (minus any line that mentions a passphrase)
+r=$t/repo23b; mkrepo "$r" 1.2.3
+sk_attest werr "$r" --runner-cmd "sh $t/fake.sh" >"$t/werr.out" 2>&1; rc=$?
+expect "#260 a signing failure after the run still exits 1" test $rc = 1
+expect "#260 ...and the message carries the reason ssh-keygen gave" grep -q 'No space left on device' "$t/werr.out"
+expect "#260 ...without any line that mentions a passphrase" bash -c "! grep -qi passphrase '$t/werr.out'"
+expect "#260 ...and still says to load the key with ssh-add" grep -q 'ssh-add' "$t/werr.out"
 r=$t/repo24; mkrepo "$r" 1.2.3
 sk_attest junk "$r" --runner-cmd "sh $t/fake.sh" >/dev/null 2>&1; rc=$?
 expect "a signature that does not verify exits 1" test $rc = 1
@@ -356,6 +364,9 @@ pty_attest() { # keyfile : attest.sh as a terminal user with the given key and N
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 6 "$tools/attest.sh" --repo "$r" --key "$1" --runner-cmd "sh $t/fake.sh" )
 }
 if [ $pty_ok = 1 ]; then
+  # issue #260: an argument with a newline or a tab reaches the command intact even when SHELL is dash (util-linux script runs -c through $SHELL)
+  SHELL=/bin/sh pty_run 5 bash -c 'printf %s "$1" >"$2"' _ $'a\nb\tc' "$t/pty-arg.out" >/dev/null 2>&1
+  expect "#260 pty_run passes a newline and a tab in an argument through unchanged, SHELL=/bin/sh" test "$(cat "$t/pty-arg.out" 2>/dev/null)" = $'a\nb\tc'
   r=$t/repo30; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
   pty_attest "$t/pkey" >"$t/pty1.out" 2>&1; rc=$?
   expect "from a terminal, a passphrase key that is not loaded is refused at once (exit 2, no hang)" test $rc = 2
@@ -709,6 +720,18 @@ done
 cp_case c20 0 MV_FAIL=1 CP_FAILSRC='*/old.*'
 expect "a failed 1st rename and a failing cp: exits 1, nothing changed, no stage directory left" bash -c "test $rc = 1 && test '$before' = '$after' && ! ls -A '$r/release-attest' | grep -q stage"
 expect "...and the message does not claim a failed restore" bash -c "! grep -q 'could not restore' '$t/cpc-c20.out'"
+
+# ---------- issue #260: verify.sh reads the attestation, the signature and the public key without replace refs
+for what in attestation signature pubkey; do
+  r=$t/rv260-$what; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"
+  case $what in
+    attestation) path=$ATTEST_DIR/$ATTEST_FILE; swap=$(jq '.result.passed = 1' "$r/$path" | git -C "$r" hash-object -w --stdin) ;;
+    signature)   path=$ATTEST_DIR/$ATTEST_FILE.sig; swap=$(echo junk | git -C "$r" hash-object -w --stdin) ;;
+    pubkey)      path=$PUBKEY_PATH; swap=$(git -C "$r" hash-object -w "$t/other.pub") ;;
+  esac
+  git -C "$r" replace "$(git -C "$r" rev-parse "HEAD:$path")" "$swap"
+  expect "#260 a replace ref on the $what: verify still reads the genuine bytes and passes" verify "$r" --expect-version 1.2.3
+done
 
 spy_hits=$(grep -E '/(release-e2e|release-e2e-log|\.tmp|release-signcheck|release-pr|release-gate-head|release-prepush|attest|attest-logs|\.attest-stage|attest-verify)\.XXXXXX|\.ls\.XXXXXX' "$SPY_LOG" 2>/dev/null)
 expect "no gate script called the mktemp found on PATH (all of them use /usr/bin/mktemp)" test -z "$spy_hits"

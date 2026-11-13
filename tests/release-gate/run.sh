@@ -3,11 +3,15 @@
 # a fake e2e command, a fake attest runner and a fake `gh` on PATH. No container, no cargo, no real e2e.
 # Needs bash, git, jq, perl and ssh-keygen.
 set -u
+# Start from a known environment: whatever the calling shell exported for the gate must not change a result.
+unset RELEASE_E2E_HOST RELEASE_E2E_SKIP RELEASE_E2E_CMD RELEASE_E2E_TEST_STAMPS RELEASE_GATE_TEST RELEASE_ATTEST_SH DH_HOST DH_CPUS DH_MEMORY DH_UNFENCED
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/../.." && pwd)
 t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
+# Everything the runs create (log files, kept log directories) goes under $t, which the trap above removes.
+mkdir "$t/tmp" && export TMPDIR=$t/tmp || exit 1
 # No test may reach the real dh.sh (or docker, or ssh): DH_SH points at a stub that logs the call and fails.
 # Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
 printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
@@ -436,6 +440,64 @@ mkdir -p "$t/badperl"; realperl=$(command -v perl)
 printf '#!/bin/sh\ncase "$*" in *length*) printf x ;; *) exec %s "$@" ;; esac\n' "$realperl" >"$t/badperl/perl"; chmod +x "$t/badperl/perl"
 refuse "a character count that is not a number refuses the skip (e2e.sh, gate_skipped)" env PATH="$t/badperl:$PATH" RELEASE_E2E_SKIP="a perfectly long reason" tools/release-gate/e2e.sh
 refuse "...and in the push hook" bash -c "printf 'refs/heads/x %s refs/heads/release %s\n' '$fu_l' '$fu_t' | env PATH='$t/badperl:$PATH' RELEASE_E2E_SKIP='a perfectly long reason' bash .githooks/pre-push origin url"
+# ---------- #234: the skip reason rule (non-blank code points, same as the causl gates)
+# one codepoint repeated: cp HEX COUNT. Needs no locale: perl writes the UTF-8 bytes itself.
+cp() { perl -CO -e 'print chr(hex($ARGV[0])) x $ARGV[1]' "$1" "$2"; }
+mkdir -p "$t/ska" && cp_topic=topicsk
+git switch -q release 2>/dev/null; git reset -q --hard
+git switch -q -c $cp_topic; echo sk >sk.txt; git add sk.txt; git commit -qm sk; git switch -q release; echo skr >skr.txt; git add skr.txt; git commit -qm skr
+sk_head=$(git rev-parse HEAD)
+sk_l=$(git rev-parse HEAD); sk_t=$(git rev-parse origin/release)
+sk_push() { printf 'refs/heads/x %s refs/heads/release %s\n' "$sk_l" "$sk_t" | env LC_ALL="$1" RELEASE_E2E_SKIP="$2" bash .githooks/pre-push origin url; }
+sk_merge() { local rc; env LC_ALL="$1" RELEASE_E2E_SKIP="$2" git merge --no-ff -q -m m $cp_topic; rc=$?; git merge --abort 2>/dev/null; git reset -q --hard "$sk_head"; return $rc; }
+sk_gate() { env LC_ALL="$1" RELEASE_E2E_SKIP="$2" tools/release-gate/e2e.sh; }
+sk_each() { # name, expect|refuse, locale, reason: the push hook, the merge hook and gate_skipped all judge it the same way
+  local name=$1 verdict=$2 loc=$3 reason=$4
+  $verdict "[$loc] $name (push hook)" sk_push "$loc" "$reason"
+  $verdict "[$loc] $name (merge hook)" sk_merge "$loc" "$reason"
+  $verdict "[$loc] $name (gate_skipped)" sk_gate "$loc" "$reason"
+}
+for loc in C en_US.UTF-8; do
+  sk_each "a, ten spaces, b is refused" refuse $loc "a          b"
+  sk_each "a plus eleven U+0301 is refused" refuse $loc "a$(cp 301 11)"
+  for u in fff9 fffa fffb e000 0378 0600 13430 1d159 e0100 1d173 1bca0 200d 2800; do
+    sk_each "twelve U+$u are refused" refuse $loc "$(cp $u 12)"
+    sk_each "ab plus ten U+$u are refused" refuse $loc "ab$(cp $u 10)"
+  done
+  sk_each "bootstrap the gate passes" expect $loc "bootstrap the gate"
+  sk_each "cafe with an accent passes" expect $loc "caf$(cp e9 1) bootstrap"
+  sk_each "punctuation passes" expect $loc "bootstrap: gate, now (once)."
+  sk_each "U+FFFC and U+FFFD count as characters" expect $loc "ab$(cp fffc 5)$(cp fffd 5)"
+  sk_each "PERL5OPT=-CSD does not break a reason with an accent" expect $loc "$(PERL5OPT=-CSD; printf 'caf\303\251 gate bootstrap now')"
+done
+# PERL5OPT in the environment of the hook itself (the previous row only exported it for the printf)
+refuse "PERL5OPT=-CSD in the hook's environment still refuses twelve zero-width joiners (push)" env PERL5OPT=-CSD bash -c "$(declare -f cp sk_push); sk_push C \"\$(cp 200d 12)\""
+expect "PERL5OPT=-CSD in the hook's environment still passes an accented reason (push)" env PERL5OPT=-CSD bash -c "$(declare -f sk_push); sk_l=$sk_l; sk_t=$sk_t; sk_push C \"\$(printf 'caf\\303\\251 gate bootstrap now')\""
+# the two one-liners are the same bytes in the three places
+norm_of() { grep -o "perl -T -C0 -e 'use Encode qw(decode FB_CROAK);.*print \$d;'" "$1"; }
+count_of() { grep -o "perl -T -C0 -e 'use Encode qw(decode); local.*print length(\$d);'" "$1"; }
+for fn in norm_of count_of; do
+  a=$($fn "$src/.githooks/pre-push"); b=$($fn "$src/.githooks/pre-merge-commit"); c=$($fn "$src/tools/release-gate/lib.sh")
+  expect "$fn finds exactly one line in each file" bash -c '[ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] && [ "$(printf "%s\n" "$1" | wc -l)" -eq 1 ]' _ "$a" "$b" "$c"
+  expect "$fn is byte-identical in pre-push, pre-merge-commit and lib.sh" bash -c '[ "$1" = "$2" ] && [ "$2" = "$3" ]' _ "$a" "$b" "$c"
+done
+git reset -q --hard "$sk_head"
+
+# ---------- #235: the runners start from a clean environment and keep their files inside their own temp dir
+for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  mkdir -p "$t/hdr/a/b" "$t/hdr/outer"
+  { sed -n '/^set -u$/,/^export DH_SH=/p' "$src/$runner" | grep -v -e '^here=' -e '^src=' -e '^tools=' -e '^\. "\$tools' -e '^export DH_SH='
+    echo 'env | grep -E "^(RELEASE_|DH_)" | grep -v "^DH_SH=" | sed "s/^/LEAK /"'
+    echo 'case $TMPDIR in "$t"/*) echo inside ;; *) echo "outside $TMPDIR" ;; esac'
+    echo 'mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX" >/dev/null; mkdir -p "${TMPDIR:-/tmp}/attest-logs-$$"'
+  } >"$t/hdr/a/b/head.sh"
+  out=$(env -u DH_SH -u DH_REAL_LOG RELEASE_E2E_HOST=x RELEASE_E2E_SKIP=x RELEASE_E2E_CMD=x RELEASE_E2E_TEST_STAMPS=x RELEASE_GATE_TEST=x RELEASE_ATTEST_SH=x DH_HOST=x DH_CPUS=1 DH_MEMORY=1g DH_UNFENCED=1 TMPDIR="$t/hdr/outer" bash "$t/hdr/a/b/head.sh" 2>&1)
+  expect "$runner: variables exported by the caller are gone before the first test" bash -c '! printf "%s\n" "$1" | grep -q LEAK' _ "$out"
+  expect "$runner: TMPDIR for the run is inside its own temp dir" bash -c 'printf "%s\n" "$1" | grep -qx inside' _ "$out"
+  expect "$runner: nothing is left in the caller's TMPDIR afterwards" test -z "$(ls -A "$t/hdr/outer")"
+  rm -rf "$t/hdr"
+done
+
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 [ $fails = 0 ] || tail -8 "$t/green.out" >&2

@@ -9,7 +9,7 @@
 set -eu
 unset GIT_COMMON_DIR   # a hook inherits git's; a decoy must not redirect us
 [ "$(git symbolic-ref --short -q HEAD || true)" = release ] || exit 0
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-head.XXXXXX") || { echo "pre-merge-commit: cannot make a temp directory; refusing the merge." >&2; exit 1; }
+tmp=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/release-gate-head.XXXXXX") || { echo "pre-merge-commit: cannot make a temp directory; refusing the merge." >&2; exit 1; }
 trap 'rm -rf "$tmp"' EXIT
 [ -n "$tmp" ] && [ -d "$tmp" ] || { echo "pre-merge-commit: the temp directory is unusable; refusing the merge." >&2; exit 1; }
 mat() { # plain files of the gate at HEAD, attributes ignored

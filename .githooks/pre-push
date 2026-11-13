@@ -17,7 +17,7 @@
 set -eu
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE   # a hook inherits git's; a decoy must not redirect us
 zero=0000000000000000000000000000000000000000
-gate=$(mktemp -d "${TMPDIR:-/tmp}/release-prepush.XXXXXX") || { echo "pre-push: cannot make a temp directory; refusing" >&2; exit 1; }
+gate=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/release-prepush.XXXXXX") || { echo "pre-push: cannot make a temp directory; refusing" >&2; exit 1; }
 trap 'rm -rf "$gate"' EXIT
 no() { echo "pre-push: refusing to push to release: $*" >&2; exit 1; }
 [ -n "$gate" ] && [ -d "$gate" ] || no "the temp directory is unusable."

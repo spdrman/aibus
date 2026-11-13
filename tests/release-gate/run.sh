@@ -636,7 +636,7 @@ for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
     echo 'case $TMPDIR in "$t"/*) echo inside ;; *) echo "outside $TMPDIR" ;; esac'
     echo '/usr/bin/mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX" >/dev/null; mkdir -p "${TMPDIR:-/tmp}/attest-logs-$$"'
   } >"$t/hdr/a/b/head.sh"
-  out=$(env -u DH_SH -u DH_REAL_LOG RELEASE_E2E_HOST=x RELEASE_E2E_SKIP=x RELEASE_E2E_CMD=x RELEASE_E2E_TEST_STAMPS=x RELEASE_GATE_TEST=x RELEASE_ATTEST_SH=x DH_HOST=x DH_CPUS=1 DH_MEMORY=1g DH_UNFENCED=1 TMPDIR="$t/hdr/outer" bash "$t/hdr/a/b/head.sh" 2>&1)
+  out=$(env -u DH_SH -u DH_REAL_LOG PATH="${PATH#"$t/spybin:"}" RELEASE_E2E_HOST=x RELEASE_E2E_SKIP=x RELEASE_E2E_CMD=x RELEASE_E2E_TEST_STAMPS=x RELEASE_GATE_TEST=x RELEASE_ATTEST_SH=x DH_HOST=x DH_CPUS=1 DH_MEMORY=1g DH_UNFENCED=1 TMPDIR="$t/hdr/outer" bash "$t/hdr/a/b/head.sh" 2>&1)
   expect "$runner: variables exported by the caller are gone before the first test" bash -c '! printf "%s\n" "$1" | grep -q LEAK' _ "$out"
   expect "$runner: TMPDIR for the run is inside its own temp dir" bash -c 'printf "%s\n" "$1" | grep -qx inside' _ "$out"
   expect "$runner: nothing is left in the caller's TMPDIR afterwards" test -z "$(ls -A "$t/hdr/outer")"

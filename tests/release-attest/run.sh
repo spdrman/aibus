@@ -102,7 +102,7 @@ refuse "no attestation is refused" verify "$r"
 lane_case() { # suites [name, default a] -> prints suite_exit of that suite
   local saved=$SUITES nonce log
   nonce=$(new_nonce); SUITES=${1//@NONCE@/$nonce}
-  log=$(mktemp "${TMPDIR:-/tmp}/lane.XXXXXX")
+  log=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/lane.XXXXXX")
   sh -c "$(lane_script "$nonce")" >"$log" 2>&1
   suite_exit "$log" "${2:-a}" "$nonce"; rm -f "$log"; SUITES=$saved
 }

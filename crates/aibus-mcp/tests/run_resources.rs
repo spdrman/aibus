@@ -301,7 +301,7 @@ fn a_key_in_the_stream_is_gone_when_the_4_kib_window_starts_inside_it() {
         status["tail"]
             .as_str()
             .unwrap()
-            .contains("yyyyyyyyyyyyyyyy"),
+            .contains("................"),
         "{status}"
     );
 }
@@ -313,7 +313,7 @@ fn a_key_in_the_summary_is_gone_when_the_4_kib_window_starts_inside_it() {
         status["tail"]
             .as_str()
             .unwrap()
-            .contains("yyyyyyyyyyyyyyyy"),
+            .contains("................"),
         "{status}"
     );
 }
@@ -325,7 +325,7 @@ fn a_key_in_the_failure_of_a_run_that_is_no_attempt_is_gone_when_the_window_star
         status["tail"]
             .as_str()
             .unwrap()
-            .contains("yyyyyyyyyyyyyyyy"),
+            .contains("................"),
         "{status}"
     );
 }

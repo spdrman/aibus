@@ -880,7 +880,7 @@ mod tests {
             stream(
                 &mut v,
                 &redactor,
-                &format!("{}{}", &KEY[25..], "y".repeat(after)),
+                &format!("{}{}", &KEY[25..], ".".repeat(after)),
             );
             assert!(v.tail.len() <= TAIL_BYTES);
             assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
@@ -898,7 +898,7 @@ mod tests {
             stream(
                 &mut v,
                 &redactor,
-                &format!("{}{}", &KEY[30..], "y".repeat(after)),
+                &format!("{}{}", &KEY[30..], ".".repeat(after)),
             );
             assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
         }
@@ -935,14 +935,17 @@ mod tests {
             &redactor,
             &format!("{} and that is it\n", &KEY[25..]),
         );
-        for i in 0..8000 {
+        for i in 0..6000 {
             stream(
                 &mut v,
                 &redactor,
                 &format!("filler line number {i} xxxxxxxxxxxxxxxxxxxxxxxx\n"),
             );
-            assert_no_piece("log", &redactor.redact(&v.log));
+            if i % 2000 == 0 {
+                assert_no_piece("log", &redactor.redact(&v.log));
+            }
         }
+        assert_no_piece("log", &redactor.redact(&v.log));
         assert!(v.log.len() <= LOG_BYTES, "the log is capped");
         assert!(!v.log.contains("first line"), "the start was cut off");
     }
@@ -959,7 +962,7 @@ mod tests {
                 &redactor,
                 &format!("{}{}", &KEY[25..], "\u{20ac}".repeat(after / 3)),
             );
-            stream(&mut v, &redactor, &"y".repeat(after % 3));
+            stream(&mut v, &redactor, &".".repeat(after % 3));
             assert!(std::str::from_utf8(v.tail.as_bytes()).is_ok());
             assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
         }

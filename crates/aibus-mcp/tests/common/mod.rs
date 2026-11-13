@@ -113,7 +113,7 @@ case "$input" in
     # into it: 100 before, 4070 after, a newline, and the 3 bytes the summary `s` adds.
     key="${input#leakstream:}"
     before=$(printf 'x%.0s' $(seq 1 100))
-    after=$(printf 'y%.0s' $(seq 1 4070))
+    after=$(printf '.%.0s' $(seq 1 4070))
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     ev '{"type":"Stream","text":"'"$before$key$after"'\n"}'
     fin L1 failed 1 1 0.01 s
@@ -123,7 +123,7 @@ case "$input" in
     # The key at the start of the lead's summary, which is 4115 bytes, so the window starts 20
     # bytes into the key (the summary is pushed as a newline, the text, a newline).
     key="${input#leaksummary:}"
-    after=$(printf 'y%.0s' $(seq 1 4073))
+    after=$(printf '.%.0s' $(seq 1 4073))
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     fin L1 failed 1 1 0.01 "$key$after"
     ev '{"type":"SessionEnd","session":"SESSION1","exit_code":1}'
@@ -132,7 +132,7 @@ case "$input" in
     # The same for a failure of a run that is not an attempt, which goes to the report (4113 bytes
     # with the two newlines the empty summary adds).
     key="${input#leakstray:}"
-    after=$(printf 'y%.0s' $(seq 1 4071))
+    after=$(printf '.%.0s' $(seq 1 4071))
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     ev '{"type":"RunFailed","run":"NOSUCH","kind":"provider","message":"'"$key$after"'"}'
     fin L1 failed 1 1 0.01 ""
@@ -142,7 +142,7 @@ case "$input" in
     # The key in pieces over two or three stream events, as a streamed key arrives, with the
     # window of the tail starting 20 bytes into it (`splitnear` has nothing after it, so no cut).
     key="${input#*:}"
-    after=$(printf 'y%.0s' $(seq 1 4070))
+    after=$(printf '.%.0s' $(seq 1 4070))
     [ "${input%%:*}" = splitnear ] && after=z
     c() { printf '%s' "$key" | cut -c"$1"; }
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'

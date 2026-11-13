@@ -255,6 +255,76 @@ expect "no list file is left next to a destination" test -z "$(ls "$t" | grep -e
 r=$t/repo17; mkrepo "$r" 1.2.3
 expect "the attestation tree hash is still the tree id without release-attest/" test "$(tree_hash "$r" HEAD)" = "$(git -C "$r" rev-parse 'HEAD^{tree}')"
 
+# ---------- sign preflight, cleanup after a failed attestation, kept logs (issue 236)
+# A stub ssh-keygen: `-Y sign` is logged and behaves by SK_MODE, everything else goes to the real one.
+# Throwaway keys only; the real ssh-keygen never sees a key outside $t.
+realsk=$(command -v ssh-keygen); mkdir "$t/skbin"
+cat >"$t/skbin/ssh-keygen" <<SKS
+#!/bin/sh
+case " \$* " in *" -Y sign "*)
+  echo "askpass=\${SSH_ASKPASS_REQUIRE:-unset} tty=\$([ -t 0 ] && echo yes || echo no) args=\$*" >>"\$SK_LOG"
+  c=\$(wc -l <"\$SK_LOG" | tr -d ' ')
+  case \${SK_MODE:-ok} in
+    nosign) echo "incorrect passphrase supplied to decrypt private key" >&2; exit 255 ;;
+    late) [ "\$c" = 1 ] || exit 255 ;;   # the preflight signs, the real signing fails
+    junk) [ "\$c" = 1 ] || { for a; do f=\$a; done; echo junk >"\$f.sig"; exit 0; } ;;
+  esac ;;
+esac
+exec "$realsk" "\$@"
+SKS
+chmod +x "$t/skbin/ssh-keygen"
+export SK_LOG=$t/sk.log
+cat >"$t/dh-pf.sh" <<'DHP'
+#!/bin/sh
+echo "$*" >>"$DH_PF_LOG"
+exit 1
+DHP
+chmod +x "$t/dh-pf.sh"
+sk_attest() { # mode repo [extra args]: the real dh path (stub dh.sh), the stub ssh-keygen
+  local m=$1 r=$2; shift 2
+  : >"$SK_LOG"; PATH="$t/skbin:$PATH" SK_MODE=$m DH_PF_LOG="$t/dh-pf.log" DH_SH="$t/dh-pf.sh" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" "$@"
+}
+r=$t/repo20; mkrepo "$r" 1.2.3; : >"$t/dh-pf.log"
+sk_attest nosign "$r" >"$t/pf.out" 2>&1; rc=$?
+expect "a key that cannot sign without a prompt is refused (exit 2)" test $rc = 2
+expect "...with the ssh-add hint" grep -q 'the key cannot sign without a prompt: load it with ssh-add .*key first' "$t/pf.out"
+expect "...before any dh.sh call" test ! -s "$t/dh-pf.log"
+expect "...leaving the tree clean and no release-attest/" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && [ ! -e '$r/release-attest' ]"
+expect "the preflight signs with SSH_ASKPASS_REQUIRE=never, no tty, the namespace and the key" grep -q "askpass=never tty=no args=.*-f $t/key -n $NAMESPACE" "$t/sk.log"
+mkdir "$t/tmp20"; TMPDIR=$t/tmp20 sk_attest nosign "$r" >/dev/null 2>&1
+expect "a refused preflight leaves nothing in TMPDIR" test -z "$(ls "$t/tmp20")"
+r=$t/repo21; mkrepo "$r" 1.2.3; : >"$t/dh-pf.log"
+sk_attest ok "$r" --runner-cmd "sh $t/fake.sh" >/dev/null 2>&1; rc=$?
+expect "when the key can sign the preflight lets the run continue and sign" test $rc = 0 -a -f "$r/release-attest/attestation.json.sig"
+expect "...and the key was asked twice (preflight, then the real signature)" test "$(wc -l <"$t/sk.log" | tr -d ' ')" = 2
+r=$t/repo22; mkrepo "$r" 1.2.3
+printf 'touch %s\n' "$t/ran.marker" >"$t/mark.sh"
+sk_attest nosign "$r" --runner-cmd "sh $t/mark.sh" >/dev/null 2>&1
+expect "the runner never starts when the preflight fails" test ! -e "$t/ran.marker"
+# a failure at the real signature removes what the script wrote, so the next run is not 'dirty'
+r=$t/repo23; mkrepo "$r" 1.2.3
+sk_attest late "$r" --runner-cmd "sh $t/fake.sh" >/dev/null 2>&1; rc=$?
+expect "a signing failure after the run exits 1" test $rc = 1
+expect "...leaves no unsigned attestation.json or .sig" bash -c "[ ! -e '$r/release-attest/attestation.json' ] && [ ! -e '$r/release-attest/attestation.json.sig' ]"
+expect "...and the tree is clean" test -z "$(git -C "$r" status --porcelain)"
+expect "...so the next run goes through" sk_attest ok "$r" --runner-cmd "sh $t/fake.sh"
+r=$t/repo24; mkrepo "$r" 1.2.3
+sk_attest junk "$r" --runner-cmd "sh $t/fake.sh" >/dev/null 2>&1; rc=$?
+expect "a signature that does not verify exits 1" test $rc = 1
+expect "...and leaves the tree clean" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && [ ! -e '$r/release-attest' ]"
+# --replace over a committed attestation: a failed run leaves the committed one alone
+r=$t/repo25; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"
+sk_attest late "$r" --runner-cmd "sh $t/fake.sh" --replace >/dev/null 2>&1
+expect "a failed --replace leaves the committed attestation and the tree untouched" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && [ -f '$r/release-attest/attestation.json.sig' ]"
+expect "...and it still verifies" verify "$r" --expect-version 1.2.3
+# a not-green run keeps its logs under a mktemp name
+r=$t/repo26; mkrepo "$r" 1.2.3; mkdir "$t/tmp26"
+TMPDIR=$t/tmp26 RED=graph SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/red.out" 2>&1
+kept=$(sed -n 's/.*logs kept in \(.*\)$/\1/p' "$t/red.out")
+expect "a red run says where its logs are and they exist" bash -c "[ -d '$kept' ] && ls '$kept'/*.log >/dev/null"
+expect "...the directory has a random name, not the pid" bash -c "! printf '%s' '$kept' | grep -Eq 'attest-logs-[0-9]+\$' && [ -n '$kept' ]"
+expect "attest.sh no longer builds attest-logs-\$\$ or mkdir -p's the log directory" bash -c "! grep -q 'attest-logs-\\\$\\\$' '$tools/attest.sh' && ! grep -q 'mkdir -p \"\\\$keep\"' '$tools/attest.sh'"
+
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"

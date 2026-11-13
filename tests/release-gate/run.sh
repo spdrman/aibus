@@ -377,6 +377,61 @@ expect "Cargo.toml and the path crates in Cargo.lock moved" bash -c "grep -q '^v
 expect "no old workspace version is left (the registry crate's 0.1.0 stays on purpose)" bash -c "! grep -n '0\.1\.0' Cargo.toml && [ \$(grep -c '0\.1\.0' Cargo.lock) = 1 ]"
 expect "the script made no tag, locally or on origin" test -z "$(git tag -l)$(git ls-remote --tags origin)"
 
+# ---------- issue 236: sign preflight, no-bump wording
+realsk=$(command -v ssh-keygen); mkdir "$t/skbin"
+cat >"$t/skbin/ssh-keygen" <<SKS
+#!/bin/sh
+case " \$* " in *" -Y sign "*)
+  echo "askpass=\${SSH_ASKPASS_REQUIRE:-unset} args=\$*" >>"\$SK_LOG"
+  [ "\${SK_MODE:-ok}" = nosign ] && { echo "incorrect passphrase supplied to decrypt private key" >&2; exit 255; } ;;
+esac
+exec "$realsk" "\$@"
+SKS
+chmod +x "$t/skbin/ssh-keygen"; export SK_LOG=$t/sk.log
+cat >"$t/dh-pf.sh" <<'DHP'
+#!/bin/sh
+echo "$*" >>"$DH_PF_LOG"
+exit 1
+DHP
+chmod +x "$t/dh-pf.sh"
+r=$t/rel236; mkrepo "$r"; usegate "$r"; : >"$t/dh-pf.log"; : >"$SK_LOG"; rm -f "$t/e2e.marker"; : >"$GH_LOG"
+PATH="$t/skbin:$PATH" SK_MODE=nosign DH_SH="$t/dh-pf.sh" DH_PF_LOG="$t/dh-pf.log" RELEASE_E2E_CMD="touch $t/e2e.marker" RELEASE_ATTEST_SH=$t/attest-ok.sh \
+  tools/release-gate/release.sh 0.2.0 --key "$t/key" --yes >"$t/pf.out" 2>&1; rc=$?
+expect "a key that cannot sign without a prompt stops release.sh with exit 2" test $rc = 2
+expect "...with the ssh-add hint" grep -q 'the key cannot sign without a prompt: load it with ssh-add .*key first' "$t/pf.out"
+expect "...before the e2e, any dh.sh call, any branch or gh call" bash -c "[ ! -e '$t/e2e.marker' ] && [ ! -s '$t/dh-pf.log' ] && [ ! -s '$GH_LOG' ] && ! git show-ref -q refs/heads/release-prep/v0.2.0"
+expect "...and the tree is clean" test -z "$(git status --porcelain)"
+expect "the preflight signs with SSH_ASKPASS_REQUIRE=never" grep -q 'askpass=never' "$t/sk.log"
+: >"$SK_LOG"
+PATH="$t/skbin:$PATH" SK_MODE=nosign RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run >"$t/pf2.out" 2>&1; rc=$?
+expect "a dry run reports the unusable key too" test $rc = 2
+# wording: a dry run and the PR body say whether a bump commit is needed
+rel 0.2.0 --dry-run >"$t/dry-bump.out" 2>&1
+expect "a dry run on a lower manifest says it would set the version" grep -q 'would: set \[workspace.package\] version = "0.2.0"' "$t/dry-bump.out"
+mkdir "$t/bin-body"
+cat >"$t/bin-body/gh" <<'GHB'
+#!/bin/sh
+echo "$*" >>"$GH_LOG"
+while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cp "$2" "$GH_BODY"; shift; done
+echo https://example.invalid/pr/1
+GHB
+chmod +x "$t/bin-body/gh"; export GH_BODY=$t/pr-body.txt
+r=$t/rel236b; mkrepo "$r"; usegate "$r"
+sed -i.bak 's/^version = "0.1.0"/version = "0.2.0"/' Cargo.toml; rm Cargo.toml.bak
+perl -0pi -e 's/version = "0.1.0"\n(?!source)/version = "0.2.0"\n/g' Cargo.lock
+git commit -qam "manifest already at 0.2.0"; git push -q origin main
+rel 0.2.0 --dry-run >"$t/dry-nobump.out" 2>&1
+expect "a dry run with the manifest already at the version says no bump commit is needed" grep -q 'no bump commit needed, the manifest is already 0.2.0' "$t/dry-nobump.out"
+expect "...and does not say it would bump or set the version" bash -c "! grep -Eqi 'would: set|would bump' '$t/dry-nobump.out'"
+PATH="$t/bin-body:$PATH" rel 0.2.0 --yes --closes 9 >"$t/nobump.out" 2>&1; expect "a release with no bump needed succeeds" test $? = 0
+expect "...makes no bump commit" test "$(git log --format=%s -2 | tr '\n' ,)" = "Attest the suites for 0.2.0,manifest already at 0.2.0,"
+expect "...and the PR body does not claim a bump" bash -c "! grep -qi 'I bumped' '$GH_BODY'"
+expect "...but says the manifest already had the version" grep -q 'no bump commit, the manifest already said 0.2.0' "$GH_BODY"
+rm -f "$GH_BODY"
+r=$t/rel236c; mkrepo "$r"; usegate "$r"
+PATH="$t/bin-body:$PATH" rel 0.2.0 --yes >"$t/bump.out" 2>&1; expect "a release that needs the bump succeeds" test $? = 0
+expect "...and its PR body says I bumped the version" grep -q 'I bumped the version' "$GH_BODY"
+
 # ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
 base2 s20
 echo fu >fu; git add fu; git commit -qm fu

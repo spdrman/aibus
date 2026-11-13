@@ -342,6 +342,39 @@ fn a_key_streamed_in_pieces_is_gone_whether_or_not_the_window_starts_inside_it()
 }
 
 #[test]
+fn a_read_in_the_middle_of_a_run_shows_nothing_of_a_key_that_is_still_arriving() {
+    let rig = rig();
+    let started = rig.call(
+        "workflow_run",
+        json!({ "name": "ship", "scope": "project", "input": format!("splitlive:{KEY}") }),
+    );
+    let run = started["structuredContent"]["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // Wait for the stream to arrive, while the run is still going.
+    let mut status = Value::Null;
+    for _ in 0..50 {
+        let r = rig.call("run_status", json!({ "run": run, "wait_ms": 1000 }));
+        status = r["structuredContent"].clone();
+        if status["tail"]
+            .as_str()
+            .is_some_and(|t| t.contains("redacted"))
+        {
+            break;
+        }
+    }
+    assert_eq!(status["status"], "running", "{status}");
+    assert!(status["exit_code"].is_null(), "{status}");
+    let (_, log) = rig.read(&format!("aibus://runs/{run}/log"));
+    let (_, json) = rig.read(&format!("aibus://runs/{run}"));
+    for (what, text) in [("log", log), ("status", json), ("tool", status.to_string())] {
+        assert_no_piece(&format!("mid-run {what}"), &text);
+    }
+    rig.call("run_cancel", json!({ "run": run }));
+}
+
+#[test]
 #[should_panic(expected = "a secret reached")]
 fn the_scan_still_finds_a_key_in_any_other_file_the_fake_wrote() {
     let rig = rig();

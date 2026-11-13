@@ -138,6 +138,15 @@ case "$input" in
     fin L1 failed 1 1 0.01 ""
     ev '{"type":"SessionEnd","session":"SESSION1","exit_code":1}'
     exit 1 ;;
+  splitlive:*)
+    # The key in two stream events and then the run stays alive, so a test reads in the middle.
+    key="${input#splitlive:}"
+    c() { printf '%s' "$key" | cut -c"$1"; }
+    trap 'fin L1 cancelled 1 1 0.0 stopped; ev "{\"type\":\"SessionEnd\",\"session\":\"SESSION1\",\"exit_code\":7}"; exit 7' INT
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    ev '{"type":"Stream","text":"'"$(c 1-25)"'"}'
+    ev '{"type":"Stream","text":"'"$(c 26-)"'"}'
+    while :; do sleep 0.1; done ;;
   split2:*|split3:*|splitnear:*)
     # The key in pieces over two or three stream events, as a streamed key arrives, with the
     # window of the tail starting 20 bytes into it (`splitnear` has nothing after it, so no cut).

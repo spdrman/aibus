@@ -3,6 +3,35 @@
 All notable changes go here, newest first. The section for a version is what the release workflow
 uses as the release notes, so every release needs its entry before it is merged into `release`.
 
+## [0.2.1] - 2026-11-13
+
+A maintenance release: `aibus mcp` handles a run's output and input more carefully, and the release gate and attestation scripts are harder to steer. Nothing in the `aibus` command line or the config format changes.
+
+### Security
+
+* `aibus mcp` no longer puts a run's input on the child's command line (#246). A run is started as `aibus run --workflow <name> -- -` and the input is written to the child's stdin, so `ps` cannot show it to other local users. Every trailing newline and carriage return of the input is dropped, as for any stdin prompt. A 200 KB input that used to fail to start on Linux (`Argument list too long`) now runs.
+* `aibus mcp` stores a run's output raw and redacts it when it is read (#247). Before, the failure message (300 bytes) and the tail (4 KiB) were cut first and redacted second, so a key near a cut, or a key sent in pieces over several stream events, left a fragment no pattern recognises. Now the fields of an attempt, the run id and the session are redacted whole before they are stored, the tail and the log keep a raw margin (about 28 to 36 KiB more than is shown), and the whole buffer is redacted before the cut. `docs/MCP.md` says what this covers and lists the residuals (for example text between the pieces of a key).
+* The release export ignores replace refs (#250). Every git call in `export_tree`, `tree_hash` and `declared_version` runs with `GIT_NO_REPLACE_OBJECTS=1` and `GIT_NO_LAZY_FETCH=1`, so a local replace ref can no longer make the attestation hash one tree while the exported bytes come from another, and a missing object fails instead of being fetched. `verify.sh` reads the attestation, signature and public key the same way (#260).
+* A symlink blob over 4096 bytes is refused from its `cat-file` header, before its body is read (#250).
+* Every `mktemp` in the release gate scripts and hooks is `/usr/bin/mktemp` (#251), so a `mktemp` earlier on `PATH` cannot pick what an exit trap deletes. Both test runners put a spy `mktemp` first on `PATH` and fail if a gate script reaches it. The runners also refuse to continue after a failed `mktemp` (#227).
+* The skip reason rule counts code points and drops invisible characters before counting, in the push hook, the merge hook and `gate_skipped` (#227, #234). The docs say plainly that it is a speed bump.
+
+### Fixed
+
+* A failed signing keeps ssh-keygen's own reason in the message, minus any line that mentions a passphrase (#260). The key-drop message no longer repeats ssh-keygen's passphrase text, which read like a prompt (#252).
+* `release.sh` and `attest.sh` sign a scratch file first and stop with "load it with ssh-add <key> first" when the key cannot sign, a failed attestation leaves nothing behind, and the staged files are installed only after their rename started, with signals handled and re-raised (#236).
+* The `pre-push` hook saves its stdin with a checked write (#227).
+
+### Changed
+
+* `export_tree` reads blobs through `git cat-file --batch` in batches of 500 (#237): this repo's 1500 files copy in about 0.8 s instead of 11.7 s, and a release does the copy twice. The checks on each path, on the reply header and on the size are unchanged.
+
+### Tests and docs
+
+* `tests/lib/pty.sh` is a portable pty helper (`pty_run`) that picks the `script` syntax from `uname`, so the ten terminal tests of the release suites pass on Linux and not only on macOS (#258).
+* The readiness check of the fake `gcloud` and `aibus` scripts in the test helpers no longer races with the fork of a freshly written file (the ETXTBSY flake, #232), and the aibus-mcp fakes keep a planted key out of their recorded argv (#241). The release test runners no longer depend on the caller's gate variables or leave files in `/var/folders` (#235).
+* `docs/RELEASE.md`, `docs/TESTING.md` and `docs/MCP.md` describe the above, including the `release-e2e-log.*` files a red e2e run keeps in `TMPDIR`.
+
 ## [0.2.0] - 2026-11-12
 
 ### Fixed

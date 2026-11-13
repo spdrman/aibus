@@ -18,6 +18,8 @@ const CHAIN: &str = r#"[
     Text("patched"), Stop(EndTurn),
     Text("tests pass"), Stop(EndTurn),
     Text("the fix is in"), Stop(EndTurn),
+    Text("spare"), Stop(EndTurn), Text("spare"), Stop(EndTurn), Text("spare"), Stop(EndTurn),
+    Text("spare"), Stop(EndTurn), Text("spare"), Stop(EndTurn), Text("spare"), Stop(EndTurn),
 ]"#;
 
 /// `aibus run --json --workflow fix`, the input as `arg` or, when `stdin` is given, on stdin
@@ -49,8 +51,8 @@ fn run_fix(arg: Option<&str>, stdin: Option<&[u8]>) -> Output {
     out
 }
 
-/// What the lead handed to the `workflow` tool as its input.
-fn workflow_input(out: &Output) -> Value {
+/// The lead's call of the `workflow` tool.
+fn workflow_call(out: &Output) -> Value {
     assert_eq!(out.status.code(), Some(0), "{}", stderr(out));
     let lines = ndjson(out);
     let call = lines
@@ -58,13 +60,14 @@ fn workflow_input(out: &Output) -> Value {
         .find(|l| l["type"] == "ToolCallRequested")
         .unwrap();
     assert_eq!(call["call"]["name"], "workflow");
-    call["call"]["input"]["input"].clone()
+    call["call"].clone()
 }
 
 #[test]
 fn the_workflow_input_is_the_same_from_the_argument_and_from_stdin() {
-    let arg = workflow_input(&run_fix(Some("login fails silently"), None));
-    let piped = workflow_input(&run_fix(None, Some(b"login fails silently\n")));
+    let arg = workflow_call(&run_fix(Some("login fails silently"), None))["input"]["input"].clone();
+    let piped =
+        workflow_call(&run_fix(None, Some(b"login fails silently\n")))["input"]["input"].clone();
     assert_eq!(arg, json!("login fails silently"));
     assert_eq!(piped, arg);
 }
@@ -73,10 +76,9 @@ fn the_workflow_input_is_the_same_from_the_argument_and_from_stdin() {
 fn a_one_megabyte_input_works_on_stdin() {
     let big = "0123456789abcdef".repeat(65_536);
     assert_eq!(big.len(), 1 << 20);
-    let got = workflow_input(&run_fix(None, Some(big.as_bytes())));
-    assert_eq!(
-        got.as_str().map(str::len),
-        Some(big.len()),
-        "the whole input arrives"
-    );
+    let call = workflow_call(&run_fix(None, Some(big.as_bytes())));
+    // The event reports the size of a call this big instead of the call: all of the input, none
+    // of it cut or changed, is what the `workflow` tool's input weighs.
+    let whole = json!({ "name": "fix", "input": big }).to_string().len();
+    assert_eq!(call["input"], json!({ "bytes": whole, "truncated": true }));
 }

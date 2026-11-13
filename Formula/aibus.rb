@@ -1,7 +1,7 @@
 class Aibus < Formula
   desc "Terminal client that drives several LLM providers and agents"
   homepage "https://github.com/spdrman/aibus"
-  version "0.1.0"
+  version "0.2.0"
   license "MIT"
 
   livecheck do
@@ -12,22 +12,22 @@ class Aibus < Formula
   on_macos do
     on_arm do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-aarch64-apple-darwin.tar.gz"
-      sha256 "38de7561bde2f06351639c84492a31477b3f9685f5b87d113a849af24453530e"
+      sha256 "e61799af362bcb922605002171a000ea1487d1b904d41c62050d0ffade2e5b46"
     end
     on_intel do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-x86_64-apple-darwin.tar.gz"
-      sha256 "92a404960d1d05029c62c6675d8ddf466bb95eaf0a6aefbc43969165dc72a021"
+      sha256 "6d4c0b995af34a81b2640f185f60505970d7f3f0abbb4c7f92c4f5df0477b10c"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "51c17d7991aefdbbc07567524f464eccc5b374b3d72a8846909cad57b79867ac"
+      sha256 "f505b667ddf2aac65d830c409d856aa5bc241ed8cf26929218b75cabb2c0c417"
     end
     on_intel do
       url "https://github.com/spdrman/aibus/releases/download/v#{version}/aibus-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "592d2ac01c8fdab549401f492de9ccffda70a6f966b7d137b7c083e350107686"
+      sha256 "afe6859958e215d1c96ed34ff6b9aa7337ca4f7d0ffdd17d6f277898979fb0c6"
     end
   end
 

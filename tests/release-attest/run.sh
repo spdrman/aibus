@@ -16,6 +16,11 @@ mkdir "$t/tmp" && export TMPDIR=$t/tmp || exit 1
 # Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
 printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
 export DH_SH=$t/dh-real-stub.sh DH_REAL_LOG=$t/dh-real.log
+# issue #251: every gate script calls /usr/bin/mktemp by absolute path. This spy sits first on PATH, logs any
+# call that reaches it and answers with an existing directory; the check at the end of the file fails if a
+# gate script (its temp dir, kept logs, stamp, PR body, hooks, tree export) still calls a bare mktemp.
+mkdir "$t/spybin" "$t/spyvictim" && printf '#!/bin/sh\necho "$*" >>"$SPY_LOG"\necho "$SPY_VICTIM"\n' >"$t/spybin/mktemp" && chmod +x "$t/spybin/mktemp" || exit 1
+export SPY_LOG=$t/spy.log SPY_VICTIM=$t/spyvictim PATH="$t/spybin:$PATH"
 fails=0 n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1"; }
@@ -707,17 +712,9 @@ cp_case c20 0 MV_FAIL=1 CP_FAILSRC='*/old.*'
 expect "a failed 1st rename and a failing cp: exits 1, nothing changed, no stage directory left" bash -c "test $rc = 1 && test '$before' = '$after' && ! ls -A '$r/release-attest' | grep -q stage"
 expect "...and the message does not claim a failed restore" bash -c "! grep -q 'could not restore' '$t/cpc-c20.out'"
 
-# ---------- issue #251: a mktemp earlier on PATH must not decide what the exit trap deletes
-mkdir "$t/hostile"; printf '#!/bin/sh\necho "$HOSTILE_VICTIM"\n' >"$t/hostile/mktemp"; chmod +x "$t/hostile/mktemp"
-hostile_run() { # name sentinel-dir command...
-  mkdir -p "$2"; echo keep >"$2/sentinel"
-  PATH="$t/hostile:$PATH" HOSTILE_VICTIM="$2" "${@:3}" >/dev/null 2>&1 </dev/null
-  expect "$1: a hostile mktemp on PATH does not get its directory deleted" test -f "$2/sentinel"
-}
-r=$t/repo251; mkrepo "$r" 1.2.3
-hostile_run "attest.sh" "$t/victim-attest" env SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"
-hostile_run "verify.sh" "$t/victim-verify" "$tools/verify.sh" --repo "$r"
-
+spy_hits=$(grep -E '/(release-e2e|release-e2e-log|\.tmp|release-signcheck|release-pr|release-gate-head|release-prepush|attest|attest-logs|\.attest-stage|attest-verify)\.XXXXXX|\.ls\.XXXXXX' "$SPY_LOG" 2>/dev/null)
+expect "no gate script called the mktemp found on PATH (all of them use /usr/bin/mktemp)" test -z "$spy_hits"
+[ -z "$spy_hits" ] || { echo "bare mktemp calls:" >&2; echo "$spy_hits" | sed "s#.*/##" | sort | uniq -c >&2; }
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"

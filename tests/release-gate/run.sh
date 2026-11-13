@@ -67,6 +67,11 @@ mkrepo() { # dir : a work repo with an origin, the gate files, version 0.1.0
 usegate() { cd "$1" || exit 1; RELEASE_E2E_TEST_STAMPS=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)/release-e2e; export RELEASE_E2E_TEST_STAMPS; }
 export GH_LOG=$t/gh.log
 export PATH="$t/bin:$PATH"
+# issue #251: every gate script calls /usr/bin/mktemp by absolute path. This spy sits first on PATH, logs any
+# call that reaches it and answers with an existing directory; the check at the end of the file fails if a
+# gate script (its temp dir, kept logs, stamp, PR body, hooks, tree export) still calls a bare mktemp.
+mkdir "$t/spybin" "$t/spyvictim" && printf '#!/bin/sh\necho "$*" >>"$SPY_LOG"\necho "$SPY_VICTIM"\n' >"$t/spybin/mktemp" && chmod +x "$t/spybin/mktemp" || exit 1
+export SPY_LOG=$t/spy.log SPY_VICTIM=$t/spyvictim PATH="$t/spybin:$PATH"
 
 
 # ---------- hooks and runner
@@ -103,11 +108,6 @@ git checkout -q f.txt
 git switch -q release; echo leak >leak.txt; git add leak.txt; git commit -q -m leak
 env -u RELEASE_E2E_TEST_STAMPS RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >"$t/leak.out" 2>&1
 expect "e2e.sh with RELEASE_E2E_CMD set warns loudly" grep -q "TEST ONLY" "$t/leak.out"
-# issue #251: a mktemp earlier on PATH must not decide what the exit trap deletes
-mkdir "$t/hostile" "$t/victim251"; echo keep >"$t/victim251/sentinel"
-printf '#!/bin/sh\necho "$HOSTILE_VICTIM"\n' >"$t/hostile/mktemp"; chmod +x "$t/hostile/mktemp"
-env -u RELEASE_E2E_TEST_STAMPS PATH="$t/hostile:$PATH" HOSTILE_VICTIM="$t/victim251" RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >/dev/null 2>&1
-expect "e2e.sh: a hostile mktemp on PATH does not get its directory deleted" test -f "$t/victim251/sentinel"
 refuse "a stamp from a leftover RELEASE_E2E_CMD does not open pre-push" git push -q -f origin release
 
 # stamp content is checked, not just its existence
@@ -634,7 +634,7 @@ for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
   { sed -n '/^set -u$/,/^export DH_SH=/p' "$src/$runner" | grep -v -e '^here=' -e '^src=' -e '^tools=' -e '^\. "\$tools' -e '^export DH_SH='
     echo 'env | grep -E "^(RELEASE_|DH_)" | grep -v "^DH_SH=" | sed "s/^/LEAK /"'
     echo 'case $TMPDIR in "$t"/*) echo inside ;; *) echo "outside $TMPDIR" ;; esac'
-    echo 'mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX" >/dev/null; mkdir -p "${TMPDIR:-/tmp}/attest-logs-$$"'
+    echo '/usr/bin/mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX" >/dev/null; mkdir -p "${TMPDIR:-/tmp}/attest-logs-$$"'
   } >"$t/hdr/a/b/head.sh"
   out=$(env -u DH_SH -u DH_REAL_LOG RELEASE_E2E_HOST=x RELEASE_E2E_SKIP=x RELEASE_E2E_CMD=x RELEASE_E2E_TEST_STAMPS=x RELEASE_GATE_TEST=x RELEASE_ATTEST_SH=x DH_HOST=x DH_CPUS=1 DH_MEMORY=1g DH_UNFENCED=1 TMPDIR="$t/hdr/outer" bash "$t/hdr/a/b/head.sh" 2>&1)
   expect "$runner: variables exported by the caller are gone before the first test" bash -c '! printf "%s\n" "$1" | grep -q LEAK' _ "$out"
@@ -643,6 +643,9 @@ for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
   rm -rf "$t/hdr"
 done
 
+spy_hits=$(grep -E '/(release-e2e|release-e2e-log|\.tmp|release-signcheck|release-pr|release-gate-head|release-prepush|attest|attest-logs|\.attest-stage|attest-verify)\.XXXXXX|\.ls\.XXXXXX' "$SPY_LOG" 2>/dev/null)
+expect "no gate script called the mktemp found on PATH (all of them use /usr/bin/mktemp)" test -z "$spy_hits"
+[ -z "$spy_hits" ] || { echo "bare mktemp calls:" >&2; echo "$spy_hits" | sed "s#.*/##" | sort | uniq -c >&2; }
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 [ $fails = 0 ] || tail -8 "$t/green.out" >&2

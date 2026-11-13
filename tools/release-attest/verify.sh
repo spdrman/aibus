@@ -40,7 +40,7 @@ if [ $sigonly = 1 ]; then
 fi
 
 bad=()
-show() { git -C "$repo" show "$commit:$1" 2>/dev/null; }
+show() { git_objects -C "$repo" show "$commit:$1" 2>/dev/null; }
 if ! show "$ATTEST_DIR/$ATTEST_FILE" >"$work/a.json"; then
   echo "not valid: $commit has no $ATTEST_DIR/$ATTEST_FILE. Run tools/release-attest/attest.sh on this tree, commit the two files it writes, and push."
   exit 1

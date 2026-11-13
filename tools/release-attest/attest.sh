@@ -154,7 +154,9 @@ fi
 # dropped out of the agent mid-run fails here instead of prompting), then verify and install the two files.
 printf '%s\n' "$att" | jq . >"$work/$ATTEST_FILE"
 detach ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/$ATTEST_FILE" >/dev/null 2>"$work/sign.err" && [ -f "$work/$ATTEST_FILE.sig" ] || {
-  skrc=$?; echo "ssh-keygen -Y sign failed (exit $skrc): the key could not sign without asking; nothing is waiting for input" >&2
+  skrc=$?; echo "ssh-keygen -Y sign failed (exit $skrc); nothing is waiting for input" >&2
+  # ssh-keygen's own reason, minus any line that mentions a passphrase (that wording reads as a prompt that is not there)
+  LC_ALL=C grep -vi passphrase "$work/sign.err" 2>/dev/null | LC_ALL=C tr -d '\000-\010\013-\037' | head -n 5 | head -c 1000 | sed 's/^/  ssh-keygen: /' >&2 || true
   echo "the key may have left ssh-agent during the run: load it with ssh-add $key first, then run again" >&2; exit 1; }
 # Both files go into $out through a stage directory inside it (same filesystem). Order: copy to the stage, verify the
 # copy, back up the files that exist (to a temp name, then renamed to old.N only when the copy succeeded), then two

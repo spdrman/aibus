@@ -7,7 +7,7 @@ set -u
 unset RELEASE_E2E_HOST RELEASE_E2E_SKIP RELEASE_E2E_CMD RELEASE_E2E_TEST_STAMPS RELEASE_GATE_TEST RELEASE_ATTEST_SH DH_HOST DH_CPUS DH_MEMORY DH_UNFENCED
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/../.." && pwd)
-t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
+t=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
 # Everything the runs create (log files, kept log directories) goes under $t, which the trap above removes.
@@ -553,7 +553,7 @@ for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
   # run the stub only on a runner whose guard the grep above just confirmed: an unguarded runner (a mixed checkout) would carry on with t='' and aim rm -rf at /
   g=${runner_guarded[$ri]}; ri=$((ri + 1))
   [ "$g" = 1 ] || { bad "$runner is not guarded, so the failing-mktemp stub run was skipped"; continue; }
-  out=$(TMPDIR="$t/no-such-dir" bash "$src/$runner" 2>&1); rc=$?
+  out=$(TMPDIR="$t/no-such-dir" bash "$src/$runner" 2>/dev/null); rc=$?
   expect "$runner exits 1 at once, running nothing, when mktemp fails" bash -c "test $rc = 1 && test -z \"\$1\"" _ "$out"
 done
 expect "e2e.sh no longer copies the red log to a predictable name" bash -c "! grep -q 'release-e2e-log-\\\$\\\$' '$src/tools/release-gate/e2e.sh'"

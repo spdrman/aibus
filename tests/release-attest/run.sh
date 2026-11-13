@@ -7,7 +7,7 @@ unset RELEASE_E2E_HOST RELEASE_E2E_SKIP RELEASE_E2E_CMD RELEASE_E2E_TEST_STAMPS 
 here=$(cd "$(dirname "$0")" && pwd)
 tools=$(cd "$here/../../tools/release-attest" && pwd)
 . "$tools/config.sh"
-t=$(mktemp -d "${TMPDIR:-/tmp}/attest-test.XXXXXX") || exit 1
+t=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/attest-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
 # Everything the runs create (log files, kept log directories) goes under $t, which the trap above removes.

@@ -237,10 +237,28 @@ fn signal(pid: u32, hard: bool) {
         .status();
 }
 
-/// Appends `more` to `text`, keeping the last `cap` bytes from a character boundary. For the log
-/// the cut also moves on to the next line start, so a half line never leads.
-fn keep_last(text: &mut String, more: &str, cap: usize, whole_lines: bool) {
-    text.push_str(more);
+/// How much of the end of a buffer is looked at again when text is appended to it: a key that
+/// began in the old text and ends in the new is whole inside this window. Longer than any key a
+/// pattern knows.
+const JOIN_BYTES: usize = 512;
+
+/// Appends `more` to `text`, redacts the join, then keeps the last `cap` bytes from a character
+/// boundary. For the log the cut also moves on to the next line start, so a half line never
+/// leads.
+///
+/// The redaction comes first and sees the old text's last `JOIN_BYTES` together with `more`, so a
+/// key that arrived in pieces (a streamed key does) is whole when the redactor looks at it, and
+/// only then can a cut fall inside what is left of it.
+fn keep_last(text: &mut String, more: &str, cap: usize, whole_lines: bool, redactor: &Redactor) {
+    let mut from = text.len().saturating_sub(JOIN_BYTES);
+    while !text.is_char_boundary(from) {
+        from += 1;
+    }
+    let joined = redactor
+        .redact(&format!("{}{more}", &text[from..]))
+        .into_owned();
+    text.truncate(from);
+    text.push_str(&joined);
     if text.len() > cap {
         let mut cut = text.len() - cap;
         while !text.is_char_boundary(cut) {
@@ -256,23 +274,28 @@ fn keep_last(text: &mut String, more: &str, cap: usize, whole_lines: bool) {
 }
 
 /// Appends to the tail `run_status` shows and to the log the run resource shows.
-fn push_both(tail: &mut String, log: &mut String, more: &str) {
-    keep_last(tail, more, TAIL_BYTES, false);
-    keep_last(log, more, LOG_BYTES, true);
+fn push_both(tail: &mut String, log: &mut String, more: &str, redactor: &Redactor) {
+    keep_last(tail, more, TAIL_BYTES, false, redactor);
+    keep_last(log, more, LOG_BYTES, true, redactor);
 }
 
 impl View {
     /// Folds one NDJSON event of the child into the view. `steps` are the workflow's agents in
     /// order. True when something `run_status` shows changed.
     ///
-    /// Every string the child sent goes through the redactor here, before it is stored, cut or
-    /// matched, so no field of the view holds a key and a cut cannot leave half of one behind.
+    /// What is guaranteed: a field of an attempt (its name, status, failure), the run id and the
+    /// session are redacted whole, as the child sent them, before they are stored or cut. Text
+    /// that goes to the tail and the log (the stream, a summary, a failure of no attempt) is
+    /// appended to what is there and redacted together with its last `JOIN_BYTES`, then cut, so a
+    /// key that arrives in pieces is whole when the redactor sees it. A key longer than that
+    /// window cannot be recognised that way, and none is that long.
+    ///
+    /// What is not: this redactor is the server's. Its patterns are in it, but the secrets a
+    /// child registered with its own (the key of an account, say) are not, because the server
+    /// process registers none; those are covered only by the child's own redaction of each event.
     fn apply(&mut self, ev: &Value, steps: &[String], redactor: &Redactor) -> bool {
-        let str_of = |k: &str| {
-            ev.get(k)
-                .and_then(Value::as_str)
-                .map(|t| redactor.redact(t).into_owned())
-        };
+        let raw_of = |k: &str| ev.get(k).and_then(Value::as_str).map(str::to_owned);
+        let str_of = |k: &str| raw_of(k).map(|t| redactor.redact(&t).into_owned());
         let run = str_of("run");
         match ev.get("type").and_then(Value::as_str) {
             Some("RunStarted") if self.lead.is_none() => {
@@ -306,7 +329,8 @@ impl View {
                 true
             }
             Some("RunFailed") => {
-                let message = str_of("message").unwrap_or_default();
+                let raw = raw_of("message").unwrap_or_default();
+                let message = redactor.redact(&raw).into_owned();
                 let mut cut = message.len().min(FAILURE_BYTES);
                 while !message.is_char_boundary(cut) {
                     cut -= 1;
@@ -317,7 +341,12 @@ impl View {
                     .find(|a| Some(&a.run) == run.as_ref())
                 {
                     Some(a) => a.failure = Some(message[..cut].to_owned()),
-                    None => push_both(&mut self.tail, &mut self.log, &format!("\n{message}\n")),
+                    None => push_both(
+                        &mut self.tail,
+                        &mut self.log,
+                        &format!("\n{raw}\n"),
+                        redactor,
+                    ),
                 }
                 true
             }
@@ -331,8 +360,13 @@ impl View {
                         n("output_tokens"),
                         ev["usage"]["cost_usd"].as_f64().unwrap_or(0.0),
                     );
-                    if let Some(summary) = str_of("summary") {
-                        push_both(&mut self.tail, &mut self.log, &format!("\n{summary}\n"));
+                    if let Some(summary) = raw_of("summary") {
+                        push_both(
+                            &mut self.tail,
+                            &mut self.log,
+                            &format!("\n{summary}\n"),
+                            redactor,
+                        );
                     }
                     self.ended_as = Some(status);
                 } else if let Some(a) = self
@@ -355,8 +389,8 @@ impl View {
                 true
             }
             Some("Stream") => {
-                if let Some(t) = str_of("text") {
-                    push_both(&mut self.tail, &mut self.log, &t);
+                if let Some(t) = raw_of("text") {
+                    push_both(&mut self.tail, &mut self.log, &t, redactor);
                 }
                 false
             }
@@ -487,11 +521,7 @@ impl Runs {
                             entry.update(|v| v.apply(&ev, &steps, &redactor));
                         } else {
                             entry.update(|v| {
-                                push_both(
-                                    &mut v.tail,
-                                    &mut v.log,
-                                    &format!("{}\n", redactor.redact(&line)),
-                                );
+                                push_both(&mut v.tail, &mut v.log, &format!("{line}\n"), &redactor);
                                 false
                             });
                         }
@@ -503,11 +533,7 @@ impl Runs {
                 thread::spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                         entry.update(|v| {
-                            push_both(
-                                &mut v.tail,
-                                &mut v.log,
-                                &format!("{}\n", redactor.redact(&line)),
-                            );
+                            push_both(&mut v.tail, &mut v.log, &format!("{line}\n"), &redactor);
                             false
                         });
                     }

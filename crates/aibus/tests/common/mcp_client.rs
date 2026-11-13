@@ -105,7 +105,8 @@ impl McpClient {
     /// A `2025-11-25` client, past `initialize` and `notifications/initialized`.
     pub fn v2025_11_25(home: &Path, args: &[&str]) -> Self {
         let mut c = Self::spawn(mcp_command(home, args), Protocol::V2025_11_25, home);
-        c.initialize_legacy().expect("the server refused initialize");
+        c.initialize_legacy()
+            .expect("the server refused initialize");
         c
     }
 
@@ -182,7 +183,9 @@ impl McpClient {
         self.stdout.push(line.clone());
         match serde_json::from_str::<Value>(&line) {
             Ok(v) if v.is_object() => v,
-            _ => self.fail(&format!("wrote a stdout line that is not a JSON-RPC message: {line:?}")),
+            _ => self.fail(&format!(
+                "wrote a stdout line that is not a JSON-RPC message: {line:?}"
+            )),
         }
     }
 
@@ -253,13 +256,21 @@ impl McpClient {
 
     /// `server/discover`, `2026-07-28` only. The result.
     pub fn discover(&mut self) -> Reply {
-        assert_eq!(self.protocol, Protocol::V2026_07_28, "server/discover is a 2026-07-28 request");
+        assert_eq!(
+            self.protocol,
+            Protocol::V2026_07_28,
+            "server/discover is a 2026-07-28 request"
+        );
         self.request("server/discover", json!({}))
     }
 
     /// `initialize` and `notifications/initialized`, `2025-11-25` only. The result of `initialize`.
     pub fn initialize_legacy(&mut self) -> Reply {
-        assert_eq!(self.protocol, Protocol::V2025_11_25, "initialize is the 2025-11-25 handshake");
+        assert_eq!(
+            self.protocol,
+            Protocol::V2025_11_25,
+            "initialize is the 2025-11-25 handshake"
+        );
         let result = self.request(
             "initialize",
             json!({
@@ -288,8 +299,16 @@ impl McpClient {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..100 {
-            let page = self.list_tools_page(cursor.as_deref()).expect("tools/list failed");
-            tools.extend(page["tools"].as_array().expect("tools is a list").iter().cloned());
+            let page = self
+                .list_tools_page(cursor.as_deref())
+                .expect("tools/list failed");
+            tools.extend(
+                page["tools"]
+                    .as_array()
+                    .expect("tools is a list")
+                    .iter()
+                    .cloned(),
+            );
             match page.get("nextCursor").and_then(Value::as_str) {
                 Some(next) => cursor = Some(next.to_owned()),
                 None => return tools,
@@ -336,7 +355,10 @@ impl McpClient {
             self.stdout.push(line);
         }
         let stderr = self.stderr.lock().unwrap().clone();
-        (Finished { status, stderr }, std::mem::take(&mut self.stdout))
+        (
+            Finished { status, stderr },
+            std::mem::take(&mut self.stdout),
+        )
     }
 }
 
@@ -353,7 +375,10 @@ fn reply(response: &Value) -> Reply {
             code: e["code"].as_i64().expect("an error has a code"),
             message: e["message"].as_str().unwrap_or_default().to_owned(),
         }),
-        None => Ok(response.get("result").cloned().expect("a response has a result or an error")),
+        None => Ok(response
+            .get("result")
+            .cloned()
+            .expect("a response has a result or an error")),
     }
 }
 
@@ -365,7 +390,9 @@ pub fn lines_that_are_not_json_rpc(lines: &[String]) -> Vec<String> {
         .filter(|l| {
             serde_json::from_str::<Value>(l).ok().is_none_or(|v| {
                 v["jsonrpc"] != "2.0"
-                    || !["method", "result", "error"].iter().any(|k| v.get(*k).is_some())
+                    || !["method", "result", "error"]
+                        .iter()
+                        .any(|k| v.get(*k).is_some())
             })
         })
         .cloned()

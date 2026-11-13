@@ -494,6 +494,21 @@ for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
   expect "...the hung ssh-keygen and its wrapper are gone, and no release-signcheck directory is left" bash -c "$(declare -f gone); t='$t'; gone && [ -z \"\$(ls '$t/tmp-h')\" ]"
 done
 
+# #252: a ssh-keygen that ignores the signal is KILLed after the grace period, same exit codes
+mkdir "$t/ignbin"
+cat >"$t/ignbin/ssh-keygen" <<IGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) trap '' INT TERM HUP; echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; sleep 30 ;; esac
+exec $realsk "\$@"
+IGS
+chmod +x "$t/ignbin/ssh-keygen"; mkdir "$t/tmp-i"
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/i-$1-$2.out" env PATH="$t/ignbin:$PATH" TMPDIR=$t/tmp-i RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run
+  expect "#252 release.sh, $2 to the $1 with a child that ignores it: exit $3 within 8 s" test "$hrc" = "$3"
+  expect "...the child that ignored the signal and its wrapper are gone" gone
+done
+
 # ---------- fourth review of #242: Ctrl-C during step 5 stops release.sh with 130, not 'did not sign a green run'
 mkdir "$t/third"
 cat >"$t/third/ssh-keygen" <<TRD

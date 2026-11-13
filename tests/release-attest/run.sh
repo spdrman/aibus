@@ -416,6 +416,7 @@ if [ $pty_ok = 1 ]; then
     r=$t/repo61; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
     SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 14 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sleep 5; sh $t/fake.sh" >"$t/pty-d.out" 2>&1; rc=$?
     expect "a key that drops out of the agent mid-run fails the real signature (exit 1), no prompt, no hang" test $rc = 1
+    expect "#252 the key-drop message has no passphrase wording at all (it is not a prompt) and names the exit status" bash -c "! grep -qi 'passphrase' '$t/pty-d.out' && grep -q 'ssh-keygen -Y sign failed (exit [0-9]*)' '$t/pty-d.out'"
     expect "...without a passphrase prompt text, with a message to load the key, and a clean tree" bash -c "! grep -qi 'enter passphrase' '$t/pty-d.out' && grep -q 'ssh-add' '$t/pty-d.out' && [ -z \"\$(git -C '$r' status --porcelain)\" ]"
     SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
   fi
@@ -494,6 +495,7 @@ case ${STUB_MODE:-} in
   wrongsha)  "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^[0-9a-f]{40}/0000000000000000000000000000000000000000/; print $d'; exit 0 ;;
   extra)     "$REAL_GIT" "$@"; echo junk; exit 0 ;;
   shortsize) "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^([0-9a-f]+ blob )(\d+)/$1.($2+4)/e; print $d'; exit 0 ;;
+  hugesize)  "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^([0-9a-f]+ blob )(\d+)/${1}1073741824/; print $d'; exit 0 ;;
   *)         exec "$REAL_GIT" "$@" ;;
 esac
 STUB
@@ -553,6 +555,53 @@ refuse "a symlink whose target holds a NUL aborts the copy" export_tree "$bx" "$
 trg=$(printf '160000 commit %s\tsub\0' 1111111111111111111111111111111111111111 | bg mktree -z --missing); : >"$STUB_LOG"
 PATH=$sb:$PATH export_tree "$bx" "$trg" "$t/bgl" >/dev/null 2>&1
 expect "a gitlink becomes an empty directory and starts no cat-file" test -d "$t/bgl/sub" -a "$(grep -c 'cat-file' "$STUB_LOG")" = 0
+# ---------- issue #250: replace refs never change what is exported or hashed; an oversized symlink target is refused unread
+rp=$t/rp250; mkdir -p "$rp"; git -C "$rp" init -q; pg() { git -C "$rp" "$@"; }
+pg config user.email t@example.com; pg config user.name t
+printf '[workspace.package]\nversion = "1.0.0"\n' >"$rp/Cargo.toml"; echo genuine >"$rp/f"; pg add -A; pg commit -qm genuine
+rtree=$(pg rev-parse 'HEAD^{tree}'); rcommit=$(pg rev-parse HEAD)
+evil=$(echo EVIL | pg hash-object -w --stdin)
+pg replace "$(pg rev-parse HEAD:f)" "$evil"
+pg replace "$(pg rev-parse HEAD:Cargo.toml)" "$(printf '[workspace.package]\nversion = "6.6.6"\n' | pg hash-object -w --stdin)"
+export_tree "$rp" HEAD "$t/rp250-blob" >/dev/null 2>&1
+expect "#250 a replace ref on a blob: the export writes the genuine bytes" test "$(cat "$t/rp250-blob/f" 2>/dev/null)" = genuine
+expect "#250 ...and the export re-hashes to the tree id the attestation records" test "$(rehash "$t/rp250-blob" "$rp/.git")" = "$rtree"
+expect "#250 ...and declared_version reads the genuine Cargo.toml" test "$(declared_version "$rp" HEAD)" = 1.0.0
+# a replaced commit: HEAD's commit is swapped for one whose tree holds f=EVIL
+rq=$t/rq250; git clone -q "$rp" "$rq" 2>/dev/null; qg() { git -C "$rq" "$@"; }
+qtree=$(qg rev-parse 'HEAD^{tree}'); qcommit=$(qg rev-parse HEAD)
+etree=$(printf '100644 blob %s\tf\0' "$(echo EVIL | qg hash-object -w --stdin)" | qg mktree -z)
+qg replace "$qcommit" "$(echo other | qg commit-tree "$etree")"
+expect "#250 a replace ref on the commit: tree_hash is still the commit's own tree" test "$(tree_hash "$rq" HEAD)" = "$qtree"
+export_tree "$rq" HEAD "$t/rq250-commit" >/dev/null 2>&1
+expect "#250 ...and the export writes the commit's own files" test "$(cat "$t/rq250-commit/f" 2>/dev/null)" = genuine -a -f "$t/rq250-commit/Cargo.toml"
+# a replaced tree, asked for by its id
+qg replace "$qtree" "$etree"
+expect "#250 a replace ref on the tree: tree_hash of the tree id is that tree" test "$(tree_hash "$rq" "$qtree")" = "$qtree"
+# every git the export and the hash start runs with replace objects and lazy fetch switched off
+cat >"$t/envgit" <<'ENVSTUB'
+#!/bin/bash
+echo "${GIT_NO_REPLACE_OBJECTS:-unset} ${GIT_NO_LAZY_FETCH:-unset} $*" >>"$ENV_LOG"
+exec "$REAL_GIT" "$@"
+ENVSTUB
+mkdir -p "$t/envbin"; mv "$t/envgit" "$t/envbin/git"; chmod +x "$t/envbin/git"; export ENV_LOG=$t/env250.log; : >"$ENV_LOG"
+( unset GIT_NO_REPLACE_OBJECTS GIT_NO_LAZY_FETCH; PATH=$t/envbin:$PATH; export_tree "$rp" HEAD "$t/rp250-env"; tree_hash "$rp" HEAD; declared_version "$rp" HEAD ) >/dev/null 2>&1
+expect "#250 export_tree, tree_hash and declared_version start git (got $(grep -c . "$ENV_LOG") calls)" test "$(grep -c . "$ENV_LOG")" -ge 5
+expect "#250 ...every one with GIT_NO_REPLACE_OBJECTS=1 and GIT_NO_LAZY_FETCH=1" bash -c "! grep -v '^1 1 ' '$ENV_LOG'"
+# symlink targets: over 4096 bytes is refused from the header, before the body is read
+long=$(head -c 4097 /dev/zero | tr '\0' a | bsha)
+export_tree "$bx" "$(printf '120000 blob %s\tl\0' "$long" | bg mktree -z)" "$t/blong" >/dev/null 2>"$t/blong.err"; lrc=$?
+expect "#250 a 4097-byte symlink target aborts the copy" test "$lrc" != 0
+expect "#250 ...and says the target is over 4096 bytes" grep -q 'over 4096' "$t/blong.err"
+huge=$t/huge250; head -c 52428800 /dev/zero | tr '\0' a >"$huge"; hugesha=$(bg hash-object -w "$huge")
+export_tree "$bx" "$(printf '120000 blob %s\th\0' "$hugesha" | bg mktree -z)" "$t/bhuge" >/dev/null 2>"$t/bhuge.err"
+expect "#250 a 50 MB symlink target is refused for its size" grep -q 'over 4096' "$t/bhuge.err"
+okl=$(printf 'some/where' | bsha)
+env STUB_MODE=hugesize PATH=$sb:$PATH bash -c ". '$tools/config.sh'; export_tree '$bx' '$(printf '120000 blob %s\tk\0' "$okl" | bg mktree -z)' '$t/bhdr'" >/dev/null 2>"$t/bhdr.err"
+expect "#250 a symlink whose header claims 1 GiB is refused from the header, not after a short read" grep -q 'over 4096' "$t/bhdr.err"
+rm -rf "$t/bok"; export_tree "$bx" "$(printf '120000 blob %s\tk\0' "$okl" | bg mktree -z)" "$t/bok" >/dev/null 2>&1
+expect "#250 ...a 10-byte symlink target is still copied" test "$(readlink "$t/bok/k")" = some/where
+
 # identity with git archive on this very repository's tree (it has no .gitattributes, so archive writes the same bytes)
 repo_root=$(cd "$here/../.." && pwd)
 rm -rf "$t/arc" "$t/exp-self"; mkdir -p "$t/arc"; git -C "$repo_root" archive HEAD | tar -x -C "$t/arc"
@@ -615,6 +664,22 @@ for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
   expect "attest.sh, $2 to the $1 during a hung preflight: exit $3" test "$hrc" = "$3"
   expect "...no wrong message, no orphan (the stub and the wrapper are gone)" bash -c "! grep -q 'the key cannot sign\|ssh-keygen exited' '$t/h-$1-$2.out'" 
   expect "...the hung ssh-keygen and its wrapper are gone" gone
+done
+
+# #252: a ssh-keygen that ignores TERM/INT/HUP is KILLed after the grace period, and the exit codes stay 130/143/129
+mkdir "$t/ignbin"
+cat >"$t/ignbin/ssh-keygen" <<IGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) trap '' INT TERM HUP; echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; sleep 30 ;; esac
+exec "$realsk" "\$@"
+IGS
+chmod +x "$t/ignbin/ssh-keygen"
+r=$t/repo91; mkrepo "$r" 1.2.3
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/i-$1-$2.out" env PATH="$t/ignbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"
+  expect "#252 attest.sh, $2 to the $1 with a child that ignores it: exit $3 within 8 s" test "$hrc" = "$3"
+  expect "...the child that ignored the signal and its wrapper are gone" gone
 done
 
 # ---------- fourth review of #242: a signal after the wrapper is gone, and a restore that was never needed

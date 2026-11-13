@@ -249,6 +249,8 @@ branch pass straight through.
 
 **Batched `export_tree`.** The copy reads blobs with `git cat-file --batch`, 500 shas per process in list order. Each reply header has to be `<the requested sha> blob <size>`, then exactly that many bytes and a newline, with nothing after the last one; a missing object, a short or long stream, a bad header or a non-zero git exit aborts the whole copy. A gitlink is never sent. The path judging and the directories are still bash (pass 0 and the directory pass), and the perl helper only writes: files with `O_EXCL|O_NOFOLLOW`, symlinks in the second pass, each after its parent was checked to be a real directory inside the destination.
 
+**Replace refs and long links.** `export_tree`, `tree_hash` and `declared_version` run every git with `GIT_NO_REPLACE_OBJECTS=1` and `GIT_NO_LAZY_FETCH=1`, so a local `refs/replace` entry cannot swap the bytes that get exported (or the version that gets read) while the hash still names the genuine tree, and a missing object fails instead of reaching the network. A symlink blob over 4096 bytes is refused from its `cat-file` header, before its body is read, so a huge link target cannot fill memory on the way to `ENAMETOOLONG`. Bodies are not hashed against their sha: with the env vars set, that would only defend against a `git cat-file` that lies, and it would cost a hash per blob (#250).
+
 **Override.** `RELEASE_E2E_SKIP='<reason>'` skips the gate in the hooks and the runner. It prints
 the reason loudly and appends it to `release-e2e/skips.log` next to the stamps. It is legitimate for
 a docs-only change to `release`, a change to the gate itself, creating the `release` branch, or when every docker host is down and the release is urgent and I

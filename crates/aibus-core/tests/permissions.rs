@@ -520,6 +520,7 @@ async fn drive(
             hooks: Arc::new(HookRunner::default()),
             compactor: None,
             assist: None,
+            fallback: None,
         },
     );
     let mut app = common::app();

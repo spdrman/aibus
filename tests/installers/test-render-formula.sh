@@ -56,9 +56,15 @@ sh "$render" 0.1.0 "$t/ZERO" "$t/z.rb" >/dev/null
 expect "all-zero sums get a PLACEHOLDER header" grep -q '^# PLACEHOLDER CHECKSUMS' "$t/z.rb"
 expect "placeholder formula passes ruby -c" ruby -c "$t/z.rb"
 
-# The committed formula is exactly what the script renders from placeholder sums.
-sh "$render" 0.1.0 "$t/ZERO" "$t/committed.rb" >/dev/null
-expect "committed Formula/aibus.rb is the rendered placeholder" diff -u "$repo/Formula/aibus.rb" "$t/committed.rb"
+# The committed formula is exactly what the script renders from its own version and checksums
+# (placeholder zeros before the first release, the release's real sums after the finalize job).
+c=$repo/Formula/aibus.rb
+cver=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$c")
+for tg in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-gnu x86_64-unknown-linux-musl; do
+  printf '%s  aibus-%s.tar.gz\n' "$(awk -v u="aibus-$tg.tar.gz" 'index($0, u) {getline; gsub(/.*sha256 "|".*/, ""); print; exit}' "$c")" "$tg"
+done >"$t/COMMITTED"
+sh "$render" "$cver" "$t/COMMITTED" "$t/committed.rb" >/dev/null
+expect "committed Formula/aibus.rb is what the script renders from its own sums" diff -u "$c" "$t/committed.rb"
 
 # Failure modes.
 grep -v musl "$t/SHA256SUMS" >"$t/MISSING"

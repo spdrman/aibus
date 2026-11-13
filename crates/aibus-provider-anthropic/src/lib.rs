@@ -10,7 +10,7 @@ mod sigv4;
 mod stream;
 mod wire;
 
-pub use cloud::TokenSource;
+pub use cloud::{CloudFactory, TokenSource};
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -18,12 +18,15 @@ use std::time::SystemTime;
 
 use aibus_provider::models::ModelTable;
 use aibus_provider::{
-    AccountInfo, AliasTable, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, ConfigError,
-    Credential, ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig, ProviderError,
-    ProviderErrorKind, ProviderFactory, ProviderId, StreamChunk, SystemRole,
+    AccountInfo, AliasTable, Api, AuthMethodKind, CacheHint, Capabilities, ChatRequest, ChatResponse, CompatFlag,
+    ConfigError, Credential, Message, MessageRole, ModelId, RequestMetadata, ToolChoice, ModelInfo, ModelRef, Price, Provider, ProviderConfig,
+    ModelTableSpec, ProviderDef, ProviderError, ProviderErrorKind, ProviderFactory, ProviderId,
+    StreamChunk, SystemRole,
 };
-use aibus_provider_http::reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use aibus_provider_http::{cancelled, chunk, emit, json, request_id, sensitive, Events, Http};
+use aibus_provider_http::reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE,
+};
+use aibus_provider_http::{cancelled, chunk, emit, json, rate_limit, request_id, sensitive, Events, Http};
 use async_trait::async_trait;
 use cloud::Transport;
 use tokio::sync::mpsc;
@@ -48,9 +51,20 @@ impl ProviderFactory for Factory {
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
         &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env]
     }
+
+    fn apis(&self) -> &'static [&'static str] {
+        &["anthropic-messages"]
+    }
 }
 
 pub struct Anthropic {
+    /// `anthropic`, or the id of the `[[provider]]` this instance was built for.
+    id: &'static str,
+    /// From the definition: sent on every request.
+    extra_headers: HeaderMap,
+    /// The provider's capabilities from its definition, before any model's entry.
+    base_caps: Capabilities,
+    compat: Vec<CompatFlag>,
     /// No trailing slash, no `/v1`.
     base: String,
     table: Mutex<ModelTable>,
@@ -70,22 +84,71 @@ impl Anthropic {
         transport: Transport,
         prefixes: &'static [&'static str],
     ) -> Result<Self, ConfigError> {
-        let base = cfg.base_url.as_deref().unwrap_or(&default_base).trim_end_matches('/');
-        if !(base.starts_with("https://") || base.starts_with("http://")) {
-            return Err(ConfigError::Invalid(
-                "anthropic".into(),
-                "base_url must start with https:// or http://".into(),
-            ));
+        // The definition the registry resolved, or just the account's `base_url` (a factory
+        // built on its own, and the cloud transports, whose default host is not Anthropic's).
+        let def = cfg.def.clone().unwrap_or_else(|| ProviderDef {
+            id: "anthropic".into(),
+            api: Some(Api::AnthropicMessages),
+            base_url: cfg.base_url.clone(),
+            ..ProviderDef::default()
+        });
+        let api_ok = match &transport {
+            Transport::Direct => def.api == Some(Api::AnthropicMessages),
+            Transport::Bedrock { .. } => matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicBedrock)),
+            Transport::Vertex { .. } => matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicVertex)),
+        };
+        if !api_ok {
+            return Err(ConfigError::Invalid(def.id.clone(), "this adapter speaks the Messages API (anthropic-messages, anthropic-bedrock, anthropic-vertex) only".into()));
         }
+        let id = def.static_id();
+        let base = def.base_url.as_deref().unwrap_or(&default_base).trim_end_matches('/');
+        if !(base.starts_with("https://") || base.starts_with("http://")) {
+            return Err(ConfigError::Invalid(id.into(), "base_url must start with https:// or http://".into()));
+        }
+        let mut extra_headers = HeaderMap::new();
+        for (k, v) in &def.headers {
+            let bad = |e: String| ConfigError::Invalid(id.into(), format!("headers: {k}: {e}"));
+            extra_headers.insert(
+                HeaderName::from_bytes(k.as_bytes()).map_err(|e| bad(e.to_string()))?,
+                HeaderValue::from_str(v).map_err(|e| bad(e.to_string()))?,
+            );
+        }
+        let builtin = match &def.model_table {
+            Some(ModelTableSpec::Inline(v)) => v.to_string(),
+            Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
+                .ok_or_else(|| ConfigError::Invalid(id.into(), format!("model_table: no built-in table called {n}")))?
+                .to_owned(),
+            None => {
+                let name = match transport {
+                    Transport::Direct => "anthropic",
+                    Transport::Bedrock { .. } => "bedrock",
+                    Transport::Vertex { .. } => "vertex",
+                };
+                aibus_provider::catalog::table(name).unwrap_or_default().to_owned()
+            }
+        };
+        // A definition's own prefixes win over the transport's (Bedrock has its own).
+        let own: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
+        let prefixes = if own.is_empty() || !matches!(transport, Transport::Direct) { prefixes } else { &own[..] };
         Ok(Self {
+            id,
+            extra_headers,
+            base_caps: Capabilities {
+                tools: true,
+                parallel_tool_calls: true,
+                streaming: true,
+                thinking: true,
+                prompt_cache: true,
+                logprobs: false,
+                effort: true,
+                images: true,
+                system_role: SystemRole::Separate,
+                max_tools: None,
+            }
+            .with(&def.default_capabilities),
+            compat: def.compat_flags().to_vec(),
             base: base.to_owned(),
-            table: Mutex::new(ModelTable::load(
-                "anthropic",
-                include_str!("models.json"),
-                cfg,
-                prefixes,
-                false,
-            )?),
+            table: Mutex::new(ModelTable::load(id, &builtin, cfg, prefixes, false)?),
             cache_dir: cfg.cache_dir.clone(),
             http: Http::new(),
             transport,
@@ -98,8 +161,8 @@ impl Anthropic {
 
     /// The version header and the auth header for this credential. `None` auth sends no key (a
     /// gateway that authenticates some other way).
-    fn headers(creds: &Credential) -> Result<HeaderMap, ProviderError> {
-        let mut h = HeaderMap::new();
+    fn headers(&self, creds: &Credential) -> Result<HeaderMap, ProviderError> {
+        let mut h = self.extra_headers.clone();
         h.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
         match creds.kind {
             AuthMethodKind::None => {}
@@ -114,9 +177,44 @@ impl Anthropic {
         Ok(h)
     }
 
+    /// Bedrock and Vertex have no cheap authenticated call, so `verify` makes one real request:
+    /// one token out, on the smallest model, whose cost it reports. A Bedrock global inference
+    /// profile is preferred, since the newer models cannot be called without a profile.
+    async fn probe(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
+        let models = self.models();
+        let haiku = |m: &&ModelInfo| m.family == "haiku" && !m.deprecated;
+        let model = models
+            .iter()
+            .filter(haiku)
+            .find(|m| m.id.0.starts_with("global."))
+            .or_else(|| models.iter().find(haiku))
+            .or(models.first())
+            .map_or_else(|| ModelId("claude-haiku-4-5".into()), |m| m.id.clone());
+        let req = ChatRequest {
+            model: model.clone(),
+            system: String::new(),
+            messages: vec![Message::text(MessageRole::User, "hi")],
+            tools: Vec::new(),
+            tool_choice: ToolChoice::Auto,
+            max_output_tokens: 1,
+            temperature: None,
+            effort: None,
+            thinking: None,
+            cache_hint: CacheHint::None,
+            logprobs: false,
+            metadata: RequestMetadata::default(),
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+        let drain = async { while rx.recv().await.is_some() {} };
+        let (resp, ()) = tokio::join!(self.stream(creds, req, tx, CancellationToken::new()), drain);
+        let resp = resp?;
+        let cost_usd = self.price(&model).and_then(|p| p.cost_usd(&resp.usage));
+        Ok(AccountInfo { label: creds.account.to_string(), org: None, models: models.into_iter().map(|m| m.id).collect(), cost_usd })
+    }
+
     async fn list_models(&self, creds: &Credential) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
         let url = format!("{}/v1/models?limit=1000", self.base);
-        let headers = Self::headers(creds)?;
+        let headers = self.headers(creds)?;
         let resp = self
             .http
             .send(&CancellationToken::new(), |c| c.get(&url).headers(headers))
@@ -138,22 +236,15 @@ impl Anthropic {
 #[async_trait]
 impl Provider for Anthropic {
     fn id(&self) -> ProviderId {
-        ProviderId("anthropic")
+        ProviderId(self.id)
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            tools: true,
-            parallel_tool_calls: true,
-            streaming: true,
-            thinking: true,
-            prompt_cache: true,
-            logprobs: false,
-            effort: true,
-            images: true,
-            system_role: SystemRole::Separate,
-            max_tools: None,
-        }
+        self.base_caps.clone().with_compat(&self.compat)
+    }
+
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        self.table().capabilities_for(self.base_caps.clone(), model).with_compat(&self.compat)
     }
 
     fn models(&self) -> Vec<ModelInfo> {
@@ -166,7 +257,7 @@ impl Provider for Anthropic {
         }
         let (ids, _) = self.list_models(creds).await?;
         Ok(self.table().refreshed(
-            "anthropic",
+            self.id,
             ids,
             |id| ModelInfo {
                 id: id.clone(),
@@ -196,18 +287,19 @@ impl Provider for Anthropic {
         out: mpsc::Sender<StreamChunk>,
         cancel: CancellationToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let req = self.capabilities().degrade(req);
+        let req = self.capabilities_for(&req.model).degrade(req);
         let (price, effort_ok) = {
             let t = self.table();
             (t.price(&req.model), t.entry(&req.model).is_some_and(|e| e.effort))
         };
-        let body = wire::messages_body(&req, effort_ok);
+        let body = wire::messages_body(&req, effort_ok, &self.compat);
         let beta = req.effort.is_some() && effort_ok;
         tracing::debug!(account = %creds.account, model = %req.model, "anthropic: stream");
 
         let (url, headers, body) = self.prepare(creds, &req.model, body, beta).await?;
         let mut resp = self.http.send(&cancel, |c| c.post(&url).headers(headers).body(body)).await?;
         let request_id = request_id(&resp);
+        let window = rate_limit(resp.headers(), SystemTime::now());
 
         let mut turn = stream::Turn::new(price);
         if matches!(self.transport, Transport::Bedrock { .. }) {
@@ -234,7 +326,9 @@ impl Provider for Anthropic {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
-        turn.finish(request_id)
+        let mut done = turn.finish(request_id)?;
+        done.rate_limit = window;
+        Ok(done)
     }
 
     async fn count_tokens(
@@ -246,10 +340,10 @@ impl Provider for Anthropic {
         if !matches!(self.transport, Transport::Direct) {
             return None;
         }
-        let body = wire::count_body(&self.capabilities().degrade(req.clone()));
+        let body = wire::count_body(&self.capabilities_for(&req.model).degrade(req.clone()));
         let url = format!("{}/v1/messages/count_tokens", self.base);
         let result = async {
-            let headers = Self::headers(creds)?;
+            let headers = self.headers(creds)?;
             let resp = self
                 .http
                 .send(&CancellationToken::new(), |c| {
@@ -269,12 +363,10 @@ impl Provider for Anthropic {
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
         if !matches!(self.transport, Transport::Direct) {
-            self.check_cloud_auth(creds).await?;
-            let models = self.models().into_iter().map(|m| m.id).collect();
-            return Ok(AccountInfo { label: creds.account.to_string(), org: None, models });
+            return self.probe(creds).await;
         }
         let (models, org) = self.list_models(creds).await?;
-        Ok(AccountInfo { label: creds.account.to_string(), org, models })
+        Ok(AccountInfo { label: creds.account.to_string(), org, models, cost_usd: None })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

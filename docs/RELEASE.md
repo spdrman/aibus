@@ -44,8 +44,12 @@ window, then go through the list. Unix terminals on macOS and Linux, Windows Ter
       Note any the terminal eats (kitty and WezTerm bind some `Ctrl-Shift` chords).
 * [ ] Mouse: click selects a card, the wheel scrolls the focused pane, the right click opens the
       card menu, and a drag selects text without breaking the layout.
-* [ ] Resize while a run streams: the layout reflows with no tearing, and the 80x24 collapsed rail
-      comes and goes at the width the spec says.
+* [ ] Cards (with more than three runs): the wheel over the cards scrolls, Shift plus the wheel pans
+      the row sideways, and a drag from empty space pans it. The cards canvas pans with eight runs.
+      The centre column is drawn by rataflow in every build.
+* [ ] Resize while a run streams, once with eight runs so the cards canvas is wider than the column:
+      the layout reflows with no tearing, and the 80x24 collapsed rail comes and goes at the width
+      the spec says.
 * [ ] Paste of several lines into the prompt arrives as one paste (bracketed paste), not as
       submitted lines.
 * [ ] Unicode: a streamed line with accents, CJK and an emoji keeps its alignment.
@@ -81,8 +85,9 @@ On a push to `release` it runs these jobs, each one only if the ones before it s
 
 1. `prepare` reads the version from `[workspace.package]` in `Cargo.toml`, makes the tag
    `v<version>`, and stops if the tag already exists, if `CHANGELOG.md` has no entry for the
-   version, if the release commit is not a descendant of the tip of `main`, or if `install.sh`,
-   `install.ps1` or `packaging/homebrew/render-formula.sh` is missing.
+   version, if the release commit is not a descendant of the tip of `main`, if `install.sh`,
+   `install.ps1` or `packaging/homebrew/render-formula.sh` is missing, or if the release commit has
+   no valid signed attestation (see "The release attestation" below).
 2. `build` runs `cargo build --release --locked -p aibus` on six runners (aarch64 and x86_64 macOS,
    x86_64 and aarch64 Linux glibc, x86_64 Linux musl, x86_64 Windows) with `AIBUS_TAG` and
    `AIBUS_COMMIT` set, runs the binary once (`aibus version` must show the commit, and the tag on a
@@ -109,7 +114,8 @@ On a push to `release` it runs these jobs, each one only if the ones before it s
 The dry run (`gh workflow run release.yml --ref <branch>`) runs `prepare` (problems become
 warnings), `build` and `package`. `publish`, `verify`, `finalize` and `summary` carry the
 push-to-`release` condition on the job itself, so a dispatch skips them whatever the ref is: it
-never tags, signs, publishes or merges.
+never tags, signs, publishes or merges. A dry run reports a missing or invalid attestation as a
+warning too, so a branch without one still builds.
 
 Pushes made with `GITHUB_TOKEN` (the formula commit, the merge into main) do not start new runs, so
 there is no loop. If that ever changed, the second run would stop in `prepare` because the tag
@@ -126,13 +132,152 @@ Not proven by a dry run: signing, publishing, `verify` and `finalize` only run o
 the first release is their first run. The keyless bundle format, the `install.sh` run and the
 formula render are the parts most likely to need a fix on that run.
 
+### The release attestation
+
+Nothing on Actions runs the suites, so the proof that they ran is a signed file I make before the
+push. `tools/release-attest/attest.sh` archives `HEAD`, pushes it to a docker host with `dh.sh`
+and runs the "every push" rows of `docs/TESTING.md` in one fenced container (memory limit, swap
+equal to it so none, CPU quota; `DH_MEMORY` and `DH_CPUS` override the defaults, the host is
+`--host`, default `mercury`). It refuses a dirty tree, a missing key, an existing attestation
+(without `--replace`) and a red run. When it is green it writes `release-attest/attestation.json`
+(commit, tree hash, version, per-suite exit and counts) and a detached `ssh-keygen -Y sign`
+signature next to it. Benchmarks, fuzzing, the live provider run and the `aibus-graph-causl`
+backend are not part of it.
+
+```
+tools/release-attest/attest.sh --key <private key>     # on the release candidate, tree clean
+git add release-attest && git commit -m "Attest the suites for <version>"
+tools/release-attest/verify.sh --expect-version <version>            # the same check `prepare` makes
+```
+
+The hash is the id of the commit's top-level git tree with the one entry named exactly
+`release-attest` removed, rebuilt with `git mktree -z` (algorithm `mktree-top-level-sans-release-attest-v2`).
+Nothing is split on newlines or tabs, so no file name can fake an entry, and only that top-level
+entry is left out: committing the two files does not invalidate them, and any other change after the
+run (a nested `release-attest` directory included) does ("the code changed after the run").
+`verify.sh` checks the signature against `packaging/release-attest.pub`, that the tree hash is this
+commit's, that the version is the one `Cargo.toml` declares, and that every suite is present, exited
+0 and passed cells. It prints ok only if the signature check actually ran, and a `--pubkey` that is
+not a readable file is a failure. `prepare` runs it on the release commit with the key read from
+`main`, so the push cannot bring its own. It proves the key holder signed a green run of this tree;
+it cannot stop someone with write access editing the script or the workflow in the same push.
+
+The signing key is `ssh-ed25519` (public half committed in `packaging/release-attest.pub`,
+fingerprint `SHA256:VqX4OVIeEX8cDiNWiwMIJdcBqZtpGyiUNiOpztMzHT8`); the private half is never
+committed. `attest.sh` looks for the private key at `~/.ssh/aibus-release-attest` with its `.pub`
+beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must sit next to it) or set
+`AIBUS_ATTEST_KEY`. Tests for the
+tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.
+
+## The local release gate
+
+Actions are off for this repo on purpose, so the gate on `release` is local: committed git hooks
+plus one runner. Install them once per clone with `tools/release-gate/install.sh` (it sets
+`core.hooksPath` to `.githooks`; there were no hooks before, so nothing else is replaced).
+
+**Flow.** A feature branch (`feature/...`, `fix/...`, `lane/...`) merges onto `main` as before. A
+release is cut on a branch named `release-prep/v<version>`, and that branch is merged into `release`.
+That merge is what `release.yml` publishes from.
+
+**On a feature branch** (`pre-commit`): fast checks on the staged files only, `rustfmt --check` on
+`.rs` and `bash -n` on shell. Clippy, the tests and the e2e are not run here (they compile, and
+compiles run in a container, see `docs/BUILD.md`), and a PR runs its own specific tests by hand. The hook
+does nothing while merging and on `release` itself.
+
+**Merging into `release`** (`pre-merge-commit`): when the current branch is `release`, a merge that
+auto-commits runs the full e2e first and is aborted if it is red. The e2e is
+`tools/release-gate/e2e.sh`. It runs the suites in `tools/release-attest/config.sh` (the "every
+push" rows of `docs/TESTING.md`, the same list as the attestation, built by the same `lane_script`) in
+one container through `/Users/rom/workspace/dh.sh`. The container is fenced: memory limit (60% of the host's RAM,
+16g at most), swap equal to it so none, CPU quota (two thirds of the CPUs). `DH_MEMORY` and `DH_CPUS`
+override that. The host is `--host`, `RELEASE_E2E_HOST`, or `dh.sh pick` (least loaded, the MacBook
+last). The tree is archived from git, pushed into a named docker volume, and the volume is removed
+on every exit path. A cold run compiles the workspace, so I expect tens of minutes and a few GB
+(I have not timed it here yet). It refuses a dirty tree. There is no Playwright in this repo.
+
+**The stamp.** A green run writes `$(git rev-parse --git-common-dir)/release-e2e/<tree key>`
+(tree, command, host, start and finish time, and `gate_sha256`). It lives inside `.git` and is never committed. The key
+is the tree id with the top-level `release-attest/` directory left out (the `tree_hash` function in `tools/release-attest/config.sh`), so adding
+the attestation commit does not invalidate the stamp. That also means anything under `release-attest/` is outside the stamp key by design; the signed attestation covers the rest, and `pre-push` refuses a push that touches that directory beyond the two attestation files. `pre-push` refuses a push whose destination is
+`refs/heads/release` unless a stamp exists for the tree being pushed. That also covers `merge
+--no-commit`, squash merges and fast-forwards, which skip `pre-merge-commit`. `pre-push` reads the stamp, it does not just look for the file: it must have exactly the keys the runner writes, name the tree it is filed under, name a host `dh.sh` knows (mars, nas, mercury, local; `e2e.sh` checks the same list before it spends a run), and carry a `gate_sha256` equal to the hash of the gate it judges with. Pushes to any other
+branch pass straight through.
+
+**Which gate judges a push.** I made `pre-push` judge with the gate from the remote release tip, not from the tree being pushed. It reads `tools/release-gate` and `tools/release-attest` at the old sha git hands the hook with `git show` (not `git archive`, which drops whatever the tip's `.gitattributes` export-ignores) into a temp dir, and runs the stamp check from that copy. If the tip has no gate, it refuses. `gate_sha256` is a hash over `config.sh`, `e2e.sh`, `lib.sh`, `attest.sh` and `verify.sh`, so a stamp made by a gate the topic edited does not match. Besides a missing stamp, I refuse the push when: it changes a gate file (`tools/release-gate/*`, `tools/release-attest/*`, `.githooks/*`); it touches `release-attest/` beyond `attestation.json` and its signature; it deletes `release`; the remote has no `release` yet (zero old sha, the one-time bootstrap); the remote `release` exists but has no gate yet (the first gated push to the real remote, which predates the gate; the refusal prints the skip hint); or the remote tip is not in the clone (`fetch first`, no fallback to `refs/remotes`). The logged `RELEASE_E2E_SKIP` lifts every one of those. I read the ref lines from the end, so a local ref with spaces in it (`HEAD^{/some message}`) cannot hide the release line, and I refuse stdin with a line of fewer than 4 fields or with more than one line naming `refs/heads/release` (a newline inside a refspec is the only way to get either). `GIT_COMMON_DIR` is unset in both hooks so a decoy stamp directory is not read. `pre-merge-commit` does the same for a merge: it reads the gate from `HEAD` with `git show` and refuses a merge that changes a gate file. The copy of the tree that `e2e.sh` and `attest.sh` run the suites on is also built from the git objects, not `git archive`, so `export-ignore` and `export-subst` cannot drop or rewrite what gets tested; modes, symlinks and submodule directories are kept. Because the tree is untrusted input copied on the host, I check every path first and refuse the whole copy for an empty, `.`, `..` or `.git` component (any case, invisible characters taken out), make every directory (the parents of the symlinks too) in a first pass while the destination holds no link, then write the symlinks in a second pass that creates no directory, never write through a symlink or over an existing path, and check that every parent resolves inside the destination. Everything is judged before it is written, so a refused copy leaves nothing outside the destination (a test snapshots the surroundings). Known limits: it runs one `git cat-file` per blob (about 11 s for this repo's 1500 files, roughly 73 s for 10k entries, `--batch` would be the speedup if it matters); the HFS-ignorable stripping covers the common characters only; and `dh.sh push` excludes directories named `target` and `node_modules` (`tar --exclude`) from what the container tests, while the tree hash still covers them (that is in `dh.sh`, outside this gate).
+
+**The skip record.** Each hook writes its own record inline and sources nothing from the working tree or the pushed tree, so a topic that silences `gate_skipped` in `lib.sh` cannot make a skip silent. The reason has to be valid UTF-8 and 12 characters or more (characters, not bytes, counted by perl so `LC_ALL=C` makes no difference) after trimming whitespace (ASCII and the common Unicode spaces such as NBSP and U+3000) and after dropping invisible characters (zero-width space and joiners, the bidi marks, BOM, word joiner and the other U+2060 range characters, Hangul filler U+3164 and U+115F/1160, braille blank U+2800, Mongolian vowel separator U+180E, variation selectors, tag characters) (control characters and the Unicode line separators are flattened to spaces, so a reason cannot forge extra lines). One line is appended to `release-e2e/skips.log`: time, hook, user email, the reason, then `pushed_sha`, `old_tip`, `remote_ref`, `waived=` (some of `stamp`, `bootstrap`, `delete`, `gate-change`, `attest-extra`, `remote-gate`, `remote-tip-missing`, `e2e` for a merge), `user` and `branch`.
+
+**Failed writes.** `pre-push` saves the push lines git sends on stdin before it judges them. If that write fails (disk full, quota) it refuses with "cannot save the push lines" rather than reading an empty file as "no release line", and every `mktemp` in the hooks, `e2e.sh`, `attest.sh`, `verify.sh`, `release.sh` and `export_tree` is checked (it must succeed and name an existing file or directory) before anything is written through it. A skip record or stamp that cannot be written refuses too, and a stamp must have all six lines before it is filed. Both test runners point `DH_SH` at a failing stub at the top, so no test can reach the real `dh.sh` or a docker host (a guard test fails if the stub was ever called; a test that wants a fake host sets its own `DH_SH`). The perl calls use `-C0`, so `PERL_UNICODE` cannot change how the reason is read, and a character count that is not a number refuses. The two test runners (`tests/release-gate/run.sh`, `tests/release-attest/run.sh`) run without `-e`, so they stop with `exit 1` when their own temp dir cannot be made. `e2e.sh` keeps a red run's log under a `mktemp` name, not a name built from the pid.
+
+**Speeding up `export_tree` (not done).** The copy runs one `git cat-file blob` per entry (about 11 s for the 1500 files here, roughly 73 s for 10k). The planviewer and xldatagrid versions of this gate use `git cat-file --batch` instead. If it ever matters here, I would do it like this and keep every escape and containment test green: send at most 500 shas per call and keep the list order; read each reply header (`<sha> <type> <size>`) and fail the copy when the sha is not the one requested in that position, when the type is not `blob`, when the header says `missing`, when the body is short or the trailing newline is absent, or when git exits non-zero (surface its status, never swallow it with a pipe); never send a gitlink (mode 160000) at all, since its commit is not in this repository; keep writing symlinks in the second pass and all the path judging in pass 0, so only the blob reads change.
+
+**Override.** `RELEASE_E2E_SKIP='<reason>'` skips the gate in the hooks and the runner. It prints
+the reason loudly and appends it to `release-e2e/skips.log` next to the stamps. It is legitimate for
+a docs-only change to `release`, a change to the gate itself, creating the `release` branch, or when every docker host is down and the release is urgent and I
+accept it. I do not use `--no-verify`. `RELEASE_E2E_CMD` replaces the container run with a local
+command; it is for the tests of the gate only. It warns loudly, and its stamps go to `release-e2e-fake/`, which
+`pre-push` never reads (only `tests/release-gate/run.sh` sets `RELEASE_E2E_TEST_STAMPS`, to the repo's stamp directory, to get real ones, and `pre-push` rejects fake-host stamps otherwise), so a
+leftover variable in a shell cannot open the gate.
+
+**Markers.** The container script wraps each suite in SUITE and EXIT markers that carry a random per-run nonce (`lane_script` in `tools/release-attest/config.sh`, shared with `attest.sh`), so a decoy a test prints or quotes (an old log, say) is not believed, and a suite with two markers is red. It does not stop suite code that reads the nonce from the container's argv, which runs with the same rights as the gate. Each EXIT marker starts on its own line. A run is green only if the container itself exited 0 and every suite has exactly one genuine EXIT marker with 0.
+
+**Failure modes.** Docker host down: `dh.sh push` fails, the runner says so and cleans up; pick another
+`--host`. OOM: a killed container leaves a suite without its `EXIT` line, so the run is red, and the
+log is kept (path printed); lower `DH_CPUS` or move to a bigger host, do not retry in a loop. Dirty
+tree: refused (in the merge hook it means unstaged or untracked files while the merge is pending).
+Red: no stamp.
+
+**What the hooks cannot do.**
+
+* The hooks themselves come from the working tree (`core.hooksPath=.githooks`). A topic that edits `.githooks` and is merged into `release` runs its own hooks, so I treat that merge as ungated. I take the runner, conf and attest files from the release tip, but not the hooks.
+* The logged skip also waives the e2e. After a gate change, or when I create `release`, I run `tools/release-gate/e2e.sh` by hand on the merged tree first.
+* A gate change needs the skip on both the merge (`pre-merge-commit`) and the push (`pre-push`). Creating the `release` branch needs it on both too. The real remote `release` predates this gate (it has no `tools/release-gate` and no `.githooks`), so my first gated merge and push take the "HEAD or the remote tip has no gate" path: the skip, a reason of 12+ characters, and the e2e run by hand.
+* A merge done in the GitHub web UI runs no local hook at all.
+* The real boundary is GitHub branch protection on `release`, plus the signed attestation check in the `prepare` job of `release.yml`, which stays fail-closed. The local gate catches my mistakes, it does not stop someone with write access.
+
+**How it relates to the attestation.** The stamp gates the merge and push into `release`; the signed
+attestation gates the publish (`prepare` in `release.yml` verifies it). They run the same suites. The
+stamp is local and unsigned, the attestation is signed and committed.
+
+### The release script
+
+`tools/release-gate/release.sh <version> [--dry-run] [--yes] [--closes N] [--host h] [--rerun]` does a
+release up to the PR and stops. It never tags, publishes or merges: `publish` in `release.yml` makes
+the tag `v<version>` when the PR lands on `release`.
+
+1. Checks: `<version>` is `X.Y.Z` or `X.Y.Z-pre.N`; the tag `v<version>` does not exist locally or on
+   origin; it is greater than the latest `v*` tag and not lower than the workspace version (a
+   version equal to the workspace one means the bump was already made, like 0.2.0 now), or pass
+   `--allow-downgrade`; `CHANGELOG.md` has the entry (I write it first); the tree is clean; the key
+   exists at `~/.ssh/aibus-release-attest` (or `--key`) and its `.pub` is the one committed in
+   `packaging/release-attest.pub`. The private key is only checked for existing, never read.
+2. Cuts `release-prep/v<version>` from `origin/main`.
+3. One commit `Release v<version>`: `version` in `[workspace.package]` in `Cargo.toml` and the path
+   crates in `Cargo.lock` (what `lane/version-0.2.0` did). `Formula/aibus.rb` stays, `finalize` renders
+   it. This is before the e2e, so the e2e and the attestation cover the tree that gets released.
+4. The full e2e (above). A stamp already there for the same tree is reused (`--rerun` forces it).
+5. `tools/release-attest/attest.sh`, then it checks the attestation covers the tree the e2e ran on.
+6. Commits `release-attest/`, runs `verify.sh --expect-version <version>` (the check `prepare` makes),
+   asks once (`--yes` skips), pushes the branch and runs `gh pr create --base release --title "Release
+   v<version>"`. The body names the attestation, the stamp (tree, host, time) and the tag.
+
+`--dry-run` prints every step and writes, pushes and opens nothing. To review in the PR: the bump
+commit, the attestation (version and tree), the CHANGELOG entry, then merge it myself. The attestation
+runs the same suites as the e2e, so a full release runs them twice; the e2e is the gate for the
+merge, the attestation is the proof for publish. Tests: `bash tests/release-gate/run.sh` (fake e2e,
+fake runner, throwaway key, fake `gh`; no container).
+
 ### Release procedure
 
 * [ ] `main` is green locally (the automatic part above) and a dry run of the workflow is green.
 * [ ] `version` in the root `Cargo.toml` is the release version, `Cargo.lock` is committed, and
       `CHANGELOG.md` has the entry for it.
+* [ ] (or all of the steps below up to the PR with `tools/release-gate/release.sh <version>`, see above.)
+* [ ] `tools/release-attest/attest.sh` is green on the commit that goes to `release`, the two files
+      are committed, and `tools/release-attest/verify.sh --expect-version <version>` says ok. The
+      merge into `release` must leave the same tree (fast-forward, or a merge that changes nothing).
 * [ ] Open a pull request from `main` (or a branch of it) into `release`, and merge it. The merge
-      is the trigger. If `release` does not exist yet, create it at the tip of `main` once.
+      is the trigger. If `release` does not exist yet, create it once from `main` (the one-time bootstrap; the stamp does not exist for that tree, so the skip is logged): `RELEASE_E2E_SKIP="bootstrap release branch" git push origin main:refs/heads/release`. A branch named `release/...` cannot exist next to `release`, so per-release work uses `release-prep/v<version>`.
 * [ ] Watch the run (`gh run watch`). The run summary says which job stopped it, if any.
 * [ ] When it is green: `main` has the merge commit and `Formula/aibus.rb`, the release has the
       assets listed above (six archives, SBOM, `SHA256SUMS`, two installers, and a bundle for

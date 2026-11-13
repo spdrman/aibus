@@ -16,6 +16,7 @@ use aibus_tui::keys::Keymap;
 use aibus_tui::{Prompt, Theme};
 
 use crate::cli::{Global, RunArgs};
+use crate::launch::ChildLauncher;
 use crate::startup::{self, not_ready, Ctx};
 
 /// The environment the loop reads: names, so a test can pass its own.
@@ -93,6 +94,12 @@ pub fn options(
         agents_dir: Some(paths.config.join("agents")),
         validate: None,
         account: None,
+        oauth_providers: aibus_provider::presets::presets()
+            .iter()
+            .filter(|p| crate::oauth::definition(&p.id, None).is_some())
+            .map(|p| p.id.clone())
+            .collect(),
+        workflows: None,
     };
     (opts, warnings)
 }
@@ -110,43 +117,140 @@ fn count_session(state: &Path) {
         .and_then(|()| aibus_core::persist::fs::write_private(state.join("sessions_seen"), n.to_string()));
 }
 
-/// One account operation from the accounts screen, run by the same code as `aibus account`.
-/// It runs on its own thread: `account test` starts a runtime of its own.
-fn account_op(op: AccountOp, paths: &Paths, redactor: &Redactor) -> String {
+/// One account operation from the Accounts screen, run by the same code as `aibus account`. It
+/// returns at once: a provider verify takes seconds, and the dashboard keeps drawing meanwhile.
+/// The work runs on a thread of its own (`account test` starts a runtime of its own), and what
+/// it did comes back as `Msg::AccountOpDone`, after a `Msg::AccountsReloaded` when the accounts
+/// changed. The key stays a `Secret` until the worker feeds it to `account add` as its stdin.
+fn account_op(
+    op: AccountOp,
+    tx: tokio::sync::mpsc::Sender<Msg>,
+    paths: &Paths,
+    project_settings: &Path,
+    redactor: &Redactor,
+    launcher: Option<Arc<ChildLauncher>>,
+    login: &mut Option<tokio_util::sync::CancellationToken>,
+) -> String {
     use crate::account::{self, Io};
     use crate::cli::{AccountAdd, AccountCmd};
-    let (cmd, key) = match op {
-        AccountOp::Test(name) => (AccountCmd::Test { name }, String::new()),
-        AccountOp::Disable(name) => (AccountCmd::Disable { name }, String::new()),
+    let mut cancel = None;
+    let (what, name, cmd, key) = match op {
+        AccountOp::CancelOauth => {
+            if let Some(token) = login.take() {
+                token.cancel();
+            }
+            return "cancelling the login...".into();
+        }
+        AccountOp::OpenUrl(url) => {
+            // The modal only offers an address of the flow; this holds even if something else asks.
+            if url.starts_with("https://") || url.starts_with("http://") {
+                crate::oauth::open(&url);
+            }
+            return String::new();
+        }
+        AccountOp::AddOauth { name, provider } => {
+            let token = tokio_util::sync::CancellationToken::new();
+            *login = Some(token.clone());
+            cancel = Some(token);
+            (
+                "login",
+                name.clone(),
+                AccountCmd::Add(AccountAdd { name, provider, key_stdin: false, env: None, file: None, oauth: true, base_url: None, label: None, region: None, project: None }),
+                None,
+            )
+        }
+        AccountOp::Test(name) => ("test", name.clone(), AccountCmd::Test { name }, None),
+        AccountOp::Disable(name) => ("disable", name.clone(), AccountCmd::Disable { name }, None),
+        AccountOp::Remove(name) => ("remove", name.clone(), AccountCmd::Remove { name }, None),
         AccountOp::Add { name, provider, key } => (
-            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None }),
-            key,
+            "add",
+            name.clone(),
+            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None, region: None, project: None }),
+            Some(key),
         ),
     };
-    let (paths, redactor) = (paths.clone(), redactor.clone());
-    let done = std::thread::spawn(move || {
-        let mut out = Vec::new();
-        let mut stdin = std::io::Cursor::new(key.into_bytes());
+    let (paths, project_settings, redactor) = (paths.clone(), project_settings.to_path_buf(), redactor.clone());
+    let shown = format!("{} {name}...", match what { "add" => "verifying", "login" => "logging in", w => w });
+    let provider_login = cancel.is_some().then(|| (tx.clone(), name.clone()));
+    std::thread::spawn(move || {
+        let mut out = Lines { all: Vec::new(), sent: 0, to: provider_login, redactor: redactor.clone() };
+        // The only copy of the key outside the keychain: wiped when the worker is done with it.
+        let bytes = zeroize::Zeroizing::new(key.map(|k| k.expose().clone().into_bytes()).unwrap_or_default());
+        let mut stdin: &[u8] = &bytes;
         let mut io = Io {
-            paths,
+            paths: paths.clone(),
             keychain: Arc::new(crate::keychain::OsKeychain),
-            factories: crate::providers::builtin_factories(),
+            factories: crate::providers::os_factories(&redactor),
             env: Arc::new(|v| std::env::var(v).ok()),
-            redactor,
-            oauth: None,
+            redactor: redactor.clone(),
+            // The browser is opened by `o` in the modal, and there is no stdin to paste on.
+            oauth: match &cmd {
+                AccountCmd::Add(a) if a.oauth => crate::oauth::definition(&a.provider, None)
+                    .map(|def| {
+                        let mut login = crate::oauth::Login::new(def);
+                        login.redactor = redactor.clone();
+                        Arc::new(login) as Arc<dyn aibus_core::OAuthFlow>
+                    }),
+                _ => None,
+            },
+            cancel,
             stdin: &mut stdin,
             prompt: None,
             out: &mut out,
         };
-        account::run(&cmd, false, &mut io)?;
-        Ok::<_, AibusError>(String::from_utf8_lossy(&out).trim().replace('\n', "  "))
-    })
-    .join();
-    match done {
-        Ok(Ok(text)) if text.is_empty() => "done".to_owned(),
-        Ok(Ok(text)) => text,
-        Ok(Err(e)) => format!("failed: {e}"),
-        Err(_) => "failed".to_owned(),
+        let ran = account::run(&cmd, false, &mut io);
+        // A browser login printed its address and code for the modal; only the last line is the result.
+        let said = String::from_utf8_lossy(&out.all);
+        let line = if what == "login" { said.lines().last().unwrap_or_default().trim().to_owned() } else { said.trim().replace('\n', "  ") };
+        let (ok, mut text) = match ran {
+            Ok(_) if line.is_empty() => (true, format!("{what} {name}: done")),
+            Ok(_) => (true, line),
+            Err(e) => (false, format!("failed: {e}")),
+        };
+        // The accounts changed: the new set is usable by the next pick, and the screens show it.
+        if ok && what != "test" {
+            match crate::startup::reload_accounts(&paths, &project_settings, &crate::providers::os_factories(&redactor)) {
+                Ok((registry, accounts, defaults)) => {
+                    if let Some(Err(why)) = launcher.as_ref().map(|l| l.set_accounts(registry, &accounts, &defaults)) {
+                        text.push_str(&format!(" (this session keeps the built-in fake: {why})"));
+                    }
+                    let _ = tx.blocking_send(Msg::AccountsReloaded { accounts });
+                }
+                Err(e) => text.push_str(&format!(" (could not reload the accounts: {e})")),
+            }
+        }
+        let text = redactor.redact(&text).into_owned();
+        let _ = tx.blocking_send(Msg::AccountOpDone { op: what.to_owned(), account: name, ok, text });
+    });
+    shown
+}
+
+/// The worker's `out`: keeps everything for the final line and, for a browser login, sends each
+/// finished line to the login modal as it is written (a `try_send`, since the flow writes from
+/// inside its runtime). The lines are redacted like every other text that leaves the worker.
+struct Lines {
+    all: Vec<u8>,
+    sent: usize,
+    to: Option<(tokio::sync::mpsc::Sender<Msg>, String)>,
+    redactor: Redactor,
+}
+
+impl std::io::Write for Lines {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.all.extend_from_slice(bytes);
+        while let Some(end) = self.all[self.sent..].iter().position(|c| *c == b'\n') {
+            if let Some((tx, account)) = &self.to {
+                let line = String::from_utf8_lossy(&self.all[self.sent..self.sent + end]);
+                let line = self.redactor.redact(&line).into_owned();
+                let _ = tx.try_send(Msg::AccountPrompt { account: account.clone(), line });
+            }
+            self.sent += end + 1;
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -182,7 +286,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     for w in warnings {
         eprintln!("aibus: warning: {w}");
     }
-    let (Some(rt), Some(app)) = (ctx.rt.as_ref(), ctx.app.take()) else {
+    let (Some(rt), Some(mut app)) = (ctx.rt.as_ref(), ctx.app.take()) else {
         return Err(not_ready("runtime"));
     };
     let mut opts = opts;
@@ -201,9 +305,22 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     if ctx.global.verbose > 0 {
         opts.mem = Some(aibus_core::mem::rss_mib);
     }
+    // The workflows on disk: the prompt's `/fix` family reads their names, and `/workflow list`,
+    // `show` and `save` work on these directories.
+    let workflows = aibus_tui::workflows::WorkflowFiles {
+        dirs: aibus_core::workflow::dirs(&ctx.cwd, Some(&paths.config)),
+        cap: loaded.config.limits.result_max_bytes,
+        redactor: ctx.redactor.clone(),
+    };
+    app.step(Msg::WorkflowsLoaded { rows: aibus_core::workflow::rows(&workflows.dirs), shown: None, said: None })?;
+    opts.workflows = Some(workflows);
     count_session(&paths.state);
     // Permission answers and messages reach the run that is waiting through its mailbox. The
     // map of which run asked is kept from what the runs say.
+    let author = ctx.launcher.clone().map(|launcher| {
+        let session = ctx.session.as_ref().map(|s| s.id.to_string()).unwrap_or_default();
+        Arc::new(crate::author::Author::new(ctx.author.clone(), launcher, ctx.cwd.clone(), session))
+    });
     if let Some(orch) = ctx.orch.clone() {
         let asked: Arc<std::sync::Mutex<HashMap<PermissionId, RunId>>> = Arc::default();
         let seen = asked.clone();
@@ -235,6 +352,33 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             Msg::Command(aibus_core::Command::SendMessage { run, text }) => {
                 let _ = o.message(*run, text.clone());
             }
+            // `/workflow new <goal>` and `edit`: the lead delegates to the workflow author in the
+            // foreground at its next turn boundary, so the draft comes back to it as data. The
+            // task is the server's `author_workflow` prompt when the server has one. `--write`
+            // starts the write child for this run (see `author.rs`).
+            Msg::Command(aibus_core::Command::WorkflowAuthor { goal, write, edit }) => {
+                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let (Some(mail), Some(author)) = (run.and_then(|r| o.mailbox(r)), author.clone()) {
+                    let (goal, edit, write, orch) = (goal.clone(), edit.clone(), *write, o.clone());
+                    tokio::spawn(async move {
+                        match author.delegate(&goal, write, edit.as_deref()).await {
+                            Ok(call) => {
+                                let _ = mail.send(RunMail::Call { tool: "delegate".into(), input: call }).await;
+                            }
+                            Err(why) => orch.send_later(Msg::IoError { context: format!("workflow author: {why}"), error: String::new() }),
+                        }
+                    });
+                }
+            }
+            // `/workflow run <name> <input>` and the shorthands: the lead makes the `workflow`
+            // call at its next turn boundary, so the steps are cards under it.
+            Msg::Command(aibus_core::Command::Workflow { name, input }) => {
+                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(mail) = run.and_then(|r| o.mailbox(r)) {
+                    let call = serde_json::json!({"name": name, "input": input});
+                    let _ = mail.try_send(RunMail::Call { tool: "workflow".into(), input: call });
+                }
+            }
             // A prompt typed while the lead runs is a message to it; slash commands are not.
             Msg::SubmitPrompt { text } if !text.starts_with('/') => {
                 let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -248,7 +392,10 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     opts.writer = ctx.writer.take();
     opts.runs_dir = ctx.session.as_ref().map(|s| s.dir.join("runs"));
     let (g, r) = (paths.clone(), ctx.redactor.clone());
-    opts.account = Some(Box::new(move |op| account_op(op, &g, &r)));
+    let project_settings = aibus_core::persist::paths::project_dir(&ctx.cwd).join("settings.toml");
+    let launcher = ctx.launcher.clone();
+    let mut login = None;
+    opts.account = Some(Box::new(move |op, tx| account_op(op, tx, &g, &project_settings, &r, launcher.clone(), &mut login)));
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();

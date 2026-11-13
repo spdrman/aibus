@@ -14,8 +14,9 @@ aibus session list | show <id> | resume <id> [--run <run-id>] [MESSAGE] | export
 aibus handoff create [--topic T] [--outcome O] | list | show [PATH]
 aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
-aibus workflow list | run <name> <input>
+aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
 aibus config path | show | init | validate | edit
+aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
 aibus doctor
 aibus completions <bash|zsh|fish|powershell>
 aibus version
@@ -87,7 +88,7 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | 8 | token or cost budget exceeded | `Budget` |
 | 10 | the lead run ended `Failed`, `Partial` or `Cancelled` | `Run` |
 | 11 | `doctor` found problems | |
-| 12 | `agent validate` found errors | |
+| 12 | `agent validate` or `workflow validate` found errors | |
 
 `session list --json` and friends exit 0 even when the list is empty.
 
@@ -98,6 +99,8 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | `agent list` | `[{name, scope, path, role, model, tools, description}]` |
 | `agent show` | the full definition as JSON (frontmatter fields plus `prompt`) |
 | `agent validate` | `{ok, errors:[{path, field, message}], warnings:[..]}` |
+| `workflow show` | `{name, path, description, steps:[{agent, prompt, gate?, on_fail?}]}` |
+| `workflow validate` | `{ok, errors:[{path, step, field, message}], warnings:[..]}` |
 | `account list` | `[{name, provider, label, auth:"keyring|env|file|none", default_model, status}]` |
 | `account test` | `{name, ok, label, org, models:[..], latency_ms}` or `{name, ok:false, error:{kind, message}}` |
 | `session list` | `[{id, started_at, ended_at, topic, runs, outcome, cost_usd}]` |
@@ -139,3 +142,17 @@ Timestamps are RFC 3339 UTC. Ids are ULIDs as strings. Nothing in any `--json` o
 | `NO_COLOR`, `COLORTERM`, `TERM`, `EDITOR` | standard meanings |
 
 No environment variable carries a credential except the explicit `env` auth method, and aibus never enumerates the environment into logs.
+
+## 8. `aibus mcp`
+
+An MCP server for other programs to read workflows through. It starts read-only, speaks stdio unless `--http` is given, and answers `2026-07-28` and `2025-11-25`.
+
+| Flag | Meaning |
+|---|---|
+| `--allow write\|gates\|run` | add to what the server may do (repeatable); `gates` needs `write`, otherwise exit 2 |
+| `--allow-tool <pattern>` | pre-approve a tool for runs (repeatable) |
+| `--http <ip:port>` | Streamable HTTP on a loopback address instead of stdio; any other address is exit 2 |
+| `--origin <origin>` | accept this `Origin` as well as the loopback ones (needs `--http`) |
+| `--max-runs`, `--max-concurrent-runs`, `--max-cost-usd` | parse, and exit 2 with "not available yet" |
+
+The tools, resources and prompts are in `docs/MCP.md`. Logging goes to stderr, and each call leaves a redacted line under `<state>/logs/mcp/`.

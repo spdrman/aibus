@@ -46,3 +46,122 @@ secrets = ["SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "abcdefghijklmnopqrstu
 name = "a url with a token in the query"
 body = 'Failed to fetch https://hooks.example/v1/ping?user=7&token=d34db33f0000&retry=1: 401'
 secrets = ["d34db33f0000"]
+
+# One row for each kind in aibus_testkit::CREDENTIAL_KINDS (a test checks none is missing). `registered`
+# lists the secrets no pattern can know the shape of: the test registers them the way the credential
+# store does when it resolves an account, then redacts. A row without it has to be caught by shape
+# alone, as a body echoed before anything was registered would be.
+
+[[case]]
+name = "anthropic key echoed in a 401 by a proxy"
+body = '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key: sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P"}}'
+secrets = ["sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P"]
+
+[[case]]
+name = "openai project key in a 401"
+body = '{"error":{"message":"Incorrect API key provided: sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12.","code":"invalid_api_key"}}'
+secrets = ["sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12"]
+
+[[case]]
+name = "oauth token endpoint echoes the access token it just issued"
+body = '{"error":"invalid_token","error_description":"access token oat-Hq7Zk2Vm9Xc4Lp1Ws8Nd3Rf6Tb0Yg5Jx is not valid for this audience"}'
+registered = ["oat-Hq7Zk2Vm9Xc4Lp1Ws8Nd3Rf6Tb0Yg5Jx"]
+secrets = ["oat-Hq7Zk2Vm9Xc4Lp1Ws8Nd3Rf6Tb0Yg5Jx"]
+
+[[case]]
+name = "token endpoint error echoes the refresh token"
+body = '{"error":"invalid_grant","error_description":"refresh token rt-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf has been revoked"}'
+registered = ["rt-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+secrets = ["rt-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+
+[[case]]
+name = "bedrock 403 echoes the access key id"
+body = '{"message":"The security token included in the request is invalid: AKIAIOSFODNN7EXAMPLE is not authorized to perform bedrock:InvokeModelWithResponseStream"}'
+secrets = ["AKIAIOSFODNN7EXAMPLE"]
+
+[[case]]
+name = "bedrock 403 echoes the signing secret"
+body = '{"message":"The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY and signing method."}'
+registered = ["wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"]
+secrets = ["wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"]
+
+[[case]]
+name = "bedrock 403 echoes the session token"
+body = '{"message":"The security token included in the request is expired: IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQD3ExampleSessionTokenOnly"}'
+registered = ["IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQD3ExampleSessionTokenOnly"]
+secrets = ["IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQD3ExampleSessionTokenOnly"]
+
+[[case]]
+name = "bedrock api key echoed as a bearer token"
+body = '{"message":"Invalid API Key","debug":{"authorization":"ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLTAxMjM0NTY3ODlhYmNkZWY"}}'
+registered = ["ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLTAxMjM0NTY3ODlhYmNkZWY"]
+secrets = ["ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLTAxMjM0NTY3ODlhYmNkZWY"]
+
+[[case]]
+name = "vertex 401 echoes the access token gcloud printed"
+body = '{"error":{"code":401,"message":"Request had invalid authentication credentials. Token ya29.a0AfB_byC-Example0123456789abcdefGHIJKLmnopQRSTuv was rejected.","status":"UNAUTHENTICATED"}}'
+secrets = ["ya29.a0AfB_byC-Example0123456789abcdefGHIJKLmnopQRSTuv"]
+
+[[case]]
+name = "gemini 400 with the key in the url"
+body = '{"error":{"code":400,"message":"API key not valid. GET https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse&key=AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q","status":"INVALID_ARGUMENT"}}'
+secrets = ["AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q"]
+
+[[case]]
+name = "openrouter 401 echoes the key"
+body = '{"error":{"message":"No auth credentials found for key sk-or-v1-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6MfZq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf","code":401}}'
+secrets = ["sk-or-v1-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6MfZq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+
+[[case]]
+name = "mcp http bearer token echoed bare by a proxy (with `Bearer ` in front the bearer pattern would catch it)"
+body = '{"detail":"upstream refused the request","request":{"headers":{"authorization":"3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9"}}}'
+registered = ["3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9"]
+secrets = ["3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9"]
+
+# The secrets of a login in flight (#191): registered by the flow for as long as it runs, so an
+# authorization server that echoes one in an error cannot get it into the error text.
+
+[[case]]
+name = "token endpoint echoes the pkce verifier"
+body = '{"error":"invalid_grant","error_description":"code_verifier dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk does not match the challenge"}'
+registered = ["dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"]
+secrets = ["dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"]
+
+[[case]]
+name = "token endpoint echoes the authorization code"
+body = '{"error":"invalid_grant","error_description":"authorization code auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9 was already used"}'
+registered = ["auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9"]
+secrets = ["auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9"]
+
+[[case]]
+name = "device endpoint echoes the device code"
+body = '{"error":"expired_token","error_description":"device_code dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf has expired"}'
+registered = ["dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+secrets = ["dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf"]
+
+# Bodies with nothing to hide. The redactor has to leave them alone (a billing message or a
+# policy code is not a credential), and the kind table in aibus-provider reads their codes.
+
+[[intact]]
+name = "openai insufficient_quota 429"
+body = '{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}'
+
+[[intact]]
+name = "openai usage_limit_reached"
+body = '{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","param":null,"code":"usage_limit_reached","plan_type":"plus","resets_in_seconds":3600}}'
+
+[[intact]]
+name = "openai content policy 400"
+body = '{"error":{"message":"Your request was rejected as a result of our safety system.","type":"invalid_request_error","param":null,"code":"content_policy_violation"}}'
+
+[[intact]]
+name = "openai content_filter on a 200 stream"
+body = '{"id":"chatcmpl-AbCd1234","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}'
+
+[[intact]]
+name = "anthropic billing_error 402"
+body = '{"type":"error","error":{"type":"billing_error","message":"Your account has hit its monthly spend cap."}}'
+
+[[intact]]
+name = "anthropic low credit balance 400"
+body = '{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}'

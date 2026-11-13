@@ -1,0 +1,10 @@
+{
+ "flag": "no_sampling_params",
+ "api": "anthropic-messages",
+ "with": {
+  "/temperature": "<absent>"
+ },
+ "without": {
+  "/temperature": 0.5
+ }
+}

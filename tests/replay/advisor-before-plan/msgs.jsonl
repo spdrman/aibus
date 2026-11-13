@@ -1,14 +1,14 @@
-{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"chunks":[{"k":"text","v":"# Plan\n1. Now I will list the files."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"msg":"UsageUpdate","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"chunks":[{"k":"text","v":"# Plan\n1. Now I will list the files."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"msg":"UsageUpdate","run":"01M769A66Z6H4ZNG2YS1A8FKCT","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
 {"checkpoint":"before_plan","detail":"the lead's text opens a plan","msg":"CheckpointHit"}
 {"advice":"plan skips auth","checkpoint":"before_plan","msg":"AdvisorSpoke","tokens_read":35}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"msg":"UsageUpdate","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"call":"00000000000000000000000001","content_len":14,"is_error":false,"ms":2,"msg":"ToolCallFinished","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"chunks":[{"k":"text","v":"done"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
-{"msg":"UsageUpdate","run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":8634055,"secs":0},"error":null,"run_id":"01M6Z6N6V9NTYNKZF8F8PAB2Y5","status":"Completed","summary":"","summary_file":null,"summary_len":4,"turns":3,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N6V9NTYNKZF8F8PAB2Y5"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"ls"}],"msg":"Stream","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"path\":\".\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"msg":"UsageUpdate","run":"01M769A66Z6H4ZNG2YS1A8FKCT","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"path":"."},"msg":"ToolCallRequested","name":"ls","needs_permission":false,"run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"call":"00000000000000000000000001","content_len":14,"is_error":false,"ms":8,"msg":"ToolCallFinished","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"chunks":[{"k":"text","v":"done"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A66Z6H4ZNG2YS1A8FKCT"}
+{"msg":"UsageUpdate","run":"01M769A66Z6H4ZNG2YS1A8FKCT","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":28073226,"secs":0},"error":null,"run_id":"01M769A66Z6H4ZNG2YS1A8FKCT","status":"Completed","summary":"","summary_file":null,"summary_len":4,"turns":3,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769A66Z6H4ZNG2YS1A8FKCT"}

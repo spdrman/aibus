@@ -7,6 +7,34 @@ use crate::error::CredentialError;
 /// The file's text without its trailing newline. On Unix the mode must be `0600` or stricter
 /// and the owner the current user.
 pub(super) fn read_key(path: &Path) -> Result<String, CredentialError> {
+    let text = read_private(path)?;
+    Ok(text.trim_end_matches(['\n', '\r']).to_owned())
+}
+
+/// The static keys of `profile` in an AWS credentials file (`aws_access_key_id`,
+/// `aws_secret_access_key` and, when there is one, `aws_session_token`), from a file only the
+/// owner can read. `None` when the profile or one of its two keys is missing. No SSO, no
+/// `credential_process`: those lines are not read.
+pub(super) fn aws_profile(path: &Path, profile: &str) -> Result<Option<(String, String, Option<String>)>, CredentialError> {
+    let text = read_private(path)?;
+    let (mut inside, mut id, mut secret, mut token) = (false, None, None, None);
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with(['#', ';'])) {
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            inside = name.trim() == profile;
+        } else if let (true, Some((k, v))) = (inside, line.split_once('=')) {
+            let v = Some(v.trim().to_owned()).filter(|v| !v.is_empty());
+            match k.trim() {
+                "aws_access_key_id" => id = v,
+                "aws_secret_access_key" => secret = v,
+                "aws_session_token" => token = v,
+                _ => {}
+            }
+        }
+    }
+    Ok(id.zip(secret).map(|(id, secret)| (id, secret, token)))
+}
+
+fn read_private(path: &Path) -> Result<String, CredentialError> {
     let unreadable =
         |e: std::io::Error| CredentialError::Unreadable(path.to_owned(), e.kind().to_string());
     let meta = std::fs::metadata(path).map_err(unreadable)?;
@@ -22,8 +50,7 @@ pub(super) fn read_key(path: &Path) -> Result<String, CredentialError> {
     }
     #[cfg(not(unix))]
     let _ = meta;
-    let text = std::fs::read_to_string(path).map_err(unreadable)?;
-    Ok(text.trim_end_matches(['\n', '\r']).to_owned())
+    std::fs::read_to_string(path).map_err(unreadable)
 }
 
 #[cfg(all(test, unix))]

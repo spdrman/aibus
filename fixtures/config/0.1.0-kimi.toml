@@ -1,0 +1,5 @@
+# A 0.1.0 config: Kimi, key from a 0600 file.
+[[account]]
+name = "kimi"
+provider = "kimi"
+auth = { file = "/home/u/.config/aibus/kimi.key" }

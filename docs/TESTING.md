@@ -19,10 +19,18 @@ the same command, started by hand.
 | TUI snapshots | `cargo test --locked -p aibus-tui` | every push |
 | CLI | `cargo test --locked -p aibus --tests` | every push |
 | Replay | `cargo test --locked -p aibus-testkit --test replay --test session` and `-p aibus-core --test replay` | every push |
-| Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai` (cassettes) | every push |
+| Capability matrix | `cargo test --locked -p aibus-testkit --test capability_matrix` (`docs/CAPABILITIES.md` is current, the renderer matches its golden page) | every push |
+| Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini` (cassettes) | every push |
 | Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |
 | Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
-| Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
+| Security | `cargo test --locked -p aibus-core --test security`, `-p aibus-tui --test security_commands` and `-p aibus --test mcp_security` (the rows of `docs/SECURITY.md`; `security/commands.rs` and `security_commands.rs` are the cross-cutting rules for the registry's commands) | every push |
+| Fuzz | `cargo fuzz run <target>` for each target in `fuzz/` (`commands_send` included, seeded with every documented command) | nightly; `nightly.yml` by hand (a no-op until `fuzz/` exists) |
+
+Before a release I run the "every push" rows above as one signed attestation, fenced in docker:
+`tools/release-attest/attest.sh`, then `tools/release-attest/verify.sh` (the suite list is
+`tools/release-attest/config.sh`, kept in step with this table; `docs/RELEASE.md` has the rest). Merging into `release` runs the same rows as a local e2e through the git hooks
+and `tools/release-gate/e2e.sh` ("The local release gate" in `docs/RELEASE.md`); the hooks are installed with
+`tools/release-gate/install.sh`.
 
 The conformance row says "both backends when available": the `causl-differential` job in
 `.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and
@@ -132,10 +140,40 @@ The integration suite is not backend-generic, see above.
 
 ## Provider cassettes
 
-Each provider crate replays recorded responses from `tests/cassettes/<name>.http` through a local
-mock server (`wiremock`), and asserts the mapping to `ProviderError`. To record one from a real
-account, run the live suite with `AIBUS_LIVE_ACCOUNT=<name>`, the account's key in
-`AIBUS_LIVE_KEY_<NAME>` and `AIBUS_RECORD=1`:
+Every provider adapter runs the same suite, `aibus_testkit::conformance::run(provider, server,
+fixtures)`. It starts a scripted fake server on a loopback port (no network, no keychain, no real
+provider), builds the adapter with the server's `base_url`, and plays one fixture per case. The
+cases are fixed: text, tool use, parallel tool calls, the stop reasons, every error status
+(400 invalid, 400 context, 401, 403, 404, 413, 429 with and without `retry-after`, 500, 503, 529),
+an error event inside a 200 stream, a malformed SSE line, a stream that ends early, a cancel while
+the server is still sending (must come back `Cancelled` within 100 ms), the model list, `verify`
+and `count_tokens`. A fixture set that leaves one out fails, unless the case is listed in
+`Fixtures::skipped` with a reason. Every case also checks that the fake key only travels in the
+adapter's one auth header, never in a URL, a body or a log line, and the suite checks that the
+redactor leaves every fixture unchanged.
+
+A fixture comes in two forms and the kit reads both:
+
+* `tests/cassettes/<name>.http`, the recorded form: `HTTP <status>`, header lines, a blank line,
+  the body. The redaction test in `aibus-core` walks these too.
+* `tests/fixtures/<name>.json`, the scripted form, for what a recording cannot say. It names the
+  `status`, `headers`, an optional `delay_ms`, and either a `body` or a list of `steps`
+  (`{"event": "..", "data": {..}, "delay_ms": 20}`, or `{"raw": ".."}` for a deliberately broken
+  frame), then `"end": "close" | "drop" | "hang"`. `drop` ends the connection with no final
+  chunk (a real broken stream) and `hang` holds it open until the client leaves, which is what the
+  cancel case uses (`Fixture::hang_after(n)` turns a recording into one).
+
+`crates/aibus-testkit/tests/conformance_broken.rs` keeps the suite honest: a wrapper that drops
+`ToolUseEnd`, swallows cancel, or logs the key must turn it red. Each adapter has one conformance
+test (`tests/conformance.rs` in its crate); what is specific to a provider (cache breakpoints,
+thinking signatures, effort headers, Kimi's reasoning round trip) stays in its `cassettes.rs`.
+The two cloud adapters (Bedrock and Vertex) run the same `run` from `tests/cloud.rs`: Vertex replays the
+Anthropic cassettes, Bedrock the same events framed as an event stream. `malformed_sse` is skipped on
+Bedrock with a reason (there is no SSE to malform); `models` and `count_tokens` play against the static
+table and the `None` answer, and `verify` is the one real one-token probe.
+
+To record a case from a real account, run the live suite with `AIBUS_LIVE_ACCOUNT=<name>`, the
+account's key in `AIBUS_LIVE_KEY_<NAME>` and `AIBUS_RECORD=1`:
 
 ```
 AIBUS_RECORD=1 AIBUS_LIVE_ACCOUNT=work AIBUS_LIVE_KEY_WORK=... \
@@ -143,7 +181,18 @@ AIBUS_RECORD=1 AIBUS_LIVE_ACCOUNT=work AIBUS_LIVE_KEY_WORK=... \
 ```
 
 The answers land in `tests/cassettes/live/<case>.http` with the key and the account's ids
-stripped. Read them, then move the ones you want up into `tests/cassettes/`.
+stripped. Read them, then move the ones you want up into `tests/cassettes/` and add a `Case` for
+them in the crate's `tests/conformance.rs`.
+
+## The MCP conformance harness
+
+`crates/aibus/tests/common/mcp_client.rs` is a scripted MCP client: it starts `aibus mcp <args>` in the `xdg_temp()` home, speaks newline JSON-RPC, and keeps every stdout line so a test can check that nothing but JSON-RPC came out. `McpClient::v2026_07_28` sends `_meta` (protocol version, client capabilities, client info) on every request and has no handshake, `McpClient::v2025_11_25` runs `initialize` and `notifications/initialized`. `discover`, `list_tools` (it follows cursors), `call`, `read_resource`, `list_prompts`, `get_prompt` and `raw` cover the rest. A server that exits before it answers is reported with its exit status and its stderr, so a binary without the subcommand fails every test with "unrecognized subcommand".
+
+`common/transcript.rs` records the exchanges and compares them with `fixtures/mcp-server/<scenario>.jsonl`. It drops ids, the request `_meta`, and the `resultType`, `ttlMs` and `cacheScope` framing, and turns ULIDs, timestamps and the temp home into `<ulid>`, `<time>` and `<home>`, so one golden file serves both protocols. `AIBUS_UPDATE_TRANSCRIPTS=1` rewrites the file; read the diff before you commit it.
+
+`common/schema.rs` gained the 2020-12 keywords the tool schemas use (see its header) and `lint_2020_12`, which checks a whole schema rather than the branches a value reaches.
+
+`tests/mcp_server.rs` is the suite the server has to pass, `tests/mcp_harness.rs` tests the harness itself against `fixtures/mcp/server.sh` and needs no server. Both run in the `cargo test --locked -p aibus --tests` row.
 
 ## Frame snapshots
 

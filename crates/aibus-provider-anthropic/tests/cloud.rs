@@ -11,9 +11,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_provider::{
     AccountName, AuthMethodKind, ContentBlock, Credential, ModelId, Provider, ProviderConfig,
-    ProviderError, ProviderErrorKind, Secret, StopReason, StreamChunk,
+    ProviderError, ProviderErrorKind, ProviderFactory, Secret, StopReason, StreamChunk,
 };
-use aibus_provider_anthropic::{Anthropic, TokenSource};
+use aibus_provider_anthropic::{Anthropic, CloudFactory, TokenSource};
 use async_trait::async_trait;
 use base64::Engine;
 use common::*;
@@ -98,7 +98,7 @@ struct Token(Result<&'static str, &'static str>);
 
 #[async_trait]
 impl TokenSource for Token {
-    async fn token(&self) -> Result<Secret<String>, ProviderError> {
+    async fn token(&self, _: &Credential) -> Result<Secret<String>, ProviderError> {
         self.0
             .map(|t| Secret::new(t.to_owned()))
             .map_err(|m| ProviderError::new(ProviderErrorKind::Auth, m))
@@ -214,12 +214,12 @@ async fn an_exception_frame_mid_stream_is_a_rate_limit_error() {
 #[tokio::test]
 async fn a_malformed_sigv4_secret_fails_before_any_request() {
     let server = MockServer::start().await;
-    let (result, _) = collect(&bedrock(&server), &aws_cred("not-a-pair-SECRETVALUE"), request("hi")).await;
+    let (result, _) = collect(&bedrock(&server), &aws_cred("SECRETVALUE:"), request("hi")).await;
     let e = result.unwrap_err();
     assert_eq!(e.kind, ProviderErrorKind::Auth);
     assert!(!e.message.contains("SECRETVALUE"));
     assert!(server.received_requests().await.unwrap().is_empty());
-    assert!(bedrock(&server).verify(&aws_cred("nope")).await.is_err());
+    assert!(bedrock(&server).verify(&aws_cred("nope:")).await.is_err());
 }
 
 #[tokio::test]
@@ -264,16 +264,102 @@ async fn vertex_errors_map_by_status_and_a_failing_token_source_stops_the_call()
 }
 
 #[tokio::test]
-async fn the_cloud_transports_have_no_counting_endpoint_and_verify_offline() {
+async fn verify_makes_one_real_request_on_the_smallest_model_and_reports_its_cost() {
     let server = MockServer::start().await;
+    Mock::given(method("POST")).respond_with(bedrock_template(&cassette("bedrock_stream"))).mount(&server).await;
     let b = bedrock(&server);
     assert!(b.count_tokens(&aws_cred(AWS_SECRET), &request("hi")).await.is_none());
     let info = b.verify(&aws_cred(AWS_SECRET)).await.unwrap();
-    assert!(info.models.iter().any(|m| m.0.starts_with("claude-")));
+    assert!(info.models.iter().any(|m| m.0.contains("claude-")));
+    let seen = server.received_requests().await.unwrap();
+    assert_eq!(seen.len(), 1, "one request, no more");
+    let body: Value = serde_json::from_slice(&seen[0].body).unwrap();
+    assert_eq!(body["max_tokens"], 1);
+    assert!(seen[0].url.path().contains("haiku"), "the smallest model: {}", seen[0].url.path());
+    // 25 input and 15 output tokens at the plain haiku price, found through the profile's `price_of`.
+    let cost = info.cost_usd.expect("a cost, not n/a");
+    assert!((cost - 0.0001).abs() < 1e-9, "{cost}");
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).respond_with(cassette("vertex_stream").template()).mount(&server).await;
     let v = vertex(&server, Token(Ok(VERTEX_TOKEN)));
     assert!(v.count_tokens(&cred(AuthMethodKind::None), &request("hi")).await.is_none());
-    assert!(v.verify(&cred(AuthMethodKind::None)).await.is_ok());
-    assert!(server.received_requests().await.unwrap().is_empty());
+    let info = v.verify(&cred(AuthMethodKind::None)).await.unwrap();
+    assert!(info.cost_usd.is_some());
+    let seen = server.received_requests().await.unwrap();
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].url.path().ends_with("/models/claude-haiku-4-5@20251001:streamRawPredict"), "{}", seen[0].url.path());
+}
+
+#[tokio::test]
+async fn verify_fails_with_the_providers_error_and_no_secret_when_the_request_is_refused() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).respond_with(cassette("bedrock_denied_403").template()).mount(&server).await;
+    let e = bedrock(&server).verify(&aws_cred(AWS_SECRET)).await.unwrap_err();
+    assert_eq!(e.kind, ProviderErrorKind::Auth);
+    assert!(!format!("{e:?}").contains("wJalrXUtnFEMI"));
+}
+
+/// The token source is asked on behalf of the calling account, so a cache can key on it.
+struct Spy(std::sync::Mutex<Vec<String>>);
+
+#[async_trait]
+impl TokenSource for Spy {
+    async fn token(&self, creds: &Credential) -> Result<Secret<String>, ProviderError> {
+        self.0.lock().unwrap().push(creds.account.to_string());
+        Ok(Secret::new(VERTEX_TOKEN.to_owned()))
+    }
+}
+
+#[tokio::test]
+async fn the_cloud_factory_builds_both_from_a_provider_config_and_asks_the_token_source_for_the_account() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).respond_with(cassette("vertex_stream").template()).mount(&server).await;
+    let spy = Arc::new(Spy(Default::default()));
+    let factory = CloudFactory { tokens: spy.clone() };
+    assert_eq!(factory.apis(), ["anthropic-bedrock", "anthropic-vertex"]);
+
+    let mut def = aibus_provider::presets::preset("vertex").unwrap().clone();
+    def.base_url = Some(server.uri());
+    def.project = Some("my-project".into());
+    def.region = Some("us-east5".into());
+    let provider = factory.build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap();
+    assert_eq!(provider.id().0, "vertex");
+    let (result, _) = collect(&*provider, &cred(AuthMethodKind::None), request("hi")).await;
+    result.unwrap();
+    assert_eq!(*spy.0.lock().unwrap(), ["work"]);
+    let seen = server.received_requests().await.unwrap();
+    assert!(seen[0].url.path().starts_with("/v1/projects/my-project/locations/us-east5/publishers/anthropic/models/"));
+
+    let mut def = aibus_provider::presets::preset("bedrock").unwrap().clone();
+    def.base_url = Some(server.uri());
+    def.region = Some("eu-west-1".into());
+    assert_eq!(factory.build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap().id().0, "bedrock");
+}
+
+#[test]
+fn the_cloud_factory_needs_a_definition_a_region_and_for_vertex_a_project() {
+    let factory = CloudFactory { tokens: Arc::new(Token(Ok("t"))) };
+    // Built as itself with nothing to go on: left out of the registry, not an error for everyone else.
+    assert!(matches!(factory.build(&ProviderConfig::default()), Err(aibus_provider::ConfigError::NotConfigured(..))));
+    let preset = |id: &str| aibus_provider::presets::preset(id).unwrap().clone();
+    let no_region = ProviderConfig { def: Some(preset("bedrock")), ..ProviderConfig::default() };
+    assert!(factory.build(&no_region).is_err());
+    let mut v = preset("vertex");
+    v.region = Some("us-east5".into());
+    assert!(factory.build(&ProviderConfig { def: Some(v), ..ProviderConfig::default() }).is_err(), "no project");
+}
+
+#[tokio::test]
+async fn a_bearer_token_without_a_colon_is_sent_as_a_bearer_and_not_signed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).respond_with(bedrock_template(&cassette("bedrock_stream"))).mount(&server).await;
+    let token = "ABSKQmVkcm9ja0FQSUtleS1leGFtcGxl";
+    let (result, _) = collect(&bedrock(&server), &aws_cred(token), request("hi")).await;
+    result.unwrap();
+    let r = server.received_requests().await.unwrap().remove(0);
+    assert_eq!(r.headers.get("authorization").unwrap().to_str().unwrap(), format!("Bearer {token}"));
+    assert!(r.headers.get("x-amz-date").is_none());
 }
 
 #[test]
@@ -283,4 +369,157 @@ fn bad_regions_and_projects_are_config_errors() {
     assert!(Anthropic::bedrock(&c, "", SystemTime::now).is_err());
     assert!(Anthropic::vertex(&c, "p/../x", "us-east5", Arc::new(Token(Ok("t")))).is_err());
     assert!(Anthropic::vertex(&c, "my-project", "global", Arc::new(Token(Ok("t")))).is_ok());
+}
+
+// ---- the recorded cassettes through the conformance kit ----------------------------------------
+
+use std::path::PathBuf;
+
+use aibus_provider::ProviderErrorKind::*;
+use aibus_testkit::conformance::{run, Body, Case, Expect, FakeServer, Fixture, Fixtures};
+use serde_json::json;
+
+fn load(sub: &str, name: &str, ext: &str) -> Fixture {
+    Fixture::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join(sub).join(format!("{name}.{ext}")))
+}
+
+/// A stream the kit plays to Bedrock: the Messages events of an SSE fixture (its `data:` lines,
+/// the same JSON Bedrock puts in a `chunk`) framed as `application/vnd.amazon.eventstream`,
+/// the way `bedrock_template` does for a cassette. The fixture's end (close, drop, hang) stays.
+fn bedrock_fixture(sse: Fixture) -> Fixture {
+    let events: Vec<String> = sse.body_text().lines().filter_map(|l| l.strip_prefix("data: ")).map(str::to_owned).collect();
+    assert!(!events.is_empty(), "no data lines to frame");
+    let mut f = sse;
+    f.headers = vec![("content-type".into(), "application/vnd.amazon.eventstream".into())];
+    f.body = Body::Bytes(
+        events
+            .iter()
+            .flat_map(|line| {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(line);
+                eventstream_frame(
+                    &[(":event-type", "chunk"), (":content-type", "application/json"), (":message-type", "event")],
+                    format!(r#"{{"bytes":"{b64}"}}"#).as_bytes(),
+                )
+            })
+            .collect(),
+    );
+    f
+}
+
+/// A Bedrock cassette that already keeps one event per line (`bedrock_stream.http`).
+fn bedrock_cassette(c: &Cassette) -> Fixture {
+    let sse: String = c.body.lines().filter(|l| !l.is_empty()).map(|l| format!("data: {l}\n\n")).collect();
+    bedrock_fixture(Fixture::http(c.status, &[], &sse))
+}
+
+fn from_preset(id: &str, server: &FakeServer, tokens: Arc<dyn TokenSource>) -> Arc<dyn Provider> {
+    let mut def = aibus_provider::presets::preset(id).unwrap().clone();
+    def.base_url = Some(server.uri());
+    def.region = Some("us-east5".into());
+    def.project = Some("my-project".into());
+    CloudFactory { tokens }.build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap()
+}
+
+/// The cases both cloud adapters share. `stream` turns an SSE fixture into what the adapter's
+/// wire carries (Vertex: itself, Bedrock: event stream frames). Error bodies are plain HTTP on
+/// both, so they pass through as they are.
+fn cloud_cases(stream: fn(Fixture) -> Fixture, text: Fixture, auth_401: Fixture, forbidden_403: Fixture) -> Vec<Case> {
+    let fail = |kind, retryable, retry_after: Option<u64>| Expect::Fail {
+        kind,
+        retryable,
+        retry_after: retry_after.map(Duration::from_secs),
+        delivered: None,
+    };
+    let case = |name, fixture, expect| Case { name, fixture, expect };
+    let sse = |name: &str| load("cassettes", name, "http");
+    vec![
+        case("text", text.clone(), Expect::Stream { text: Some("Hello, world"), stop: StopReason::EndTurn }),
+        case("tool_use", stream(sse("tool_call")), Expect::Tools { calls: vec![("read_file", json!({"path": "src/main.rs"}))], min_fragments: 2 }),
+        case(
+            "parallel_tools",
+            stream(load("fixtures", "parallel_tools", "json")),
+            Expect::Tools { calls: vec![("read_file", json!({"path": "a"})), ("read_file", json!({"path": "b"}))], min_fragments: 2 },
+        ),
+        case("max_tokens", stream(sse("max_tokens")), Expect::Stream { text: None, stop: StopReason::MaxTokens }),
+        case("refusal", stream(sse("refusal")), Expect::Stream { text: None, stop: StopReason::Refusal }),
+        case("http_400_invalid", sse("invalid_400"), fail(InvalidRequest, false, None)),
+        case("http_400_context", sse("context_too_long_400"), fail(ContextTooLong, false, None)),
+        case("http_401", auth_401, fail(Auth, false, None)),
+        case("http_403", forbidden_403, fail(Auth, false, None)),
+        case("http_404", sse("not_found_404"), fail(ModelNotFound, false, None)),
+        case("http_413", sse("too_large_413"), fail(ContextTooLong, false, None)),
+        case("http_429_retry_after", sse("rate_limit_429"), fail(RateLimit, true, Some(12))),
+        case("http_429", sse("rate_limit_429_no_retry_after"), fail(RateLimit, true, None)),
+        case("http_500", sse("server_500"), fail(Server, true, None)),
+        case("http_503", sse("overloaded_503"), fail(Overloaded, true, None)),
+        case("http_529", sse("overloaded_529"), fail(Overloaded, true, None)),
+        case("stream_error", stream(sse("stream_error_overloaded")), fail(Overloaded, true, None)),
+        case(
+            "truncated",
+            stream(sse("truncated")),
+            Expect::Fail { kind: Network, retryable: true, retry_after: None, delivered: Some("Hello") },
+        ),
+        // The frames up to the first text delta, then silence with the connection open.
+        case("cancel", stream_hang(stream, sse("stream_text")), Expect::Cancel),
+        // Neither cloud has a model list or a counting endpoint here: the table is static and
+        // `count_tokens` is `None`, so these two fixtures are never asked for. `verify` is the
+        // one real request (a one token probe), played from the text stream.
+        case("models", text.clone(), Expect::Models { at_least: 3 }),
+        case("count_tokens", text.clone(), Expect::Tokens(None)),
+    ]
+}
+
+/// `stream` of the first four SSE frames, with the connection left open.
+fn stream_hang(stream: fn(Fixture) -> Fixture, sse: Fixture) -> Fixture {
+    let mut f = stream(sse.hang_after(4));
+    f.end = aibus_testkit::conformance::End::Hang;
+    f
+}
+
+#[tokio::test]
+async fn bedrock_passes_the_conformance_suite() {
+    let server = FakeServer::start().await;
+    // A Bedrock API key (a bearer, no colon) so the key travels in one header the kit can see;
+    // the sigv4 form has its own tests above.
+    let p = from_preset("bedrock", &server, Arc::new(Token(Ok("unused"))));
+    let mut cases = cloud_cases(
+        bedrock_fixture,
+        bedrock_cassette(&cassette("bedrock_stream")),
+        load("cassettes", "auth_401", "http"),
+        load("cassettes", "bedrock_denied_403", "http"),
+    );
+    cases.push(Case { name: "verify", fixture: bedrock_cassette(&cassette("bedrock_stream")), expect: Expect::Verify { models: 11 } });
+    let f = Fixtures {
+        model: "claude-sonnet-4-5",
+        kind: AuthMethodKind::Bearer,
+        auth: Some(("authorization", "Bearer ")),
+        cases,
+        skipped: vec![
+            ("malformed_sse", "Bedrock has no SSE: a bad frame is a broken event stream (a frame that stops short is `truncated`), not a malformed line"),
+        ],
+    };
+    run(p, &server, &f).await;
+}
+
+#[tokio::test]
+async fn vertex_passes_the_conformance_suite() {
+    let server = FakeServer::start().await;
+    // The token source is what Vertex sends, so it is the fake key the kit looks for.
+    let p = from_preset("vertex", &server, Arc::new(Token(Ok(aibus_provider::fake::FAKE_KEY))));
+    let mut cases = cloud_cases(
+        std::convert::identity,
+        load("cassettes", "stream_text", "http"),
+        load("cassettes", "vertex_unauthenticated_401", "http"),
+        load("cassettes", "forbidden_403", "http"),
+    );
+    cases.push(Case { name: "verify", fixture: load("cassettes", "vertex_stream", "http"), expect: Expect::Verify { models: 4 } });
+    cases.push(Case { name: "malformed_sse", fixture: load("cassettes", "malformed_sse", "http"), expect: Expect::Fail { kind: Unknown, retryable: false, retry_after: None, delivered: None } });
+    let f = Fixtures {
+        model: "claude-sonnet-4-5@20250929",
+        kind: AuthMethodKind::None,
+        auth: Some(("authorization", "Bearer ")),
+        cases,
+        skipped: vec![],
+    };
+    run(p, &server, &f).await;
 }

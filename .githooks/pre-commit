@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Fast checks only: rustfmt on staged Rust files, bash -n on staged shell. No cargo build, no tests.
+# Skipped while merging and on `release` (pre-merge-commit owns that). Never run the full suite here.
+set -eu
+[ -e "$(git rev-parse --git-dir)/MERGE_HEAD" ] && exit 0
+[ "$(git symbolic-ref --short -q HEAD || true)" = release ] && exit 0
+rs=$(git diff --cached --name-only --diff-filter=ACM -z -- '*.rs' | tr '\0' ' ')
+if [ -n "$rs" ] && command -v rustfmt >/dev/null 2>&1; then
+  # shellcheck disable=SC2086
+  rustfmt --check --edition 2021 $rs >/dev/null || { echo "pre-commit: rustfmt would change the staged Rust files (run rustfmt on them)" >&2; exit 1; }
+fi
+git diff --cached --name-only --diff-filter=ACM -z -- '*.sh' .githooks | while IFS= read -r -d '' f; do
+  if head -1 "$f" | grep -q 'sh'; then bash -n "$f" || { echo "pre-commit: syntax error in $f" >&2; exit 1; }; fi   # no `&&`: a file without a shebang must not fail the hook
+done

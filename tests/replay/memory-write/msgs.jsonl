@@ -1,10 +1,10 @@
-{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"memory_write"}],"msg":"Stream","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"content\":\"Run the failing test alone first.\",\"path\":\"LEARNINGS.md\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"msg":"UsageUpdate","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"call":"00000000000000000000000001","input":{"content":"Run the failing test alone first.","path":"LEARNINGS.md"},"msg":"ToolCallRequested","name":"memory_write","needs_permission":false,"run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"call":"00000000000000000000000001","content_len":25,"is_error":true,"ms":0,"msg":"ToolCallFinished","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"chunks":[{"k":"text","v":"Saved the note."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
-{"msg":"UsageUpdate","run":"01M6Z6N7AC7RFXNB6Q1T19HFK8","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}}
-{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":4292410,"secs":0},"error":null,"run_id":"01M6Z6N7AC7RFXNB6Q1T19HFK8","status":"Completed","summary":"","summary_file":null,"summary_len":15,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0}},"run":"01M6Z6N7AC7RFXNB6Q1T19HFK8"}
+{"account":"fake","agent":"lead","model":"fake-small","msg":"RunStarted","parent":null,"role":"lead","run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_start","name":"memory_write"}],"msg":"Stream","run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"chunks":[{"id":"00000000000000000000000001","k":"tool_input","v":"{\"content\":\"Run the failing test alone first.\",\"path\":\"LEARNINGS.md\"}"},{"id":"00000000000000000000000001","k":"tool_end"}],"msg":"Stream","run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"chunks":[{"k":"done","v":"ToolUse"}],"msg":"Stream","run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"msg":"UsageUpdate","run":"01M769ABF45XG8BCRCZRNZB5H2","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"call":"00000000000000000000000001","input":{"content":"Run the failing test alone first.","path":"LEARNINGS.md"},"msg":"ToolCallRequested","name":"memory_write","needs_permission":false,"run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"call":"00000000000000000000000001","content_len":25,"is_error":true,"ms":1,"msg":"ToolCallFinished","run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"chunks":[{"k":"text","v":"Saved the note."},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769ABF45XG8BCRCZRNZB5H2"}
+{"msg":"UsageUpdate","run":"01M769ABF45XG8BCRCZRNZB5H2","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}}
+{"msg":"RunFinished","result":{"agent":"lead","duration":{"nanos":245363931,"secs":3},"error":null,"run_id":"01M769ABF45XG8BCRCZRNZB5H2","status":"Completed","summary":"","summary_file":null,"summary_len":15,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":null}},"run":"01M769ABF45XG8BCRCZRNZB5H2"}

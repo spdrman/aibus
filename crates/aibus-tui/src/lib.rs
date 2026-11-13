@@ -2,7 +2,9 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod commands;
 pub mod demo;
+pub mod diagram;
 pub mod glyphs;
 pub mod hit;
 pub mod input;
@@ -16,6 +18,7 @@ pub mod ui;
 pub mod view;
 pub mod views;
 pub mod widgets;
+pub mod workflows;
 
 pub use layout::{areas, Areas, Layout};
 pub use theme::Theme;

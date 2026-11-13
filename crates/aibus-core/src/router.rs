@@ -47,7 +47,7 @@ pub async fn ask(
         effort: None,
         thinking: None,
         cache_hint: CacheHint::None,
-        logprobs: seat.provider.capabilities().logprobs,
+        logprobs: seat.provider.capabilities_for(&seat.model).logprobs,
         metadata: RequestMetadata::default(),
     };
     let began = tokio::time::Instant::now();

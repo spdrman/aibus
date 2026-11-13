@@ -3,7 +3,9 @@
 //! handling can be tested without a terminal. The prompt is not in the graph: it changes with
 //! every key press.
 
-use aibus_core::{Command, Isolation, Msg, Screen};
+use aibus_core::Msg;
+
+use crate::commands::{slash_offered, Env};
 
 /// Rows the prompt grows to before it scrolls (`Alt+Enter`).
 pub const MAX_ROWS: usize = 5;
@@ -11,26 +13,6 @@ pub const MAX_ROWS: usize = 5;
 pub const BLINK_TICKS: i64 = 30;
 /// A prompt line shows a hint row under it for this many sessions.
 pub const HINT_SESSIONS: u32 = 5;
-
-/// Every slash command with its argument hint, in the order the popup lists them. The workflow
-/// shorthands `/fix`, `/build`, `/review` and `/explore` are offered when the workflow exists.
-pub const SLASH: [(&str, &str); 12] = [
-    ("/fork", "<task>"),
-    ("/delegate", "<agent> <task>"),
-    ("/compact", ""),
-    ("/clear", ""),
-    ("/handoff", ""),
-    ("/ledger", "<section> <text>"),
-    ("/model", "<alias>"),
-    ("/advisor", "<alias>"),
-    ("/workflow", "<name> <input>"),
-    ("/agents", ""),
-    ("/accounts", ""),
-    ("/help", ""),
-];
-
-/// The workflow shorthands that exist as slash commands when a workflow of that name does.
-pub const SHORTHANDS: [&str; 4] = ["/fix", "/build", "/review", "/explore"];
 
 /// The completion popup: candidates for the word that ends at the cursor.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -91,6 +73,8 @@ impl Default for Prompt {
 pub enum Sent {
     /// Goes to the reducer as `SubmitPrompt` (or is a slash command the reducer already knows).
     Msgs(Vec<Msg>),
+    /// `/login <provider>`: the messages, and the provider whose add flow starts in the terminal.
+    Login(String, Vec<Msg>),
     /// A command the dashboard cannot make sense of; the line says why.
     Bad(String),
 }
@@ -208,9 +192,11 @@ impl Prompt {
     /// Pasted text: a dropped file path stays a path (quoted when it has spaces) and is never
     /// run as a command; newlines stay newlines.
     pub fn paste(&mut self, pasted: &str) {
-        let trimmed = pasted.trim_end_matches(['\n', '\r']);
+        // A terminal sends CRLF, LF or (xterm style) a bare CR for each newline of a paste.
+        let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+        let trimmed = pasted.trim_end_matches('\n');
         let one_line = !trimmed.contains('\n');
-        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.replace('\r', "") };
+        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.to_owned() };
         self.drop_selection();
         let at = char_at(&self.text, self.at());
         self.text.insert_str(at, &insert);
@@ -351,11 +337,12 @@ impl Prompt {
 
     /// Candidates for the word at the cursor: `@agent-` names, and slash commands for the first
     /// word of the line. `workflows` are the shorthands that exist.
-    pub fn candidates(&self, agents: &[String], workflows: &[String]) -> (usize, Vec<String>) {
+    pub fn candidates(&self, env: &Env) -> (usize, Vec<String>) {
         let (from, word) = self.word();
         if word.starts_with('@') {
             let typed = word.trim_start_matches('@').trim_start_matches("agent-");
-            let items = agents
+            let items = env
+                .agents
                 .iter()
                 .filter(|a| a.starts_with(typed))
                 .map(|a| format!("@agent-{a}"))
@@ -363,20 +350,19 @@ impl Prompt {
             return (from, items);
         }
         if word.starts_with('/') && self.text.chars().take(from).all(char::is_whitespace) {
-            let mut all: Vec<String> = SLASH.iter().map(|(c, _)| (*c).to_owned()).collect();
-            all.extend(SHORTHANDS.iter().filter(|c| workflows.iter().any(|w| format!("/{w}") == **c)).map(|c| (*c).to_owned()));
-            return (from, all.into_iter().filter(|c| c.starts_with(&word)).collect());
+            let all = slash_offered(env).into_iter().map(|(name, _)| name);
+            return (from, all.filter(|c| c.starts_with(&word)).collect());
         }
         (from, Vec::new())
     }
 
     /// `Tab`: a single candidate is inserted; several open the popup, and `Tab` again walks it.
-    pub fn tab(&mut self, agents: &[String], workflows: &[String]) {
+    pub fn tab(&mut self, env: &Env) {
         if let Some(p) = &mut self.popup {
             p.sel = (p.sel + 1) % p.items.len().max(1);
             return;
         }
-        let (from, items) = self.candidates(agents, workflows);
+        let (from, items) = self.candidates(env);
         match items.len() {
             0 => {}
             1 => self.accept(from, &items[0]),
@@ -414,7 +400,8 @@ impl Prompt {
         if text.is_empty() {
             return None;
         }
-        if self.history.last() != Some(&text) {
+        // A key typed after `/login <provider>` must not be recalled with the up arrow.
+        if self.history.last() != Some(&text) && !crate::commands::carries_key(&text) {
             self.history.push(text.clone());
         }
         self.text.clear();
@@ -454,64 +441,6 @@ fn quote_path(s: &str) -> String {
     } else {
         s
     }
-}
-
-/// What a line of text means: a slash command becomes the messages it stands for, anything else
-/// is a prompt for the lead (which `reduce` hands on, or turns into a delegate for `@agent-`).
-pub fn send(line: &str, agents: &[String], workflows: &[String]) -> Sent {
-    let line = line.trim();
-    let Some(rest) = line.strip_prefix('/') else {
-        return Sent::Msgs(vec![Msg::SubmitPrompt { text: line.to_owned() }]);
-    };
-    let (word, args) = rest.split_once(char::is_whitespace).map_or((rest, ""), |(w, a)| (w, a.trim()));
-    let cmd = |c: Command| Sent::Msgs(vec![Msg::Command(c)]);
-    let need = |what: &str| Sent::Bad(format!("/{word} needs {what}"));
-    match word {
-        "fork" | "compact" => Sent::Msgs(vec![Msg::SubmitPrompt { text: line.to_owned() }]),
-        "delegate" => match args.split_once(char::is_whitespace) {
-            Some((agent, task)) if !task.trim().is_empty() => match agent.parse() {
-                Ok(agent) if agents.iter().any(|a| a == agent_name(&agent)) => cmd(Command::Delegate {
-                    agent,
-                    prompt: task.trim().to_owned(),
-                    background: true,
-                    isolation: Isolation::None,
-                    parent: None,
-                    run: None,
-                    model: None,
-                    account: None,
-                }),
-                _ => Sent::Bad(format!("/delegate: no agent named {agent}")),
-            },
-            _ => need("an agent and a task"),
-        },
-        // `/clear` asks first.
-        "clear" => cmd(Command::OpenScreen(Screen::ConfirmClear)),
-        "handoff" => cmd(Command::CreateHandoff { outcome: None }),
-        "ledger" => match args.split_once(char::is_whitespace) {
-            Some((section, text)) if !text.trim().is_empty() => {
-                cmd(Command::LedgerUpdate { section: section.to_owned(), text: text.trim().to_owned() })
-            }
-            _ => need("a section and text"),
-        },
-        "model" | "advisor" if args.is_empty() => need("an alias"),
-        "model" | "advisor" => Sent::Msgs(vec![Msg::SubmitPrompt { text: line.to_owned() }]),
-        "workflow" => match args.split_once(char::is_whitespace) {
-            Some((name, input)) => cmd(Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
-            None if !args.is_empty() => cmd(Command::Workflow { name: args.to_owned(), input: String::new() }),
-            None => need("a workflow name"),
-        },
-        "agents" => cmd(Command::OpenScreen(Screen::Agents)),
-        "accounts" => cmd(Command::OpenScreen(Screen::Accounts)),
-        "help" => cmd(Command::OpenHelp),
-        w if workflows.iter().any(|x| x == w) && SHORTHANDS.contains(&line.split_whitespace().next().unwrap_or("")) => {
-            cmd(Command::Workflow { name: w.to_owned(), input: args.to_owned() })
-        }
-        other => Sent::Bad(format!("no command /{other} (try /help)")),
-    }
-}
-
-fn agent_name(a: &aibus_core::AgentName) -> &str {
-    a.as_str()
 }
 
 #[cfg(test)]
@@ -599,7 +528,7 @@ mod tests {
     #[test]
     fn escape_closes_the_popup_first_then_clears_the_line() {
         let mut p = Prompt::default().with_text("/a");
-        p.tab(&[], &[]);
+        p.tab(&Env::bare(&[], &[]));
         assert!(p.popup.is_some());
         assert!(p.escape());
         assert!(p.popup.is_none() && p.text == "/a");
@@ -611,64 +540,36 @@ mod tests {
     fn tab_completes_slash_commands_and_agent_names() {
         let agents = vec!["search".to_owned(), "grep".to_owned(), "audit".to_owned()];
         let mut p = Prompt::default().with_text("/comp");
-        p.tab(&agents, &[]);
+        p.tab(&Env::bare(&agents, &[]));
         assert_eq!(p.text, "/compact ", "one candidate is taken at once");
         let mut p = Prompt::default().with_text("/");
-        p.tab(&agents, &[]);
+        p.tab(&Env::bare(&agents, &[]));
         let popup = p.popup.clone().unwrap();
-        assert_eq!(popup.items.len(), SLASH.len());
-        p.tab(&agents, &[]);
+        assert_eq!(popup.items.len(), 15);
+        p.tab(&Env::bare(&agents, &[]));
         assert_eq!(p.popup.as_ref().unwrap().sel, 1);
         assert!(p.accept_popup());
         assert_eq!(p.text, "/delegate ");
         let mut p = Prompt::default().with_text("ask @agent-gr");
-        p.tab(&agents, &[]);
+        p.tab(&Env::bare(&agents, &[]));
         assert_eq!(p.text, "ask @agent-grep ");
         let mut p = Prompt::default().with_text("@");
-        p.tab(&agents, &[]);
+        p.tab(&Env::bare(&agents, &[]));
         assert_eq!(p.popup.as_ref().unwrap().items, ["@agent-search", "@agent-grep", "@agent-audit"]);
         // A slash in the middle of a sentence is not a command.
         let mut p = Prompt::default().with_text("see /com");
-        p.tab(&agents, &[]);
+        p.tab(&Env::bare(&agents, &[]));
         assert!(p.popup.is_none() && p.text == "see /com");
     }
 
     #[test]
     fn workflow_shorthands_complete_only_when_the_workflow_exists() {
         let mut p = Prompt::default().with_text("/fi");
-        p.tab(&[], &[]);
+        p.tab(&Env::bare(&[], &[]));
         assert_eq!(p.text, "/fi");
-        p.tab(&[], &["fix".to_owned()]);
+        let wf = ["fix".to_owned()];
+        p.tab(&Env { lead: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap()), ..Env::bare(&[], &wf) });
         assert_eq!(p.text, "/fix ");
-    }
-
-    #[test]
-    fn every_slash_command_becomes_what_it_stands_for() {
-        let agents = vec!["search".to_owned()];
-        let m = |line: &str| match send(line, &agents, &["fix".to_owned()]) {
-            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
-            Sent::Bad(why) => format!("BAD {why}"),
-        };
-        assert!(m("/fork try the other way").starts_with("SubmitPrompt { text: \"/fork try the other way\" }"));
-        assert!(m("/compact").contains("/compact"));
-        assert!(m("/delegate search map it").contains("Delegate") && m("/delegate search map it").contains("map it"));
-        assert!(m("/delegate nobody map it").starts_with("BAD"));
-        assert!(m("/delegate search").starts_with("BAD"));
-        assert_eq!(m("/clear"), "Command(OpenScreen(ConfirmClear))");
-        assert_eq!(m("/handoff"), "Command(CreateHandoff { outcome: None })");
-        assert!(m("/ledger now ship it").contains("LedgerUpdate { section: \"now\", text: \"ship it\" }"));
-        assert!(m("/ledger now").starts_with("BAD"));
-        assert!(m("/model opus").contains("/model opus"));
-        assert!(m("/model").starts_with("BAD"));
-        assert!(m("/advisor opus").contains("/advisor opus"));
-        assert!(m("/workflow review the diff").contains("Workflow { name: \"review\", input: \"the diff\" }"));
-        assert!(m("/fix the bug").contains("Workflow { name: \"fix\", input: \"the bug\" }"));
-        assert!(m("/build x").starts_with("BAD"), "no such workflow");
-        assert_eq!(m("/agents"), "Command(OpenScreen(Agents))");
-        assert_eq!(m("/accounts"), "Command(OpenScreen(Accounts))");
-        assert_eq!(m("/help"), "Command(OpenHelp)");
-        assert!(m("/nope").starts_with("BAD no command /nope"));
-        assert_eq!(m("hello"), "SubmitPrompt { text: \"hello\" }");
     }
 
     #[test]
@@ -689,6 +590,17 @@ mod tests {
     fn the_cursor_blinks_on_a_two_second_period_from_the_tick_counter() {
         let phases: Vec<bool> = [0, 29, 30, 59, 60, 89, 90].map(Prompt::blink_on).to_vec();
         assert_eq!(phases, [true, true, false, false, true, true, false]);
+    }
+
+    #[test]
+    fn a_paste_keeps_its_line_breaks_whatever_newline_the_terminal_sent() {
+        // Issue #197: xterm style terminals put a bare CR for each newline inside a bracketed
+        // paste. LF and CRLF always worked; the CR was deleted and the lines ran together.
+        for (name, pasted) in [("LF", "one\ntwo\nthree"), ("CRLF", "one\r\ntwo\r\nthree"), ("CR", "one\rtwo\rthree")] {
+            let mut p = Prompt::default();
+            p.paste(pasted);
+            assert_eq!(p.text, "one\ntwo\nthree", "{name} newlines");
+        }
     }
 
     #[test]

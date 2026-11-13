@@ -1,5 +1,5 @@
 //! Agent definitions (01 section 1): the types here, `def` parses one file, `discover` walks the
-//! scopes, `builtin` holds the compiled-in nine.
+//! scopes, `builtin` holds the compiled-in ten.
 
 pub mod builtin;
 pub mod def;
@@ -257,6 +257,8 @@ pub struct AgentDef {
     pub router: Option<RouterSpec>,
     pub initial_prompt: Option<String>,
     pub auto_compact_at: Option<u32>,
+    /// The accounts to fall back to, replacing the account's own list; `Some([])` stays put.
+    pub fallback: Option<Vec<AccountName>>,
     pub system_prompt: String,
     pub source: DefSource,
 }

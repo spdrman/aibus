@@ -108,12 +108,22 @@ fn tab_opens_a_completion_popup_for_commands_and_agents() {
     for c in ["/fork", "/delegate", "/compact", "/clear", "/handoff", "/ledger", "/model", "/advisor"] {
         assert!(text.contains(c), "the popup lacks {c}");
     }
-    for _ in 0..11 {
+    // The popup shows eight rows and follows the selection, so walk to /help and then to the end.
+    let items = r.ui.prompt.popup.as_ref().unwrap().items.clone();
+    let help = items.iter().position(|i| i.starts_with("/help")).expect("/help is offered");
+    for _ in 0..help {
         r.key(K::Tab);
     }
     for c in ["/workflow", "/agents", "/accounts", "/help"] {
         assert!(r.text().contains(c), "the popup lacks {c} after walking down");
     }
+    for _ in help..items.len() - 1 {
+        r.key(K::Tab);
+    }
+    for c in ["/login", "/logout"] {
+        assert!(r.text().contains(c), "the popup lacks {c} at the end");
+    }
+    // One more wraps to the first, and one after that is /delegate.
     r.key(K::Tab);
     r.key(K::Tab);
     r.key(K::Enter);
@@ -145,8 +155,8 @@ fn every_slash_command_becomes_a_command() {
     assert!(run("/delegate search map it").contains("Delegate"));
     assert_eq!(run("/handoff"), "Command(CreateHandoff { outcome: None })");
     assert!(run("/ledger now ship").contains("LedgerUpdate"));
-    assert!(run("/model opus").contains("/model opus"));
-    assert!(run("/advisor opus").contains("/advisor opus"));
+    assert_eq!(run("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
+    assert_eq!(run("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
     assert!(run("/workflow review the diff").contains("Workflow"));
     assert_eq!(run("/agents"), "Command(OpenScreen(Agents))");
     assert_eq!(modal(&r).as_deref(), Some("agents"));
@@ -639,13 +649,13 @@ fn new_agents_are_written_from_a_template_and_a_bad_name_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let (mut validate, mut account) = (None, None);
     let mut note = String::new();
-    let opened = aibus_tui::app::run_job(Job::NewAgent("planner".into()), Some(dir.path()), &mut validate, &mut account, &mut note);
+    let opened = aibus_tui::app::run_job(Job::NewAgent("planner".into()), Some(dir.path()), &mut validate, &mut account, &mut note, &tokio::sync::mpsc::channel(1).0);
     let path = dir.path().join("planner.md");
     assert_eq!(opened.as_deref(), Some(path.as_path()));
     let body = std::fs::read_to_string(&path).unwrap();
     assert!(body.starts_with("---\nname: planner\n"), "{body}");
     assert!(aibus_core::agent::def::parse(&body, DefSource { path: Some(path.clone()), scope: Scope::User }).is_ok(), "the template is a valid definition");
-    assert!(aibus_tui::app::run_job(Job::NewAgent("../x".into()), Some(dir.path()), &mut validate, &mut account, &mut note).is_none());
+    assert!(aibus_tui::app::run_job(Job::NewAgent("../x".into()), Some(dir.path()), &mut validate, &mut account, &mut note, &tokio::sync::mpsc::channel(1).0).is_none());
     assert!(note.contains("is not a name"));
     assert_eq!(aibus_tui::app::editor(None, Some("nano -w")), "nano -w");
     assert_eq!(aibus_tui::app::editor(Some("code"), Some("nano")), "code");
@@ -657,8 +667,8 @@ fn the_accounts_screen_has_t_a_d_and_a_key_never_shows() {
     let mut app = session();
     app.step(Msg::AccountsReloaded {
         accounts: vec![
-            AccountView { name: AccountName("work".into()), provider: "anthropic".into(), label: "work".into(), default_model: None, key_ref: "keyring:aibus/work".into() },
-            AccountView { name: AccountName("spare".into()), provider: "openai".into(), label: "spare".into(), default_model: None, key_ref: "none".into() },
+            AccountView { name: AccountName("work".into()), provider: "anthropic".into(), label: "work".into(), default_model: None, key_ref: "keyring:aibus/work".into(), models: vec![] },
+            AccountView { name: AccountName("spare".into()), provider: "openai".into(), label: "spare".into(), default_model: None, key_ref: "none".into(), models: vec![] },
         ],
     })
     .unwrap();
@@ -673,23 +683,37 @@ fn the_accounts_screen_has_t_a_d_and_a_key_never_shows() {
     r.press('d');
     assert_eq!(r.jobs, [Job::Account(AccountOp::Disable("spare".into()))]);
     r.jobs.clear();
+    // `a` opens the provider list; the pick, the name and the masked key follow.
     r.press('a');
-    r.type_text("third");
+    assert!(r.text().contains("log in to a provider"), "{}", r.text());
+    let at = provider_row(&r, "anthropic");
+    for _ in 0..at {
+        r.press('j');
+    }
     r.key(K::Enter);
-    r.type_text("anthropic");
+    r.type_text("third");
     r.key(K::Enter);
     r.type_text("sk-secret-123");
     let shown = r.text();
     assert!(!shown.contains("sk-secret-123") && shown.contains("•••••••••••••"), "the key is masked: {shown}");
     r.key(K::Enter);
-    assert!(matches!(&r.jobs[..], [Job::Account(AccountOp::Add { name, provider, key })] if name == "third" && provider == "anthropic" && key == "sk-secret-123"));
+    let [Job::Account(AccountOp::Add { name, provider, key })] = &r.jobs[..] else { panic!("{:?}", r.jobs) };
+    assert!(name == "third" && provider == "anthropic" && key.expose() == "sk-secret-123");
     assert!(!format!("{:?}", r.jobs).contains("sk-secret-123"), "Debug hides the key");
-    // The job runs through the hooks the binary gives it, and the answer is a line of text.
+    // The job runs through the hook the binary gives it, which answers with a line of text at once.
     let mut note = String::new();
     let mut validate = None;
-    let mut account: Option<aibus_tui::app::AccountHook> = Some(Box::new(|op| format!("did {op:?}")));
-    aibus_tui::app::run_job(r.jobs.remove(0), None, &mut validate, &mut account, &mut note);
+    let mut account: Option<aibus_tui::app::AccountHook> = Some(Box::new(|op, _| format!("did {op:?}")));
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    aibus_tui::app::run_job(r.jobs.remove(0), None, &mut validate, &mut account, &mut note, &tx);
     assert!(note.starts_with("did Add") && !note.contains("sk-secret"), "{note}");
+}
+
+/// The index of the provider in the list the `a` key opened.
+fn provider_row(r: &Rig, id: &str) -> usize {
+    use aibus_core::state::value::{as_list, get};
+    let v = r.app.graph.read_key("view:providers").unwrap();
+    as_list(get(v, "rows").unwrap()).iter().position(|row| get(row, "id").and_then(as_str) == Some(id)).unwrap()
 }
 
 #[test]

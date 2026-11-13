@@ -2,6 +2,7 @@
 
 mod budget;
 mod coalesce;
+mod fallback;
 mod loop_;
 mod model;
 pub mod result;
@@ -11,8 +12,9 @@ mod compact;
 
 pub use budget::Budgets;
 pub use compact::{AutoHandoff, ModelCompactor};
+pub use fallback::Fallback;
 pub use loop_::{
-    spawn, Compactor, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
+    spawn, Compactor, ModelSwitch, RunConfig, RunDeps, RunHandle, RunMail, Start, MAILBOX_CAPACITY,
     STREAM_CAPACITY,
 };
 pub use model::{expand, resolve_model, ModelDefaults};
@@ -171,6 +173,11 @@ pub enum RunErrorKind {
     Provider,
     /// The credential was rejected (06 section 3, exit 4). Never retried.
     Auth,
+    /// The account's allowance or billing cap is spent (exit 4, like a rejected credential).
+    /// Never retried; the banner names the account.
+    Quota,
+    /// The provider refused the content. Never retried, and no fault of the account.
+    ContentFilter,
     Tool,
     Budget,
     Denied,
@@ -182,6 +189,8 @@ impl RunErrorKind {
         match self {
             RunErrorKind::Provider => "provider",
             RunErrorKind::Auth => "auth",
+            RunErrorKind::Quota => "quota",
+            RunErrorKind::ContentFilter => "content_filter",
             RunErrorKind::Tool => "tool",
             RunErrorKind::Budget => "budget",
             RunErrorKind::Denied => "denied",

@@ -372,3 +372,108 @@ fn an_account_whose_provider_is_not_registered_serves_nothing_and_has_no_provide
     };
     assert!(matches!(r.select(&alias("sonnet"), &h), Err(SelectError::CannotServe { .. })));
 }
+
+/// The fake provider, except that its `fake-small` has no logprobs (the model, not the provider).
+struct SmallHasNoLogprobs;
+
+impl aibus_provider::ProviderFactory for SmallHasNoLogprobs {
+    fn id(&self) -> aibus_provider::ProviderId {
+        aibus_provider::ProviderId("fake")
+    }
+    fn build(&self, _: &aibus_provider::ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
+        use aibus_provider::fake::{FakeProvider, Script};
+        let over = aibus_provider::CapabilityOverrides { logprobs: Some(false), ..Default::default() };
+        Ok(Arc::new(FakeProvider::new(Script::new()).with_model_capabilities("fake-small", over)))
+    }
+    fn auth_methods(&self) -> &'static [aibus_provider::AuthMethodKind] {
+        &[aibus_provider::AuthMethodKind::None]
+    }
+}
+
+#[test]
+fn a_model_without_logprobs_on_a_logprob_capable_provider_is_not_preferred_by_the_router() {
+    install_log_router();
+    let cfg: Config = toml::from_str(
+        r#"
+[[account]]
+name = "first"
+provider = "fake"
+auth = { none = true }
+aliases = { judge = "fake-small" }
+
+[[account]]
+name = "second"
+provider = "fake"
+auth = { none = true }
+aliases = { judge = "fake-large" }
+"#,
+    )
+    .unwrap();
+    let providers = ProviderRegistry::new(&[Box::new(SmallHasNoLogprobs)], &BTreeMap::new()).unwrap();
+    let r = AccountRegistry::new(&cfg, Arc::new(providers));
+
+    // Without the hint the first account in the file wins.
+    assert_eq!(r.select(&alias("judge"), &hints()), pair("first", "fake-small"));
+    // With it, the account whose model reports logprobs does, though both share one provider.
+    let h = SelectHints { logprobs: true, ..hints() };
+    assert_eq!(r.select(&alias("judge"), &h), pair("second", "fake-large"));
+}
+
+fn quota(resets_in: Option<Duration>) -> aibus_provider::ProviderError {
+    let mut e = aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Quota, "spent");
+    e.rate_limit = Some(Box::new(aibus_provider::RateLimitInfo { resets_in, ..Default::default() }));
+    e
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cooled_down_account_is_skipped_by_select_and_comes_back_after_the_cooldown() {
+    let r = registry(|_| {});
+    // `sonnet` is on `work` and `personal`; the default account is `personal`.
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("personal", "fake-small"));
+    r.cool(&name("personal"), FallbackKind::Quota, &quota(Some(Duration::from_secs(90))));
+    assert!(r.cooled(&name("personal")));
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("work", "fake-small"));
+
+    tokio::time::advance(Duration::from_secs(89)).await;
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("work", "fake-small"));
+    tokio::time::advance(Duration::from_secs(2)).await;
+    assert!(!r.cooled(&name("personal")));
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("personal", "fake-small"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_cooldown_length_follows_the_kind() {
+    let r = registry(|_| {});
+    let (a, b, c) = (name("work"), name("personal"), name("kimi"));
+    r.cool(&a, FallbackKind::Quota, &quota(None));
+    r.cool(&b, FallbackKind::Overloaded, &aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Overloaded, "busy"));
+    r.cool(&c, FallbackKind::Auth, &aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Auth, "bad key"));
+    tokio::time::advance(Duration::from_secs(61)).await;
+    assert!(r.cooled(&a) && !r.cooled(&b) && r.cooled(&c));
+    tokio::time::advance(Duration::from_secs(30 * 60)).await;
+    // A quota with no stated reset waits 30 minutes; an auth failure waits for the test.
+    assert!(!r.cooled(&a) && r.cooled(&c));
+    r.tested(&c);
+    assert!(!r.cooled(&c));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_explicit_account_is_a_demand_and_ignores_the_cooldown_and_so_does_the_last_resort() {
+    let r = registry(|_| {});
+    r.cool(&name("kimi"), FallbackKind::Quota, &quota(None));
+    let h = SelectHints { explicit: Some(name("kimi")), ..hints() };
+    assert_eq!(r.select(&alias("fast"), &h), pair("kimi", "fake-large"));
+    // `fast` is only on `kimi`: with nothing else it serves though it is cooling.
+    assert_eq!(r.select(&alias("fast"), &hints()), pair("kimi", "fake-large"));
+}
+
+#[test]
+fn fallback_names_take_the_definition_over_the_account_and_leave_out_unknown_and_disabled() {
+    let r = registry(|c| {
+        c.accounts[0].fallback = vec!["personal".into(), "asleep".into(), "nobody".into()];
+    });
+    assert_eq!(r.fallback_names(&name("work"), None), [name("personal")]);
+    assert_eq!(r.fallback_names(&name("work"), Some(&[name("kimi")])), [name("kimi")]);
+    assert!(r.fallback_names(&name("work"), Some(&[])).is_empty());
+    assert!(r.fallback_names(&name("kimi"), None).is_empty());
+}

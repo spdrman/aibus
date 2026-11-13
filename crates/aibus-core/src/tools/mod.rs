@@ -157,6 +157,9 @@ fn names_tool(entry: &str, name: &str) -> bool {
 #[derive(Default)]
 pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
+    /// Tools added after the executor was built: the write child of `/workflow new --write` is
+    /// started when the owner asks for it, long after the registry went into an `Arc`.
+    late: Mutex<BTreeMap<String, Arc<dyn Tool>>>,
 }
 
 impl ToolRegistry {
@@ -190,11 +193,24 @@ impl ToolRegistry {
         self.tools.insert(tool.name().to_owned(), tool);
     }
 
+    /// Adds `tool` to a registry that is already in use.
+    pub fn register_late(&self, tool: Arc<dyn Tool>) {
+        lock(&self.late).insert(tool.name().to_owned(), tool);
+    }
+
+    fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.get(name).cloned().or_else(|| lock(&self.late).get(name).cloned())
+    }
+
     /// Schemas for the tools the run may call. Names outside `eff` are never shown.
     pub fn specs(&self, eff: &EffectiveTools) -> Vec<ToolSpec> {
+        let late = lock(&self.late);
         self.tools
             .iter()
+            .chain(late.iter())
             .filter(|(name, _)| eff.allow.iter().any(|p| names_tool(&p.tool, name)))
+            // A bare deny of an MCP tool (`mcp:aibus:*`) keeps it out of the list too.
+            .filter(|(name, _)| !eff.deny.iter().any(|d| d.spec.is_none() && d.tool.starts_with("mcp:") && names_tool(&d.tool, name)))
             .map(|(_, t)| t.spec())
             .collect()
     }
@@ -284,6 +300,11 @@ impl ToolExecutor {
         self.registry.specs(eff)
     }
 
+    /// Adds a tool to the running executor (see `ToolRegistry::register_late`).
+    pub fn register_late(&self, tool: Arc<dyn Tool>) {
+        self.registry.register_late(tool);
+    }
+
     /// Whether a prompt can be answered at all (headless runs cannot).
     pub fn tty(&self) -> bool {
         self.gate.tty
@@ -318,12 +339,12 @@ impl ToolExecutor {
         let adm = self.admit(eff, cx, name, input)?;
         let tool = self
             .registry
-            .tools
             .get(name)
             .ok_or_else(|| ToolError::Invalid(format!("unknown tool {name}")))?;
+        let every_time = crate::mcp::asks_every_time(name);
 
         let need = tool.needs_permission(&adm.input, mode);
-        let pre = {
+        let pre = !every_time && {
             let session = lock(&self.session);
             let pats: Vec<&ToolPattern> = self.gate.allow.iter().chain(session.iter()).collect();
             covers(&pats, name, &adm.subjects, adm.outside)
@@ -340,9 +361,10 @@ impl ToolExecutor {
                     "write" | "edit" => adm.input.get("path"),
                     _ => None,
                 };
-                let mut summary = match main.and_then(Value::as_str) {
-                    Some(s) => format!("{name}: {s}"),
-                    None => format!("{name}: {}", adm.input),
+                let mut summary = match (main.and_then(Value::as_str), crate::workflow::write_summary(name, &adm.input)) {
+                    (Some(s), _) => format!("{name}: {s}"),
+                    (None, Some(line)) => format!("{name}: {line}"),
+                    (None, None) => format!("{name}: {}", adm.input),
                 };
                 if let Some(r) = &self.gate.redactor {
                     summary = r.redact(&summary).into_owned();
@@ -358,6 +380,8 @@ impl ToolExecutor {
                 match answer {
                     Decision::Deny => return Err(denied("permission denied")),
                     Decision::Allow => {}
+                    // A workflow write asks again next time, so "always" is "once" for it.
+                    Decision::AllowSession if every_time => {}
                     Decision::AllowSession => {
                         // The first word of every part of a command (`bash(cargo *)`), the
                         // exact path for `write` and `edit`, the bare tool otherwise.

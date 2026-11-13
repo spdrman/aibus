@@ -72,12 +72,18 @@ pub struct Options {
     pub validate: Option<Validator>,
     /// The accounts screen's `t`, `a` and `d`: what was done, in a line.
     pub account: Option<AccountHook>,
+    /// The providers whose definition carries a browser login (`/login` shows its modal for them).
+    pub oauth_providers: Vec<String>,
+    /// Where `/workflow list`, `show` and `save` find the files. Without it they do nothing.
+    pub workflows: Option<crate::workflows::WorkflowFiles>,
 }
 
 /// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
 pub type Validator = Box<dyn FnMut(&str, Option<&Path>) -> String>;
-/// Does an account operation and says what happened, in a line.
-pub type AccountHook = Box<dyn FnMut(AccountOp) -> String>;
+/// Starts an account operation and returns at once with the line to show while it runs. The work
+/// (a provider verify can take seconds) happens on a thread of the hook's own, which reports with
+/// `Msg::AccountOpDone` through the sender it is given.
+pub type AccountHook = Box<dyn FnMut(AccountOp, mpsc::Sender<Msg>) -> String>;
 /// Steps one message; the loop's version also tells the run's mailbox and the session writer.
 pub type StepFn<'a, G> = dyn FnMut(&mut App<G>, Msg) -> Result<(), AibusError> + 'a;
 
@@ -290,6 +296,7 @@ pub fn run_job(
     validate: &mut Option<Validator>,
     account: &mut Option<AccountHook>,
     note: &mut String,
+    tx: &mpsc::Sender<Msg>,
 ) -> Option<PathBuf> {
     match job {
         Job::EditFile(path) => Some(path),
@@ -325,7 +332,7 @@ pub fn run_job(
         }
         Job::Account(op) => {
             *note = match account {
-                Some(f) => f(op),
+                Some(f) => f(op, tx.clone()),
                 None => "accounts cannot be changed from here".into(),
             };
             None
@@ -402,7 +409,9 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut user = opts.user.take().unwrap_or_else(|| Box::new(|_| {}));
     let mut writer = opts.writer.take();
     let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
+    let workflows = opts.workflows.take();
     let mut input = Input::default();
+    input.oauth_providers = std::mem::take(&mut opts.oauth_providers);
     let mut ctrl_c = CtrlC::default();
     let supported = input::mouse_supported(opts.term.as_deref());
     let mut mode = MouseMode::Off;
@@ -448,7 +457,10 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             }
         };
         tokio::select! {
-            Some(m) = rx.recv() => step_written(&mut app, &mut writer, m)?,
+            Some(m) = rx.recv() => {
+                input.observe(&m);
+                step_written(&mut app, &mut writer, m)?;
+            }
             Some(m) = next_run => {
                 if let Some(f) = watch.as_mut() {
                     f(&m);
@@ -462,9 +474,17 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                     let Ok(e) = ev_rx.try_recv() else { break };
                     batch.push(e);
                 }
-                let mut step = |app: &mut App<G>, m: Msg| {
+                let mut step = |app: &mut App<G>, m: Msg| -> Result<(), AibusError> {
                     user(&m);
-                    step_written(app, &mut writer, m)
+                    // A workflow file command is answered with what the files say.
+                    let answer = match (&m, &workflows) {
+                        (Msg::Command(Command::WorkflowFile(op)), Some(files)) => {
+                            crate::workflows::apply(op, app, files, std::time::SystemTime::now())
+                        }
+                        _ => Vec::new(),
+                    };
+                    step_written(app, &mut writer, m)?;
+                    answer.into_iter().try_for_each(|a| step_written(app, &mut writer, a))
                 };
                 done = terminal_events(
                     batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(), &mut step,
@@ -490,7 +510,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             }
         }
         for job in done.jobs.drain(..) {
-            let file = run_job(job, opts.agents_dir.as_deref(), &mut validate, &mut account, &mut input.note);
+            let file = run_job(job, opts.agents_dir.as_deref(), &mut validate, &mut account, &mut input.note, &tx);
             if let Some(path) = file {
                 if let Err(e) = edit_file(&mut session, &path) {
                     input.note = format!("could not run the editor: {e}");

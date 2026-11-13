@@ -1,0 +1,5 @@
+HTTP 402
+content-type: application/json
+request-id: req_ant_billing
+
+{"type":"error","error":{"type":"billing_error","message":"Your account has hit its monthly spend cap."}}

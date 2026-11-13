@@ -241,6 +241,20 @@ impl Client {
         }
     }
 
+    /// `prompts/get`: the text of the prompt's messages, joined. `Err` is why there is none (the
+    /// server has no such prompt, or no text in it).
+    pub async fn prompt(&self, name: &str, arguments: Value) -> Result<String, String> {
+        let got = self
+            .request("prompts/get", json!({"name": name, "arguments": arguments}), self.timeout, None)
+            .await?;
+        let text: Vec<&str> =
+            got["messages"].as_array().into_iter().flatten().filter_map(|m| m["content"]["text"].as_str()).collect();
+        if text.is_empty() {
+            return Err(format!("the prompt {name} has no text"));
+        }
+        Ok(text.join("\n\n"))
+    }
+
     /// `tools/call`. The text of the answer, and whether the server marked it an error.
     pub async fn call(
         &self,
@@ -314,6 +328,20 @@ fn wire_name(server: &str, tool: &str) -> String {
     name
 }
 
+/// The server name the on-demand write child of `/workflow new --write` registers under.
+pub const WRITE_SERVER: &str = "aibus-write";
+
+/// Whether `tool` (as the model calls it) writes a workflow through the write child. Such a call
+/// asks the owner every time: a pre-approved pattern does not cover it and "always" is not
+/// offered, so a write never happens because a model decided it should. The executor and the
+/// permission modal both read this.
+pub fn asks_every_time(tool: &str) -> bool {
+    matches!(
+        &*allow_name(tool),
+        "mcp:aibus-write:workflow_create" | "mcp:aibus-write:workflow_update"
+    )
+}
+
 /// `mcp__server__tool` as an allow-list spells it, `mcp:server:tool`; anything else as it is.
 pub fn allow_name(name: &str) -> std::borrow::Cow<'_, str> {
     match name.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {
@@ -379,6 +407,26 @@ impl Tool for McpTool {
     }
 }
 
+/// The tools one connected server listed, as the registry holds them.
+pub fn tools_of(name: &str, client: &Arc<Client>, listed: Vec<Listed>) -> Vec<Arc<dyn Tool>> {
+    listed
+        .into_iter()
+        .map(|t| {
+            let wire = wire_name(name, &t.name);
+            Arc::new(McpTool {
+                spec: ToolSpec {
+                    name: wire.as_str().into(),
+                    description: format!("[MCP server {name}] {}", t.description),
+                    schema: t.schema,
+                },
+                client: client.clone(),
+                wire,
+                remote: t.name,
+            }) as Arc<dyn Tool>
+        })
+        .collect()
+}
+
 /// Starts every server in `servers` and returns the tools they list. A server that does not
 /// start, or answers wrongly, is left out with a warning; the others are not affected.
 pub async fn connect_all(
@@ -392,21 +440,7 @@ pub async fn connect_all(
     for (name, cfg) in servers {
         match Client::connect(name, cfg, env, project_dir, session).await {
             Err(why) => warnings.push(format!("mcp.{name}: {why}")),
-            Ok((client, listed)) => {
-                for t in listed {
-                    let wire = wire_name(name, &t.name);
-                    tools.push(Arc::new(McpTool {
-                        spec: ToolSpec {
-                            name: wire.as_str().into(),
-                            description: format!("[MCP server {name}] {}", t.description),
-                            schema: t.schema,
-                        },
-                        client: client.clone(),
-                        wire,
-                        remote: t.name,
-                    }));
-                }
-            }
+            Ok((client, listed)) => tools.extend(tools_of(name, &client, listed)),
         }
     }
     (tools, warnings)

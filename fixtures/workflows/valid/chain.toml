@@ -1,0 +1,11 @@
+name = "chain"
+description = "Two steps and a retry"
+
+[[step]]
+agent = "explore"
+prompt = "Find it: {{input}}"
+
+[[step]]
+agent = "general"
+prompt = "Fix it. Findings: {{prev.summary}}"
+on_fail = "retry:3"

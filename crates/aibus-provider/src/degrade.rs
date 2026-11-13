@@ -68,3 +68,69 @@ impl Capabilities {
         req
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::presets::CompatFlag;
+    use crate::provider::{Capabilities, CapabilityOverrides, ChatRequest, SystemRole};
+    use crate::types::*;
+
+    fn caps() -> Capabilities {
+        Capabilities {
+            tools: true,
+            parallel_tool_calls: true,
+            streaming: true,
+            thinking: true,
+            prompt_cache: true,
+            logprobs: true,
+            effort: true,
+            images: true,
+            system_role: SystemRole::Separate,
+            max_tools: None,
+        }
+    }
+
+    fn req() -> ChatRequest {
+        ChatRequest {
+            model: ModelId("m".into()),
+            system: "Be terse.".into(),
+            messages: vec![Message {
+                role: MessageRole::User,
+                blocks: vec![
+                    ContentBlock::Text("look".into()),
+                    ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"x") },
+                ],
+                at: std::time::SystemTime::UNIX_EPOCH,
+            }],
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+            max_output_tokens: 10,
+            temperature: None,
+            effort: Some(Effort::High),
+            thinking: None,
+            cache_hint: CacheHint::None,
+            logprobs: false,
+            metadata: RequestMetadata::default(),
+        }
+    }
+
+    #[test]
+    fn degrade_runs_on_the_resolved_per_model_capabilities() {
+        let resolved = caps().with(&CapabilityOverrides { effort: Some(false), images: Some(false), ..CapabilityOverrides::default() });
+        let out = resolved.degrade(req());
+        assert_eq!(out.effort, None, "this model takes no effort even though the provider does");
+        assert_eq!(out.messages[0].blocks[1], ContentBlock::Text("[image omitted]".into()));
+    }
+
+    #[test]
+    fn the_system_role_and_strip_images_flags_become_degrade_steps() {
+        let c = caps().with_compat(&[CompatFlag::NoSystemRole, CompatFlag::StripImages]);
+        assert_eq!((c.system_role, c.images), (SystemRole::FirstMessage, false));
+        let out = c.degrade(req());
+        assert!(out.system.is_empty());
+        assert_eq!(out.messages[0].blocks[0], ContentBlock::Text("Be terse.\n\n".into()));
+        assert!(!out.messages[0].blocks.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+        // Flags that are not about capabilities leave them alone.
+        assert_eq!(caps().with_compat(&[CompatFlag::NoStore, CompatFlag::NoToolChoice]), caps());
+    }
+}

@@ -1,0 +1,499 @@
+{
+ "providers": [
+  {
+   "id": "anthropic",
+   "api": "anthropic-messages",
+   "base_url": "https://api.anthropic.com",
+   "env_vars": [
+    "ANTHROPIC_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "anthropic",
+   "prefixes": [
+    "claude-"
+   ],
+   "responses": false
+  },
+  {
+   "id": "openai",
+   "api": "openai-chat",
+   "base_url": "https://api.openai.com/v1",
+   "env_vars": [
+    "OPENAI_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "openai",
+   "prefixes": [
+    "gpt-",
+    "chatgpt-",
+    "o1",
+    "o3",
+    "o4"
+   ],
+   "user": true,
+   "default_capabilities": {
+    "logprobs": true,
+    "effort": true,
+    "images": true,
+    "prompt_cache": true,
+    "max_tools": 128
+   },
+   "compat": [
+    {
+     "max_tokens_field": "max_completion_tokens"
+    }
+   ]
+  },
+  {
+   "id": "kimi",
+   "api": "openai-chat",
+   "base_url": "https://api.moonshot.ai/v1",
+   "env_vars": [
+    "MOONSHOT_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "kimi",
+   "prefixes": [
+    "kimi-",
+    "moonshot-"
+   ],
+   "user": true,
+   "responses": false,
+   "default_capabilities": {
+    "prompt_cache": true,
+    "max_tools": 128
+   },
+   "compat": [
+    "reasoning_content_replay"
+   ]
+  },
+  {
+   "id": "openai-compatible",
+   "api": "openai-chat",
+   "env_vars": [],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env",
+    "none"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "open_aliases": true,
+   "default_capabilities": {
+    "logprobs": true
+   }
+  },
+  {
+   "id": "groq",
+   "api": "openai-chat",
+   "base_url": "https://api.groq.com/openai/v1",
+   "env_vars": [
+    "GROQ_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "groq",
+   "prefixes": [
+    "llama-",
+    "meta-llama/",
+    "openai/",
+    "qwen/",
+    "moonshotai/",
+    "deepseek-r1"
+   ],
+   "responses": false
+  },
+  {
+   "id": "mistral",
+   "api": "openai-chat",
+   "base_url": "https://api.mistral.ai/v1",
+   "env_vars": [
+    "MISTRAL_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "mistral",
+   "prefixes": [
+    "mistral-",
+    "codestral-",
+    "ministral-",
+    "pixtral-",
+    "open-mistral-",
+    "open-mixtral-"
+   ],
+   "responses": false
+  },
+  {
+   "id": "deepseek",
+   "api": "openai-chat",
+   "base_url": "https://api.deepseek.com/v1",
+   "env_vars": [
+    "DEEPSEEK_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "deepseek",
+   "prefixes": [
+    "deepseek-"
+   ],
+   "responses": false
+  },
+  {
+   "id": "xai",
+   "api": "openai-chat",
+   "base_url": "https://api.x.ai/v1",
+   "env_vars": [
+    "XAI_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "xai",
+   "prefixes": [
+    "grok-"
+   ],
+   "responses": false
+  },
+  {
+   "id": "together",
+   "api": "openai-chat",
+   "base_url": "https://api.together.xyz/v1",
+   "env_vars": [
+    "TOGETHER_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "together",
+   "prefixes": [
+    "meta-llama/",
+    "Qwen/",
+    "deepseek-ai/",
+    "mistralai/"
+   ],
+   "responses": false
+  },
+  {
+   "id": "fireworks",
+   "api": "openai-chat",
+   "base_url": "https://api.fireworks.ai/inference/v1",
+   "env_vars": [
+    "FIREWORKS_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "fireworks",
+   "prefixes": [
+    "accounts/fireworks/"
+   ],
+   "responses": false
+  },
+  {
+   "id": "cerebras",
+   "api": "openai-chat",
+   "base_url": "https://api.cerebras.ai/v1",
+   "env_vars": [
+    "CEREBRAS_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "cerebras",
+   "prefixes": [
+    "llama",
+    "qwen-",
+    "gpt-oss-"
+   ],
+   "responses": false
+  },
+  {
+   "id": "deepinfra",
+   "api": "openai-chat",
+   "base_url": "https://api.deepinfra.com/v1/openai",
+   "env_vars": [
+    "DEEPINFRA_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "deepinfra",
+   "prefixes": [
+    "meta-llama/",
+    "Qwen/",
+    "deepseek-ai/",
+    "mistralai/"
+   ],
+   "responses": false
+  },
+  {
+   "id": "perplexity",
+   "api": "openai-chat",
+   "base_url": "https://api.perplexity.ai",
+   "env_vars": [
+    "PERPLEXITY_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "perplexity",
+   "prefixes": [
+    "sonar"
+   ],
+   "responses": false
+  },
+  {
+   "id": "openrouter",
+   "api": "openai-chat",
+   "base_url": "https://openrouter.ai/api/v1",
+   "env_vars": [
+    "OPENROUTER_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "openrouter",
+   "prefixes": [
+    "openai/",
+    "anthropic/",
+    "google/",
+    "meta-llama/",
+    "mistralai/",
+    "deepseek/",
+    "x-ai/",
+    "qwen/"
+   ],
+   "responses": false
+  },
+  {
+   "id": "azure-openai",
+   "api": "openai-chat",
+   "env_vars": [
+    "AZURE_OPENAI_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "query": {
+    "api-version": "2024-10-21"
+   },
+   "open_aliases": true,
+   "auth_header": "api-key",
+   "responses": false,
+   "compat": [
+    {
+     "max_tokens_field": "max_completion_tokens"
+    }
+   ]
+  },
+  {
+   "id": "ollama",
+   "api": "openai-chat",
+   "base_url": "http://127.0.0.1:11434/v1",
+   "env_vars": [],
+   "auth_methods": [
+    "none",
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
+   }
+  },
+  {
+   "id": "lm-studio",
+   "api": "openai-chat",
+   "base_url": "http://127.0.0.1:1234/v1",
+   "env_vars": [],
+   "auth_methods": [
+    "none",
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
+   }
+  },
+  {
+   "id": "vllm",
+   "api": "openai-chat",
+   "base_url": "http://127.0.0.1:8000/v1",
+   "env_vars": [
+    "VLLM_API_KEY"
+   ],
+   "auth_methods": [
+    "none",
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
+   }
+  },
+  {
+   "id": "llama-cpp",
+   "api": "openai-chat",
+   "base_url": "http://127.0.0.1:8080/v1",
+   "env_vars": [],
+   "auth_methods": [
+    "none",
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
+   }
+  },
+  {
+   "id": "litellm",
+   "api": "openai-chat",
+   "base_url": "http://127.0.0.1:4000/v1",
+   "env_vars": [
+    "LITELLM_API_KEY"
+   ],
+   "auth_methods": [
+    "none",
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "empty",
+   "prefixes": [],
+   "open_aliases": true,
+   "responses": false,
+   "default_capabilities": {
+    "logprobs": true
+   }
+  },
+  {
+   "id": "gemini-openai",
+   "api": "openai-chat",
+   "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+   "env_vars": [
+    "GEMINI_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "gemini-openai",
+   "prefixes": [
+    "gemini-"
+   ],
+   "responses": false
+  },
+  {
+   "id": "gemini",
+   "api": "gemini-generate-content",
+   "base_url": "https://generativelanguage.googleapis.com",
+   "env_vars": [
+    "GEMINI_API_KEY"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "gemini",
+   "prefixes": [
+    "gemini-"
+   ]
+  },
+  {
+   "id": "bedrock",
+   "api": "anthropic-bedrock",
+   "env_vars": [
+    "AWS_BEARER_TOKEN_BEDROCK"
+   ],
+   "auth_methods": [
+    "api_key",
+    "bearer",
+    "env"
+   ],
+   "model_table": "bedrock",
+   "prefixes": [
+    "claude-",
+    "anthropic.",
+    "us.anthropic.",
+    "eu.anthropic.",
+    "apac.anthropic.",
+    "global.anthropic."
+   ],
+   "responses": false
+  },
+  {
+   "id": "vertex",
+   "api": "anthropic-vertex",
+   "env_vars": [],
+   "auth_methods": [
+    "none"
+   ],
+   "model_table": "vertex",
+   "prefixes": [
+    "claude-"
+   ],
+   "responses": false
+  }
+ ]
+}

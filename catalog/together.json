@@ -1,0 +1,6 @@
+{
+  "models": [
+    {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "context_window": 131072, "max_output": 8192, "family": "llama", "deprecated": false}
+  ],
+  "families": {}
+}

@@ -1,0 +1,16 @@
+{
+  "models": [
+    {"id": "anthropic.claude-opus-4-5-20251101-v1:0", "context_window": 200000, "max_output": 64000, "family": "opus", "deprecated": false, "effort": true, "price_of": "claude-opus-4-5"},
+    {"id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "context_window": 200000, "max_output": 64000, "family": "opus", "deprecated": false, "effort": true, "price_of": "claude-opus-4-5"},
+    {"id": "global.anthropic.claude-opus-4-5-20251101-v1:0", "context_window": 200000, "max_output": 64000, "family": "opus", "deprecated": false, "effort": true, "price_of": "claude-opus-4-5"},
+    {"id": "anthropic.claude-opus-4-1-20250805-v1:0", "context_window": 200000, "max_output": 32000, "family": "opus", "deprecated": false, "price_of": "claude-opus-4-1"},
+    {"id": "us.anthropic.claude-opus-4-1-20250805-v1:0", "context_window": 200000, "max_output": 32000, "family": "opus", "deprecated": false, "price_of": "claude-opus-4-1"},
+    {"id": "anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": false, "price_of": "claude-sonnet-4-5"},
+    {"id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": false, "price_of": "claude-sonnet-4-5"},
+    {"id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0", "context_window": 200000, "max_output": 64000, "family": "sonnet", "deprecated": false, "price_of": "claude-sonnet-4-5"},
+    {"id": "anthropic.claude-haiku-4-5-20251001-v1:0", "context_window": 200000, "max_output": 64000, "family": "haiku", "deprecated": false, "price_of": "claude-haiku-4-5"},
+    {"id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "context_window": 200000, "max_output": 64000, "family": "haiku", "deprecated": false, "price_of": "claude-haiku-4-5"},
+    {"id": "global.anthropic.claude-haiku-4-5-20251001-v1:0", "context_window": 200000, "max_output": 64000, "family": "haiku", "deprecated": false, "price_of": "claude-haiku-4-5"}
+  ],
+  "families": {}
+}

@@ -20,3 +20,7 @@ $tools clean aibus-r3
 ```
 
 The text frames and the cast are deterministic; the GIF pixels depend on agg and the font version the image's Debian ships.
+
+## The rataflow path
+
+The centre column is drawn through rataflow, so the recording above is of that path. `AIBUS_FEATURES` goes straight to `cargo build --features` in `tools/record-demo.sh`, for any feature you want in a recording; nothing else in the script changes. The two plays inside a run have to agree byte for byte (`cmp` on the casts and on the text frames), which is what keeps the drawing deterministic.

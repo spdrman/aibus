@@ -1,0 +1,10 @@
+{
+ "flag": "no_store",
+ "api": "openai-responses",
+ "with": {
+  "/store": "<absent>"
+ },
+ "without": {
+  "/store": false
+ }
+}

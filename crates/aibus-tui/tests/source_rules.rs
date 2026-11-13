@@ -63,3 +63,27 @@ fn widgets_cannot_reach_the_graph() {
         }
     }
 }
+
+/// There is one way to draw the centre column, so no source file gates on a feature.
+#[test]
+fn no_feature_gate_left() {
+    for (name, src) in sources() {
+        for banned in ["flow-diagram", "cfg(feature", "cfg!(feature"] {
+            assert!(!src.contains(banned), "{name} still mentions `{banned}`");
+        }
+    }
+}
+
+/// rataflow is a 0.1 crate with one maintainer: one file knows it, so swapping it out is one file.
+#[test]
+fn rataflow_is_named_only_in_diagram_rs() {
+    for (name, src) in sources() {
+        if name == "diagram.rs" {
+            continue;
+        }
+        assert!(
+            !code_lines(&src).any(|l| l.contains("rataflow")),
+            "{name} names rataflow, only diagram.rs may"
+        );
+    }
+}

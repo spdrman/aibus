@@ -5,7 +5,7 @@
 //! anyone; the other runs just keep the ledger.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use aibus_provider::{ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind, StreamChunk};
 use tokio::sync::mpsc;
@@ -15,17 +15,23 @@ use crate::advisor::Ledger;
 use crate::agent::AgentDef;
 use crate::credentials::CredentialSource;
 use crate::ids::{AccountName, ForkId, ModelId};
+use crate::msg::ModelTarget;
+use crate::run::Fallback;
 use crate::run::STREAM_CAPACITY;
 
 /// A model on an account: how the advisor and the router reach theirs. Each has its own, apart
 /// from the lead's.
+#[derive(Clone)]
 pub struct Seat {
     pub provider: Arc<dyn Provider>,
     pub creds: Arc<dyn CredentialSource>,
     pub model: ModelId,
     pub account: AccountName,
+    /// Where a request goes when `account` fails before answering (F9).
+    pub fallback: Option<Arc<Fallback>>,
 }
 
+#[derive(Clone)]
 pub struct AdvisorSeat {
     pub seat: Seat,
     /// The `advisor` definition: its prompt, tool list and custom checkpoints.
@@ -35,6 +41,7 @@ pub struct AdvisorSeat {
     pub packet_max_tokens: u64,
 }
 
+#[derive(Clone)]
 pub struct RouterSeat {
     pub seat: Seat,
     /// The `router` definition's prompt.
@@ -50,6 +57,10 @@ pub struct Assist {
     pub router: Option<RouterSeat>,
     pub ledger: Ledger,
     forks: AtomicU64,
+    /// What `/advisor` and `/router` chose, over the seats above: `None` is no choice yet,
+    /// `Some(None)` is the seat turned off.
+    chosen_advisor: Mutex<Option<Option<Seat>>>,
+    chosen_router: Mutex<Option<Option<Seat>>>,
 }
 
 impl Assist {
@@ -59,7 +70,41 @@ impl Assist {
             router,
             ledger: Ledger::default(),
             forks: AtomicU64::new(0),
+            chosen_advisor: Mutex::default(),
+            chosen_router: Mutex::default(),
         })
+    }
+
+    /// `/advisor` or `/router`: from the next consultation on, the seat uses `seat`, or is off
+    /// for `None`. A seat the session started without cannot be switched on this way, since it
+    /// has no definition to speak from.
+    pub fn switch(&self, target: ModelTarget, seat: Option<Seat>) {
+        let slot = match target {
+            ModelTarget::Advisor => &self.chosen_advisor,
+            ModelTarget::Router => &self.chosen_router,
+            ModelTarget::Lead | ModelTarget::Run(_) => return,
+        };
+        *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(seat);
+    }
+
+    /// The advisor as it is now: its definition with the model it was last switched to, or
+    /// `None` when it was never configured or has been turned off.
+    pub fn advisor_now(&self) -> Option<AdvisorSeat> {
+        let base = self.advisor.as_ref()?;
+        match &*self.chosen_advisor.lock().unwrap_or_else(PoisonError::into_inner) {
+            None => Some(base.clone()),
+            Some(None) => None,
+            Some(Some(seat)) => Some(AdvisorSeat { seat: seat.clone(), ..base.clone() }),
+        }
+    }
+
+    pub fn router_now(&self) -> Option<RouterSeat> {
+        let base = self.router.as_ref()?;
+        match &*self.chosen_router.lock().unwrap_or_else(PoisonError::into_inner) {
+            None => Some(base.clone()),
+            Some(None) => None,
+            Some(Some(seat)) => Some(RouterSeat { seat: seat.clone(), ..base.clone() }),
+        }
     }
 
     /// The next fork number: the session's lifetime count of router questions.
@@ -68,18 +113,42 @@ impl Assist {
     }
 }
 
-/// One completion on `seat`. Returns the response and the logprobs the provider streamed.
+/// One completion on `seat`. Returns the response and the logprobs the provider streamed. When
+/// the seat's account fails with a kind its fallback answers to, the same request goes to the
+/// next account (F9); the lead is not waiting on this beyond the one extra request.
 pub async fn complete(
     seat: &Seat,
     req: ChatRequest,
     cancel: &CancellationToken,
 ) -> Result<(ChatResponse, Vec<(String, f32)>), ProviderError> {
-    let creds = seat
-        .creds
+    let mut tried = vec![seat.account.clone()];
+    let mut on = (seat.provider.clone(), seat.creds.clone(), seat.account.clone(), req.model.clone());
+    loop {
+        let mut req = req.clone();
+        req.model = on.3.clone();
+        let e = match complete_on(&on.0, &*on.1, req, cancel).await {
+            Ok(done) => return Ok(done),
+            Err(e) => e,
+        };
+        let Some(to) = seat.fallback.as_ref().and_then(|f| f.next(&on.2, &tried, &e)) else {
+            return Err(e);
+        };
+        tried.push(to.account.clone());
+        on = (to.provider, to.creds, to.account, to.model);
+    }
+}
+
+async fn complete_on(
+    provider: &Arc<dyn Provider>,
+    creds: &dyn CredentialSource,
+    req: ChatRequest,
+    cancel: &CancellationToken,
+) -> Result<(ChatResponse, Vec<(String, f32)>), ProviderError> {
+    let creds = creds
         .credential()
         .map_err(|e| ProviderError::new(ProviderErrorKind::Auth, e.to_string()))?;
     let (out, mut chunks) = mpsc::channel(STREAM_CAPACITY);
-    let call = seat.provider.stream(&creds, req, out, cancel.clone());
+    let call = provider.stream(&creds, req, out, cancel.clone());
     tokio::pin!(call);
     let mut logprobs = Vec::new();
     let mut keep = |chunk| {

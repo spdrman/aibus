@@ -363,3 +363,197 @@ fn every_mouse_action_has_a_keyboard_equivalent_with_the_same_message() {
     assert_eq!(names(&k.press('k')), ["Ui(Scroll { pane: Log, lines: 1, sideways: false })"]);
     assert_eq!(names(&k.press('j')), ["Ui(Scroll { pane: Log, lines: -1, sideways: false })"]);
 }
+
+// ---- #89: mouse ownership and overflow on the card canvas ------------------------------------
+//
+// The hit map resolves first on both paths, the flow is never handed an event, and the row pans a
+// card at a time through `ctrl:scroll:cards:x`. 
+
+fn eight(size: (u16, u16)) -> Rig {
+    let mut app = session();
+    for k in 0..8u128 {
+        worker(&mut app, 2 + k, &format!("w{k}"), "does a thing", Some(0.5), "running");
+    }
+    Rig::new(app, size, Theme::recording())
+}
+
+fn first_card(r: &Rig) -> i64 {
+    r.int(&scroll_key("cards:x")).unwrap_or(0)
+}
+
+/// A cell of the cards pane with nothing on it: the corner of the centre column, on the lead row.
+fn empty_canvas(r: &Rig) -> (u16, u16) {
+    let a = r.ui.drawn.areas.centre;
+    (a.right() - 1, a.y)
+}
+
+fn card_rects(r: &Rig) -> Vec<(usize, ratatui::layout::Rect)> {
+    (0..8).filter_map(|i| r.ui.drawn.hits.find(HitId::Card(i)).map(|h| (i, h.rect))).collect()
+}
+
+#[test]
+fn click_on_a_card_selects_it_on_the_canvas() {
+    let mut r = eight((98, 46));
+    let msgs = r.click(HitId::Card(1));
+    assert_eq!(names(&msgs), ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(1)))"]);
+    assert_eq!(r.int(SELECTED_CARD), Some(1));
+}
+
+#[test]
+fn right_click_on_a_card_opens_its_menu() {
+    let mut r = eight((98, 46));
+    let (c, row) = r.centre(HitId::Card(2));
+    let msgs = names(&r.right_down(c, row));
+    assert_eq!(msgs[0], "Ui(Focus(Cards))");
+    assert!(msgs.iter().any(|m| m.starts_with("Ui(OpenMenu")), "{msgs:?}");
+    assert_eq!(r.int(SELECTED_CARD), Some(2));
+}
+
+#[test]
+fn double_click_opens_the_transcript() {
+    let mut r = eight((98, 46));
+    let (c, row) = r.centre(HitId::Card(0));
+    r.down(c, row);
+    r.up(c, row);
+    r.advance(100);
+    let msgs = names(&r.down(c, row));
+    assert_eq!(msgs.last().map(String::as_str), Some("Ui(Open(Cards))"), "{msgs:?}");
+}
+
+#[test]
+fn left_drag_on_a_card_never_moves_it() {
+    let mut r = eight((98, 46));
+    let before = card_rects(&r);
+    let (c, row) = r.centre(HitId::Card(1));
+    r.down(c, row);
+    for dx in 1..=30 {
+        r.drag(c.saturating_sub(dx), row);
+    }
+    r.up(c.saturating_sub(30), row);
+    assert_eq!(card_rects(&r), before, "the cards stayed put");
+    assert_eq!(first_card(&r), 0, "and a drag that starts on a card does not pan");
+}
+
+#[test]
+fn wheel_over_the_cards_scrolls_not_zooms() {
+    let mut r = eight((98, 46));
+    let before = card_rects(&r);
+    let (c, row) = r.centre(HitId::Card(0));
+    for _ in 0..10 {
+        r.mouse(MouseEventKind::ScrollUp, c, row);
+    }
+    for _ in 0..10 {
+        r.mouse(MouseEventKind::ScrollDown, c, row);
+    }
+    let widths = |v: &[(usize, ratatui::layout::Rect)]| v.iter().map(|(_, r)| (r.width, r.height)).collect::<Vec<_>>();
+    assert_eq!(widths(&card_rects(&r)), widths(&before), "the boxes kept their size");
+    assert_eq!(first_card(&r), 0, "a plain wheel is not a sideways pan");
+}
+
+#[test]
+fn shift_wheel_pans_eight_cards() {
+    let mut r = eight((98, 46));
+    assert!(r.text().contains("w0") && !r.text().contains("w5"), "{}", r.text());
+    let (c, row) = r.centre(HitId::Card(0));
+    r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
+    assert_eq!(first_card(&r), 3);
+    assert!(r.text().contains("w5") && r.text().contains("◂ 3 more"), "{}", r.text());
+    r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
+    assert_eq!(first_card(&r), 5, "the last window starts at card 5, not 6");
+    assert!(r.text().contains("w7"), "{}", r.text());
+}
+
+#[test]
+fn drag_on_empty_canvas_pans() {
+    let mut r = eight((98, 46));
+    let (c, row) = empty_canvas(&r);
+    assert_eq!(r.ui.drawn.hits.at(c, row).map(|h| h.id), Some(HitId::Pane(Pane::Cards)));
+    r.down(c, row);
+    r.drag(c - 20, row);
+    assert_eq!(first_card(&r), 1, "a card and its gap to the left is one card in");
+    r.drag(c - 45, row);
+    assert_eq!(first_card(&r), 2);
+    r.drag(c, row);
+    assert_eq!(first_card(&r), 0, "back where the press was");
+    r.up(c, row);
+}
+
+#[test]
+fn pan_is_clamped_at_both_ends() {
+    let mut r = eight((98, 46));
+    let (c, row) = r.centre(HitId::Card(0));
+    for _ in 0..6 {
+        r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
+    }
+    assert_eq!(first_card(&r), 5, "no further than the window that ends on the last card");
+    for _ in 0..6 {
+        r.mouse_with(MouseEventKind::ScrollDown, c, row, KeyModifiers::SHIFT);
+    }
+    assert_eq!(first_card(&r), 0, "and never before the first");
+    // A drag past either end stops there, and coming back is one step per card, not per overshoot.
+    let (c, row) = empty_canvas(&r);
+    for _ in 0..3 {
+        r.down(c, row);
+        r.drag(c - 60, row);
+        r.up(c - 60, row);
+    }
+    assert_eq!(first_card(&r), 5);
+}
+
+#[test]
+fn selecting_the_eighth_card_by_key_brings_it_into_view() {
+    for size in [(98, 46), (98, 29)] {
+        let mut r = eight(size);
+        r.key(crossterm::event::KeyCode::Tab);
+        for _ in 0..7 {
+            r.press('l');
+        }
+        assert_eq!(r.int(SELECTED_CARD), Some(7), "{size:?}");
+        let card = r.ui.drawn.hits.find(HitId::Card(7)).unwrap_or_else(|| panic!("{size:?}: card 7 is off screen")).rect;
+        let centre = r.ui.drawn.areas.centre;
+        assert!(card.x >= centre.x && card.right() <= centre.right(), "{size:?}: {card:?} in {centre:?}");
+        assert!(r.text().contains("w7"), "{size:?}");
+    }
+}
+
+#[test]
+fn resize_keeps_the_selected_card_visible() {
+    let mut r = eight((98, 46));
+    r.key(crossterm::event::KeyCode::Tab);
+    for _ in 0..7 {
+        r.press('l');
+    }
+    for size in [(120, 50), (98, 46), (110, 40)] {
+        r.resize(size);
+        assert!(r.ui.drawn.hits.find(HitId::Card(7)).is_some(), "{size:?}: the selected card left the view");
+    }
+}
+
+#[test]
+fn rail_handle_drag_still_resizes_the_rail_with_the_canvas_present() {
+    let mut r = eight((120, 50));
+    let handle = r.ui.drawn.hits.find(HitId::RailHandle).unwrap().rect;
+    let rail_x = r.ui.drawn.areas.rail.x;
+    let row = handle.y + 5;
+    assert!(r.down(handle.x, row).is_empty(), "a press on a handle only arms the drag");
+    assert_eq!(names(&r.drag(rail_x + 30, row)), ["Ui(SetRailWidth(30))"]);
+    r.up(rail_x + 30, row);
+    assert_eq!(r.ui.drawn.areas.rail.width, 30);
+    assert_eq!(first_card(&r), 0, "and the cards did not pan");
+}
+
+/// The cards view and everything else the dashboard reads is the same graph however the column is
+/// drawn, and a pan is not a view node: it lives in `ctrl:scroll:cards:x`.
+#[test]
+fn replaying_eight_runs_gives_the_same_view_nodes_before_and_after_a_pan() {
+    let mut r = eight((98, 46));
+    let views = |r: &Rig| -> Vec<String> {
+        r.app.keys.iter().filter(|k| k.starts_with("view:")).map(|k| format!("{k}={:?}", r.app.graph.read_key(k))).collect()
+    };
+    let before = views(&r);
+    let (c, row) = r.centre(HitId::Card(0));
+    r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
+    assert_eq!(first_card(&r), 3);
+    let cards = |v: &[String]| v.iter().find(|s| s.starts_with("view:cards=")).cloned();
+    assert_eq!(cards(&views(&r)), cards(&before), "view:cards does not depend on the pan");
+}

@@ -60,6 +60,7 @@ Names are `snake_case` in aibus. The loader also accepts the Claude Code `camelC
 | `router` | router only | map | | `threshold` (f32, 0.85), `questions` (list), see section 7.2. |
 | `initial_prompt` | no | string | | Auto-submitted first turn when run as the session's lead (`aibus --agent name`). |
 | `auto_compact_at` | no | u32 tokens | from model's context size | Compact this run's context when input tokens pass this value. |
+| `fallback` | no | list of account names | the account's `fallback` | Accounts to try, in order, when the run's account fails before the first token (04 section 4.3). `[]` keeps the run on its account. |
 
 Unknown keys are a validation warning, not an error (`aibus agent validate` prints them). A missing `name` or `description` is an error.
 
@@ -94,6 +95,7 @@ aibus --agents '{"reviewer":{"description":"...","prompt":"...","tools":["read",
 | `search` | worker | `inherit` or `defaults.swarm_model` | `read, grep, glob, ls` | Maps the repo (the first card in the recording). |
 | `grep` | worker | same | `grep, read` | Finds call sites (second card). |
 | `audit` | worker | same, `isolation: worktree` | `read, grep, glob, bash(git *), bash(cargo *), bash(npm *)` | Runs checks in a worktree (third card). |
+| `workflow-author` | worker | `inherit` | `read, glob, grep, mcp:aibus:*` | Drafts a workflow for a goal over `aibus mcp` on stdio (read-only: validate and dry run, never a write), for `/workflow new`. Its `max_cost_usd` is a quarter of `limits.max_cost_usd`. |
 
 Built-ins can be overridden by a project or user definition with the same name. `aibus agent show explore` prints the built-in's effective definition so you can copy it.
 
@@ -138,6 +140,8 @@ The lead's `delegate` tool description embeds the roster: every non-built-in def
 - `inherit`: use the parent run's model and account. For the lead, `inherit` means config `defaults.model`.
 
 CLI `--model <alias|id>` sets the lead's model for the session; `--advisor <alias|id>` and `--router <alias|id>` set those roles (the recording's prompt line reads `claude --model sonnet --advisor opus`, frames f01 to f37). A definition's `model` beats the parent's; the CLI only sets the lead's.
+
+In the TUI, `/model [@target] <ref>` changes the model of the lead (no target), of `@advisor` or `@router`, or of one run (`@<agent>`, its newest run, or `@<run id prefix>`); `/advisor <ref|off>` and `/router <ref|off>` are the seat shorthands, and `off` is only for a seat. The change applies from the **next request**: a request already in flight finishes on the model it started with, and the next one (the next turn of a tool loop included) goes to the new model on the account that serves it. An unknown reference, or one no account can serve, changes nothing and leaves one log line. The header and the cards show the new model as soon as the switch is accepted. The choice lasts for the session: nothing is written to a definition, to `config.toml` or to `.aibus/settings.toml`.
 
 ## 4. Delegation
 
@@ -471,6 +475,10 @@ on_fail = "retry:2"          # re-run kraken then arbiter, twice max
 ```
 
 `/fix <text>` in the TUI or `aibus run --workflow fix "<text>"` executes the chain under the lead. Each step is an ordinary run; the lead sees each result and can stop the chain. The built-in workflows shipped as examples are `fix`, `build`, `review`, `explore`, copied from the Continuous-Claude chains with the agents renamed to aibus built-ins where no definition exists.
+
+A workflow becomes a file and comes back later through the `/workflow` subcommands in the TUI. `/workflow list` and `/workflow show <name>` open a modal (the rows, or the file as text with the validator's summary under it). `/workflow save <name> [--user] [--force]` takes the latest drafted workflow (`model:workflow:draft`), runs the validator over it against the real roster, refuses on errors (and shows them), and writes `.aibus/workflows/<name>.toml` (or `~/.config/aibus/workflows/` with `--user`, mode 0600) atomically. The file starts with two comment lines, `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`, which `Workflow::parse` ignores like any TOML comment. The name has to match `^[a-z0-9][a-z0-9_-]{0,63}$` and is checked before the disk is touched; the path is the directory plus that name, never the argument. An existing file is refused unless `--force`. `/workflow run <name> <input>` is `/workflow <name> <input>` under a second name.
+
+`/workflow new <goal>` is how a draft comes to exist: the lead delegates the goal to the built-in `workflow-author` agent in the foreground, and the author works through this program's own `aibus mcp` (read-only: it lists the agents, validates a draft and dry-runs a saved workflow). Its report comes back as data like any child's, and the last fenced `toml` block in it that validates against the agents in the session becomes `model:workflow:draft`, which `/workflow save` writes. The author saves by itself only when the owner says so for that one command: `/workflow new --write <goal>` and `/workflow edit <name> <change>` start a second `aibus mcp --allow write` child (never `gates`, never `run`) and offer `workflow_create` and `workflow_update` to that author run. Each call asks in the permission modal with a one-line summary and has no "always". `edit` reads the file with `workflow_get` and updates with the revision it got, so a file changed in between is a conflict. A file the author writes starts with the marker line `# written through aibus mcp, <RFC 3339 time>` (an update keeps the line the file had), where a file `/workflow save` writes starts with `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`.
 
 ## 9. Tools
 

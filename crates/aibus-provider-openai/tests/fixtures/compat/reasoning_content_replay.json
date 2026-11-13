@@ -1,0 +1,10 @@
+{
+ "flag": "reasoning_content_replay",
+ "api": "openai-chat",
+ "with": {
+  "/messages/3/reasoning_content": "hmm"
+ },
+ "without": {
+  "/messages/3/reasoning_content": "<absent>"
+ }
+}

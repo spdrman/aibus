@@ -57,3 +57,14 @@ regex = '\bAIza[0-9A-Za-z_-]{35}'
 [[pattern]]
 name = "api-key-field"
 regex = '(?i)(?:x-api-key|x-goog-api-key|api[_-]?key)"?\s*[:=]\s*"?[A-Za-z0-9._~+/=-]{8,}'
+
+# Added with the credential kinds of epic F (fixtures/redact/provider-errors.toml). An OpenRouter
+# key has hyphens after `sk-`, so `openai-key` stops at `sk-or`; `gcloud` prints Google access
+# tokens as `ya29.` and a long tail, with no `Bearer ` in front when an error body echoes one.
+[[pattern]]
+name = "openrouter-key"
+regex = '\bsk-or-v1-[A-Za-z0-9]{16,}'
+
+[[pattern]]
+name = "google-access-token"
+regex = '\bya29\.[A-Za-z0-9._-]{20,}'

@@ -4,6 +4,7 @@
 mod account;
 mod agent_cmd;
 mod agent_watch;
+mod author;
 mod cli;
 mod commands;
 mod completions;
@@ -13,12 +14,16 @@ mod control;
 mod doctor;
 mod env;
 mod events;
+mod gcloud;
 mod headless;
 mod keychain;
 mod launch;
 mod logfile;
 mod logging;
+mod mcp_cmd;
+mod mcp_http;
 mod net;
+mod oauth;
 mod plain;
 mod providers;
 mod session_cmd;
@@ -91,6 +96,10 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Workflow(WorkflowCmd::List { names })) => {
             commands::workflow_list(&cli.global, names)
         }
+        Some(Command::Workflow(WorkflowCmd::Validate { target })) => {
+            commands::workflow_validate(&cli.global, target.as_deref())
+        }
+        Some(Command::Workflow(WorkflowCmd::Show { name })) => commands::workflow_show(&cli.global, &name),
         Some(Command::Workflow(WorkflowCmd::Run { name, input, script })) => {
             // The same session as `aibus run --workflow <name> <input>`.
             let args = RunArgs {
@@ -101,6 +110,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             };
             headless::run(cli.global, args, redactor.clone())
         }
+        Some(Command::Mcp(args)) => mcp_cmd::mcp(&cli.global, &args, redactor),
         Some(Command::Init) => commands::init(&cli.global),
         Some(Command::Doctor { session }) => {
             doctor::doctor(&cli.global, session.as_deref(), redactor, &keychain::OsKeychain)

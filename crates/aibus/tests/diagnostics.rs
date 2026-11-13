@@ -252,6 +252,39 @@ fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
     assert_eq!(gone.status.code(), Some(11));
 }
 
+#[test]
+fn doctor_shows_the_region_and_project_of_the_cloud_providers() {
+    let home = xdg_temp();
+    user_config(
+        home.path(),
+        "[[account]]\nname = \"bedrock\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\nregion = \"us-east-1\"\n\n\
+         [[account]]\nname = \"vertex\"\nprovider = \"vertex\"\nauth = { gcloud = true }\nproject = \"my-project\"\nregion = \"us-east5\"\n",
+    );
+    let out = aibus(home.path(), &["doctor"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let row = |id: &str| text.lines().find(|l| l.contains(&format!("provider: {id}: "))).unwrap_or_default();
+    let (bedrock, vertex) = (row("bedrock"), row("vertex"));
+    assert!(bedrock.contains("anthropic-bedrock") && bedrock.contains("auth sigv4") && bedrock.contains("region us-east-1"), "{text}");
+    assert!(vertex.contains("anthropic-vertex") && vertex.contains("auth gcloud") && vertex.contains("project my-project") && vertex.contains("region us-east5"), "{text}");
+}
+
+#[test]
+fn doctor_has_a_row_per_provider_and_warns_about_one_no_account_uses() {
+    let home = xdg_temp();
+    user_config(
+        home.path(),
+        "[[provider]]\nid = \"lab\"\napi = \"openai-chat\"\nbase_url = \"http://10.1.1.1:8000/v1\"\n\n\
+         [[account]]\nname = \"g\"\nprovider = \"groq\"\nauth = { env = \"GROQ_API_KEY\" }\n",
+    );
+    let out = aibus(home.path(), &["doctor"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let groq = text.lines().find(|l| l.contains("provider: groq: ")).unwrap_or_default();
+    assert!(groq.contains("openai-chat") && groq.contains("preset groq") && groq.contains("auth env") && groq.contains("no cache"), "{text}");
+    assert!(text.lines().any(|l| l.contains("provider: lab: ") && l.contains("custom [[provider]]")), "{text}");
+    assert!(text.lines().any(|l| l.contains("warning: [[provider]] lab is used by no enabled account")), "{text}");
+    assert_eq!(out.status.code(), Some(0), "a warning is not a failure: {text}");
+}
+
 // ---- completions ------------------------------------------------------------------------
 
 #[test]
@@ -316,14 +349,19 @@ fn bash_completes_account_names_dynamically() {
             "source {}; COMP_WORDS=({words}); COMP_CWORD={cword}; _aibus_dynamic; printf '%s\\n' \"${{COMPREPLY[@]}}\"",
             path.display()
         );
-        let out = std::process::Command::new("bash")
-            .arg("-c")
+        let mut cmd = std::process::Command::new("bash");
+        cmd.arg("-c")
             .arg(body)
             .env("HOME", home.path())
             .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap()))
-            .current_dir(home.path().join("proj"))
-            .output()
-            .unwrap();
+            .current_dir(home.path().join("proj"));
+        // The `aibus` the script calls must read this test's home, not an XDG directory the
+        // host happens to export (a hosted runner does).
+        for v in common::XDG {
+            cmd.env_remove(v);
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "bash failed: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned).collect()
     };
     // `aibus account show w<TAB>` offers the two accounts that start with w.

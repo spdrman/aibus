@@ -227,6 +227,17 @@ pub(crate) fn from_fields(
         None => None,
     };
     let initial_prompt = string(&mut m, "initial_prompt")?;
+    // `fallback: []` pins the run to its account; absent leaves it to the account's own list.
+    let fallback = match m.remove("fallback") {
+        None => None,
+        Some(v) => Some(
+            string_list("fallback", v)?
+                .into_iter()
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| AccountName(s.trim().into()))
+                .collect(),
+        ),
+    };
     let auto_compact_at = match uint(&mut m, "auto_compact_at")? {
         Some(n) => Some(u32::try_from(n).map_err(|_| want("auto_compact_at", "a u32"))?),
         None => None,
@@ -261,6 +272,7 @@ pub(crate) fn from_fields(
             router,
             initial_prompt,
             auto_compact_at,
+            fallback,
             system_prompt: body.trim().to_string(),
             source,
         },
@@ -389,6 +401,9 @@ pub fn to_json(def: &AgentDef) -> Value {
     if let Some(n) = def.auto_compact_at {
         m.insert("auto_compact_at".into(), n.into());
     }
+    if let Some(f) = &def.fallback {
+        m.insert("fallback".into(), f.iter().map(|a| a.0.as_str()).collect());
+    }
     m.insert("prompt".into(), def.system_prompt.clone().into());
     Value::Object(m)
 }
@@ -401,7 +416,7 @@ pub fn to_markdown(def: &AgentDef) -> String {
     };
     fields.remove("prompt");
     // The order of the table in 01 section 1.1, not the map's alphabetical one.
-    const ORDER: [&str; 23] = [
+    const ORDER: [&str; 24] = [
         "name",
         "description",
         "role",
@@ -425,6 +440,7 @@ pub fn to_markdown(def: &AgentDef) -> String {
         "router",
         "initial_prompt",
         "auto_compact_at",
+        "fallback",
     ];
     let mut out = String::from("---\n");
     for (k, v) in ORDER.iter().filter_map(|k| fields.get_key_value(*k)) {

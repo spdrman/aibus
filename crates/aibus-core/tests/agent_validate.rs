@@ -235,7 +235,7 @@ fn a_scope_reads_at_most_1000_files_and_says_so() {
         write(&user, &format!("a{i:04}.md"), &format!("---\nname: a{i:04}\ndescription: d\n---\n"));
     }
     let found = discover(None, &root, Some(&user), &[], &[]).unwrap();
-    assert_eq!(found.agents.len(), MAX_FILES_PER_SCOPE + 9);
+    assert_eq!(found.agents.len(), MAX_FILES_PER_SCOPE + BUILTINS.len());
     assert!(found.agents.contains_key(&"a0999".parse::<AgentName>().unwrap()));
     assert!(!found.agents.contains_key(&"a1000".parse::<AgentName>().unwrap()));
     let cap: Vec<_> = found.warnings.iter().filter(|w| w.contains("more than 1000")).collect();
@@ -262,7 +262,7 @@ fn the_roster_lists_non_built_ins_and_warns_past_15000_tokens_but_loads_all() {
     let long = "x".repeat(60_000);
     write(&user, "long.md", &format!("---\nname: long\ndescription: {long}\n---\n"));
     let found = discover(None, &root, Some(&user), &[], &[]).unwrap();
-    assert_eq!(found.agents.len(), 11);
+    assert_eq!(found.agents.len(), BUILTINS.len() + 2);
     let tokens = roster::estimate_tokens(&found.roster);
     assert!(tokens > roster::BUDGET_TOKENS);
     assert_eq!(

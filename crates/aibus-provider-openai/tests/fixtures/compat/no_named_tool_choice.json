@@ -1,0 +1,10 @@
+{
+ "flag": "no_named_tool_choice",
+ "api": "openai-chat",
+ "with": {
+  "/tool_choice": "required"
+ },
+ "without": {
+  "/tool_choice/function/name": "read"
+ }
+}

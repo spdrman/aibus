@@ -35,6 +35,10 @@ pub struct RecordedRequest {
 pub struct FakeProvider {
     script: Arc<Mutex<Script>>,
     caps: Capabilities,
+    /// Per model, laid over `caps` by `capabilities_for`.
+    model_caps: BTreeMap<String, CapabilityOverrides>,
+    /// What `verify` reports it cost.
+    verify_cost: Option<f64>,
     /// Account name to its key. Empty means any credential is accepted.
     accounts: BTreeMap<AccountName, String>,
     recorded: Mutex<Vec<RecordedRequest>>,
@@ -57,6 +61,8 @@ impl FakeProvider {
         Self {
             script: Arc::new(Mutex::new(script)),
             caps,
+            model_caps: BTreeMap::new(),
+            verify_cost: None,
             accounts: BTreeMap::new(),
             recorded: Mutex::new(vec![]),
         }
@@ -64,6 +70,18 @@ impl FakeProvider {
 
     pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
         self.caps = caps;
+        self
+    }
+
+    /// Makes `verify` report this cost, like a provider whose verifying call is a real request.
+    pub fn with_verify_cost(mut self, usd: f64) -> Self {
+        self.verify_cost = Some(usd);
+        self
+    }
+
+    /// What `model` can do differently from the rest of this fake.
+    pub fn with_model_capabilities(mut self, model: &str, over: CapabilityOverrides) -> Self {
+        self.model_caps.insert(model.to_owned(), over);
         self
     }
 
@@ -166,6 +184,13 @@ impl Provider for FakeProvider {
         self.caps.clone()
     }
 
+    fn capabilities_for(&self, model: &ModelId) -> Capabilities {
+        match self.model_caps.get(model.0.as_str()) {
+            Some(over) => self.caps.clone().with(over),
+            None => self.caps.clone(),
+        }
+    }
+
     fn models(&self) -> Vec<ModelInfo> {
         ["fake-small", "fake-large"]
             .into_iter()
@@ -249,7 +274,7 @@ impl Provider for FakeProvider {
                     )
                     .await?;
                     emit(&out, &cancel, StreamChunk::ToolUseEnd { id }).await?;
-                    blocks.push(ContentBlock::ToolUse { id, name, input });
+                    blocks.push(ContentBlock::ToolUse { id, name, input, signature: None });
                     called_tool = true;
                 }
                 Step::Usage { input, output } => {
@@ -325,6 +350,7 @@ impl Provider for FakeProvider {
             usage,
             stop,
             request_id: Some(format!("fake-req-{}", self.recorded.lock().unwrap().len())),
+            rate_limit: None,
         })
     }
 
@@ -342,6 +368,7 @@ impl Provider for FakeProvider {
             label: creds.account.to_string(),
             org: None,
             models: self.models().into_iter().map(|m| m.id).collect(),
+            cost_usd: self.verify_cost,
         })
     }
 

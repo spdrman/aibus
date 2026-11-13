@@ -36,6 +36,15 @@ fn names_are_pinned() {
         ),
         (Msg::Command(Command::Clear), "Command"),
         (started(R()), "RunStarted"),
+        (
+            Msg::RunSwitched {
+                run: R(),
+                from: AccountName("acct".into()),
+                to: AccountName("backup".into()),
+                model: ModelId("m2".into()),
+            },
+            "RunSwitched",
+        ),
         (text_stream(R(), ""), "Stream"),
         (
             Msg::ToolCallRequested {
@@ -83,10 +92,10 @@ fn names_are_pinned() {
     for (m, want) in samples {
         assert_eq!(m.name(), want);
     }
-    // The rest are covered by the case table, which pins all 27 names.
+    // The rest are covered by the case table, which pins all 28 names.
     let from_cases: std::collections::BTreeSet<_> = cases().iter().map(|c| c.msg.name()).collect();
     assert_eq!(from_cases, ALL_NAMES.into_iter().collect());
-    assert_eq!(ALL_NAMES.len(), 27);
+    assert_eq!(ALL_NAMES.len(), 32);
 }
 
 #[test]
@@ -204,6 +213,7 @@ fn a_key_ref_that_is_not_a_reference_is_refused_without_echoing_it() {
                 label: "w".into(),
                 default_model: None,
                 key_ref: secret.into(),
+                models: vec![],
             }],
         })
         .unwrap_err();

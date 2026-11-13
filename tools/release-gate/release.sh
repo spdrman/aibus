@@ -19,7 +19,7 @@
 #      push the branch and open the PR "Release v<version>" against `release`. The owner merges it.
 # The script never creates or pushes a tag: publish in release.yml makes v<version> on the push to `release`.
 # --dry-run prints every step and writes, pushes and opens nothing.
-# The signing key is tried first on a scratch file (no prompt, in a new session so it has no terminal): a key that is not loaded in ssh-agent stops the run at once.
+# The signing key is tried first on a scratch file (no prompt, in a new session so it has no terminal, even with job control on): a key that is not loaded in ssh-agent stops the run at once.
 # Test hooks: RELEASE_ATTEST_SH (attest.sh stand-in), plus RELEASE_E2E_CMD of e2e.sh. Exit 1 a step failed, 2 refused.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -80,17 +80,27 @@ committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}'
 [ -n "$committed" ] && [ "$committed" = "$(awk '{print $1, $2}' "$key.pub")" ] \
   || refuse "$key.pub is not the key committed at $PUBKEY_PATH"
 command -v gh >/dev/null || refuse "gh is not installed"
+# detach: run a command in a NEW SESSION, so it has no controlling terminal (ssh-keygen opens /dev/tty itself and would
+# prompt there). The parent forks first, because setsid() fails (EPERM, returned as -1, which is true in Perl) for a
+# process group leader, which is what the process is when job control is on. It forwards INT/TERM/HUP to the child and
+# returns the child's exit status (128+n after a signal). The wrapper's own failure (fork, setsid, exec) exits 125.
+DETACH_PL='use POSIX; my $p = fork; defined $p or do { warn "fork: $!\n"; exit 125 };
+if ($p) { $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub { kill "TERM", $p }; 1 while waitpid($p, 0) < 0 && $! == EINTR; exit($? & 127 ? 128 + ($? & 127) : $? >> 8) }
+POSIX::setsid() > 0 or do { warn "setsid: $!\n"; exit 125 }; exec @ARGV or do { warn "exec: $!\n"; exit 125 }'
+detach() { SSH_ASKPASS_REQUIRE=never perl -e "$DETACH_PL" -- "$@" </dev/null; }
+
 # Sign preflight: the e2e and the attestation take about 15 minutes, so find out now that the key signs
-# without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation. ssh-keygen
-# opens /dev/tty by itself, so it runs in a new session (perl setsid) and has no terminal to ask on.
+# without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation.
 command -v perl >/dev/null || refuse "perl is not installed"
 pf=$(mktemp -d "${TMPDIR:-/tmp}/release-signcheck.XXXXXX") && [ -n "$pf" ] && [ -d "$pf" ] || refuse "could not make a temp directory for the sign check; nothing ran"
-pf_clean() { rm -f "$pf/probe" "$pf/probe.sig"; rmdir "$pf" 2>/dev/null || true; }
-trap pf_clean EXIT; trap 'pf_clean; exit 130' INT TERM
+pf_clean() { rm -f "$pf/probe" "$pf/probe.sig" "$pf/err"; rmdir "$pf" 2>/dev/null || true; }
+trap pf_clean EXIT; trap 'pf_clean; exit 130' INT; trap 'pf_clean; exit 143' TERM; trap 'pf_clean; exit 129' HUP
 echo preflight >"$pf/probe"
-SSH_ASKPASS_REQUIRE=never perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$pf/probe" </dev/null >/dev/null 2>&1 \
-  && [ -s "$pf/probe.sig" ] || refuse "the key cannot sign without a prompt: load it with ssh-add $key first"
-pf_clean; trap - EXIT INT TERM
+detach ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$pf/probe" >/dev/null 2>"$pf/err" && [ -s "$pf/probe.sig" ] || {
+  skrc=$?; [ $skrc != 125 ] || { msg=$(tr '\n' ' ' <"$pf/err"); refuse "cannot detach the terminal for the key check ($msg); nothing ran"; }
+  echo "   ssh-keygen exited $skrc" >&2
+  refuse "the key cannot sign without a prompt: load it with ssh-add $key first"; }
+pf_clean; trap - EXIT INT TERM HUP
 echo "   version $ver (workspace is $current), tag $tag is made by release.yml on the push to release, not here" >&2
 
 # the CHANGELOG the release branch will have: its own tip if it exists, else origin/main's

@@ -168,21 +168,30 @@ committed. `attest.sh` looks for the private key at `~/.ssh/aibus-release-attest
 beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must sit next to it) or set
 `AIBUS_ATTEST_KEY`.
 
-**The key has to sign without a prompt.** `attest.sh` signs with `ssh-keygen -Y sign -f <private key path>`
-with nobody to type a passphrase on a long run, so a passphrase-protected key fails with "incorrect
-passphrase supplied to decrypt private key" unless it is loaded in `ssh-agent`. Run `ssh-add ~/.ssh/aibus-release-attest` once
-before the release. A key in the agent signs silently even though the script passes the private key
-path (checked with a throwaway key: with the key in the agent `ssh-keygen -Y sign -f <private path>`
-signs without asking, without it the same command prompts). Both `release.sh` and `attest.sh` sign a
-small scratch file first (same key and namespace, `SSH_ASKPASS_REQUIRE=never`, stdin from `/dev/null`,
-and in a new session through `perl` `setsid`, because `ssh-keygen` opens `/dev/tty` itself and would
-otherwise ask on your terminal; perl is a prerequisite of both scripts) and stop with "the key cannot sign without a prompt: load it with ssh-add <key> first" before the
-container starts. On 0.2.0 this was found out at the very end of a 7 minute attestation. The signed
-files are made in a temp directory and put into `release-attest/` only once the signature verifies
-(copied to a stage directory inside it, then two renames). If a step fails, the pair that was there
-before is restored (a `--replace` keeps the committed attestation) and only what this run made is
-removed, so a failed attestation leaves no untracked `attestation.json` behind (it used to, and the next
-run stopped with "the tree is dirty"). `release-attest` being a regular file is refused up front. A red run keeps its logs in a `mktemp -d` directory and says where.
+**The key has to sign without a prompt.** `attest.sh` signs with `ssh-keygen -Y sign -f <private key path>`,
+and nobody is there to type a passphrase during a 15 minute run, so a passphrase-protected key has to be
+loaded in `ssh-agent`: run `ssh-add ~/.ssh/aibus-release-attest` once before the release. A key in the
+agent signs silently even though the script passes the private key path (checked with a throwaway key:
+with the key in the agent `ssh-keygen -Y sign -f <private path>` signs without asking, without it the same
+command prompts). `release.sh` and `attest.sh` both sign a small scratch file first (same key and namespace,
+`SSH_ASKPASS_REQUIRE=never`, stdin from `/dev/null`) and stop with "the key cannot sign without a prompt:
+load it with ssh-add <key> first" before the container starts. `ssh-keygen` opens `/dev/tty` by itself, so
+the call runs through a small `perl` wrapper that forks and calls `setsid` in the child (a new session has no
+controlling terminal, so it cannot prompt, even when the shell has job control on). The wrapper forwards
+INT/TERM/HUP to the child and returns its exit status; if the wrapper itself fails the message is "cannot
+detach the terminal for the key check" instead. perl is a prerequisite of both scripts. The real signature
+at the end of `attest.sh` goes through the same wrapper, so a key that dropped out of the agent mid-run
+(`ssh-add -t`, a locked agent) makes it stop with exit 1 and a message to load the key, not prompt. On 0.2.0
+the failure was found out at the very end of a 7 minute attestation.
+
+The signed files are made in a temp directory, copied into a stage directory inside `release-attest/`,
+verified there, and renamed into place. A failure or a TERM/INT/HUP restores the pair that was there before
+(a `--replace` keeps the committed attestation) and removes only what this run made, so a failed attestation
+leaves no untracked `attestation.json` behind (it used to, and the next run stopped with "the tree is
+dirty"). If a restore itself fails, the stage directory is kept (it holds the old copy) and the message says
+where. SIGKILL cannot be caught, so a kill -9 between the two renames can leave a stage directory or a
+half pair; remove `release-attest/.attest-stage.*` and `git checkout release-attest` then. `release-attest`
+being a regular file is refused up front. A red run keeps its logs in a `mktemp -d` directory and says where.
 
 Tests for the
 tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.

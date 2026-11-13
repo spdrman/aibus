@@ -54,12 +54,22 @@ pushed=0
 cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
 
+# detach: run a command in a NEW SESSION, so it has no controlling terminal (ssh-keygen opens /dev/tty itself and would
+# prompt there). The parent forks first, because setsid() fails (EPERM, returned as -1, which is true in Perl) for a
+# process group leader, which is what the process is when job control is on. It forwards INT/TERM/HUP to the child and
+# returns the child's exit status (128+n after a signal). The wrapper's own failure (fork, setsid, exec) exits 125.
+DETACH_PL='use POSIX; my $p = fork; defined $p or do { warn "fork: $!\n"; exit 125 };
+if ($p) { $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub { kill "TERM", $p }; 1 while waitpid($p, 0) < 0 && $! == EINTR; exit($? & 127 ? 128 + ($? & 127) : $? >> 8) }
+POSIX::setsid() > 0 or do { warn "setsid: $!\n"; exit 125 }; exec @ARGV or do { warn "exec: $!\n"; exit 125 }'
+detach() { SSH_ASKPASS_REQUIRE=never perl -e "$DETACH_PL" -- "$@" </dev/null; }
+
 # Sign preflight: the same key, namespace and no-prompt settings as the real signature, on a scratch file.
 # A passphrase key that is not in ssh-agent fails here, not after the container run.
-# ssh-keygen opens /dev/tty itself, so it runs in a new session (perl setsid) and has no terminal to ask on.
 mkdir "$work/pf" && echo preflight >"$work/pf/probe" || refuse "could not make the preflight scratch file; nothing ran"
-SSH_ASKPASS_REQUIRE=never perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/pf/probe" </dev/null >/dev/null 2>&1 \
-  && [ -s "$work/pf/probe.sig" ] || refuse "the key cannot sign without a prompt: load it with ssh-add $key first"
+detach ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/pf/probe" >/dev/null 2>"$work/pf/err" && [ -s "$work/pf/probe.sig" ] || {
+  skrc=$?; [ $skrc != 125 ] || refuse "cannot detach the terminal for the key check ($(tr '\n' ' ' <"$work/pf/err")); nothing ran"
+  echo "   ssh-keygen exited $skrc" >&2
+  refuse "the key cannot sign without a prompt: load it with ssh-add $key first"; }
 
 lane=$work/lane.sh
 nonce=$(new_nonce); [ -n "$nonce" ] || refuse "could not make a nonce (od on /dev/urandom gave nothing); nothing ran"
@@ -109,36 +119,45 @@ if [ "$verdict" != green ]; then
   exit 1
 fi
 
-# Sign and verify in $work, then move both files into $out: a failure anywhere before the move touches nothing there.
+# Sign in $work (detached too: if the key was loadable for the preflight it signs from the agent without asking; a key that
+# dropped out of the agent mid-run fails here instead of prompting), then verify and install the two files.
 printf '%s\n' "$att" | jq . >"$work/$ATTEST_FILE"
-SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/$ATTEST_FILE" </dev/null >/dev/null \
-  && [ -f "$work/$ATTEST_FILE.sig" ] || { echo "ssh-keygen -Y sign failed" >&2; exit 1; }
-"$here/verify.sh" --signature-only --file "$work/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || { echo "the signature does not verify against $key.pub" >&2; exit 1; }
-# Both files go into $out under temporary names in a stage directory next to the final names (same filesystem),
-# then two renames. Anything that fails puts back what was there before (a --replace keeps the old pair) and
-# removes only what this run made; the final names of an existing attestation are never deleted.
+detach ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/$ATTEST_FILE" >/dev/null 2>"$work/sign.err" && [ -f "$work/$ATTEST_FILE.sig" ] || {
+  skrc=$?; echo "ssh-keygen -Y sign failed (exit $skrc): $(tr '\n' ' ' <"$work/sign.err")" >&2
+  echo "the key may have left ssh-agent during the run: load it with ssh-add $key first, then run again" >&2; exit 1; }
+# Both files go into $out through a stage directory inside it (same filesystem): copy, verify the copy, back up what is
+# there, then two renames. A failure or a TERM/INT/HUP (SIGKILL cannot be caught) puts back what was there before (a
+# --replace keeps the old pair) and removes only what this run made; the final names of an existing attestation are
+# never deleted. If a restore itself fails the stage directory is kept, it holds the old copy.
 made=0
 if [ ! -d "$out" ]; then mkdir -p "$out" || { echo "could not make $out" >&2; exit 1; }; made=1; fi
 stage=$(mktemp -d "$out/.attest-stage.XXXXXX") && [ -n "$stage" ] && [ -d "$stage" ] || { echo "could not make a stage directory in $out" >&2; if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi; exit 1; }
-placed=
+keepstage=0
 undo() {
   local i=0 f
   for f in "$ATTEST_FILE" "$ATTEST_FILE.sig"; do
-    if [ -f "$stage/old.$i" ]; then cp -p "$stage/old.$i" "$out/$f" || echo "could not restore $out/$f from $stage/old.$i" >&2
-    elif [ -n "$placed" ] && [ "$placed" = "$f" -o "$placed" = both ]; then rm -f "$out/$f"
+    if [ -f "$stage/old.$i" ]; then
+      cp -p "$stage/old.$i" "$out/$f" || { keepstage=1; echo "could not restore $out/$f; the old copy is in $stage/old.$i" >&2; }
+    elif [ ! -e "$stage/$f" ]; then rm -f "$out/$f"   # no old copy and the staged file is gone: this run renamed it in
     fi
     i=$((i + 1))
   done
 }
-leave() { rm -f "$stage"/new.0 "$stage"/new.1 "$stage"/old.0 "$stage"/old.1; rmdir "$stage" 2>/dev/null || true; if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi; }
-failmove() { undo; leave; echo "could not move the signed attestation into $out" >&2; exit 1; }
-cp "$work/$ATTEST_FILE" "$stage/new.0" && cp "$work/$ATTEST_FILE.sig" "$stage/new.1" || failmove
+leave() {
+  [ $keepstage = 0 ] || { echo "the stage directory $stage was kept" >&2; return 0; }
+  rm -f "$stage/$ATTEST_FILE" "$stage/$ATTEST_FILE.sig" "$stage/old.0" "$stage/old.1"; rmdir "$stage" 2>/dev/null || true
+  if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi
+}
+failmove() { undo; leave; echo "${1:-could not move the signed attestation into $out}" >&2; exit 1; }
+trap 'undo; leave; exit 143' INT TERM HUP
+cp "$work/$ATTEST_FILE" "$stage/$ATTEST_FILE" && cp "$work/$ATTEST_FILE.sig" "$stage/$ATTEST_FILE.sig" || failmove
+"$here/verify.sh" --signature-only --file "$stage/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || failmove "the signature does not verify against $key.pub"
 i=0; for f in "$ATTEST_FILE" "$ATTEST_FILE.sig"; do
   if [ -f "$out/$f" ]; then cp -p "$out/$f" "$stage/old.$i" || failmove; fi
   i=$((i + 1))
 done
-mv -f "$stage/new.0" "$out/$ATTEST_FILE" || failmove
-placed=$ATTEST_FILE
-mv -f "$stage/new.1" "$out/$ATTEST_FILE.sig" || failmove
+mv -f "$stage/$ATTEST_FILE" "$out/$ATTEST_FILE" || failmove
+mv -f "$stage/$ATTEST_FILE.sig" "$out/$ATTEST_FILE.sig" || failmove
+trap - INT TERM HUP
 leave
 echo "signed $out/$ATTEST_FILE: $(jq -r '.result.passed' <<<"$att") passed, tree $(jq -r '.tree.hash[0:12]' <<<"$att")"

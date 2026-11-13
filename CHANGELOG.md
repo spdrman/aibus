@@ -3,7 +3,7 @@
 All notable changes go here, newest first. The section for a version is what the release workflow
 uses as the release notes, so every release needs its entry before it is merged into `release`.
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-11-12
 
 ### Fixed
 

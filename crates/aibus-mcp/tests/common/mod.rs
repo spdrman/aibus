@@ -15,8 +15,14 @@ pub fn server(caps: Caps, redactor: Redactor) -> (Server, Xdg) {
     let home = xdg_temp();
     let project = home.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
-    let server = Server::new(caps, project, &home.paths, Some(home.path().join("home")), redactor)
-        .expect("a server");
+    let server = Server::new(
+        caps,
+        project,
+        &home.paths,
+        Some(home.path().join("home")),
+        redactor,
+    )
+    .expect("a server");
     (server, home)
 }
 

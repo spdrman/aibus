@@ -103,6 +103,11 @@ git checkout -q f.txt
 git switch -q release; echo leak >leak.txt; git add leak.txt; git commit -q -m leak
 env -u RELEASE_E2E_TEST_STAMPS RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >"$t/leak.out" 2>&1
 expect "e2e.sh with RELEASE_E2E_CMD set warns loudly" grep -q "TEST ONLY" "$t/leak.out"
+# issue #251: a mktemp earlier on PATH must not decide what the exit trap deletes
+mkdir "$t/hostile" "$t/victim251"; echo keep >"$t/victim251/sentinel"
+printf '#!/bin/sh\necho "$HOSTILE_VICTIM"\n' >"$t/hostile/mktemp"; chmod +x "$t/hostile/mktemp"
+env -u RELEASE_E2E_TEST_STAMPS PATH="$t/hostile:$PATH" HOSTILE_VICTIM="$t/victim251" RELEASE_E2E_CMD=true tools/release-gate/e2e.sh >/dev/null 2>&1
+expect "e2e.sh: a hostile mktemp on PATH does not get its directory deleted" test -f "$t/victim251/sentinel"
 refuse "a stamp from a leftover RELEASE_E2E_CMD does not open pre-push" git push -q -f origin release
 
 # stamp content is checked, not just its existence

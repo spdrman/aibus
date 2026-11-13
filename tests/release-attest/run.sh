@@ -642,6 +642,17 @@ cp_case c20 0 MV_FAIL=1 CP_FAILSRC='*/old.*'
 expect "a failed 1st rename and a failing cp: exits 1, nothing changed, no stage directory left" bash -c "test $rc = 1 && test '$before' = '$after' && ! ls -A '$r/release-attest' | grep -q stage"
 expect "...and the message does not claim a failed restore" bash -c "! grep -q 'could not restore' '$t/cpc-c20.out'"
 
+# ---------- issue #251: a mktemp earlier on PATH must not decide what the exit trap deletes
+mkdir "$t/hostile"; printf '#!/bin/sh\necho "$HOSTILE_VICTIM"\n' >"$t/hostile/mktemp"; chmod +x "$t/hostile/mktemp"
+hostile_run() { # name sentinel-dir command...
+  mkdir -p "$2"; echo keep >"$2/sentinel"
+  PATH="$t/hostile:$PATH" HOSTILE_VICTIM="$2" "${@:3}" >/dev/null 2>&1 </dev/null
+  expect "$1: a hostile mktemp on PATH does not get its directory deleted" test -f "$2/sentinel"
+}
+r=$t/repo251; mkrepo "$r" 1.2.3
+hostile_run "attest.sh" "$t/victim-attest" env SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"
+hostile_run "verify.sh" "$t/victim-verify" "$tools/verify.sh" --repo "$r"
+
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"

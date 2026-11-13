@@ -243,8 +243,14 @@ fn signal(pid: u32, hard: bool) {
 /// that is shown.
 const RAW_MARGIN: usize = 32 * 1024;
 
+/// A character a key or token is made of.
+fn is_token(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "_-.+/=:~".contains(c)
+}
+
 /// Appends `more` to `text`, keeping the last `cap + RAW_MARGIN` bytes from a character boundary,
-/// moved on to a line start when there is one in the next 4 KiB. The text is raw: it is redacted
+/// moved on to a line start when there is one in the next 4 KiB, or else past the first character a
+/// token cannot contain. The text is raw: it is redacted
 /// when it is read (`window`), never cut first, so that a key sent in pieces, a private key block
 /// sent a line at a time and a value that follows its context are whole when the redactor sees
 /// them.
@@ -263,6 +269,10 @@ fn keep_raw(text: &mut String, more: &str, cap: usize) {
         }
         if let Some(nl) = text[cut..near].find('\n') {
             cut += nl + 1;
+        } else if let Some((at, c)) = text[cut..near].char_indices().find(|(_, c)| !is_token(*c)) {
+            // No line start close by: start after the first character a key cannot be made of,
+            // so the window does not begin inside a key that began before it.
+            cut += at + c.len_utf8();
         }
         text.drain(..cut);
     }

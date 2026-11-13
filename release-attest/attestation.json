@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "kind": "aibus-release-attestation",
+  "commit": "aa8f1b575acb87fae6a876aa1eaea1ee2ce42b96",
+  "tree": {
+    "hash": "c4383374e6948f58e2a8e580718b4c5461ebdefb",
+    "algo": "mktree-top-level-sans-release-attest-v2"
+  },
+  "version": {
+    "declared": "0.2.0"
+  },
+  "run": {
+    "host": "mars",
+    "startedAt": "2026-11-13T02:35:33Z",
+    "finishedAt": "2026-11-13T02:42:17Z"
+  },
+  "suites": [
+    {
+      "name": "unit",
+      "exit": 0,
+      "passed": 529,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "graph",
+      "exit": 0,
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "integration",
+      "exit": 0,
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "tui",
+      "exit": 0,
+      "passed": 308,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "cli",
+      "exit": 0,
+      "passed": 300,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "replay",
+      "exit": 0,
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "capability-matrix",
+      "exit": 0,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "provider-contract",
+      "exit": 0,
+      "passed": 153,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "security",
+      "exit": 0,
+      "passed": 46,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "result": {
+    "verdict": "green",
+    "total": 1374,
+    "passed": 1374,
+    "failed": 0,
+    "ignored": 0
+  }
+}

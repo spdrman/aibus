@@ -17,6 +17,7 @@ mkdir "$t/tmp" && export TMPDIR=$t/tmp || exit 1
 printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
 export DH_SH=$t/dh-real-stub.sh DH_REAL_LOG=$t/dh-real.log
 fails=0 n=0
+. "$here/../lib/pty.sh"
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1"; }
 expect() { name=$1; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else bad "$name"; fi; }
@@ -443,15 +444,15 @@ expect "...and its PR body says I bumped the version" grep -q 'I bumped the vers
 
 # ---------- review of #242: release.sh's preflight has no controlling terminal, and leaves nothing behind when interrupted
 ssh-keygen -q -t ed25519 -N 'pw236' -C pass -f "$t/pkey"   # a passphrase key; no agent is started or touched here
-if command -v script >/dev/null && command -v timeout >/dev/null; then
+if pty_available; then
   r=$t/rel236p; mkrepo "$r"; usegate "$r"; cp "$t/pkey.pub" "$PUBKEY_PATH"; git commit -qam pub; git push -q origin main
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
-    timeout 6 script -q /dev/null tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run < <(sleep 8) ) >"$t/pty-rel.out" 2>&1; rc=$?
+    pty_run 6 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel.out" 2>&1; rc=$?
   expect "from a terminal, release.sh refuses a passphrase key that is not loaded at once (exit 2, no hang)" test $rc = 2
   expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-rel.out' && ! grep -qi 'enter passphrase' '$t/pty-rel.out'"
   printf 'set -m\n' >"$t/monitor.env"
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
-    timeout 8 script -q /dev/null tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run < <(sleep 10) ) >"$t/pty-rel2.out" 2>&1; rc=$?
+    pty_run 8 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel2.out" 2>&1; rc=$?
   expect "with job control on, release.sh still refuses a passphrase key at once (exit 2), no prompt" bash -c "test $rc = 2 && ! grep -qi 'enter passphrase' '$t/pty-rel2.out'"
 else echo "SKIP: script(1) or timeout is missing, the pseudo-terminal test does not run" >&2; fi
 # an interrupt during the preflight leaves no release-signcheck.* directory

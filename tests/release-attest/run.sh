@@ -348,12 +348,10 @@ if [ -S "$agent_sock" ] && [ -n "$agent_pid" ]; then
   SSH_AUTH_SOCK=$agent_sock ssh-add -l >/dev/null 2>&1; [ $? = 1 ] && agent_ok=1   # 1 = reachable, no identities
 fi
 if [ $agent_ok = 1 ]; then ok "the private ssh-agent started on $agent_sock"; else bad "the private ssh-agent did not start; the agent tests are skipped and ssh-add is never run"; fi
-pty_ok=0; command -v script >/dev/null && command -v timeout >/dev/null && pty_ok=1
+. "$here/../lib/pty.sh"
+pty_ok=0; pty_available && pty_ok=1
 [ $pty_ok = 1 ] || echo "SKIP: script(1) or timeout is missing, the pseudo-terminal tests do not run" >&2
-pty() { # secs cmd... : run under a pseudo-terminal nobody types into (stdin stays open, so a prompt would hang)
-  local secs=$1; shift
-  timeout "$secs" script -q /dev/null "$@" < <(sleep $((secs + 2)))
-}
+pty() { pty_run "$@"; }
 pty_attest() { # keyfile : attest.sh as a terminal user with the given key and NO agent
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 6 "$tools/attest.sh" --repo "$r" --key "$1" --runner-cmd "sh $t/fake.sh" )
 }

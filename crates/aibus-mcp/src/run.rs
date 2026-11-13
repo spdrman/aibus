@@ -333,6 +333,14 @@ impl View {
     ///   string to any pattern, as before.
     /// - The context patterns (`bearer`, `api-key-field`, `assignment`) match a name with its
     ///   value, so a value whose name was cut off at the start of the stored window is missed.
+    /// - When the cut falls just before a context name that was whole but inside a token
+    ///   (`x.|Bearer <value>`, `x.|api_key: <value>`), the move past the token takes the name
+    ///   with it, and a value that only its name marks (no key shape of its own) is then shown,
+    ///   if the redaction also shrinks the buffer so that the start of the window is shown (one
+    ///   unterminated BEGIN line does that). A `name=value` pair goes whole only when the value is
+    ///   token characters to its end; one with a character outside the token set (a quote, `!`,
+    ///   `@`: `x.api_key="v"`, `--api-key="v"`, `x.password=hunter!v`, `x.token=ab@v`) can be cut
+    ///   inside its name, and the move then stops after that character and shows the rest.
     /// - The start of the stored window can hold the rest of something that began before it. The
     ///   cut is moved to a line start, or past the first character a token cannot contain when it
     ///   falls inside a token (`keep_raw`), which removes the rest of a key; but an unterminated

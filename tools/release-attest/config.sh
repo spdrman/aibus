@@ -113,8 +113,9 @@ export_entries() {
 # through a file, so no write to a pipe can block while git writes. Each reply is held to what was asked:
 # the header must be `<the requested sha> blob <size>`, then exactly size bytes and a newline, and
 # nothing after the last one. A missing object, a short or long stream, a bad header or a non-zero git
-# exit aborts the whole copy. A symlink blob over 4096 bytes (PATH_MAX on Linux, and no system can make
-# a longer link) is refused from its header, before its body is read. Files are made with
+# exit aborts the whole copy. A symlink blob over 4096 bytes is refused from its header, before its body
+# is read. The cap only bounds the read: Linux links hold at most 4095 bytes, so a target of exactly 4096
+# passes this check, is read, and then fails at symlink() with ENAMETOOLONG. Files are made with
 # O_EXCL|O_NOFOLLOW (an existing path is an error); before each write or link every component of the
 # parent is checked to be a real directory (no symlink) that resolves inside the destination; a symlink
 # target holding a NUL is refused. Every git here runs with replace refs and lazy fetch off (see

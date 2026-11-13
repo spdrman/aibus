@@ -1033,15 +1033,18 @@ mod tests {
     fn a_key_that_starts_before_the_stored_window_leaves_no_fragment_when_the_buffer_shrinks() {
         let redactor = Redactor::new();
         let keep = TAIL_BYTES + RAW_MARGIN;
-        let begin = "-----BEGIN PRIVATE KEY-----\n";
         let mut v = view();
-        // The stored window will start 20 bytes into the key, with no newline for a long way
-        // after it, and then a BEGIN line makes the redaction shrink everything after it, so the
-        // start of the window is shown.
-        let before = ".".repeat(100);
-        let spaces = " ".repeat(keep - 22 - begin.len());
-        stream(&mut v, &redactor, &format!("{before}{KEY}{spaces}"));
-        stream(&mut v, &redactor, begin);
+        // The stored window starts 20 bytes into the key, with no newline for a long way after
+        // it, and an unterminated BEGIN line right behind the key makes the redaction swallow
+        // everything after it, so the start of the window is what is shown.
+        let first = format!("{}{KEY} -----BEGIN PRIVATE KEY-----", ".".repeat(100));
+        stream(&mut v, &redactor, &first);
+        stream(&mut v, &redactor, &" ".repeat(keep + 120 - first.len()));
+        assert_eq!(
+            v.tail.len(),
+            keep + 120 - 120,
+            "the window was cut at the key"
+        );
         assert_no_piece("tail", &shown(&v, &redactor));
     }
 

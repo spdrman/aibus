@@ -237,28 +237,39 @@ fn signal(pid: u32, hard: bool) {
         .status();
 }
 
-/// How much of the end of a buffer is looked at again when text is appended to it: a key that
-/// began in the old text and ends in the new is whole inside this window. Longer than any key a
-/// pattern knows.
+/// The longest run of token characters at the end of a buffer that is held back from redaction
+/// (longer than any key a pattern knows); a longer run is redacted as it is.
 const JOIN_BYTES: usize = 512;
 
-/// Appends `more` to `text`, redacts the join, then keeps the last `cap` bytes from a character
+/// A character a key or token is made of. A run of these at the end of a buffer may be the start
+/// of a key whose rest has not arrived yet.
+fn is_token(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "_-.+/=:~".contains(c)
+}
+
+/// Appends `more` to `text`, redacts it, then keeps the last `cap` bytes from a character
 /// boundary. For the log the cut also moves on to the next line start, so a half line never
 /// leads.
 ///
-/// The redaction comes first and sees the old text's last `JOIN_BYTES` together with `more`, so a
-/// key that arrived in pieces (a streamed key does) is whole when the redactor looks at it, and
-/// only then can a cut fall inside what is left of it.
+/// Redaction comes before the cut, so the cut can only fall inside a redaction marker. A key
+/// that arrives in pieces (a streamed key does) is whole when the redactor looks at it because
+/// the run of token characters at the very end of the buffer is held back raw and joined to the
+/// next text before it is redacted: redacting a piece on its own would swallow the part that
+/// matches a pattern and leave the rest of the key to arrive as plain text. That held-back run
+/// is redacted by the next append, by `View::flush` when the run ends, and by the read.
 fn keep_last(text: &mut String, more: &str, cap: usize, whole_lines: bool, redactor: &Redactor) {
-    let mut from = text.len().saturating_sub(JOIN_BYTES);
-    while !text.is_char_boundary(from) {
-        from += 1;
+    let held = text.len() - text.trim_end_matches(is_token).len();
+    let from = text.len() - held.min(JOIN_BYTES);
+    let joined = format!("{}{more}", &text[from..]);
+    let mut hold = joined.len() - joined.trim_end_matches(is_token).len();
+    if hold > JOIN_BYTES {
+        hold = 0;
     }
-    let joined = redactor
-        .redact(&format!("{}{more}", &text[from..]))
-        .into_owned();
+    let split = joined.len() - hold;
+    let committed = redactor.redact(&joined[..split]).into_owned();
     text.truncate(from);
-    text.push_str(&joined);
+    text.push_str(&committed);
+    text.push_str(&joined[split..]);
     if text.len() > cap {
         let mut cut = text.len() - cap;
         while !text.is_char_boundary(cut) {
@@ -280,15 +291,25 @@ fn push_both(tail: &mut String, log: &mut String, more: &str, redactor: &Redacto
 }
 
 impl View {
+    /// The run has ended, so nothing more will join the held-back end of the tail and the log:
+    /// redact it.
+    fn flush(&mut self, redactor: &Redactor) {
+        self.tail = redactor.redact(&self.tail).into_owned();
+        self.log = redactor.redact(&self.log).into_owned();
+    }
+
     /// Folds one NDJSON event of the child into the view. `steps` are the workflow's agents in
     /// order. True when something `run_status` shows changed.
     ///
     /// What is guaranteed: a field of an attempt (its name, status, failure), the run id and the
     /// session are redacted whole, as the child sent them, before they are stored or cut. Text
     /// that goes to the tail and the log (the stream, a summary, a failure of no attempt) is
-    /// appended to what is there and redacted together with its last `JOIN_BYTES`, then cut, so a
-    /// key that arrives in pieces is whole when the redactor sees it. A key longer than that
-    /// window cannot be recognised that way, and none is that long.
+    /// appended to the buffer and redacted before the buffer is cut, with the run of token
+    /// characters at its end held back until the next text joins it (see `keep_last`), so a key
+    /// that arrives in pieces is whole when the redactor sees it and a cut can only fall inside a
+    /// redaction marker. A held-back run longer than `JOIN_BYTES` is not held back, and no key
+    /// is that long. The held-back end is raw until the next text, the end of the run
+    /// (`flush`) or a read, which redacts the whole buffer again.
     ///
     /// What is not: this redactor is the server's. Its patterns are in it, but the secrets a
     /// child registered with its own (the key of an account, say) are not, because the server
@@ -529,7 +550,7 @@ impl Runs {
                 })
             };
             let notes = {
-                let (entry, redactor) = (entry.clone(), redactor);
+                let (entry, redactor) = (entry.clone(), redactor.clone());
                 thread::spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                         entry.update(|v| {
@@ -554,6 +575,7 @@ impl Runs {
                 for a in v.attempts.iter_mut().filter(|a| a.status == "running") {
                     a.status = if v.cancelled { "cancelled" } else { "failed" }.into();
                 }
+                v.flush(&redactor);
                 v.ended = true;
                 true
             });
@@ -928,6 +950,19 @@ mod tests {
             );
             assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
         }
+    }
+
+    #[test]
+    fn a_key_whose_end_has_not_arrived_is_redacted_by_the_read_and_by_the_flush() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &format!("a key: {}", &KEY[..30]));
+        // Held back as it came, since its rest may still follow; the read redacts it whole.
+        assert_no_piece("tail", &shown(&v, &redactor));
+        stream(&mut v, &redactor, &KEY[30..]);
+        v.flush(&redactor);
+        assert_no_piece("tail after the flush", &v.tail);
+        assert_no_piece("log after the flush", &v.log);
     }
 
     #[test]

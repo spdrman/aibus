@@ -322,8 +322,8 @@ impl View {
     /// run id and the session are redacted whole, as the child sent them, before they are stored
     /// (the failure before its 300 byte cut). Text for the tail and the log (the stream, a
     /// summary, a failure of no attempt, stdout and stderr lines) is stored raw, about
-    /// `RAW_MARGIN` more than what is shown (up to `TRIM_SLACK` more again), and redacted when it is read: all of the buffer first, then the
-    /// cut. So the redactor sees a key sent in pieces, a private key block sent a line at a time,
+    /// `RAW_MARGIN` more than what is shown (up to `TRIM_SLACK` more again), and redacted when it
+    /// is read: all of the buffer first, then the cut. So the redactor sees a key sent in pieces, a private key block sent a line at a time,
     /// a token of any length and a value that follows its context (a header or field name) whole,
     /// and a cut falls in text it has already replaced.
     ///

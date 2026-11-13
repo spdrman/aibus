@@ -245,34 +245,40 @@ const RAW_MARGIN: usize = 32 * 1024;
 
 /// A character a key or token is made of.
 fn is_token(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "_-.+/=:~".contains(c)
+    matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.' | '+' | '/' | '=' | ':' | '~')
 }
 
-/// Appends `more` to `text`, keeping the last `cap + RAW_MARGIN` bytes from a character boundary,
-/// moved on to a line start when there is one in the next 4 KiB, or else past the first character a
-/// token cannot contain. The text is raw: it is redacted
-/// when it is read (`window`), never cut first, so that a key sent in pieces, a private key block
-/// sent a line at a time and a value that follows its context are whole when the redactor sees
-/// them.
+/// The raw buffers are trimmed once they are this much over `cap + RAW_MARGIN`, so the scan for a
+/// cut and the move of the rest happen once per this many bytes instead of once per event.
+const TRIM_SLACK: usize = 4096;
+
+/// Appends `more` to `text` and, once it is `TRIM_SLACK` over `cap + RAW_MARGIN` bytes, keeps
+/// the last `cap + RAW_MARGIN` from a character boundary. The cut is moved on to a line start
+/// when there is one in the next 4 KiB, or else, when it falls inside a token, past the first
+/// character a token cannot contain, so a key that began before the window leaves no end of
+/// itself at its start. The text is raw: it is redacted when it is read (`window`), never cut
+/// first, so that a key sent in pieces, a private key block sent a line at a time and a value
+/// that follows its context are whole when the redactor sees them.
 fn keep_raw(text: &mut String, more: &str, cap: usize) {
     text.push_str(more);
     let keep = cap + RAW_MARGIN;
-    if text.len() > keep {
+    if text.len() > keep + TRIM_SLACK {
         let mut cut = text.len() - keep;
         while !text.is_char_boundary(cut) {
             cut += 1;
         }
-        let near = (cut + 4096).min(text.len());
-        let mut near = near;
+        let mut near = (cut + 4096).min(text.len());
         while !text.is_char_boundary(near) {
             near -= 1;
         }
+        let inside = text[..cut].chars().next_back().is_some_and(is_token)
+            && text[cut..].chars().next().is_some_and(is_token);
         if let Some(nl) = text[cut..near].find('\n') {
             cut += nl + 1;
-        } else if let Some((at, c)) = text[cut..near].char_indices().find(|(_, c)| !is_token(*c)) {
-            // No line start close by: start after the first character a key cannot be made of,
-            // so the window does not begin inside a key that began before it.
-            cut += at + c.len_utf8();
+        } else if inside {
+            if let Some((at, c)) = text[cut..near].char_indices().find(|(_, c)| !is_token(*c)) {
+                cut += at + c.len_utf8();
+            }
         }
         text.drain(..cut);
     }
@@ -315,20 +321,29 @@ impl View {
     /// What the server redacts, and when. The strings of an attempt (name, status, failure), the
     /// run id and the session are redacted whole, as the child sent them, before they are stored
     /// (the failure before its 300 byte cut). Text for the tail and the log (the stream, a
-    /// summary, a failure of no attempt, stdout and stderr lines) is stored raw, up to `RAW_MARGIN`
-    /// more than what is shown, and redacted when it is read: all of the buffer first, then the
+    /// summary, a failure of no attempt, stdout and stderr lines) is stored raw, about
+    /// `RAW_MARGIN` more than what is shown (up to `TRIM_SLACK` more again), and redacted when it is read: all of the buffer first, then the
     /// cut. So the redactor sees a key sent in pieces, a private key block sent a line at a time,
     /// a token of any length and a value that follows its context (a header or field name) whole,
     /// and a cut falls in text it has already replaced.
     ///
-    /// What is not covered: a key split by other text in between (a stderr line between two stream
-    /// pieces) is not one string to any pattern, as before; the start of the raw window can hold
-    /// the rest of something that began before it, but it is `RAW_MARGIN` outside what is shown
-    /// unless the redaction shrinks the buffer by that much; the raw text sits in memory until
-    /// it is cut off, which a read redacts but the process does not; and this redactor is the
-    /// server's: its patterns are in it, but the secrets a child registered with its own are not,
-    /// because the server process registers none, so those are covered only by the child's own
-    /// redaction of each event.
+    /// What is not covered:
+    /// - A key split by other text in between (a stderr line between two stream pieces) is not one
+    ///   string to any pattern, as before.
+    /// - The context patterns (`bearer`, `api-key-field`, `assignment`) match a name with its
+    ///   value, so a value whose name was cut off at the start of the stored window is missed.
+    /// - The start of the stored window can hold the rest of something that began before it. The
+    ///   cut is moved to a line start, or past the first character a token cannot contain when it
+    ///   falls inside a token (`keep_raw`), which removes the rest of a key; but an unterminated
+    ///   BEGIN line is enough for the redaction to shrink the buffer so that the start is shown,
+    ///   and the body lines of a private key whose BEGIN line was cut off then show.
+    /// - A read during a run can show the first piece of a key still arriving, as a piece too
+    ///   short for any pattern matches none.
+    /// - The raw text sits in memory until it is cut off, which a read redacts but the process
+    ///   does not.
+    /// - This redactor is the server's: its patterns are in it, but the secrets a child registered
+    ///   with its own are not, because the server process registers none, so those are covered
+    ///   only by the child's own redaction of each event.
     fn apply(&mut self, ev: &Value, steps: &[String], redactor: &Redactor) -> bool {
         let raw_of = |k: &str| ev.get(k).and_then(Value::as_str).map(str::to_owned);
         let str_of = |k: &str| raw_of(k).map(|t| redactor.redact(&t).into_owned());

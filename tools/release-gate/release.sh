@@ -19,6 +19,7 @@
 #      push the branch and open the PR "Release v<version>" against `release`. The owner merges it.
 # The script never creates or pushes a tag: publish in release.yml makes v<version> on the push to `release`.
 # --dry-run prints every step and writes, pushes and opens nothing.
+# The signing key is tried first on a scratch file (no prompt, no tty): a key that is not loaded in ssh-agent stops the run at once.
 # Test hooks: RELEASE_ATTEST_SH (attest.sh stand-in), plus RELEASE_E2E_CMD of e2e.sh. Exit 1 a step failed, 2 refused.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -79,6 +80,12 @@ committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}'
 [ -n "$committed" ] && [ "$committed" = "$(awk '{print $1, $2}' "$key.pub")" ] \
   || refuse "$key.pub is not the key committed at $PUBKEY_PATH"
 command -v gh >/dev/null || refuse "gh is not installed"
+# Sign preflight: the e2e and the attestation take about 15 minutes, so find out now that the key signs
+# without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation.
+pf=$(mktemp -d "${TMPDIR:-/tmp}/release-signcheck.XXXXXX") && [ -n "$pf" ] && [ -d "$pf" ] || refuse "could not make a temp directory for the sign check; nothing ran"
+echo preflight >"$pf/probe"
+if SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$pf/probe" </dev/null >/dev/null 2>&1 && [ -s "$pf/probe.sig" ]; then rm -f "$pf/probe" "$pf/probe.sig"; rmdir "$pf"
+else rm -f "$pf/probe" "$pf/probe.sig"; rmdir "$pf"; refuse "the key cannot sign without a prompt: load it with ssh-add $key first"; fi
 echo "   version $ver (workspace is $current), tag $tag is made by release.yml on the push to release, not here" >&2
 
 # the CHANGELOG the release branch will have: its own tip if it exists, else origin/main's
@@ -104,6 +111,8 @@ fi
 step "3. bump commit"
 if [ $dry = 0 ] && [ "$(declared_version . HEAD)" = "$ver" ]; then
   echo "   the manifest already says $ver, no bump commit" >&2
+elif [ $dry = 1 ] && [ "$(if git show-ref -q --verify "refs/heads/$branch"; then declared_version . "refs/heads/$branch"; else echo "$current"; fi)" = "$ver" ]; then
+  echo "   (dry run) no bump commit needed, the manifest is already $ver" >&2
 elif would "set [workspace.package] version = \"$ver\" in Cargo.toml and the path crates in Cargo.lock; commit 'Release $tag'"; then :
 else
   export V=$ver
@@ -152,7 +161,11 @@ body=$(mktemp "${TMPDIR:-/tmp}/release-pr.XXXXXX") || refuse "could not make a t
 [ -n "$body" ] && [ -f "$body" ] || refuse "the temp file for the PR body is unusable; nothing was pushed"
 trap 'rm -f "$body"' EXIT
 {
-  echo "Release $ver. I bumped the version, ran the full e2e, then signed the attestation, and verify.sh passes on this commit."
+  if git log --format=%s "$main_sha"..HEAD | grep -qx "Release $tag"; then
+    echo "Release $ver. I bumped the version, ran the full e2e, then signed the attestation, and verify.sh passes on this commit."
+  else
+    echo "Release $ver. There is no bump commit, the manifest already said $ver, so I ran the full e2e, then signed the attestation, and verify.sh passes on this commit."
+  fi
   echo
   echo "* attestation: release-attest/attestation.json, version $ver, tree $tkey"
   echo "* e2e stamp: tree $tkey, host $(sed -n 's/^host=//p' "$stamp"), finished $(sed -n 's/^finished=//p' "$stamp")"

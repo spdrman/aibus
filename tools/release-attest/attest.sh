@@ -8,8 +8,10 @@
 # which fences the container: memory limit, swap equal to it (so none) and a CPU quota. Override with
 # DH_MEMORY (e.g. 8g) and DH_CPUS (e.g. 4). Nothing here runs a benchmark or a fuzz target.
 # It refuses a dirty tree (anything outside release-attest/), a missing key or .pub, an existing
-# attestation without --replace, and a red run. It then writes attestation.json, signs it with
-# `ssh-keygen -Y sign` and checks the signature against the .pub.
+# attestation without --replace, a key that cannot sign without a prompt (checked first, by signing a
+# scratch file, so the long run is not wasted on it: load the key with ssh-add) and a red run. It then
+# signs attestation.json with `ssh-keygen -Y sign`, checks the signature against the .pub and only then
+# moves both files into release-attest/, so a failed run leaves nothing there.
 # Exit codes: 0 signed, 1 not green or does not add up, 2 refused before anything ran.
 # --runner-cmd stands in for dh.sh in the tests: it gets the lane script in $LANE_SCRIPT.
 set -euo pipefail
@@ -49,6 +51,12 @@ job=attest-aibus-${commit:0:8}-$$
 pushed=0
 cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
+
+# Sign preflight: the same key, namespace and no-prompt settings as the real signature, on a scratch file.
+# A passphrase key that is not in ssh-agent fails here, not after the container run.
+mkdir "$work/pf" && echo preflight >"$work/pf/probe" || refuse "could not make the preflight scratch file; nothing ran"
+SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/pf/probe" </dev/null >/dev/null 2>&1 \
+  && [ -s "$work/pf/probe.sig" ] || refuse "the key cannot sign without a prompt: load it with ssh-add $key first"
 
 lane=$work/lane.sh
 nonce=$(new_nonce); [ -n "$nonce" ] || refuse "could not make a nonce (od on /dev/urandom gave nothing); nothing ran"
@@ -92,15 +100,19 @@ att=$(jq -n --argjson s "$suites_json" --arg commit "$commit" --arg kind "$KIND"
             total: ($passed + $failed + $ignored), passed: $passed, failed: $failed, ignored: $ignored}}')
 verdict=$(jq -r .result.verdict <<<"$att")
 if [ "$verdict" != green ]; then
-  keep=${TMPDIR:-/tmp}/attest-logs-$$; mkdir -p "$keep"; cp "$work"/*.log "$keep"/
+  keep=$(mktemp -d "${TMPDIR:-/tmp}/attest-logs.XXXXXX") && [ -n "$keep" ] && [ -d "$keep" ] || { echo "not green: $(jq -c .result <<<"$att"); could not make a directory for the logs" >&2; exit 1; }
+  cp "$work"/*.log "$keep"/
   echo "not green: $(jq -c .result <<<"$att"); logs kept in $keep" >&2
   exit 1
 fi
 
-mkdir -p "$out"
-rm -f "$out/$ATTEST_FILE.sig"
-printf '%s\n' "$att" | jq . >"$out/$ATTEST_FILE"
-ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$out/$ATTEST_FILE" >/dev/null
-[ -f "$out/$ATTEST_FILE.sig" ] || { echo "ssh-keygen -Y sign failed" >&2; exit 1; }
-"$here/verify.sh" --signature-only --file "$out/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || { echo "the signature does not verify against $key.pub" >&2; exit 1; }
+# Sign and verify in $work, then move both files into $out: a failure anywhere before the move touches nothing there.
+printf '%s\n' "$att" | jq . >"$work/$ATTEST_FILE"
+SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/$ATTEST_FILE" </dev/null >/dev/null \
+  && [ -f "$work/$ATTEST_FILE.sig" ] || { echo "ssh-keygen -Y sign failed" >&2; exit 1; }
+"$here/verify.sh" --signature-only --file "$work/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || { echo "the signature does not verify against $key.pub" >&2; exit 1; }
+if [ -d "$out" ]; then made=0; else made=1; mkdir -p "$out"; fi
+mv -f "$work/$ATTEST_FILE" "$work/$ATTEST_FILE.sig" "$out/" || {
+  rm -f "$out/$ATTEST_FILE" "$out/$ATTEST_FILE.sig"; [ $made = 0 ] || rmdir "$out" 2>/dev/null
+  echo "could not move the signed attestation into $out" >&2; exit 1; }
 echo "signed $out/$ATTEST_FILE: $(jq -r '.result.passed' <<<"$att") passed, tree $(jq -r '.tree.hash[0:12]' <<<"$att")"

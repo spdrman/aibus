@@ -432,6 +432,26 @@ r=$t/rel236c; mkrepo "$r"; usegate "$r"
 PATH="$t/bin-body:$PATH" rel 0.2.0 --yes >"$t/bump.out" 2>&1; expect "a release that needs the bump succeeds" test $? = 0
 expect "...and its PR body says I bumped the version" grep -q 'I bumped the version' "$GH_BODY"
 
+# ---------- review of #242: release.sh's preflight has no controlling terminal, and leaves nothing behind when interrupted
+ssh-keygen -q -t ed25519 -N 'pw236' -C pass -f "$t/pkey"   # a passphrase key; no agent is started or touched here
+if command -v script >/dev/null && command -v timeout >/dev/null; then
+  r=$t/rel236p; mkrepo "$r"; usegate "$r"; cp "$t/pkey.pub" "$PUBKEY_PATH"; git commit -qam pub; git push -q origin main
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
+    timeout 6 script -q /dev/null tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run < <(sleep 8) ) >"$t/pty-rel.out" 2>&1; rc=$?
+  expect "from a terminal, release.sh refuses a passphrase key that is not loaded at once (exit 2, no hang)" test $rc = 2
+  expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-rel.out' && ! grep -qi 'enter passphrase' '$t/pty-rel.out'"
+else echo "SKIP: script(1) or timeout is missing, the pseudo-terminal test does not run" >&2; fi
+# an interrupt during the preflight leaves no release-signcheck.* directory
+r=$t/rel236t; mkrepo "$r"; usegate "$r"; mkdir "$t/tmp-int"
+cat >"$t/skbin/ssh-keygen" <<SKI
+#!/bin/sh
+case " \$* " in *" -Y sign "*) kill -TERM \$PPID; sleep 1; exit 1 ;; esac
+exec $realsk "\$@"
+SKI
+chmod +x "$t/skbin/ssh-keygen"
+PATH="$t/skbin:$PATH" TMPDIR=$t/tmp-int RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run >/dev/null 2>&1
+expect "an interrupted preflight leaves no release-signcheck directory" test -z "$(ls "$t/tmp-int")"
+
 # ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
 base2 s20
 echo fu >fu; git add fu; git commit -qm fu

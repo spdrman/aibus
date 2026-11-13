@@ -325,6 +325,73 @@ expect "a red run says where its logs are and they exist" bash -c "[ -d '$kept' 
 expect "...the directory has a random name, not the pid" bash -c "! printf '%s' '$kept' | grep -Eq 'attest-logs-[0-9]+\$' && [ -n '$kept' ]"
 expect "attest.sh no longer builds attest-logs-\$\$ or mkdir -p's the log directory" bash -c "! grep -q 'attest-logs-\\\$\\\$' '$tools/attest.sh' && ! grep -q 'mkdir -p \"\\\$keep\"' '$tools/attest.sh'"
 
+# ---------- review of #242: no controlling terminal for the preflight, and a failed move never loses a file
+# A private ssh-agent on a SHORT socket (macOS limits socket paths to about 100 characters). Every command below sets
+# SSH_AUTH_SOCK itself (the private socket, or none at all); ssh-add never runs unless the private agent answered.
+ssh-keygen -q -t ed25519 -N 'pw236' -C pass -f "$t/pkey"
+printf '#!/bin/sh\necho pw236\n' >"$t/askpass.sh"; chmod +x "$t/askpass.sh"
+agent_sock=/tmp/a236-$$.sock; agent_pid=; rm -f "$agent_sock"
+trap 'rm -rf "$t"; [ -z "$agent_pid" ] || kill "$agent_pid" 2>/dev/null; rm -f "$agent_sock"' EXIT
+env -u SSH_AUTH_SOCK -u SSH_AGENT_PID ssh-agent -a "$agent_sock" >"$t/agent.out" 2>&1
+agent_pid=$(sed -n 's/^SSH_AGENT_PID=\([0-9]*\);.*/\1/p' "$t/agent.out")
+agent_ok=0
+if [ -S "$agent_sock" ] && [ -n "$agent_pid" ]; then
+  SSH_AUTH_SOCK=$agent_sock ssh-add -l >/dev/null 2>&1; [ $? = 1 ] && agent_ok=1   # 1 = reachable, no identities
+fi
+if [ $agent_ok = 1 ]; then ok "the private ssh-agent started on $agent_sock"; else bad "the private ssh-agent did not start; the agent tests are skipped and ssh-add is never run"; fi
+pty_ok=0; command -v script >/dev/null && command -v timeout >/dev/null && pty_ok=1
+[ $pty_ok = 1 ] || echo "SKIP: script(1) or timeout is missing, the pseudo-terminal tests do not run" >&2
+pty() { # secs cmd... : run under a pseudo-terminal nobody types into (stdin stays open, so a prompt would hang)
+  local secs=$1; shift
+  timeout "$secs" script -q /dev/null "$@" < <(sleep $((secs + 2)))
+}
+pty_attest() { # keyfile : attest.sh as a terminal user with the given key and NO agent
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 6 "$tools/attest.sh" --repo "$r" --key "$1" --runner-cmd "sh $t/fake.sh" )
+}
+if [ $pty_ok = 1 ]; then
+  r=$t/repo30; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
+  pty_attest "$t/pkey" >"$t/pty1.out" 2>&1; rc=$?
+  expect "from a terminal, a passphrase key that is not loaded is refused at once (exit 2, no hang)" test $rc = 2
+  expect "...with the ssh-add message" grep -q 'the key cannot sign without a prompt: load it with ssh-add' "$t/pty1.out"
+  expect "...and the passphrase prompt never appeared" bash -c "! grep -qi 'enter passphrase' '$t/pty1.out'"
+  expect "...leaving the tree clean" test -z "$(git -C "$r" status --porcelain)"
+  if [ $agent_ok = 1 ]; then
+    SSH_AUTH_SOCK=$agent_sock SSH_ASKPASS=$t/askpass.sh SSH_ASKPASS_REQUIRE=force ssh-add "$t/pkey" </dev/null >/dev/null 2>&1
+    r=$t/repo31; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
+    SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 6 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" >"$t/pty2.out" 2>&1; rc=$?
+    expect "from a terminal, the same key loaded in the private agent signs without a prompt" test $rc = 0 -a -f "$r/release-attest/attestation.json.sig"
+    SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
+  fi
+else echo "SKIP pty tests" >&2; fi
+# release-attest that is a regular file: a clear refusal, before anything runs
+r=$t/repo32; mkrepo "$r" 1.2.3; echo x >"$r/release-attest"; git -C "$r" add -A; git -C "$r" commit -qm file
+sk_attest ok "$r" --runner-cmd "sh $t/fake.sh" >"$t/rf.out" 2>&1; rc=$?
+expect "release-attest as a regular file is refused (exit 2) with a clear message" bash -c "test $rc = 2 && grep -q 'is not a directory' '$t/rf.out'"
+# a mv that fails: the first or the second rename, with and without --replace
+mkdir "$t/mvbin"
+cat >"$t/mvbin/mv" <<'MVS'
+#!/bin/sh
+c=$(cat "$MV_COUNT" 2>/dev/null || echo 0); c=$((c + 1)); echo $c >"$MV_COUNT"
+[ "$c" = "$MV_FAIL" ] && exit 1
+exec /bin/mv "$@"
+MVS
+chmod +x "$t/mvbin/mv"
+mv_attest() { # nth repo [args]
+  local nth=$1 rr=$2; shift 2; echo 0 >"$t/mvcount"
+  PATH="$t/mvbin:$PATH" MV_COUNT=$t/mvcount MV_FAIL=$nth SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$rr" --key "$t/key" --runner-cmd "sh $t/fake.sh" "$@"
+}
+for k in 1 2; do
+  r=$t/repo4$k; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"; sha_j=$(git -C "$r" rev-parse HEAD:release-attest/attestation.json)
+  mv_attest $k "$r" --replace >/dev/null 2>&1; rc=$?
+  expect "mv failure #$k with --replace exits 1" test $rc = 1
+  expect "...the committed attestation and its signature are untouched (tree clean)" test -z "$(git -C "$r" status --porcelain)"
+  expect "...and no temporary file is left in release-attest/" test "$(ls -A "$r/release-attest" | wc -l | tr -d ' ')" = 2
+  r=$t/repo5$k; mkrepo "$r" 1.2.3
+  mv_attest $k "$r" >/dev/null 2>&1; rc=$?
+  expect "mv failure #$k without --replace exits 1" test $rc = 1
+  expect "...leaves the tree clean and no release-attest/" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && [ ! -e '$r/release-attest' ]"
+done
+
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"

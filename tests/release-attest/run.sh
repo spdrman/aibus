@@ -2,12 +2,16 @@
 # Tests for tools/release-attest. A throwaway key and a throwaway git repo in a temp dir; the
 # runner is a fake, so no container starts and no cargo runs. Needs bash, git, jq and ssh-keygen.
 set -u
+# Start from a known environment: whatever the calling shell exported for the gate must not change a result.
+unset RELEASE_E2E_HOST RELEASE_E2E_SKIP RELEASE_E2E_CMD RELEASE_E2E_TEST_STAMPS RELEASE_GATE_TEST RELEASE_ATTEST_SH DH_HOST DH_CPUS DH_MEMORY DH_UNFENCED
 here=$(cd "$(dirname "$0")" && pwd)
 tools=$(cd "$here/../../tools/release-attest" && pwd)
 . "$tools/config.sh"
 t=$(mktemp -d "${TMPDIR:-/tmp}/attest-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
+# Everything the runs create (log files, kept log directories) goes under $t, which the trap above removes.
+mkdir "$t/tmp" && export TMPDIR=$t/tmp || exit 1
 # No test may reach the real dh.sh (or docker, or ssh): DH_SH points at a stub that logs the call and fails.
 # Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
 printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1

@@ -43,7 +43,8 @@ for f in "$ATTEST_FILE" "$ATTEST_FILE.sig"; do
 done
 
 commit=$(git -C "$repo" rev-parse HEAD)
-work=$(mktemp -d "${TMPDIR:-/tmp}/attest.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/attest.XXXXXX") || { echo "refused: could not make a temp directory; nothing ran" >&2; exit 2; }
+[ -n "$work" ] && [ -d "$work" ] || { echo "refused: the temp directory is unusable; nothing ran" >&2; exit 2; }
 job=attest-aibus-${commit:0:8}-$$
 pushed=0
 cleanup() { [ $pushed = 0 ] || "$DH" clean "$host" "$job" >/dev/null 2>&1 || true; rm -rf "$work"; }
@@ -51,7 +52,7 @@ trap cleanup EXIT
 
 lane=$work/lane.sh
 nonce=$(new_nonce); [ -n "$nonce" ] || refuse "could not make a nonce (od on /dev/urandom gave nothing); nothing ran"
-lane_script "$nonce" >"$lane"
+lane_script "$nonce" >"$lane" && [ -s "$lane" ] || refuse "could not write the lane script; nothing ran"
 
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ -n "$runner" ]; then

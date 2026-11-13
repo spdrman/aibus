@@ -50,6 +50,7 @@ export_tree() { # repo tree-ish dir
   mkdir -p "$3" || return 1
   # the list sits next to the destination: the caller's work dir, which it removes on every exit path
   ls=$(mktemp "$(cd "$3" && pwd -P).ls.XXXXXX") || return 1
+  [ -n "$ls" ] && [ -f "$ls" ] || return 1
   git -C "$1" ls-tree -r -z "$2" >"$ls" || { rm -f "$ls"; return 1; }
   export_entries "$1" "$ls" "$3"; rc=$?
   rm -f "$ls"

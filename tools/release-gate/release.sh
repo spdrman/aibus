@@ -148,7 +148,9 @@ if [ $yes = 0 ]; then
   [ "$a" = y ] || fail "not confirmed (the commits stay local)"
 fi
 git push -q -u origin "$branch"
-body=$(mktemp "${TMPDIR:-/tmp}/release-pr.XXXXXX"); trap 'rm -f "$body"' EXIT
+body=$(mktemp "${TMPDIR:-/tmp}/release-pr.XXXXXX") || refuse "could not make a temp file for the PR body; nothing was pushed"
+[ -n "$body" ] && [ -f "$body" ] || refuse "the temp file for the PR body is unusable; nothing was pushed"
+trap 'rm -f "$body"' EXIT
 {
   echo "Release $ver. I bumped the version, ran the full e2e, then signed the attestation, and verify.sh passes on this commit."
   echo

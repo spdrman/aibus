@@ -17,10 +17,12 @@
 set -eu
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE   # a hook inherits git's; a decoy must not redirect us
 zero=0000000000000000000000000000000000000000
-gate=$(mktemp -d "${TMPDIR:-/tmp}/release-prepush.XXXXXX")
+gate=$(mktemp -d "${TMPDIR:-/tmp}/release-prepush.XXXXXX") || { echo "pre-push: cannot make a temp directory; refusing" >&2; exit 1; }
 trap 'rm -rf "$gate"' EXIT
 no() { echo "pre-push: refusing to push to release: $*" >&2; exit 1; }
-cat >"$gate/refs"
+[ -n "$gate" ] && [ -d "$gate" ] || no "the temp directory is unusable."
+# A failed save (disk full, quota) would leave an empty file that reads as "no release line": fail closed.
+cat >"$gate/refs" || no "cannot save the push lines."
 # Each stdin line is <local ref> <local sha> <remote ref> <remote sha>. A local ref may hold spaces
 # (HEAD^{/some message}), so fields are read from the END of the line. A newline inside the local ref
 # splits one line into two and can plant a fake release line, so a line with fewer than 4 fields, or
@@ -32,6 +34,7 @@ n=$(awk '$(NF-1) == "refs/heads/release"' "$gate/refs" | wc -l | tr -d ' ')
 [ "$n" != 0 ] || exit 0
 [ "$n" = 1 ] || no "more than one ref line names refs/heads/release (a newline inside a refspec?)."
 read -r lsha tip < <(awk '$(NF-1) == "refs/heads/release" { print $(NF-2), $NF }' "$gate/refs")
+[ -n "$lsha" ] && [ -n "$tip" ] || no "could not read the release line (lsha='$lsha' tip='$tip')."
 common=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
 # $1 = treeish, $2 = dir: the plain files of the gate, byte for byte, attributes ignored
 mat() {
@@ -48,8 +51,11 @@ git cat-file -e "$tip^{commit}" 2>/dev/null && mat "$tip" "$gate/tree" 2>/dev/nu
 
 if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
   printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || no "RELEASE_E2E_SKIP is not valid UTF-8."
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -0pe 's/[\x00-\x1f\x7f]|\xc2[\x80-\x9f\xa0]|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]|\xe2\x81\x9f|\xe3\x80\x80/ /g; s/^\s+|\s+$//g')
-  [ "${#reason}" -ge 12 ] || no "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace is trimmed)."
+  # valid UTF-8 (checked above); invisible characters are dropped, control characters and Unicode spaces become blanks, the ends are
+  # trimmed, and characters are counted by perl (not bytes, so the locale does not matter)
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -C0 -e 'use Encode qw(decode FB_CROAK); local $/; my $d = decode("UTF-8", <STDIN>, FB_CROAK); $d =~ s/[\x{ad}\x{34f}\x{61c}\x{115f}\x{1160}\x{17b4}\x{17b5}\x{180b}-\x{180e}\x{200b}-\x{200f}\x{202a}-\x{202e}\x{2060}-\x{206f}\x{2800}\x{3164}\x{fe00}-\x{fe0f}\x{feff}\x{ffa0}\x{fff9}-\x{fffb}\x{e0000}-\x{e007f}]//g; $d =~ s/[\x00-\x1f\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]/ /g; $d =~ s/^\s+|\s+$//g; binmode(STDOUT, ":utf8"); print $d;') || no "RELEASE_E2E_SKIP could not be normalised (perl missing?)."
+  nchars=$(printf '%s' "$reason" | perl -C0 -e 'use Encode qw(decode); local $/; print length(decode("UTF-8", <STDIN>));') || no "cannot count the characters of RELEASE_E2E_SKIP."
+  [ "$nchars" -ge 12 ] || no "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace and invisible characters are trimmed)."
   waived=stamp
   case $tip in *[!0]*) ;; *) waived="$waived,bootstrap" ;; esac
   [ "$lsha" != "$zero" ] || waived="$waived,delete"
@@ -61,11 +67,11 @@ if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
     git diff --quiet "$tip" "$lsha" -- tools/release-gate tools/release-attest .githooks || waived="$waived,gate-change"
     [ -z "$(git diff --name-only "$tip" "$lsha" -- release-attest | grep -vxF -e release-attest/attestation.json -e release-attest/attestation.json.sig || true)" ] || waived="$waived,attest-extra"
   fi
-  mkdir -p "$common/release-e2e"
+  mkdir -p "$common/release-e2e" || no "cannot make $common/release-e2e."
   printf '%s skip at pre-push by %s: %s (pushed_sha=%s old_tip=%s remote_ref=refs/heads/release waived=%s user=%s branch=%s)\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git config user.email || echo unknown)" "$reason" "$lsha" "$tip" "$waived" "$(id -un)" "$(git symbolic-ref -q --short HEAD || echo detached)" \
-    >>"$common/release-e2e/skips.log"
-  echo "!!! RELEASE E2E GATE SKIPPED at pre-push: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
+    >>"$common/release-e2e/skips.log" || no "cannot write the skip record in $common/release-e2e/skips.log; nothing was skipped."
+  printf '%s\n' "!!! RELEASE E2E GATE SKIPPED at pre-push: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
   exit 0
 fi
 [ "$lsha" != "$zero" ] || no "deleting release needs RELEASE_E2E_SKIP='<reason>' (logged)."

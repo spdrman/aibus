@@ -25,7 +25,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/attest-verify.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/attest-verify.XXXXXX") || { echo "cannot make a temp directory; nothing verified" >&2; exit 2; }
+[ -n "$work" ] && [ -d "$work" ] || { echo "the temp directory is unusable; nothing verified" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
 
 check_sig() { # json sig pubkeyfile

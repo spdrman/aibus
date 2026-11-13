@@ -5,8 +5,13 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/../.." && pwd)
-t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX")
+t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
+[ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
+# No test may reach the real dh.sh (or docker, or ssh): DH_SH points at a stub that logs the call and fails.
+# Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
+printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
+export DH_SH=$t/dh-real-stub.sh DH_REAL_LOG=$t/dh-real.log
 fails=0 n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1"; }
@@ -243,7 +248,7 @@ expect "S2: ...listing remote-gate among what was waived" grep -q 'waived=.*remo
 base2 s8; git switch -q -c topic; echo t >t.txt; git add t.txt; git commit -qm topic; git switch -q release; echo r >r2.txt; git add r2.txt; git commit -qm r2
 mkdir "$t/tmpL"; TMPDIR=$t/tmpL RELEASE_E2E_SKIP="leak check for the merge" git merge --no-ff -q -m m topic 2>/dev/null
 expect "pre-merge-commit with a skip leaves no temp dir" test -z "$(ls "$t/tmpL")"
-git switch -q -c topic2 HEAD~1; echo u >u.txt; git add u.txt; git commit -qm topic2; git switch -q release; git merge -q -s ours --no-ff -m m2 topic2 >/dev/null 2>&1
+git switch -q -c topic2 HEAD~1; echo u >u.txt; git add u.txt; git commit -qm topic2; git switch -q release; RELEASE_E2E_CMD=true git merge -q -s ours --no-ff -m m2 topic2 >/dev/null 2>&1
 rm -rf "$t/tmpL"; mkdir "$t/tmpL"; TMPDIR=$t/tmpL RELEASE_E2E_CMD=true git merge --no-ff -q -m m3 topic2 >/dev/null 2>&1
 expect "pre-merge-commit on a normal merge leaves no temp dir" test -z "$(ls "$t/tmpL")"
 echo p >p.txt; git add p.txt; git commit -qm p; mkdir "$t/tmpP"; TMPDIR=$t/tmpP RELEASE_E2E_SKIP="leak check for the push" git push -q origin release 2>/dev/null
@@ -372,6 +377,67 @@ expect "Cargo.toml and the path crates in Cargo.lock moved" bash -c "grep -q '^v
 expect "no old workspace version is left (the registry crate's 0.1.0 stays on purpose)" bash -c "! grep -n '0\.1\.0' Cargo.toml && [ \$(grep -c '0\.1\.0' Cargo.lock) = 1 ]"
 expect "the script made no tag, locally or on origin" test -z "$(git tag -l)$(git ls-remote --tags origin)"
 
+# ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
+base2 s20
+echo fu >fu; git add fu; git commit -qm fu
+fu_l=$(git rev-parse HEAD); fu_t=$(git rev-parse origin/release)
+printf 'refs/heads/x %s refs/heads/release %s\n' "$fu_l" "$fu_t" >"$t/fu-line.txt"
+expect "control, no size limit: a skipped release push passes the hook" bash -c "RELEASE_E2E_SKIP='a long enough reason' bash .githooks/pre-push origin url <'$t/fu-line.txt'"
+out=$( (trap '' XFSZ; ulimit -f 0; RELEASE_E2E_SKIP='a long enough reason' bash .githooks/pre-push origin url <"$t/fu-line.txt") 2>&1 ); rc=$?
+expect "a push-line save that cannot be written is refused, even with the skip set" test $rc != 0
+expect "...and the refusal says the lines could not be saved" bash -c "printf '%s' \"\$1\" | grep -q 'cannot save the push lines'" _ "$out"
+out=$(TMPDIR=$t/no-such-tmp bash .githooks/pre-push origin url <"$t/fu-line.txt" 2>&1); rc=$?
+expect "an unusable TMPDIR (mktemp fails) refuses the push with a message of its own" bash -c "test $rc != 0 && printf '%s' \"\$1\" | grep -q 'cannot make a temp'" _ "$out"
+# the test runners must not carry on with an empty temp dir: rm -rf "$t/..." would aim at paths under /
+runner_guarded=(0 0); ri=0
+for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  c1="grep -A1 '^t=\$(mktemp' '$src/$runner' | grep -q '|| exit 1'"
+  c2="grep -q '\[ -n \"\$t\" \] && \[ -d \"\$t\" \]' '$src/$runner'"
+  expect "$runner stops when mktemp fails" bash -c "$c1"
+  expect "$runner checks the temp dir is a non-empty directory" bash -c "$c2"
+  if bash -c "$c1" >/dev/null 2>&1 && bash -c "$c2" >/dev/null 2>&1; then runner_guarded[$ri]=1; fi
+  ri=$((ri + 1))
+done
+mkdir -p "$t/failmk"; printf '#!/bin/sh\nexit 1\n' >"$t/failmk/mktemp"; chmod +x "$t/failmk/mktemp"
+ri=0
+for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  # run the stub only on a runner whose guard the grep above just confirmed: an unguarded runner (a mixed checkout) would carry on with t='' and aim rm -rf at /
+  g=${runner_guarded[$ri]}; ri=$((ri + 1))
+  [ "$g" = 1 ] || { bad "$runner is not guarded, so the failing-mktemp stub run was skipped"; continue; }
+  out=$(PATH="$t/failmk:$PATH" bash "$src/$runner" 2>&1); rc=$?
+  expect "$runner exits 1 at once, running nothing, when mktemp fails" bash -c "test $rc = 1 && test -z \"\$1\"" _ "$out"
+done
+expect "e2e.sh no longer copies the red log to a predictable name" bash -c "! grep -q 'release-e2e-log-\\\$\\\$' '$src/tools/release-gate/e2e.sh'"
+mkdir -p "$t/kt"
+out=$(env -u RELEASE_E2E_CMD -u RELEASE_E2E_TEST_STAMPS TMPDIR=$t/kt SUITES_LIST="$SUITES" DH_SH="$t/dh-fake.sh" MODE=decoy-inside tools/release-gate/e2e.sh 2>&1); kept=$(printf '%s' "$out" | sed -n 's/^log kept in \([^ ]*\) .*/\1/p')
+expect "...the kept log has a mktemp name (random suffix, not the pid)" bash -c "[ -f '$kept' ] && ! printf '%s' '$kept' | grep -Eq 'release-e2e-log-[0-9]+\$'"
+# characters, not bytes, and invisible characters do not count
+rep() { local i out=; for ((i = 0; i < $2; i++)); do out=$out$1; done; printf '%s' "$out"; }
+EA='\303\251'; ZW='\342\200\213'; BOM='\357\273\277'; WJ='\342\201\240'; HF='\343\205\244'; BR='\342\240\200'; MV='\341\240\216'
+fu_hook() { printf 'refs/heads/x %s refs/heads/release %s\n' "$fu_l" "$fu_t" | env LC_ALL="$1" RELEASE_E2E_SKIP="$2" bash .githooks/pre-push origin url; }
+for loc in C en_US.UTF-8; do
+  refuse "[$loc] six e-acute (6 characters, 12 bytes) are refused (push)" fu_hook $loc "$(printf "$(rep "$EA" 6)")"
+  refuse "[$loc] six e-acute are refused by e2e.sh too" env LC_ALL=$loc RELEASE_E2E_SKIP="$(printf "$(rep "$EA" 6)")" tools/release-gate/e2e.sh
+  expect "[$loc] twelve e-acute (12 characters) pass (push)" fu_hook $loc "$(printf "$(rep "$EA" 12)")"
+  for inv in ZW BOM WJ HF BR MV; do
+    refuse "[$loc] twelve invisible characters ($inv) are refused (push)" fu_hook $loc "$(printf "$(rep "${!inv}" 12)")"
+    refuse "[$loc] 'ab' plus ten invisible characters ($inv) are refused (push)" fu_hook $loc "$(printf "ab$(rep "${!inv}" 10)")"
+  done
+  refuse "[$loc] twelve zero-width spaces are refused by e2e.sh" env LC_ALL=$loc RELEASE_E2E_SKIP="$(printf "$(rep "$ZW" 12)")" tools/release-gate/e2e.sh
+  expect "[$loc] a real reason with a zero-width space inside still passes" fu_hook $loc "$(printf "bootstrap${ZW} release now")"
+done
+git switch -q -c topicfu; echo y >yfu; git add yfu; git commit -qm yfu; git switch -q release; echo z >zfu; git add zfu; git commit -qm zfu
+refuse "twelve zero-width spaces are refused (merge)" env RELEASE_E2E_SKIP="$(printf "$(rep "$ZW" 12)")" git merge --no-ff -q -m m topicfu
+refuse "six e-acute are refused under LC_ALL=C (merge)" env LC_ALL=C RELEASE_E2E_SKIP="$(printf "$(rep "$EA" 6)")" git merge --no-ff -q -m m topicfu
+git merge --abort 2>/dev/null; git reset -q --hard
+
+# a count that is not a number must refuse, never pass (perl stub: the length call prints x)
+mkdir -p "$t/badperl"; realperl=$(command -v perl)
+printf '#!/bin/sh\ncase "$*" in *length*) printf x ;; *) exec %s "$@" ;; esac\n' "$realperl" >"$t/badperl/perl"; chmod +x "$t/badperl/perl"
+refuse "a character count that is not a number refuses the skip (e2e.sh, gate_skipped)" env PATH="$t/badperl:$PATH" RELEASE_E2E_SKIP="a perfectly long reason" tools/release-gate/e2e.sh
+refuse "...and in the push hook" bash -c "printf 'refs/heads/x %s refs/heads/release %s\n' '$fu_l' '$fu_t' | env PATH='$t/badperl:$PATH' RELEASE_E2E_SKIP='a perfectly long reason' bash .githooks/pre-push origin url"
+expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
+[ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 [ $fails = 0 ] || tail -8 "$t/green.out" >&2
 echo "$n tests, $fails failed"
 [ $fails = 0 ]

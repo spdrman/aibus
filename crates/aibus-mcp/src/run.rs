@@ -953,6 +953,32 @@ mod tests {
     }
 
     #[test]
+    fn the_fields_of_an_event_are_redacted_before_they_are_stored() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        let steps = ["plan".to_owned()];
+        for ev in [
+            json!({ "type": "RunStarted", "run": "L1", "agent": "lead" }),
+            json!({ "type": "RunStarted", "run": "C1", "agent": KEY }),
+            json!({ "type": "RunFailed", "run": "C1", "message": format!("failed with {KEY}") }),
+            json!({ "type": "RunFinished", "run": "C1", "status": KEY, "summary": "s" }),
+            json!({ "type": "SessionEnd", "session": KEY, "exit_code": 1 }),
+        ] {
+            v.apply(&ev, &steps, &redactor);
+        }
+        let a = &v.attempts[0];
+        for (what, text) in [
+            ("agent", a.agent.as_str()),
+            ("status", a.status.as_str()),
+            ("failure", a.failure.as_deref().unwrap()),
+            ("session", v.session.as_deref().unwrap()),
+        ] {
+            assert_no_piece(what, text);
+            assert!(!text.is_empty(), "{what} is kept, redacted");
+        }
+    }
+
+    #[test]
     fn a_key_whose_end_has_not_arrived_is_redacted_by_the_read_and_by_the_flush() {
         let redactor = Redactor::new();
         let mut v = view();

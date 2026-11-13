@@ -1043,15 +1043,48 @@ mod tests {
     fn a_key_that_starts_before_the_stored_window_leaves_no_fragment_when_the_buffer_shrinks() {
         let redactor = Redactor::new();
         let keep = TAIL_BYTES + RAW_MARGIN;
+        // The buffer is trimmed once it is 4 KiB over `keep`. Push it one byte over, so the cut
+        // is at 4097 and the key, which starts at 4077, has its first 20 bytes before it.
+        let slack = 4096;
         let mut v = view();
-        // The stored window starts 20 bytes into the key, with no newline for a long way after
-        // it, and an unterminated BEGIN line right behind the key makes the redaction swallow
-        // everything after it, so the start of the window is what is shown.
-        let first = format!("{}{KEY} -----BEGIN PRIVATE KEY-----", ".".repeat(100));
+        // No newline for a long way after the cut, and an unterminated BEGIN line right behind the
+        // key makes the redaction swallow everything after it, so the start of the window is what
+        // is shown.
+        let first = format!(
+            "{}{KEY} -----BEGIN PRIVATE KEY-----",
+            ".".repeat(slack - 19)
+        );
         stream(&mut v, &redactor, &first);
-        stream(&mut v, &redactor, &" ".repeat(keep + 120 - first.len()));
-        assert!(v.tail.len() <= keep, "the window was cut");
+        stream(
+            &mut v,
+            &redactor,
+            &" ".repeat(keep + slack + 1 - first.len()),
+        );
+        assert!(v.tail.len() <= keep, "the window was cut: {}", v.tail.len());
         assert_no_piece("tail", &shown(&v, &redactor));
+    }
+
+    #[test]
+    fn a_name_that_starts_at_the_cut_is_kept_whole() {
+        let redactor = Redactor::new();
+        let keep = TAIL_BYTES + RAW_MARGIN;
+        let slack = 4096;
+        let mut v = view();
+        // The cut is at 4097, exactly where `Bearer` starts, so nothing of the name is in a token
+        // that began before the window and the window starts there.
+        let first = format!(
+            "{}Bearer abcdefghijklmnopqrstuvwxyz0123456789 ",
+            " ".repeat(slack + 1)
+        );
+        stream(&mut v, &redactor, &first);
+        stream(
+            &mut v,
+            &redactor,
+            &" ".repeat(keep + slack + 1 - first.len()),
+        );
+        assert!(v.tail.starts_with("Bearer "), "{:?}", &v.tail[..20]);
+        assert!(v.tail.len() <= keep);
+        assert!(shown_log(&v, &redactor).contains("[redacted:pattern:bearer]"));
     }
 
     const PEM_BODY: [&str; 2] = [

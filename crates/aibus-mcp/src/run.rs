@@ -1108,6 +1108,22 @@ mod tests {
     ];
 
     #[test]
+    fn a_private_key_whose_begin_line_is_before_the_shown_window_is_redacted() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &"older line\n".repeat(400));
+        stream(&mut v, &redactor, "-----BEGIN PRIVATE KEY-----\n");
+        for line in PEM_BODY {
+            stream(&mut v, &redactor, &format!("{line}\n"));
+        }
+        stream(&mut v, &redactor, "-----END PRIVATE KEY-----\n");
+        stream(&mut v, &redactor, &"later line\n".repeat(359));
+        for body in PEM_BODY {
+            assert!(!shown(&v, &redactor).contains(&body[..20]), "{body}");
+        }
+    }
+
+    #[test]
     fn a_private_key_sent_a_line_at_a_time_is_redacted_whole_or_as_far_as_it_has_come() {
         let redactor = Redactor::new();
         for after in [0usize, 100, 5000] {

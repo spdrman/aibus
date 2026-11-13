@@ -617,6 +617,31 @@ for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
   expect "...the hung ssh-keygen and its wrapper are gone" gone
 done
 
+# ---------- fourth review of #242: a signal after the wrapper is gone, and a restore that was never needed
+mkdir "$t/shortbin"
+cat >"$t/shortbin/ssh-keygen" <<SHS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; sleep 1 ;; esac
+exec $realsk "\$@"
+SHS
+chmod +x "$t/shortbin/ssh-keygen"
+r=$t/repo95; mkrepo "$r" 1.2.3
+for spec in "TERM 143" "INT 130" "HUP 129"; do
+  set -- $spec
+  rm -f "$t/hang.pid" "$t/hang.ppid"
+  perl -MPOSIX -e 'setpgid(0,0); $SIG{INT} = "DEFAULT"; exec @ARGV' env PATH="$t/shortbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/late-$1.out" 2>&1 </dev/null &
+  lp=$!; for _ in $(seq 1 60); do [ -s "$t/hang.ppid" ] && break; sleep 0.1; done; wr=$(cat "$t/hang.ppid")
+  kill -STOP $lp   # the script cannot reap the wrapper yet; wait until the wrapper has exited
+  for _ in $(seq 1 60); do kill -0 $wr 2>/dev/null || break; [ "$(ps -o stat= -p $wr | tr -d ' ')" = Z ] && break; sleep 0.1; done
+  kill -$1 $lp; kill -CONT $lp; wait $lp; lrc=$?
+  expect "$1 handled after the wrapper already exited: exit $2, not 1" test "$lrc" = "$2"
+  rm -rf "$r/release-attest"
+done
+# a rename that fails changes nothing, so a failing restore afterwards must not say it could not restore
+cp_case c20 0 MV_FAIL=1 CP_FAILSRC='*/old.*'
+expect "a failed 1st rename and a failing cp: exits 1, nothing changed, no stage directory left" bash -c "test $rc = 1 && test '$before' = '$after' && ! ls -A '$r/release-attest' | grep -q stage"
+expect "...and the message does not claim a failed restore" bash -c "! grep -q 'could not restore' '$t/cpc-c20.out'"
+
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"

@@ -489,6 +489,23 @@ for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
   expect "...the hung ssh-keygen and its wrapper are gone, and no release-signcheck directory is left" bash -c "$(declare -f gone); t='$t'; gone && [ -z \"\$(ls '$t/tmp-h')\" ]"
 done
 
+# ---------- fourth review of #242: Ctrl-C during step 5 stops release.sh with 130, not 'did not sign a green run'
+mkdir "$t/third"
+cat >"$t/third/ssh-keygen" <<TRD
+#!/bin/sh
+case " \$* " in *" -Y sign "*)
+  echo x >>"$t/sign.count"; n=\$(wc -l <"$t/sign.count" | tr -d ' ')
+  if [ "\$n" = 3 ]; then echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; exec sleep 30; fi ;;
+esac
+exec $realsk "\$@"
+TRD
+chmod +x "$t/third/ssh-keygen"
+r=$t/rel236s; mkrepo "$r"; usegate "$r"; rm -f "$t/sign.count"
+hang_run group INT "$t/h-step5.out" env PATH="$t/third:$PATH" RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --yes
+expect "release.sh: INT to the group while attest.sh signs (3rd sign call) exits 130" test "$hrc" = 130
+expect "...and does not say attest.sh did not sign a green run" bash -c "! grep -q 'did not sign' '$t/h-step5.out'"
+expect "...nothing was pushed or opened" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release-prep/*')\" ] && [ ! -s '$GH_LOG' ]"
+
 # ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
 base2 s20
 echo fu >fu; git add fu; git commit -qm fu

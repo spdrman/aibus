@@ -8,6 +8,10 @@ src=$(cd "$here/../.." && pwd)
 t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
+# No test may reach the real dh.sh (or docker, or ssh): DH_SH points at a stub that logs the call and fails.
+# Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
+printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
+export DH_SH=$t/dh-real-stub.sh DH_REAL_LOG=$t/dh-real.log
 fails=0 n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1"; }
@@ -418,6 +422,13 @@ refuse "twelve zero-width spaces are refused (merge)" env RELEASE_E2E_SKIP="$(pr
 refuse "six e-acute are refused under LC_ALL=C (merge)" env LC_ALL=C RELEASE_E2E_SKIP="$(printf "$(rep "$EA" 6)")" git merge --no-ff -q -m m topicfu
 git merge --abort 2>/dev/null; git reset -q --hard
 
+# a count that is not a number must refuse, never pass (perl stub: the length call prints x)
+mkdir -p "$t/badperl"; realperl=$(command -v perl)
+printf '#!/bin/sh\ncase "$*" in *length*) printf x ;; *) exec %s "$@" ;; esac\n' "$realperl" >"$t/badperl/perl"; chmod +x "$t/badperl/perl"
+refuse "a character count that is not a number refuses the skip (e2e.sh, gate_skipped)" env PATH="$t/badperl:$PATH" RELEASE_E2E_SKIP="a perfectly long reason" tools/release-gate/e2e.sh
+refuse "...and in the push hook" bash -c "printf 'refs/heads/x %s refs/heads/release %s\n' '$fu_l' '$fu_t' | env PATH='$t/badperl:$PATH' RELEASE_E2E_SKIP='a perfectly long reason' bash .githooks/pre-push origin url"
+expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
+[ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 [ $fails = 0 ] || tail -8 "$t/green.out" >&2
 echo "$n tests, $fails failed"
 [ $fails = 0 ]

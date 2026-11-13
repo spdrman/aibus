@@ -8,6 +8,10 @@ tools=$(cd "$here/../../tools/release-attest" && pwd)
 t=$(mktemp -d "${TMPDIR:-/tmp}/attest-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
+# No test may reach the real dh.sh (or docker, or ssh): DH_SH points at a stub that logs the call and fails.
+# Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
+printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
+export DH_SH=$t/dh-real-stub.sh DH_REAL_LOG=$t/dh-real.log
 fails=0 n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1"; }
@@ -251,5 +255,7 @@ expect "no list file is left next to a destination" test -z "$(ls "$t" | grep -e
 r=$t/repo17; mkrepo "$r" 1.2.3
 expect "the attestation tree hash is still the tree id without release-attest/" test "$(tree_hash "$r" HEAD)" = "$(git -C "$r" rev-parse 'HEAD^{tree}')"
 
+expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
+[ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"
 [ "$fails" = 0 ]

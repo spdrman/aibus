@@ -263,6 +263,55 @@ mod tests {
         assert!(!marker.exists(), "a shell ran the command");
     }
 
+    /// #232: a script this process just wrote must be runnable at once, even while other threads
+    /// fork (a child that forked a moment earlier can still hold the write handle, and exec then
+    /// fails with ETXTBSY). Writer threads write and run fakes while spawner threads fork in a loop.
+    #[cfg(unix)]
+    #[test]
+    fn a_script_written_a_moment_ago_runs_while_other_threads_fork() {
+        use std::sync::atomic::AtomicBool;
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawners: Vec<_> = (0..4)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        let _ = std::process::Command::new("true").status();
+                    }
+                })
+            })
+            .collect();
+        let writers: Vec<_> = (0..8)
+            .map(|w| {
+                std::thread::spawn(move || {
+                    let dir = tempfile::tempdir().unwrap();
+                    (0..60)
+                        .map(|i| {
+                            let fake = script(dir.path(), &format!("echo ya29.stress-{w}-{i}"));
+                            run_gcloud(&fake, Duration::from_secs(10))
+                        })
+                        .filter(|r| r.is_err())
+                        .map(|r| r.unwrap_err())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let failures: Vec<String> = writers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap())
+            .collect();
+        stop.store(true, Ordering::Relaxed);
+        for s in spawners {
+            s.join().unwrap();
+        }
+        assert!(
+            failures.is_empty(),
+            "{} of 480 runs failed, first: {}",
+            failures.len(),
+            failures[0]
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_runner_gives_up_after_its_timeout_and_never_echoes_stderr() {

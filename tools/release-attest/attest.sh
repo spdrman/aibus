@@ -37,6 +37,8 @@ repo=$(cd "$repo" && pwd)
 refuse() { echo "refused: $1" >&2; exit 2; }
 
 [ -z "$(git -C "$repo" status --porcelain -- . ":(exclude)$ATTEST_DIR")" ] || refuse "the tree is dirty (outside $ATTEST_DIR/): a release has to describe a tree somebody can check out"
+command -v perl >/dev/null || refuse "perl is not installed (the sign preflight needs it)"
+[ ! -e "$out" ] || [ -d "$out" ] || refuse "$out exists and is not a directory"
 [ -f "$key" ] || refuse "no signing key at $key"
 [ -f "$key.pub" ] || refuse "no public key next to the signing key ($key.pub)"
 ssh-keygen -l -f "$key.pub" >/dev/null 2>&1 || refuse "$key.pub is not a public key ssh-keygen can read"
@@ -54,8 +56,9 @@ trap cleanup EXIT
 
 # Sign preflight: the same key, namespace and no-prompt settings as the real signature, on a scratch file.
 # A passphrase key that is not in ssh-agent fails here, not after the container run.
+# ssh-keygen opens /dev/tty itself, so it runs in a new session (perl setsid) and has no terminal to ask on.
 mkdir "$work/pf" && echo preflight >"$work/pf/probe" || refuse "could not make the preflight scratch file; nothing ran"
-SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/pf/probe" </dev/null >/dev/null 2>&1 \
+SSH_ASKPASS_REQUIRE=never perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/pf/probe" </dev/null >/dev/null 2>&1 \
   && [ -s "$work/pf/probe.sig" ] || refuse "the key cannot sign without a prompt: load it with ssh-add $key first"
 
 lane=$work/lane.sh
@@ -111,8 +114,31 @@ printf '%s\n' "$att" | jq . >"$work/$ATTEST_FILE"
 SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$work/$ATTEST_FILE" </dev/null >/dev/null \
   && [ -f "$work/$ATTEST_FILE.sig" ] || { echo "ssh-keygen -Y sign failed" >&2; exit 1; }
 "$here/verify.sh" --signature-only --file "$work/$ATTEST_FILE" --pubkey "$key.pub" >/dev/null || { echo "the signature does not verify against $key.pub" >&2; exit 1; }
-if [ -d "$out" ]; then made=0; else made=1; mkdir -p "$out"; fi
-mv -f "$work/$ATTEST_FILE" "$work/$ATTEST_FILE.sig" "$out/" || {
-  rm -f "$out/$ATTEST_FILE" "$out/$ATTEST_FILE.sig"; [ $made = 0 ] || rmdir "$out" 2>/dev/null
-  echo "could not move the signed attestation into $out" >&2; exit 1; }
+# Both files go into $out under temporary names in a stage directory next to the final names (same filesystem),
+# then two renames. Anything that fails puts back what was there before (a --replace keeps the old pair) and
+# removes only what this run made; the final names of an existing attestation are never deleted.
+made=0
+if [ ! -d "$out" ]; then mkdir -p "$out" || { echo "could not make $out" >&2; exit 1; }; made=1; fi
+stage=$(mktemp -d "$out/.attest-stage.XXXXXX") && [ -n "$stage" ] && [ -d "$stage" ] || { echo "could not make a stage directory in $out" >&2; if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi; exit 1; }
+placed=
+undo() {
+  local i=0 f
+  for f in "$ATTEST_FILE" "$ATTEST_FILE.sig"; do
+    if [ -f "$stage/old.$i" ]; then cp -p "$stage/old.$i" "$out/$f" || echo "could not restore $out/$f from $stage/old.$i" >&2
+    elif [ -n "$placed" ] && [ "$placed" = "$f" -o "$placed" = both ]; then rm -f "$out/$f"
+    fi
+    i=$((i + 1))
+  done
+}
+leave() { rm -f "$stage"/new.0 "$stage"/new.1 "$stage"/old.0 "$stage"/old.1; rmdir "$stage" 2>/dev/null || true; if [ $made = 1 ]; then rmdir "$out" 2>/dev/null || true; fi; }
+failmove() { undo; leave; echo "could not move the signed attestation into $out" >&2; exit 1; }
+cp "$work/$ATTEST_FILE" "$stage/new.0" && cp "$work/$ATTEST_FILE.sig" "$stage/new.1" || failmove
+i=0; for f in "$ATTEST_FILE" "$ATTEST_FILE.sig"; do
+  if [ -f "$out/$f" ]; then cp -p "$out/$f" "$stage/old.$i" || failmove; fi
+  i=$((i + 1))
+done
+mv -f "$stage/new.0" "$out/$ATTEST_FILE" || failmove
+placed=$ATTEST_FILE
+mv -f "$stage/new.1" "$out/$ATTEST_FILE.sig" || failmove
+leave
 echo "signed $out/$ATTEST_FILE: $(jq -r '.result.passed' <<<"$att") passed, tree $(jq -r '.tree.hash[0:12]' <<<"$att")"

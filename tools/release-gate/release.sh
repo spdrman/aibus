@@ -19,7 +19,7 @@
 #      push the branch and open the PR "Release v<version>" against `release`. The owner merges it.
 # The script never creates or pushes a tag: publish in release.yml makes v<version> on the push to `release`.
 # --dry-run prints every step and writes, pushes and opens nothing.
-# The signing key is tried first on a scratch file (no prompt, no tty): a key that is not loaded in ssh-agent stops the run at once.
+# The signing key is tried first on a scratch file (no prompt, in a new session so it has no terminal): a key that is not loaded in ssh-agent stops the run at once.
 # Test hooks: RELEASE_ATTEST_SH (attest.sh stand-in), plus RELEASE_E2E_CMD of e2e.sh. Exit 1 a step failed, 2 refused.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -81,11 +81,16 @@ committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}'
   || refuse "$key.pub is not the key committed at $PUBKEY_PATH"
 command -v gh >/dev/null || refuse "gh is not installed"
 # Sign preflight: the e2e and the attestation take about 15 minutes, so find out now that the key signs
-# without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation.
+# without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation. ssh-keygen
+# opens /dev/tty by itself, so it runs in a new session (perl setsid) and has no terminal to ask on.
+command -v perl >/dev/null || refuse "perl is not installed"
 pf=$(mktemp -d "${TMPDIR:-/tmp}/release-signcheck.XXXXXX") && [ -n "$pf" ] && [ -d "$pf" ] || refuse "could not make a temp directory for the sign check; nothing ran"
+pf_clean() { rm -f "$pf/probe" "$pf/probe.sig"; rmdir "$pf" 2>/dev/null || true; }
+trap pf_clean EXIT; trap 'pf_clean; exit 130' INT TERM
 echo preflight >"$pf/probe"
-if SSH_ASKPASS_REQUIRE=never ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$pf/probe" </dev/null >/dev/null 2>&1 && [ -s "$pf/probe.sig" ]; then rm -f "$pf/probe" "$pf/probe.sig"; rmdir "$pf"
-else rm -f "$pf/probe" "$pf/probe.sig"; rmdir "$pf"; refuse "the key cannot sign without a prompt: load it with ssh-add $key first"; fi
+SSH_ASKPASS_REQUIRE=never perl -MPOSIX -e 'POSIX::setsid() or die; exec @ARGV' ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$pf/probe" </dev/null >/dev/null 2>&1 \
+  && [ -s "$pf/probe.sig" ] || refuse "the key cannot sign without a prompt: load it with ssh-add $key first"
+pf_clean; trap - EXIT INT TERM
 echo "   version $ver (workspace is $current), tag $tag is made by release.yml on the push to release, not here" >&2
 
 # the CHANGELOG the release branch will have: its own tip if it exists, else origin/main's

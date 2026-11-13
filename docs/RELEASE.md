@@ -169,17 +169,20 @@ beside it. If it lives elsewhere, pass `--key <private file>` (the `.pub` must s
 `AIBUS_ATTEST_KEY`.
 
 **The key has to sign without a prompt.** `attest.sh` signs with `ssh-keygen -Y sign -f <private key path>`
-and gives it no terminal, so a passphrase-protected key fails with "incorrect passphrase supplied to
-decrypt private key" unless it is loaded in `ssh-agent`. Run `ssh-add ~/.ssh/aibus-release-attest` once
+with nobody to type a passphrase on a long run, so a passphrase-protected key fails with "incorrect
+passphrase supplied to decrypt private key" unless it is loaded in `ssh-agent`. Run `ssh-add ~/.ssh/aibus-release-attest` once
 before the release. A key in the agent signs silently even though the script passes the private key
 path (checked with a throwaway key: with the key in the agent `ssh-keygen -Y sign -f <private path>`
 signs without asking, without it the same command prompts). Both `release.sh` and `attest.sh` sign a
-small scratch file first (same key and namespace, `SSH_ASKPASS_REQUIRE=never`, stdin from `/dev/null`)
-and stop with "the key cannot sign without a prompt: load it with ssh-add <key> first" before the
+small scratch file first (same key and namespace, `SSH_ASKPASS_REQUIRE=never`, stdin from `/dev/null`,
+and in a new session through `perl` `setsid`, because `ssh-keygen` opens `/dev/tty` itself and would
+otherwise ask on your terminal; perl is a prerequisite of both scripts) and stop with "the key cannot sign without a prompt: load it with ssh-add <key> first" before the
 container starts. On 0.2.0 this was found out at the very end of a 7 minute attestation. The signed
-files are made in a temp directory and moved into `release-attest/` only once the signature verifies,
-so a failed attestation leaves no untracked `attestation.json` behind (it used to, and the next run
-stopped with "the tree is dirty"). A red run keeps its logs in a `mktemp -d` directory and says where.
+files are made in a temp directory and put into `release-attest/` only once the signature verifies
+(copied to a stage directory inside it, then two renames). If a step fails, the pair that was there
+before is restored (a `--replace` keeps the committed attestation) and only what this run made is
+removed, so a failed attestation leaves no untracked `attestation.json` behind (it used to, and the next
+run stopped with "the tree is dirty"). `release-attest` being a regular file is refused up front. A red run keeps its logs in a `mktemp -d` directory and says where.
 
 Tests for the
 tooling (throwaway keys, a fake runner, no container) are `bash tests/release-attest/run.sh`.

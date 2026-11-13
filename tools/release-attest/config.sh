@@ -23,6 +23,12 @@ capability-matrix|cargo test --locked -p aibus-testkit --test capability_matrix
 provider-contract|cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini
 security|cargo test --locked -p aibus-core --test security && cargo test --locked -p aibus-tui --test security_commands && cargo test --locked -p aibus --test mcp_security'
 
+# Every git that reads the tree for the attestation goes through this: replace refs (refs/replace,
+# local to a clone) would swap an object's content without changing its id, so the export and the
+# version would come from one tree while the hash names another, and a lazy fetch would reach the
+# network for a missing object instead of failing.
+git_objects() { GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1 git "$@"; }
+
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi; }
 
 # The id of the commit's top-level tree with the one entry named exactly release-attest dropped,
@@ -30,7 +36,7 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -
 # or a tab), and the drop matches the fixed "mode type sha<TAB>name" shape, so only the top-level
 # entry goes and nothing nested can hide from the hash.
 tree_hash() { # repo commit
-  git -C "$1" ls-tree -z "$2" | perl -0ne 'print unless /\A\d+ \w+ [0-9a-f]+\trelease-attest\0\z/' | git -C "$1" mktree -z
+  git_objects -C "$1" ls-tree -z "$2" | perl -0ne 'print unless /\A\d+ \w+ [0-9a-f]+\trelease-attest\0\z/' | git_objects -C "$1" mktree -z
 }
 
 # Writes the exact content of a tree-ish into a directory, entry by entry from the git objects. `git
@@ -51,7 +57,7 @@ export_tree() { # repo tree-ish dir
   # the list sits next to the destination: the caller's work dir, which it removes on every exit path
   ls=$(mktemp "$(cd "$3" && pwd -P).ls.XXXXXX") || return 1
   [ -n "$ls" ] && [ -f "$ls" ] || return 1
-  git -C "$1" ls-tree -r -z "$2" >"$ls" || { rm -f "$ls"; return 1; }
+  git_objects -C "$1" ls-tree -r -z "$2" >"$ls" || { rm -f "$ls"; return 1; }
   export_entries "$1" "$ls" "$3"; rc=$?
   rm -f "$ls"
   return $rc
@@ -107,10 +113,12 @@ export_entries() {
 # through a file, so no write to a pipe can block while git writes. Each reply is held to what was asked:
 # the header must be `<the requested sha> blob <size>`, then exactly size bytes and a newline, and
 # nothing after the last one. A missing object, a short or long stream, a bad header or a non-zero git
-# exit aborts the whole copy. Files are made with O_EXCL|O_NOFOLLOW (an existing path is an error); before
-# each write or link every component of the parent is checked to be a real directory (no symlink) that
-# resolves inside the destination; a symlink target holding a NUL is refused. Path judging and the
-# directories stay in export_entries.
+# exit aborts the whole copy. A symlink blob over 4096 bytes (PATH_MAX on Linux, and no system can make
+# a longer link) is refused from its header, before its body is read. Files are made with
+# O_EXCL|O_NOFOLLOW (an existing path is an error); before each write or link every component of the
+# parent is checked to be a real directory (no symlink) that resolves inside the destination; a symlink
+# target holding a NUL is refused. Every git here runs with replace refs and lazy fetch off (see
+# git_objects). Path judging and the directories stay in export_entries.
 export_blobs() { # repo list dest pass
   local src
   read -r -d '' src <<'PERL' || true
@@ -159,6 +167,7 @@ while (my @batch = splice(@ents, 0, $BATCH)) {
     $h =~ /\A([0-9a-f]{40}|[0-9a-f]{64}) blob (0|[1-9][0-9]*)\z/ or fail("bad or missing object for $sha: '$h'");
     fail("object header names $1, not the requested $sha") unless $1 eq $sha;
     my $size = $2;
+    fail("symlink target of '$path' is $size bytes, over 4096") if $pass eq "2" && $size > 4096;
     parent_ok($path);
     my ($fh, $body) = (undef, undef);
     if ($pass eq "1") {
@@ -185,12 +194,12 @@ while (my @batch = splice(@ents, 0, $BATCH)) {
   close $out; fail("git cat-file exited with status " . ($? >> 8)) if $?;
 }
 PERL
-  perl -C0 -e "$src" -- "$1" "$2" "$3" "$4"
+  GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1 perl -C0 -e "$src" -- "$1" "$2" "$3" "$4"
 }
 
 # The workspace version, read the way release.yml reads it.
 declared_version() { # repo commit
-  git -C "$1" show "$2:Cargo.toml" | awk '
+  git_objects -C "$1" show "$2:Cargo.toml" | awk '
     /^\[/ { in_ws = ($0 == "[workspace.package]") }
     in_ws && /^version[ ]*=/ { gsub(/^[^"]*"|".*$/, ""); print; exit }'
 }

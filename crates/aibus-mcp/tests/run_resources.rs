@@ -342,7 +342,7 @@ fn a_key_streamed_in_pieces_is_gone_whether_or_not_the_window_starts_inside_it()
 }
 
 #[test]
-fn a_read_in_the_middle_of_a_run_shows_nothing_of_a_key_that_is_still_arriving() {
+fn a_read_in_the_middle_of_a_run_shows_none_of_a_key_whose_pieces_have_both_arrived() {
     let rig = rig();
     let started = rig.call(
         "workflow_run",
@@ -352,7 +352,8 @@ fn a_read_in_the_middle_of_a_run_shows_nothing_of_a_key_that_is_still_arriving()
         .as_str()
         .unwrap()
         .to_owned();
-    // Wait for the stream to arrive, while the run is still going.
+    // Wait for both pieces to arrive, while the run is still going. A read between the two
+    // pieces is the documented residual, and this test does not cover it.
     let mut status = Value::Null;
     for _ in 0..50 {
         let r = rig.call("run_status", json!({ "run": run, "wait_ms": 1000 }));

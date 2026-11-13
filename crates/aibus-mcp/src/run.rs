@@ -1207,19 +1207,83 @@ mod tests {
     }
 
     #[test]
-    fn many_events_without_a_separator_cost_about_what_one_does() {
-        // A run of text with no separator in it, as one very long token, a few thousand events.
-        let redactor = Redactor::new();
-        let mut v = view();
-        let began = std::time::Instant::now();
-        for _ in 0..20_000 {
-            stream(&mut v, &redactor, &"x".repeat(1024));
+    fn the_raw_buffer_is_trimmed_once_per_slack_and_not_once_per_event() {
+        // Work is counted, not time: every trim moves the whole kept window, so the number of
+        // trims is the cost. One long token, no separator, 1 KiB events: the scan for a cut
+        // finds nothing, which is the worst case for a trim.
+        let event = "x".repeat(1024);
+        let mut text = String::new();
+        let (mut events, mut trims) = (0usize, 0usize);
+        while events < 5_000 {
+            let before = text.len() + event.len();
+            keep_raw(&mut text, &event, TAIL_BYTES);
+            events += 1;
+            if text.len() < before {
+                trims += 1;
+            }
         }
+        let keep = TAIL_BYTES + RAW_MARGIN;
+        assert!(text.len() <= keep + TRIM_SLACK, "{}", text.len());
+        // A trim drops at least 4 KiB (the documented slack, written out here so that a smaller
+        // `TRIM_SLACK` is caught), so there is one per four events at most, plus one. With no
+        // slack there is one per event.
+        let most = events * event.len() / 4096 + 1;
+        assert!(trims >= 1, "the buffer was never trimmed");
         assert!(
-            began.elapsed() < Duration::from_secs(5),
-            "{:?}",
-            began.elapsed()
+            trims <= most,
+            "{trims} trims for {events} events, at most {most} expected"
         );
+    }
+
+    /// The tail as shown when the stored window was cut at offset `i` of `token`, with an
+    /// unterminated BEGIN line right behind it: the redaction then shrinks the buffer, so the
+    /// start of the window is what shows, and what the cut left there is visible.
+    fn shown_after_cut_at(token: &str, i: usize) -> String {
+        let redactor = Redactor::new();
+        let keep = TAIL_BYTES + RAW_MARGIN;
+        let slack = 4096;
+        let mut v = view();
+        let first = format!(
+            "{}{token}-----BEGIN PRIVATE KEY-----",
+            " ".repeat(slack + 1 - i)
+        );
+        stream(&mut v, &redactor, &first);
+        stream(
+            &mut v,
+            &redactor,
+            &" ".repeat(keep + slack + 1 - first.len()),
+        );
+        assert!(v.tail.len() <= keep, "offset {i}: not cut");
+        shown(&v, &redactor)
+    }
+
+    #[test]
+    fn the_nudge_leaves_no_piece_of_a_key_at_any_offset_of_the_cut_inside_a_token() {
+        // The cut is at 4097. Slide the token so that the cut falls at each of its offsets.
+        let token = format!("x.{KEY}.{KEY}.");
+        for i in 1..token.len() {
+            assert_no_piece(&format!("tail, cut at {i}"), &shown_after_cut_at(&token, i));
+        }
+    }
+
+    #[test]
+    fn a_value_that_only_its_name_marks_shows_when_the_nudge_strips_a_name_that_was_whole() {
+        // Documented residual (docs/MCP.md): the cut lands just before a context name that was
+        // whole (`x.|Bearer`, inside the token `x.Bearer`), the nudge moves past it, and the
+        // value, which no pattern catches without its name, is shown. This pins that behaviour.
+        let value = "abcdefghijklmnopqrstuvwxyz0123456789";
+        for (name, sep) in [("Bearer", " "), ("api_key", ": ")] {
+            let token = format!("x.{name}{sep}{value} ");
+            assert!(
+                shown_after_cut_at(&token, 2).contains(value),
+                "{name}: the value was hidden, so the residual is gone; update docs/MCP.md"
+            );
+        }
+        // `name=value` is one token, so the nudge takes both.
+        for i in 1.."x.password=".len() {
+            let shown = shown_after_cut_at(&format!("x.password={value} "), i);
+            assert!(!shown.contains(value), "password at {i}");
+        }
     }
 
     #[test]

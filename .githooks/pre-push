@@ -53,8 +53,8 @@ if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
   printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || no "RELEASE_E2E_SKIP is not valid UTF-8."
   # valid UTF-8 (checked above); invisible characters are dropped, control characters and Unicode spaces become blanks, the ends are
   # trimmed, and characters are counted by perl (not bytes, so the locale does not matter)
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -e 'use Encode qw(decode FB_CROAK); local $/; my $d = decode("UTF-8", <STDIN>, FB_CROAK); $d =~ s/[\x{ad}\x{34f}\x{61c}\x{115f}\x{1160}\x{17b4}\x{17b5}\x{180b}-\x{180e}\x{200b}-\x{200f}\x{202a}-\x{202e}\x{2060}-\x{206f}\x{2800}\x{3164}\x{fe00}-\x{fe0f}\x{feff}\x{ffa0}\x{fff9}-\x{fffb}\x{e0000}-\x{e007f}]//g; $d =~ s/[\x00-\x1f\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]/ /g; $d =~ s/^\s+|\s+$//g; binmode(STDOUT, ":utf8"); print $d;') || no "RELEASE_E2E_SKIP could not be normalised (perl missing?)."
-  nchars=$(printf '%s' "$reason" | perl -e 'use Encode qw(decode); local $/; print length(decode("UTF-8", <STDIN>));') || no "cannot count the characters of RELEASE_E2E_SKIP."
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -C0 -e 'use Encode qw(decode FB_CROAK); local $/; my $d = decode("UTF-8", <STDIN>, FB_CROAK); $d =~ s/[\x{ad}\x{34f}\x{61c}\x{115f}\x{1160}\x{17b4}\x{17b5}\x{180b}-\x{180e}\x{200b}-\x{200f}\x{202a}-\x{202e}\x{2060}-\x{206f}\x{2800}\x{3164}\x{fe00}-\x{fe0f}\x{feff}\x{ffa0}\x{fff9}-\x{fffb}\x{e0000}-\x{e007f}]//g; $d =~ s/[\x00-\x1f\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]/ /g; $d =~ s/^\s+|\s+$//g; binmode(STDOUT, ":utf8"); print $d;') || no "RELEASE_E2E_SKIP could not be normalised (perl missing?)."
+  nchars=$(printf '%s' "$reason" | perl -C0 -e 'use Encode qw(decode); local $/; print length(decode("UTF-8", <STDIN>));') || no "cannot count the characters of RELEASE_E2E_SKIP."
   [ "$nchars" -ge 12 ] || no "RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace and invisible characters are trimmed)."
   waived=stamp
   case $tip in *[!0]*) ;; *) waived="$waived,bootstrap" ;; esac
@@ -71,7 +71,7 @@ if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
   printf '%s skip at pre-push by %s: %s (pushed_sha=%s old_tip=%s remote_ref=refs/heads/release waived=%s user=%s branch=%s)\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git config user.email || echo unknown)" "$reason" "$lsha" "$tip" "$waived" "$(id -un)" "$(git symbolic-ref -q --short HEAD || echo detached)" \
     >>"$common/release-e2e/skips.log" || no "cannot write the skip record in $common/release-e2e/skips.log; nothing was skipped."
-  echo "!!! RELEASE E2E GATE SKIPPED at pre-push: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
+  printf '%s\n' "!!! RELEASE E2E GATE SKIPPED at pre-push: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
   exit 0
 fi
 [ "$lsha" != "$zero" ] || no "deleting release needs RELEASE_E2E_SKIP='<reason>' (logged)."

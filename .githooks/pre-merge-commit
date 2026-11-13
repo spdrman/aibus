@@ -26,8 +26,8 @@ changed=0
 git diff --cached --quiet HEAD -- tools/release-gate tools/release-attest .githooks || changed=1
 if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
   printf '%s' "$RELEASE_E2E_SKIP" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || { echo "pre-merge-commit: RELEASE_E2E_SKIP is not valid UTF-8." >&2; exit 1; }
-  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -e 'use Encode qw(decode FB_CROAK); local $/; my $d = decode("UTF-8", <STDIN>, FB_CROAK); $d =~ s/[\x{ad}\x{34f}\x{61c}\x{115f}\x{1160}\x{17b4}\x{17b5}\x{180b}-\x{180e}\x{200b}-\x{200f}\x{202a}-\x{202e}\x{2060}-\x{206f}\x{2800}\x{3164}\x{fe00}-\x{fe0f}\x{feff}\x{ffa0}\x{fff9}-\x{fffb}\x{e0000}-\x{e007f}]//g; $d =~ s/[\x00-\x1f\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]/ /g; $d =~ s/^\s+|\s+$//g; binmode(STDOUT, ":utf8"); print $d;') || { echo "pre-merge-commit: RELEASE_E2E_SKIP could not be normalised (perl missing?)." >&2; exit 1; }
-  nchars=$(printf '%s' "$reason" | perl -e 'use Encode qw(decode); local $/; print length(decode("UTF-8", <STDIN>));') || { echo "pre-merge-commit: cannot count the characters of RELEASE_E2E_SKIP." >&2; exit 1; }
+  reason=$(printf '%s' "$RELEASE_E2E_SKIP" | perl -C0 -e 'use Encode qw(decode FB_CROAK); local $/; my $d = decode("UTF-8", <STDIN>, FB_CROAK); $d =~ s/[\x{ad}\x{34f}\x{61c}\x{115f}\x{1160}\x{17b4}\x{17b5}\x{180b}-\x{180e}\x{200b}-\x{200f}\x{202a}-\x{202e}\x{2060}-\x{206f}\x{2800}\x{3164}\x{fe00}-\x{fe0f}\x{feff}\x{ffa0}\x{fff9}-\x{fffb}\x{e0000}-\x{e007f}]//g; $d =~ s/[\x00-\x1f\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}]/ /g; $d =~ s/^\s+|\s+$//g; binmode(STDOUT, ":utf8"); print $d;') || { echo "pre-merge-commit: RELEASE_E2E_SKIP could not be normalised (perl missing?)." >&2; exit 1; }
+  nchars=$(printf '%s' "$reason" | perl -C0 -e 'use Encode qw(decode); local $/; print length(decode("UTF-8", <STDIN>));') || { echo "pre-merge-commit: cannot count the characters of RELEASE_E2E_SKIP." >&2; exit 1; }
   [ "$nchars" -ge 12 ] || { echo "pre-merge-commit: RELEASE_E2E_SKIP needs a real reason (12 characters or more once whitespace and invisible characters are trimmed)." >&2; exit 1; }
   waived=e2e
   [ "$have_gate" = 1 ] || waived="$waived,remote-gate"
@@ -37,7 +37,7 @@ if [ -n "${RELEASE_E2E_SKIP:-}" ]; then
   printf '%s skip at pre-merge-commit by %s: %s (head=%s merge_tree=%s waived=%s user=%s branch=release)\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git config user.email || echo unknown)" "$reason" "$(git rev-parse HEAD)" "$(git write-tree)" "$waived" "$(id -un)" \
     >>"$common/release-e2e/skips.log" || { echo "pre-merge-commit: cannot write the skip record; refusing the merge, nothing was skipped." >&2; exit 1; }
-  echo "!!! RELEASE E2E GATE SKIPPED at pre-merge-commit: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
+  printf '%s\n' "!!! RELEASE E2E GATE SKIPPED at pre-merge-commit: $reason (waived: $waived; logged in $common/release-e2e/skips.log)" >&2
   exit 0
 fi
 [ "$have_gate" = 1 ] || { echo "pre-merge-commit: HEAD (release) has no release gate; refusing the merge. RELEASE_E2E_SKIP='<reason>' (logged) creates it." >&2; exit 1; }

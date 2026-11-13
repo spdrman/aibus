@@ -248,7 +248,7 @@ expect "S2: ...listing remote-gate among what was waived" grep -q 'waived=.*remo
 base2 s8; git switch -q -c topic; echo t >t.txt; git add t.txt; git commit -qm topic; git switch -q release; echo r >r2.txt; git add r2.txt; git commit -qm r2
 mkdir "$t/tmpL"; TMPDIR=$t/tmpL RELEASE_E2E_SKIP="leak check for the merge" git merge --no-ff -q -m m topic 2>/dev/null
 expect "pre-merge-commit with a skip leaves no temp dir" test -z "$(ls "$t/tmpL")"
-git switch -q -c topic2 HEAD~1; echo u >u.txt; git add u.txt; git commit -qm topic2; git switch -q release; git merge -q -s ours --no-ff -m m2 topic2 >/dev/null 2>&1
+git switch -q -c topic2 HEAD~1; echo u >u.txt; git add u.txt; git commit -qm topic2; git switch -q release; RELEASE_E2E_CMD=true git merge -q -s ours --no-ff -m m2 topic2 >/dev/null 2>&1
 rm -rf "$t/tmpL"; mkdir "$t/tmpL"; TMPDIR=$t/tmpL RELEASE_E2E_CMD=true git merge --no-ff -q -m m3 topic2 >/dev/null 2>&1
 expect "pre-merge-commit on a normal merge leaves no temp dir" test -z "$(ls "$t/tmpL")"
 echo p >p.txt; git add p.txt; git commit -qm p; mkdir "$t/tmpP"; TMPDIR=$t/tmpP RELEASE_E2E_SKIP="leak check for the push" git push -q origin release 2>/dev/null
@@ -389,12 +389,21 @@ expect "...and the refusal says the lines could not be saved" bash -c "printf '%
 out=$(TMPDIR=$t/no-such-tmp bash .githooks/pre-push origin url <"$t/fu-line.txt" 2>&1); rc=$?
 expect "an unusable TMPDIR (mktemp fails) refuses the push with a message of its own" bash -c "test $rc != 0 && printf '%s' \"\$1\" | grep -q 'cannot make a temp'" _ "$out"
 # the test runners must not carry on with an empty temp dir: rm -rf "$t/..." would aim at paths under /
+runner_guarded=(0 0); ri=0
 for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
-  expect "$runner stops when mktemp fails" bash -c "grep -A1 '^t=\$(mktemp' '$src/$runner' | grep -q '|| exit 1'"
-  expect "$runner checks the temp dir is a non-empty directory" bash -c "grep -q '\[ -n \"\$t\" \] && \[ -d \"\$t\" \]' '$src/$runner'"
+  c1="grep -A1 '^t=\$(mktemp' '$src/$runner' | grep -q '|| exit 1'"
+  c2="grep -q '\[ -n \"\$t\" \] && \[ -d \"\$t\" \]' '$src/$runner'"
+  expect "$runner stops when mktemp fails" bash -c "$c1"
+  expect "$runner checks the temp dir is a non-empty directory" bash -c "$c2"
+  if bash -c "$c1" >/dev/null 2>&1 && bash -c "$c2" >/dev/null 2>&1; then runner_guarded[$ri]=1; fi
+  ri=$((ri + 1))
 done
 mkdir -p "$t/failmk"; printf '#!/bin/sh\nexit 1\n' >"$t/failmk/mktemp"; chmod +x "$t/failmk/mktemp"
+ri=0
 for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  # run the stub only on a runner whose guard the grep above just confirmed: an unguarded runner (a mixed checkout) would carry on with t='' and aim rm -rf at /
+  g=${runner_guarded[$ri]}; ri=$((ri + 1))
+  [ "$g" = 1 ] || { bad "$runner is not guarded, so the failing-mktemp stub run was skipped"; continue; }
   out=$(PATH="$t/failmk:$PATH" bash "$src/$runner" 2>&1); rc=$?
   expect "$runner exits 1 at once, running nothing, when mktemp fails" bash -c "test $rc = 1 && test -z \"\$1\"" _ "$out"
 done

@@ -81,20 +81,44 @@ committed=$(git show "$main_sha:$PUBKEY_PATH" 2>/dev/null | awk '{print $1, $2}'
   || refuse "$key.pub is not the key committed at $PUBKEY_PATH"
 command -v gh >/dev/null || refuse "gh is not installed"
 # detach: run a command in a NEW SESSION, so it has no controlling terminal (ssh-keygen opens /dev/tty itself and would
-# prompt there). The parent forks first, because setsid() fails (EPERM, returned as -1, which is true in Perl) for a
-# process group leader, which is what the process is when job control is on. It forwards INT/TERM/HUP to the child and
-# returns the child's exit status (128+n after a signal). The wrapper's own failure (fork, setsid, exec) exits 125.
+# prompt there). A perl wrapper forks first, because setsid() fails for a process group leader (job control on) and
+# returns -1, which is true in Perl, so the child must check for > 0. The wrapper runs in the background and the shell
+# waits for it, so a signal sent to the script alone reaches it too (detach_sig). On INT/TERM/HUP the wrapper sends TERM
+# to the child's session, KILLs it after 2 s, reaps it, and re-raises the signal on itself so the shell sees a death by
+# signal. Otherwise it returns the child's exit status (128+n after a signal). Its own failure (fork, setsid, exec) is 125.
 DETACH_PL='use POSIX; my $p = fork; defined $p or do { warn "fork: $!\n"; exit 125 };
-if ($p) { $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub { kill "TERM", $p }; 1 while waitpid($p, 0) < 0 && $! == EINTR; exit($? & 127 ? 128 + ($? & 127) : $? >> 8) }
+if ($p) {
+  my ($sig, $due);
+  my $fwd = sub { $sig = $_[0] unless $sig; $due = time + 2 unless $due; kill "TERM", -$p; kill "TERM", $p };
+  $SIG{INT} = $SIG{TERM} = $SIG{HUP} = $fwd; my $st;
+  while (1) {
+    my $r = waitpid($p, WNOHANG);
+    if ($r == $p) { $st = $?; last }
+    if ($r < 0 && $! != EINTR) { $st = 255 << 8; last }
+    if (defined $due && time >= $due) { kill "KILL", -$p; kill "KILL", $p }
+    select(undef, undef, undef, 0.1);
+  }
+  if ($sig) { $SIG{$sig} = "DEFAULT"; kill $sig, $$; sleep 1 }
+  exit($st & 127 ? 128 + ($st & 127) : $st >> 8);
+}
 POSIX::setsid() > 0 or do { warn "setsid: $!\n"; exit 125 }; exec @ARGV or do { warn "exec: $!\n"; exit 125 }'
-detach() { SSH_ASKPASS_REQUIRE=never perl -e "$DETACH_PL" -- "$@" </dev/null; }
+dpid=
+detach_sig() { [ -z "$dpid" ] || { kill -TERM "$dpid" 2>/dev/null; wait "$dpid" 2>/dev/null || true; }; exit "$1"; }
+detach() {
+  local rc
+  trap 'detach_sig 130' INT; trap 'detach_sig 143' TERM; trap 'detach_sig 129' HUP
+  SSH_ASKPASS_REQUIRE=never perl -e "$DETACH_PL" -- "$@" </dev/null & dpid=$!
+  wait "$dpid" && rc=0 || rc=$?
+  trap - INT TERM HUP; dpid=
+  return $rc
+}
 
 # Sign preflight: the e2e and the attestation take about 15 minutes, so find out now that the key signs
 # without a prompt (a passphrase key has to be in ssh-agent), not at the end of the attestation.
 command -v perl >/dev/null || refuse "perl is not installed"
 pf=$(mktemp -d "${TMPDIR:-/tmp}/release-signcheck.XXXXXX") && [ -n "$pf" ] && [ -d "$pf" ] || refuse "could not make a temp directory for the sign check; nothing ran"
 pf_clean() { rm -f "$pf/probe" "$pf/probe.sig" "$pf/err"; rmdir "$pf" 2>/dev/null || true; }
-trap pf_clean EXIT; trap 'pf_clean; exit 130' INT; trap 'pf_clean; exit 143' TERM; trap 'pf_clean; exit 129' HUP
+trap pf_clean EXIT   # detach_sig exits, which runs this too
 echo preflight >"$pf/probe"
 detach ssh-keygen -Y sign -f "$key" -n "$NAMESPACE" "$pf/probe" >/dev/null 2>"$pf/err" && [ -s "$pf/probe.sig" ] || {
   skrc=$?; [ $skrc != 125 ] || { msg=$(tr '\n' ' ' <"$pf/err"); refuse "cannot detach the terminal for the key check ($msg); nothing ran"; }

@@ -569,7 +569,7 @@ cp_case() { # label half(0|1) env... : a committed pair (mode 640), attest.sh --
   r=$t/cpc-$label; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"
   if [ $half = 1 ]; then git -C "$r" rm -q release-attest/attestation.json.sig; git -C "$r" commit -qm half; fi
   chmod 640 "$r"/release-attest/*; before=$(pairsnap "$r"); echo 0 >"$t/mvcount"
-  env "$@" PATH="$t/cpbin:$t/mvbin:$PATH" MV_COUNT=$t/mvcount SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" --replace >"$t/cpc-$label.out" 2>&1; rc=$?
+  env "$@" PATH="$t/cpbin:$t/mvbin:$PATH" MV_COUNT=$t/mvcount SUITES_LIST="$SUITES" perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" --replace >"$t/cpc-$label.out" 2>&1; rc=$?
   after=$(pairsnap "$r")
 }
 untouched() { # name expected-rc
@@ -609,10 +609,9 @@ hang_run() { # mode(group|pid) sig out cmd... ; sets hrc
 }
 gone() { [ -s "$t/hang.pid" ] && ! kill -0 "$(cat "$t/hang.pid")" 2>/dev/null && ! kill -0 "$(cat "$t/hang.ppid")" 2>/dev/null; }
 r=$t/repo90; mkrepo "$r" 1.2.3
-atcmd() { echo env PATH="$t/hangbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"; }
 for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
   set -- $spec
-  hang_run $1 $2 "$t/h-$1-$2.out" $(atcmd)
+  hang_run $1 $2 "$t/h-$1-$2.out" env PATH="$t/hangbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"
   expect "attest.sh, $2 to the $1 during a hung preflight: exit $3" test "$hrc" = "$3"
   expect "...no wrong message, no orphan (the stub and the wrapper are gone)" bash -c "! grep -q 'the key cannot sign\|ssh-keygen exited' '$t/h-$1-$2.out'" 
   expect "...the hung ssh-keygen and its wrapper are gone" gone

@@ -177,20 +177,25 @@ command prompts). `release.sh` and `attest.sh` both sign a small scratch file fi
 `SSH_ASKPASS_REQUIRE=never`, stdin from `/dev/null`) and stop with "the key cannot sign without a prompt:
 load it with ssh-add <key> first" before the container starts. `ssh-keygen` opens `/dev/tty` by itself, so
 the call runs through a small `perl` wrapper that forks and calls `setsid` in the child (a new session has no
-controlling terminal, so it cannot prompt, even when the shell has job control on). The wrapper forwards
-INT/TERM/HUP to the child and returns its exit status; if the wrapper itself fails the message is "cannot
+controlling terminal, so it cannot prompt, even when the shell has job control on). The wrapper runs in the
+background and the script waits for it, so INT, TERM or HUP sent to the script alone, or Ctrl-C to the whole
+group, reach it: it sends TERM to the child's session, kills it after 2 seconds, and the script exits 130,
+143 or 129 without leaving an orphan. The wrapper returns the child's exit status, and its own failure shows as "cannot
 detach the terminal for the key check" instead. perl is a prerequisite of both scripts. The real signature
 at the end of `attest.sh` goes through the same wrapper, so a key that dropped out of the agent mid-run
 (`ssh-add -t`, a locked agent) makes it stop with exit 1 and a message to load the key, not prompt. On 0.2.0
 the failure was found out at the very end of a 7 minute attestation.
 
 The signed files are made in a temp directory, copied into a stage directory inside `release-attest/`,
-verified there, and renamed into place. A failure or a TERM/INT/HUP restores the pair that was there before
-(a `--replace` keeps the committed attestation) and removes only what this run made, so a failed attestation
-leaves no untracked `attestation.json` behind (it used to, and the next run stopped with "the tree is
-dirty"). If a restore itself fails, the stage directory is kept (it holds the old copy) and the message says
-where. SIGKILL cannot be caught, so a kill -9 between the two renames can leave a stage directory or a
-half pair; remove `release-attest/.attest-stage.*` and `git checkout release-attest` then. `release-attest`
+verified there, the existing files are backed up (to a temp name, renamed only when the copy succeeded),
+and then the two files are renamed into place. Undo acts only on a file whose rename was started: it is
+restored from its backup, or removed when this run created it. A failure or INT/TERM/HUP before the first
+rename (during the copies or the backups) therefore touches nothing in `release-attest/`, and a `--replace`
+keeps the committed attestation byte for byte, mode included. A failed attestation leaves no untracked
+`attestation.json` behind (it used to, and the next run stopped with "the tree is dirty"). If a restore
+itself fails the stage directory is kept (it holds the old copy) and the message says where. SIGKILL cannot
+be caught, so a kill -9 between the two renames can leave a stage directory or a half pair; remove
+`release-attest/.attest-stage.*` and `git checkout release-attest` then. `release-attest`
 being a regular file is refused up front. A red run keeps its logs in a `mktemp -d` directory and says where.
 
 Tests for the

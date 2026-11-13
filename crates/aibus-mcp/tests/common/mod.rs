@@ -108,5 +108,31 @@ esac
     let path = dir.join("fake-aibus.sh");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Another thread forking right now can give a child a copy of the write handle until it execs,
+    // and starting the script then fails with ETXTBSY (#232). A handle that is already closed
+    // cannot be copied, so once one start succeeds none can fail that way. The probe is killed
+    // at once; it only has to get past exec.
+    let began = std::time::Instant::now();
+    loop {
+        let probe = std::process::Command::new(&path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        match probe {
+            Ok(mut child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && began.elapsed().as_secs() < 10 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(e) => panic!("the fake {} would not start: {e}", path.display()),
+        }
+    }
     path
 }

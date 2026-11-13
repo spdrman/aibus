@@ -227,12 +227,42 @@ mod tests {
         assert_eq!(runs.load(Ordering::SeqCst), 2);
     }
 
+    /// Writes an executable fake in a directory of its own and returns once the kernel will run it.
+    /// Closing our handle is not enough: a thread forking elsewhere in this process can hand a
+    /// child a copy of the write handle until that child execs, and exec then fails with ETXTBSY
+    /// (#232). New forks cannot copy a handle that is already closed, so once one start of the file
+    /// succeeds, none can fail that way. That start is killed at once, so the body never matters.
     #[cfg(unix)]
     fn script(dir: &std::path::Path, body: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = dir.join(format!("s{}", N.fetch_add(1, Ordering::SeqCst)));
+        std::fs::create_dir(&dir).unwrap();
         let path = dir.join("gcloud-fake");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let began = Instant::now();
+        loop {
+            match std::process::Command::new(&path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(mut probe) => {
+                    let _ = probe.kill();
+                    let _ = probe.wait();
+                    break;
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                        && began.elapsed() < Duration::from_secs(10) =>
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(e) => panic!("the fake {} would not start: {e}", path.display()),
+            }
+        }
         path.display().to_string()
     }
 

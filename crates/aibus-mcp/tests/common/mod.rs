@@ -40,7 +40,7 @@ pub fn audit_lines(home: &Xdg) -> Vec<serde_json::Value> {
 
 /// A stand-in for `aibus run --workflow <name> --json -- <input>` that plays one scripted
 /// chain, chosen by the input (the last argument): `ok`, `slow`, `ask`, `costly`, `step`, `echo:<text>` (puts its input in the output) or `loud` (a long log).
-/// It writes its arguments and its environment to `<dir>/argv.txt` and `<dir>/env.txt`, and an
+/// It writes its arguments (the input of an `echo:` step left out, since a test plants a key there) and its environment to `<dir>/argv.txt` and `<dir>/env.txt`, and an
 /// empty `commits.jsonl.zst` to `<dir>/session/`, so a test can tell whether (and how) it was
 /// started. Returns the path of the script.
 #[cfg(unix)]
@@ -48,11 +48,17 @@ pub fn fake_aibus(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
 [ -n "$AIBUS_FAKE_PROBE" ] && exit 0
-printf '%s\n' "$@" > "DIR/argv.txt"
+for last; do :; done
+# The input is the caller's text and a test may plant a key in it on purpose (`echo:<key>`), so the
+# record keeps the shape of the line but not that text, or the secret scan on drop would find the
+# fake's own copy of it.
+case "$last" in
+  echo:*) { for a; do [ "$a" = "$last" ] && printf 'echo:<input kept out of this file>\n' || printf '%s\n' "$a"; done; } > "DIR/argv.txt" ;;
+  *) printf '%s\n' "$@" > "DIR/argv.txt" ;;
+esac
 env > "DIR/env.txt"
 mkdir -p "DIR/session"
 : > "DIR/session/commits.jsonl.zst"
-for last; do :; done
 ev() { printf '%s\n' "$1"; }
 fin() { ev '{"type":"RunFinished","run":"'"$1"'","status":"'"$2"'","turns":1,"usage":{"input_tokens":'"$3"',"output_tokens":'"$4"',"cost_usd":'"$5"'},"summary":"'"$6"'"}'; }
 case "$last" in
@@ -112,8 +118,8 @@ esac
     // Another thread forking right now can give a child a copy of the write handle until it execs,
     // and starting the script then fails with ETXTBSY (#232). A handle that is already closed
     // cannot be copied, so once one start succeeds none can fail that way. That start is a probe:
-    // `AIBUS_FAKE_PROBE` is set for it only, and the first line of the script exits 0 when it sees
-    // it, so the body never runs, no file is written and nothing outlives the wait below.
+    // the probe is started with `--aibus-fake-probe` as its only argument, which a real run never
+    // has (it starts with `--cwd`), and the first line of the script exits 0 when it sees it, so the body never runs, no file is written and nothing outlives the wait below.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut probe = loop {
         let started = std::process::Command::new(&path)

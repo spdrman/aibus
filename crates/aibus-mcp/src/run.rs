@@ -1002,7 +1002,7 @@ mod tests {
         stream(
             &mut v,
             &redactor,
-            &format!("{} {}\n", &KEY[25..], "z ".repeat(2500)),
+            &format!("{} {}\n", &KEY[25..], "z ".repeat(1000)),
         );
         let runs = Runs::new(RunConfig::new(PathBuf::from("unused"), 1.0));
         let entry = Entry {
@@ -1027,6 +1027,22 @@ mod tests {
             "log text",
             &runs.log_text("run-x", &redactor, 1 << 20).unwrap(),
         );
+    }
+
+    #[test]
+    fn a_key_that_starts_before_the_stored_window_leaves_no_fragment_when_the_buffer_shrinks() {
+        let redactor = Redactor::new();
+        let keep = TAIL_BYTES + RAW_MARGIN;
+        let begin = "-----BEGIN PRIVATE KEY-----\n";
+        let mut v = view();
+        // The stored window will start 20 bytes into the key, with no newline for a long way
+        // after it, and then a BEGIN line makes the redaction shrink everything after it, so the
+        // start of the window is shown.
+        let before = ".".repeat(100);
+        let spaces = " ".repeat(keep - 22 - begin.len());
+        stream(&mut v, &redactor, &format!("{before}{KEY}{spaces}"));
+        stream(&mut v, &redactor, begin);
+        assert_no_piece("tail", &shown(&v, &redactor));
     }
 
     const PEM_BODY: [&str; 2] = [

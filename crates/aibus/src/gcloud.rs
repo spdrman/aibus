@@ -342,6 +342,56 @@ mod tests {
         );
     }
 
+    /// #232: the readiness check in `script` must not run the body: a body that writes a marker
+    /// leaves none behind, even under load, and nothing keeps running after `script` returns.
+    #[cfg(unix)]
+    #[test]
+    fn the_readiness_check_of_a_fake_script_leaves_no_trace_under_load() {
+        use std::sync::atomic::AtomicBool;
+        let stop = Arc::new(AtomicBool::new(false));
+        let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let burners: Vec<_> = (0..cpus * 2)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let mut x = 0u64;
+                    while !stop.load(Ordering::Relaxed) {
+                        x = std::hint::black_box(
+                            x.wrapping_mul(6364136223846793005).wrapping_add(1),
+                        );
+                    }
+                })
+            })
+            .collect();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_owned();
+        let makers: Vec<_> = (0..8)
+            .map(|w| {
+                let root = root.clone();
+                std::thread::spawn(move || {
+                    (0..60)
+                        .map(|i| {
+                            let marker = root.join(format!("ran-{w}-{i}"));
+                            script(&root, &format!(": > {}", marker.display()));
+                            marker
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let markers: Vec<_> = makers.into_iter().flat_map(|m| m.join().unwrap()).collect();
+        stop.store(true, Ordering::Relaxed);
+        for b in burners {
+            b.join().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        let ran = markers.iter().filter(|m| m.exists()).count();
+        assert_eq!(
+            ran, 0,
+            "{ran} of 480 scripts had their body run by the readiness check"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_runner_gives_up_after_its_timeout_and_never_echoes_stderr() {

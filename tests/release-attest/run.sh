@@ -375,8 +375,12 @@ expect "release-attest as a regular file is refused (exit 2) with a clear messag
 mkdir "$t/mvbin"
 cat >"$t/mvbin/mv" <<'MVS'
 #!/bin/sh
-c=$(cat "$MV_COUNT" 2>/dev/null || echo 0); c=$((c + 1)); echo $c >"$MV_COUNT"
-[ "$c" = "$MV_FAIL" ] && exit 1
+for a; do last=$a; done
+case "$last" in */attestation.json|*/attestation.json.sig)   # only renames onto the final names are counted
+  c=$(cat "$MV_COUNT" 2>/dev/null || echo 0); c=$((c + 1)); echo $c >"$MV_COUNT"
+  [ "$c" = "${MV_FAIL:-0}" ] && exit 1
+  [ "$c" = "${MV_SIG:-0}" ] && { kill -TERM $PPID; sleep 1; } ;;
+esac
 exec /bin/mv "$@"
 MVS
 chmod +x "$t/mvbin/mv"
@@ -403,8 +407,8 @@ if [ $pty_ok = 1 ]; then
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env SUITES_LIST="$SUITES"; pty 8 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m.out" 2>&1; rc=$?
   expect "with job control on (BASH_ENV set -m) a passphrase key is still refused at once (exit 2)" test $rc = 2
   expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-m.out' && ! grep -qi 'enter passphrase' '$t/pty-m.out'"
-  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SHELLOPTS=braceexpand:hashall:interactive-comments:monitor SUITES_LIST="$SUITES"; pty 8 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m2.out" 2>&1; rc=$?
-  expect "...and with SHELLOPTS=...:monitor" test $rc = 2
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 8 env SHELLOPTS=braceexpand:hashall:interactive-comments:monitor "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m2.out" 2>&1; rc=$?
+  expect "...and with SHELLOPTS=...:monitor (set through env, the variable is readonly in bash)" bash -c "test $rc = 2 && ! grep -qi 'enter passphrase' '$t/pty-m2.out'"
   if [ $agent_ok = 1 ]; then
     # the key leaves the agent mid-run (ssh-add -t): the real signature fails, it does not prompt
     SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
@@ -412,7 +416,7 @@ if [ $pty_ok = 1 ]; then
     r=$t/repo61; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
     SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 14 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sleep 5; sh $t/fake.sh" >"$t/pty-d.out" 2>&1; rc=$?
     expect "a key that drops out of the agent mid-run fails the real signature (exit 1), no prompt, no hang" test $rc = 1
-    expect "...with a message to load the key and a clean tree (ssh-keygen's stderr is shown, but nothing waited for input)" bash -c "grep -q 'ssh-add' '$t/pty-d.out' && [ -z \"\$(git -C '$r' status --porcelain)\" ]"
+    expect "...without a passphrase prompt text, with a message to load the key, and a clean tree" bash -c "! grep -qi 'enter passphrase' '$t/pty-d.out' && grep -q 'ssh-add' '$t/pty-d.out' && [ -z \"\$(git -C '$r' status --porcelain)\" ]"
     SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
   fi
 fi
@@ -438,26 +442,19 @@ expect "a signal-killed ssh-keygen shows as 128+n (137)" grep -q 'ssh-keygen exi
 mkdir "$t/hangbin"
 cat >"$t/hangbin/ssh-keygen" <<HGS
 #!/bin/sh
-case " \$* " in *" -Y sign "*) echo \$PPID >"$t/hang.pid"; sleep 20; exit 1 ;; esac
+case " \$* " in *" -Y sign "*) echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; exec sleep 30 ;; esac
 exec "$realsk" "\$@"
 HGS
 chmod +x "$t/hangbin/ssh-keygen"; rm -f "$t/hang.pid"
 r=$t/repo64; mkrepo "$r" 1.2.3
 PATH="$t/hangbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/hang.out" 2>&1 &
-apid=$!; for _ in $(seq 1 40); do [ -s "$t/hang.pid" ] && break; sleep 0.25; done
-[ -s "$t/hang.pid" ] && kill -TERM "$(cat "$t/hang.pid")" 2>/dev/null
+apid=$!; for _ in $(seq 1 40); do [ -s "$t/hang.ppid" ] && break; sleep 0.25; done
+[ -s "$t/hang.ppid" ] && kill -TERM "$(cat "$t/hang.ppid")" 2>/dev/null
 for _ in $(seq 1 24); do kill -0 $apid 2>/dev/null || break; sleep 0.25; done
 if kill -0 $apid 2>/dev/null; then bad "TERM to the wrapper stops a hung preflight within 6 seconds"; kill -9 $apid 2>/dev/null; else ok "TERM to the wrapper stops a hung preflight within 6 seconds"; fi
 wait $apid 2>/dev/null; hrc=$?
 expect "...and attest.sh refuses (exit 2) instead of going on" test $hrc = 2
 # a signal between the two renames restores the old pair and removes the stage directory
-cat >"$t/mvbin/mv" <<'MVS'
-#!/bin/sh
-c=$(cat "$MV_COUNT" 2>/dev/null || echo 0); c=$((c + 1)); echo $c >"$MV_COUNT"
-[ "$c" = "$MV_FAIL" ] && exit 1
-[ "$c" = "${MV_SIG:-0}" ] && { kill -TERM $PPID; sleep 1; }
-exec /bin/mv "$@"
-MVS
 for mode in replace fresh; do
   r=$t/repo7$mode; mkrepo "$r" 1.2.3; extra=
   if [ $mode = replace ]; then attest "$r" >/dev/null 2>&1; commit_attest "$r"; extra=--replace; fi
@@ -467,9 +464,20 @@ for mode in replace fresh; do
   expect "...leaves the tree clean, no stage directory and no half pair" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && ! ls -A '$r/release-attest' 2>/dev/null | grep -q stage && { [ '$mode' = replace ] || [ ! -e '$r/release-attest' ]; }"
 done
 # a restore that fails keeps the stage directory (it holds the old copy) and says where
-mkdir "$t/cpbin"; printf '#!/bin/sh\ncase "$*" in *"/old."*" "*) exit 1 ;; esac\nexec /bin/cp "$@"\n' >"$t/cpbin/cp"; chmod +x "$t/cpbin/cp"
+mkdir "$t/cpbin"
+cat >"$t/cpbin/cp" <<'CPS'
+#!/bin/sh
+# CP_FAILDEST: fail when the destination matches (CP_PARTIAL=1: after writing 20 bytes); CP_FAILSRC: fail on a source;
+# CP_SIG + CP_SIGDEST: signal the caller when the destination matches, after the copy has run
+for a; do p2=$p1; p1=$a; done
+case "$p1" in $CP_FAILDEST) [ -z "${CP_PARTIAL:-}" ] || head -c 20 "$p2" >"$p1"; exit 1 ;; esac
+case "$p2" in $CP_FAILSRC) exit 1 ;; esac
+if [ -n "${CP_SIG:-}" ]; then case "$p1" in $CP_SIGDEST) /bin/cp "$@"; kill -$CP_SIG $PPID; sleep 1; exit 0 ;; esac; fi
+exec /bin/cp "$@"
+CPS
+chmod +x "$t/cpbin/cp"
 r=$t/repo80; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"; echo 0 >"$t/mvcount"
-PATH="$t/cpbin:$t/mvbin:$PATH" MV_COUNT=$t/mvcount MV_FAIL=2 SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" --replace >"$t/cpf.out" 2>&1
+PATH="$t/cpbin:$t/mvbin:$PATH" CP_FAILSRC='*/old.*' MV_COUNT=$t/mvcount MV_FAIL=2 SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" --replace >"$t/cpf.out" 2>&1
 expect "a failed restore keeps the stage directory with the old copy" bash -c "ls '$r'/release-attest/.attest-stage.*/old.0 >/dev/null"
 expect "...and the message says where it is" grep -q 'attest-stage' "$t/cpf.out"
 # ---------- export_tree: blobs are read with `git cat-file --batch`, 500 per call (issue #237)
@@ -551,6 +559,64 @@ rm -rf "$t/arc" "$t/exp-self"; mkdir -p "$t/arc"; git -C "$repo_root" archive HE
 export_tree "$repo_root" HEAD "$t/exp-self" >/dev/null 2>&1
 expect "this repository's tree: diff -r against git archive shows nothing" diff -r "$t/arc" "$t/exp-self"
 expect "...and the copy re-hashes to the commit's tree id" test "$(rehash "$t/exp-self" "$(git -C "$repo_root" rev-parse --absolute-git-dir)")" = "$(git -C "$repo_root" rev-parse 'HEAD^{tree}')"
+
+# ---------- third review of #242: the stage copy never touches the committed pair; backups are all or nothing
+modeof() { perl -e 'printf "%o\n", (stat $ARGV[0])[2] & 07777' "$1"; }
+pairsnap() { local f; for f in attestation.json attestation.json.sig; do
+  if [ -f "$1/release-attest/$f" ]; then echo "$f $(modeof "$1/release-attest/$f") $(cksum <"$1/release-attest/$f")"; else echo "$f missing"; fi; done; }
+cp_case() { # label half(0|1) env... : a committed pair (mode 640), attest.sh --replace with the stubs; sets rc, before, after
+  local label=$1 half=$2; shift 2
+  r=$t/cpc-$label; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"
+  if [ $half = 1 ]; then git -C "$r" rm -q release-attest/attestation.json.sig; git -C "$r" commit -qm half; fi
+  chmod 640 "$r"/release-attest/*; before=$(pairsnap "$r"); echo 0 >"$t/mvcount"
+  env "$@" PATH="$t/cpbin:$t/mvbin:$PATH" MV_COUNT=$t/mvcount SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" --replace >"$t/cpc-$label.out" 2>&1; rc=$?
+  after=$(pairsnap "$r")
+}
+untouched() { # name expected-rc
+  expect "$1: exits $2" test "$rc" = "$2"
+  expect "...the committed pair is byte for byte and mode for mode what it was" test "$before" = "$after"
+  expect "...git status is clean and no stage directory is left" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && ! ls -A '$r/release-attest' | grep -q stage"
+}
+cp_case c1 0 CP_FAILDEST='*/.attest-stage.*/attestation.json';     untouched "--replace, the 1st stage copy fails" 1
+cp_case c2 0 CP_FAILDEST='*/.attest-stage.*/attestation.json.sig'; untouched "--replace, the 2nd stage copy fails" 1
+cp_case c3 0 CP_SIG=TERM CP_SIGDEST='*/.attest-stage.*/attestation.json'; untouched "--replace, TERM during the 1st stage copy" 143
+cp_case c4 0 CP_SIG=INT CP_SIGDEST='*/.attest-stage.*/attestation.json';  untouched "--replace, INT during the 1st stage copy" 130
+cp_case c5 0 CP_SIG=HUP CP_SIGDEST='*/.attest-stage.*/attestation.json';  untouched "--replace, HUP during the 1st stage copy" 129
+cp_case c6 1 CP_FAILDEST='*/.attest-stage.*/attestation.json';     untouched "a half pair (json only) and --replace, the 1st stage copy fails" 1
+cp_case c7 0 CP_FAILDEST='*/.attest-stage.*/bak.*' CP_PARTIAL=1;   untouched "--replace, a backup copy writes 20 bytes and fails" 1
+cp_case c8 0 CP_FAILDEST='*/.attest-stage.*/bak.*';                untouched "--replace, a backup copy fails" 1
+cp_case c9 0 CP_SIG=TERM CP_SIGDEST='*/.attest-stage.*/bak.*';     untouched "--replace, TERM during a backup copy" 143
+cp_case c10 0 MV_FAIL=1;                                           untouched "--replace, the 1st rename fails" 1
+cp_case c11 0 MV_FAIL=2;                                           untouched "--replace, the 2nd rename fails" 1
+cp_case c12 0 MV_SIG=1;                                            untouched "--replace, TERM right after the 1st rename" 143
+cp_case c13 0 MV_SIG=2;                                            untouched "--replace, TERM right after the 2nd rename" 143
+# an unrelated file in release-attest/ is never touched, whatever fails
+r=$t/cpc-readme; mkrepo "$r" 1.2.3; mkdir "$r/release-attest"; echo keep >"$r/release-attest/README"; git -C "$r" add -A; git -C "$r" commit -qm readme; echo 0 >"$t/mvcount"
+PATH="$t/cpbin:$t/mvbin:$PATH" CP_FAILDEST='*/.attest-stage.*/attestation.json.sig' MV_COUNT=$t/mvcount SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >/dev/null 2>&1
+expect "an unrelated README in release-attest/ survives a failed install, and the tree is clean" bash -c "[ \"\$(cat '$r/release-attest/README')\" = keep ] && [ -z \"\$(git -C '$r' status --porcelain)\" ]"
+
+# hung ssh-keygen: INT to the whole process group, TERM or HUP to the script alone. Nothing is left running and the
+# exit code and message say what happened. The hung stub is replaced by `exec sleep 30` (its pid is recorded).
+hang_run() { # mode(group|pid) sig out cmd... ; sets hrc
+  local mode=$1 sig=$2 out=$3; shift 3; rm -f "$t/hang.pid" "$t/hang.ppid"
+  perl -MPOSIX -e 'setpgid(0,0); $SIG{INT} = "DEFAULT"; exec @ARGV' "$@" >"$out" 2>&1 </dev/null &
+  local hp=$! i
+  for i in $(seq 1 60); do [ -s "$t/hang.ppid" ] && break; sleep 0.25; done
+  if [ $mode = group ]; then kill -$sig -- -$hp 2>/dev/null; else kill -$sig $hp 2>/dev/null; fi
+  for i in $(seq 1 32); do kill -0 $hp 2>/dev/null || break; sleep 0.25; done
+  if kill -0 $hp 2>/dev/null; then kill -9 $hp 2>/dev/null; hrc=still-running; else wait $hp; hrc=$?; fi
+  sleep 0.5
+}
+gone() { [ -s "$t/hang.pid" ] && ! kill -0 "$(cat "$t/hang.pid")" 2>/dev/null && ! kill -0 "$(cat "$t/hang.ppid")" 2>/dev/null; }
+r=$t/repo90; mkrepo "$r" 1.2.3
+atcmd() { echo env PATH="$t/hangbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh"; }
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/h-$1-$2.out" $(atcmd)
+  expect "attest.sh, $2 to the $1 during a hung preflight: exit $3" test "$hrc" = "$3"
+  expect "...no wrong message, no orphan (the stub and the wrapper are gone)" bash -c "! grep -q 'the key cannot sign\|ssh-keygen exited' '$t/h-$1-$2.out'" 
+  expect "...the hung ssh-keygen and its wrapper are gone" gone
+done
 
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }

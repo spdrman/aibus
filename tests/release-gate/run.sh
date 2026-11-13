@@ -461,6 +461,34 @@ PATH="$t/skbin:$PATH" TMPDIR=$t/tmp-int RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$
 expect "an interrupted preflight (TERM) exits 143" test $rc = 143
 expect "an interrupted preflight leaves no release-signcheck directory" test -z "$(ls "$t/tmp-int")"
 
+# ---------- third review of #242: a hung ssh-keygen and signals (release.sh)
+mkdir "$t/hangbin"
+cat >"$t/hangbin/ssh-keygen" <<HGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; exec sleep 30 ;; esac
+exec $realsk "\$@"
+HGS
+chmod +x "$t/hangbin/ssh-keygen"
+hang_run() { # mode(group|pid) sig out cmd... ; sets hrc
+  local mode=$1 sig=$2 out=$3; shift 3; rm -f "$t/hang.pid" "$t/hang.ppid"
+  perl -MPOSIX -e 'setpgid(0,0); $SIG{INT} = "DEFAULT"; exec @ARGV' "$@" >"$out" 2>&1 </dev/null &
+  local hp=$! i
+  for i in $(seq 1 60); do [ -s "$t/hang.ppid" ] && break; sleep 0.25; done
+  if [ $mode = group ]; then kill -$sig -- -$hp 2>/dev/null; else kill -$sig $hp 2>/dev/null; fi
+  for i in $(seq 1 32); do kill -0 $hp 2>/dev/null || break; sleep 0.25; done
+  if kill -0 $hp 2>/dev/null; then kill -9 $hp 2>/dev/null; hrc=still-running; else wait $hp; hrc=$?; fi
+  sleep 0.5
+}
+gone() { [ -s "$t/hang.pid" ] && ! kill -0 "$(cat "$t/hang.pid")" 2>/dev/null && ! kill -0 "$(cat "$t/hang.ppid")" 2>/dev/null; }
+r=$t/rel236h; mkrepo "$r"; usegate "$r"; mkdir "$t/tmp-h"
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/h-$1-$2.out" env PATH="$t/hangbin:$PATH" TMPDIR=$t/tmp-h RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run
+  expect "release.sh, $2 to the $1 during a hung preflight: exit $3" test "$hrc" = "$3"
+  expect "...no wrong message" bash -c "! grep -q 'the key cannot sign\|ssh-keygen exited' '$t/h-$1-$2.out'"
+  expect "...the hung ssh-keygen and its wrapper are gone, and no release-signcheck directory is left" bash -c "$(declare -f gone); t='$t'; gone && [ -z \"\$(ls '$t/tmp-h')\" ]"
+done
+
 # ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
 base2 s20
 echo fu >fu; git add fu; git commit -qm fu

@@ -49,11 +49,13 @@ pub fn fake_aibus(dir: &std::path::Path) -> std::path::PathBuf {
     let script = r#"#!/bin/sh
 [ "$1" = --aibus-fake-probe ] && exit 0
 for last; do :; done
+input=$last
+[ "$last" = "-" ] && input=$(cat)
 # The input is the caller's text and a test may plant a key in it on purpose (`echo:<key>`), so the
 # record keeps the shape of the line but not that text, or the secret scan on drop would find the
 # fake's own copy of it.
 case "$last" in
-  echo:*|leak:*) { for a; do [ "$a" = "$last" ] && printf '%s:<input kept out of this file>\n' "${last%%:*}" || printf '%s\n' "$a"; done; } > "DIR/argv.txt" ;;
+  echo:*|leak*:*|leak:*|split*:*) { for a; do [ "$a" = "$last" ] && printf '%s:<input kept out of this file>\n' "${last%%:*}" || printf '%s\n' "$a"; done; } > "DIR/argv.txt" ;;
   *) printf '%s\n' "$@" > "DIR/argv.txt" ;;
 esac
 env > "DIR/env.txt"
@@ -61,7 +63,7 @@ mkdir -p "DIR/session"
 : > "DIR/session/commits.jsonl.zst"
 ev() { printf '%s\n' "$1"; }
 fin() { ev '{"type":"RunFinished","run":"'"$1"'","status":"'"$2"'","turns":1,"usage":{"input_tokens":'"$3"',"output_tokens":'"$4"',"cost_usd":'"$5"'},"summary":"'"$6"'"}'; }
-case "$last" in
+case "$input" in
   ok)
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     sleep 0.4
@@ -89,25 +91,72 @@ case "$last" in
     exit 10 ;;
   echo:*)
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
-    printf '{"type":"Stream","text":"the step saw %s and kept going\\n"}\n' "$last"
-    fin L1 completed 1 1 0.01 "echoed $last, then the last line of the report"
+    printf '{"type":"Stream","text":"the step saw %s and kept going\\n"}\n' "$input"
+    fin L1 completed 1 1 0.01 "echoed $input, then the last line of the report"
     ev '{"type":"SessionEnd","session":"SESSION1","exit_code":0}'
     exit 0 ;;
   leak:*)
-    # The input after `leak:` is a key. It comes back in every string a child event can carry (a
-    # step's name, status and failure, the session, a stray failure, the stream and the summary),
-    # with the padding that makes the failure and the stream cut the key in two.
-    key="${last#leak:}"
+    # The input after `leak:` is a key. It comes back in the strings of an attempt (its name,
+    # status and failure) and in the session; the failure is padded so the 300 byte cut lands
+    # inside the key.
+    key="${input#leak:}"
     pad=$(printf 'x%.0s' $(seq 1 280))
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
     ev '{"type":"RunStarted","run":"C1","agent":"'"$key"'"}'
     ev '{"type":"RunFailed","run":"C1","kind":"provider","message":"'"$pad$key"' and more"}'
     ev '{"type":"RunFinished","run":"C1","status":"'"$key"'","turns":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":0.01},"summary":"s"}'
-    ev '{"type":"RunFailed","run":"NOSUCH","kind":"provider","message":"'"$key"'"}'
-    pad=$(printf 'y%.0s' $(seq 1 4080))
-    ev '{"type":"Stream","text":"'"$key $pad"'\n"}'
-    fin L1 failed 1 1 0.01 "gave up on $key"
+    fin L1 failed 1 1 0.01 s
     ev '{"type":"SessionEnd","session":"'"$key"'","exit_code":1}'
+    exit 1 ;;
+  leakstream:*)
+    # The key in one stream event, placed so the 4096 byte window of the tail starts 20 bytes
+    # into it: 100 before, 4070 after, a newline, and the 3 bytes the summary `s` adds.
+    key="${input#leakstream:}"
+    before=$(printf 'x%.0s' $(seq 1 100))
+    after=$(printf 'y%.0s' $(seq 1 4070))
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    ev '{"type":"Stream","text":"'"$before$key$after"'\n"}'
+    fin L1 failed 1 1 0.01 s
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":1}'
+    exit 1 ;;
+  leaksummary:*)
+    # The key at the start of the lead's summary, which is 4115 bytes, so the window starts 20
+    # bytes into the key (the summary is pushed as a newline, the text, a newline).
+    key="${input#leaksummary:}"
+    after=$(printf 'y%.0s' $(seq 1 4073))
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    fin L1 failed 1 1 0.01 "$key$after"
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":1}'
+    exit 1 ;;
+  leakstray:*)
+    # The same for a failure of a run that is not an attempt, which goes to the report (4113 bytes
+    # with the two newlines the empty summary adds).
+    key="${input#leakstray:}"
+    after=$(printf 'y%.0s' $(seq 1 4071))
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    ev '{"type":"RunFailed","run":"NOSUCH","kind":"provider","message":"'"$key$after"'"}'
+    fin L1 failed 1 1 0.01 ""
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":1}'
+    exit 1 ;;
+  split2:*|split3:*|splitnear:*)
+    # The key in pieces over two or three stream events, as a streamed key arrives, with the
+    # window of the tail starting 20 bytes into it (`splitnear` has nothing after it, so no cut).
+    key="${input#*:}"
+    after=$(printf 'y%.0s' $(seq 1 4070))
+    [ "${input%%:*}" = splitnear ] && after=z
+    c() { printf '%s' "$key" | cut -c"$1"; }
+    ev '{"type":"RunStarted","run":"L1","agent":"lead"}'
+    case "${input%%:*}" in
+      split3)
+        ev '{"type":"Stream","text":"'"$(c 1-14)"'"}'
+        ev '{"type":"Stream","text":"'"$(c 15-30)"'"}'
+        ev '{"type":"Stream","text":"'"$(c 31-)$after"'\n"}' ;;
+      *)
+        ev '{"type":"Stream","text":"'"$(c 1-25)"'"}'
+        ev '{"type":"Stream","text":"'"$(c 26-)$after"'\n"}' ;;
+    esac
+    fin L1 failed 1 1 0.01 s
+    ev '{"type":"SessionEnd","session":"SESSION1","exit_code":1}'
     exit 1 ;;
   loud)
     ev '{"type":"RunStarted","run":"L1","agent":"lead"}'

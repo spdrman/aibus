@@ -245,20 +245,45 @@ fn a_step_that_echoes_a_key_never_reaches_the_log_resource() {
     );
 }
 
-#[test]
-fn a_key_in_any_string_a_child_reports_never_reaches_a_client() {
+/// No seven-byte piece of the secret part of the key, and not its start, shows in `text`.
+fn assert_no_piece(what: &str, text: &str) {
+    let secret = "Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P";
+    for i in 0..=secret.len() - 7 {
+        let piece = &secret[i..i + 7];
+        assert!(
+            !text.contains(piece),
+            "{what} shows {piece}: {}",
+            text.chars().take(600).collect::<String>()
+        );
+    }
+    assert!(
+        !text.contains("sk-ant-api03-Zq"),
+        "{what} shows the start of the key"
+    );
+}
+
+/// Runs the fake with `input` (a mode and a planted key), and checks that the tool result, the
+/// status resource and the log show no piece of the key. Returns the status body.
+fn nothing_of_the_key_shows(input: &str) -> Value {
     let rig = rig();
-    let (run, status) = rig.finished(&format!("leak:{KEY}"));
+    let (run, status) = rig.finished(input);
     let (_, log) = rig.read(&format!("aibus://runs/{run}/log"));
     let (_, json) = rig.read(&format!("aibus://runs/{run}"));
-    // The failure is cut at 300 bytes and the stream at 4 KiB, and both cuts land inside the key,
-    // so a key found only at the edge would leave a piece of it behind: no piece may show.
     for (what, text) in [("log", log), ("status", json), ("tool", status.to_string())] {
-        for piece in ["Zq8wLm2X", "Gf9Jk3P", "sk-ant-api03"] {
-            assert!(!text.contains(piece), "{what} shows {piece}: {text}");
-        }
+        assert_no_piece(&format!("{input}: {what}"), &text);
     }
-    // The fields are still there, only the key is gone.
+    // The fake keeps the key out of its argv record, so the scan on drop has nothing of the
+    // test's own making.
+    let argv = fs::read_to_string(rig.home.path().join("fake/argv.txt")).unwrap();
+    assert_no_piece("argv", &argv);
+    assert!(argv.contains("--workflow\nship\n"), "{argv}");
+    status
+}
+
+#[test]
+fn a_key_in_an_attempts_name_status_failure_and_in_the_session_never_reaches_a_client() {
+    // The failure is cut at 300 bytes and the cut lands inside the key.
+    let status = nothing_of_the_key_shows(&format!("leak:{KEY}"));
     let attempt = &status["attempts"][0];
     assert!(
         attempt["failure"].as_str().unwrap().starts_with("xxxx"),
@@ -266,13 +291,54 @@ fn a_key_in_any_string_a_child_reports_never_reaches_a_client() {
     );
     assert!(status["session"].is_string(), "{status}");
     assert_eq!(status["exit_code"], 1);
-    // The fake keeps the key out of its argv record, so the scan on drop has nothing of the
-    // test's own making.
-    let argv = fs::read_to_string(rig.home.path().join("fake/argv.txt")).unwrap();
+}
+
+#[test]
+fn a_key_in_the_stream_is_gone_when_the_4_kib_window_starts_inside_it() {
+    let status = nothing_of_the_key_shows(&format!("leakstream:{KEY}"));
+    // The window is full, so it was cut, and the text around the key is still there.
     assert!(
-        argv.contains("leak:<input kept out of this file>"),
-        "{argv}"
+        status["tail"]
+            .as_str()
+            .unwrap()
+            .contains("yyyyyyyyyyyyyyyy"),
+        "{status}"
     );
+}
+
+#[test]
+fn a_key_in_the_summary_is_gone_when_the_4_kib_window_starts_inside_it() {
+    let status = nothing_of_the_key_shows(&format!("leaksummary:{KEY}"));
+    assert!(
+        status["tail"]
+            .as_str()
+            .unwrap()
+            .contains("yyyyyyyyyyyyyyyy"),
+        "{status}"
+    );
+}
+
+#[test]
+fn a_key_in_the_failure_of_a_run_that_is_no_attempt_is_gone_when_the_window_starts_inside_it() {
+    let status = nothing_of_the_key_shows(&format!("leakstray:{KEY}"));
+    assert!(
+        status["tail"]
+            .as_str()
+            .unwrap()
+            .contains("yyyyyyyyyyyyyyyy"),
+        "{status}"
+    );
+}
+
+#[test]
+fn a_key_streamed_in_pieces_is_gone_whether_or_not_the_window_starts_inside_it() {
+    for mode in ["split2", "split3", "splitnear"] {
+        let status = nothing_of_the_key_shows(&format!("{mode}:{KEY}"));
+        assert!(
+            !status["tail"].as_str().unwrap().is_empty(),
+            "{mode}: {status}"
+        );
+    }
 }
 
 #[test]

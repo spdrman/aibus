@@ -820,3 +820,148 @@ impl Server {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: &str = "sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P";
+    const SECRET: &str = "Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P";
+
+    fn view() -> View {
+        View {
+            status: "running".into(),
+            ended_as: None,
+            step: None,
+            pointer: 0,
+            attempts: Vec::new(),
+            lead: None,
+            session: None,
+            usage: (0, 0, 0.0),
+            exit_code: None,
+            tail: String::new(),
+            log: String::new(),
+            cancelled: false,
+            ended: false,
+        }
+    }
+
+    fn stream(v: &mut View, redactor: &Redactor, text: &str) {
+        v.apply(&json!({ "type": "Stream", "text": text }), &[], redactor);
+    }
+
+    /// No seven-byte piece of the secret part of the key, and not the start of the key, shows.
+    fn assert_no_piece(what: &str, text: &str) {
+        for i in 0..=SECRET.len() - 7 {
+            assert!(
+                !text.contains(&SECRET[i..i + 7]),
+                "{what} shows a piece of the key: {:?}",
+                &SECRET[i..i + 7]
+            );
+        }
+        assert!(
+            !text.contains("sk-ant-api03-Zq"),
+            "{what} shows the start of the key"
+        );
+    }
+
+    /// What `body()` shows of the tail: the buffer through the redactor once more.
+    fn shown(v: &View, redactor: &Redactor) -> String {
+        redactor.redact(&v.tail).into_owned()
+    }
+
+    #[test]
+    fn a_key_split_across_two_events_is_redacted_when_the_tail_cut_lands_inside_it() {
+        let redactor = Redactor::new();
+        // Every position of the cut inside the key, and a little either side of it.
+        for after in 4060..4090 {
+            let mut v = view();
+            stream(&mut v, &redactor, &KEY[..25]);
+            stream(
+                &mut v,
+                &redactor,
+                &format!("{}{}", &KEY[25..], "y".repeat(after)),
+            );
+            assert!(v.tail.len() <= TAIL_BYTES);
+            assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
+            assert_no_piece(&format!("log ({after})"), &redactor.redact(&v.log));
+        }
+    }
+
+    #[test]
+    fn a_key_split_across_three_events_is_redacted_when_the_tail_cut_lands_inside_it() {
+        let redactor = Redactor::new();
+        for after in 4060..4090 {
+            let mut v = view();
+            stream(&mut v, &redactor, &KEY[..14]);
+            stream(&mut v, &redactor, &KEY[14..30]);
+            stream(
+                &mut v,
+                &redactor,
+                &format!("{}{}", &KEY[30..], "y".repeat(after)),
+            );
+            assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
+        }
+    }
+
+    #[test]
+    fn a_split_key_that_no_cut_touches_is_redacted_too() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        stream(&mut v, &redactor, &format!("before {}", &KEY[..25]));
+        stream(&mut v, &redactor, &format!("{} after\n", &KEY[25..]));
+        let tail = shown(&v, &redactor);
+        assert_no_piece("tail", &tail);
+        assert!(
+            tail.starts_with("before ") && tail.ends_with(" after\n"),
+            "{tail}"
+        );
+        assert_no_piece("log", &redactor.redact(&v.log));
+    }
+
+    #[test]
+    fn the_log_stays_clean_when_it_overflows_with_a_split_key_in_it() {
+        let redactor = Redactor::new();
+        let mut v = view();
+        // The key arrives in two halves in the middle of lines near the start, then enough lines
+        // to push the start of the log out several times over.
+        stream(
+            &mut v,
+            &redactor,
+            &format!("first line\nthe key is {}", &KEY[..25]),
+        );
+        stream(
+            &mut v,
+            &redactor,
+            &format!("{} and that is it\n", &KEY[25..]),
+        );
+        for i in 0..8000 {
+            stream(
+                &mut v,
+                &redactor,
+                &format!("filler line number {i} xxxxxxxxxxxxxxxxxxxxxxxx\n"),
+            );
+            assert_no_piece("log", &redactor.redact(&v.log));
+        }
+        assert!(v.log.len() <= LOG_BYTES, "the log is capped");
+        assert!(!v.log.contains("first line"), "the start was cut off");
+    }
+
+    #[test]
+    fn a_multibyte_character_at_the_cut_neither_panics_nor_leaves_a_piece() {
+        let redactor = Redactor::new();
+        for after in 4040..4110 {
+            let mut v = view();
+            stream(&mut v, &redactor, &"\u{e9}".repeat(100));
+            stream(&mut v, &redactor, &KEY[..25]);
+            stream(
+                &mut v,
+                &redactor,
+                &format!("{}{}", &KEY[25..], "\u{20ac}".repeat(after / 3)),
+            );
+            stream(&mut v, &redactor, &"y".repeat(after % 3));
+            assert!(std::str::from_utf8(v.tail.as_bytes()).is_ok());
+            assert_no_piece(&format!("tail ({after})"), &shown(&v, &redactor));
+        }
+    }
+}

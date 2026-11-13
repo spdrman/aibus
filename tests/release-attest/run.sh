@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for tools/release-attest. A throwaway key and a throwaway git repo in a temp dir; the
-# runner is a fake, so no container starts and no cargo runs. Needs bash, git, jq and ssh-keygen.
+# runner is a fake, so no container starts and no cargo runs. Needs bash, git, jq, perl and ssh-keygen.
 set -u
 # Start from a known environment: whatever the calling shell exported for the gate must not change a result.
 unset RELEASE_E2E_HOST RELEASE_E2E_SKIP RELEASE_E2E_CMD RELEASE_E2E_TEST_STAMPS RELEASE_GATE_TEST RELEASE_ATTEST_SH DH_HOST DH_CPUS DH_MEMORY DH_UNFENCED
@@ -395,6 +395,83 @@ for k in 1 2; do
   expect "mv failure #$k without --replace exits 1" test $rc = 1
   expect "...leaves the tree clean and no release-attest/" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && [ ! -e '$r/release-attest' ]"
 done
+
+# ---------- second review of #242: job control, signal forwarding, exit status, the real signature, signals mid-install
+printf 'set -m\n' >"$t/monitor.env"
+if [ $pty_ok = 1 ]; then
+  r=$t/repo60; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env SUITES_LIST="$SUITES"; pty 8 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m.out" 2>&1; rc=$?
+  expect "with job control on (BASH_ENV set -m) a passphrase key is still refused at once (exit 2)" test $rc = 2
+  expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-m.out' && ! grep -qi 'enter passphrase' '$t/pty-m.out'"
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SHELLOPTS=braceexpand:hashall:interactive-comments:monitor SUITES_LIST="$SUITES"; pty 8 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m2.out" 2>&1; rc=$?
+  expect "...and with SHELLOPTS=...:monitor" test $rc = 2
+  if [ $agent_ok = 1 ]; then
+    # the key leaves the agent mid-run (ssh-add -t): the real signature fails, it does not prompt
+    SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
+    SSH_AUTH_SOCK=$agent_sock SSH_ASKPASS=$t/askpass.sh SSH_ASKPASS_REQUIRE=force ssh-add -t 3 "$t/pkey" </dev/null >/dev/null 2>&1
+    r=$t/repo61; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
+    SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 14 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sleep 5; sh $t/fake.sh" >"$t/pty-d.out" 2>&1; rc=$?
+    expect "a key that drops out of the agent mid-run fails the real signature (exit 1), no prompt, no hang" test $rc = 1
+    expect "...without a passphrase prompt, with a message to load the key, and a clean tree" bash -c "! grep -qi 'enter passphrase' '$t/pty-d.out' && grep -q 'ssh-add' '$t/pty-d.out' && [ -z \"\$(git -C '$r' status --porcelain)\" ]"
+    SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
+  fi
+fi
+# the wrapper itself failing is not 'the key cannot sign'
+mkdir "$t/badperl"; printf '#!/bin/sh\nexit 125\n' >"$t/badperl/perl"; chmod +x "$t/badperl/perl"
+r=$t/repo62; mkrepo "$r" 1.2.3
+PATH="$t/badperl:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/bp.out" 2>&1; rc=$?
+expect "a wrapper that cannot detach is refused (exit 2) with its own message" bash -c "test $rc = 2 && grep -q 'cannot detach the terminal for the key check' '$t/bp.out' && ! grep -q 'the key cannot sign' '$t/bp.out'"
+# ssh-keygen's exit status comes back through the wrapper, and a signal shows as 128+n
+mkdir "$t/rcbin"
+cat >"$t/rcbin/ssh-keygen" <<RCS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) [ -n "\${RC_KILL:-}" ] && kill -\$RC_KILL \$\$; exit \${RC_EXIT:-0} ;; esac
+exec "$realsk" "\$@"
+RCS
+chmod +x "$t/rcbin/ssh-keygen"
+r=$t/repo63; mkrepo "$r" 1.2.3
+PATH="$t/rcbin:$PATH" RC_EXIT=7 SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/rc7.out" 2>&1
+expect "ssh-keygen's exit status 7 reaches the message" grep -q 'ssh-keygen exited 7' "$t/rc7.out"
+PATH="$t/rcbin:$PATH" RC_KILL=KILL SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/rck.out" 2>&1
+expect "a signal-killed ssh-keygen shows as 128+n (137)" grep -q 'ssh-keygen exited 137' "$t/rck.out"
+# TERM sent to the wrapper stops a hung preflight promptly
+mkdir "$t/hangbin"
+cat >"$t/hangbin/ssh-keygen" <<HGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) echo \$PPID >"$t/hang.pid"; sleep 20; exit 1 ;; esac
+exec "$realsk" "\$@"
+HGS
+chmod +x "$t/hangbin/ssh-keygen"; rm -f "$t/hang.pid"
+r=$t/repo64; mkrepo "$r" 1.2.3
+PATH="$t/hangbin:$PATH" SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" >"$t/hang.out" 2>&1 &
+apid=$!; for _ in $(seq 1 40); do [ -s "$t/hang.pid" ] && break; sleep 0.25; done
+[ -s "$t/hang.pid" ] && kill -TERM "$(cat "$t/hang.pid")" 2>/dev/null
+for _ in $(seq 1 24); do kill -0 $apid 2>/dev/null || break; sleep 0.25; done
+if kill -0 $apid 2>/dev/null; then bad "TERM to the wrapper stops a hung preflight within 6 seconds"; kill -9 $apid 2>/dev/null; else ok "TERM to the wrapper stops a hung preflight within 6 seconds"; fi
+wait $apid 2>/dev/null; hrc=$?
+expect "...and attest.sh refuses (exit 2) instead of going on" test $hrc = 2
+# a signal between the two renames restores the old pair and removes the stage directory
+cat >"$t/mvbin/mv" <<'MVS'
+#!/bin/sh
+c=$(cat "$MV_COUNT" 2>/dev/null || echo 0); c=$((c + 1)); echo $c >"$MV_COUNT"
+[ "$c" = "$MV_FAIL" ] && exit 1
+[ "$c" = "${MV_SIG:-0}" ] && { kill -TERM $PPID; sleep 1; }
+exec /bin/mv "$@"
+MVS
+for mode in replace fresh; do
+  r=$t/repo7$mode; mkrepo "$r" 1.2.3; extra=
+  if [ $mode = replace ]; then attest "$r" >/dev/null 2>&1; commit_attest "$r"; extra=--replace; fi
+  echo 0 >"$t/mvcount"
+  PATH="$t/mvbin:$PATH" MV_COUNT=$t/mvcount MV_FAIL=0 MV_SIG=2 SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" $extra >/dev/null 2>&1; rc=$?
+  expect "TERM between the renames ($mode) exits 143" test $rc = 143
+  expect "...leaves the tree clean, no stage directory and no half pair" bash -c "[ -z \"\$(git -C '$r' status --porcelain)\" ] && ! ls -A '$r/release-attest' 2>/dev/null | grep -q stage && { [ '$mode' = replace ] || [ ! -e '$r/release-attest' ]; }"
+done
+# a restore that fails keeps the stage directory (it holds the old copy) and says where
+mkdir "$t/cpbin"; printf '#!/bin/sh\ncase "$*" in *"/old."*" "*) exit 1 ;; esac\nexec /bin/cp "$@"\n' >"$t/cpbin/cp"; chmod +x "$t/cpbin/cp"
+r=$t/repo80; mkrepo "$r" 1.2.3; attest "$r" >/dev/null 2>&1; commit_attest "$r"; echo 0 >"$t/mvcount"
+PATH="$t/cpbin:$t/mvbin:$PATH" MV_COUNT=$t/mvcount MV_FAIL=2 SUITES_LIST="$SUITES" "$tools/attest.sh" --repo "$r" --key "$t/key" --runner-cmd "sh $t/fake.sh" --replace >"$t/cpf.out" 2>&1
+expect "a failed restore keeps the stage directory with the old copy" bash -c "ls '$r'/release-attest/.attest-stage.*/old.0 >/dev/null"
+expect "...and the message says where it is" grep -q 'attest-stage' "$t/cpf.out"
 
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }

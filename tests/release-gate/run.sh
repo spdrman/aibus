@@ -444,16 +444,21 @@ if command -v script >/dev/null && command -v timeout >/dev/null; then
     timeout 6 script -q /dev/null tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run < <(sleep 8) ) >"$t/pty-rel.out" 2>&1; rc=$?
   expect "from a terminal, release.sh refuses a passphrase key that is not loaded at once (exit 2, no hang)" test $rc = 2
   expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-rel.out' && ! grep -qi 'enter passphrase' '$t/pty-rel.out'"
+  printf 'set -m\n' >"$t/monitor.env"
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
+    timeout 8 script -q /dev/null tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run < <(sleep 10) ) >"$t/pty-rel2.out" 2>&1; rc=$?
+  expect "with job control on, release.sh still refuses a passphrase key at once (exit 2), no prompt" bash -c "test $rc = 2 && ! grep -qi 'enter passphrase' '$t/pty-rel2.out'"
 else echo "SKIP: script(1) or timeout is missing, the pseudo-terminal test does not run" >&2; fi
 # an interrupt during the preflight leaves no release-signcheck.* directory
 r=$t/rel236t; mkrepo "$r"; usegate "$r"; mkdir "$t/tmp-int"
 cat >"$t/skbin/ssh-keygen" <<SKI
 #!/bin/sh
-case " \$* " in *" -Y sign "*) kill -TERM \$PPID; sleep 1; exit 1 ;; esac
+case " \$* " in *" -Y sign "*) p=\$PPID; while [ -n "\$p" ] && ! ps -o command= -p \$p | grep -q 'release-gate/release.sh'; do p=\$(ps -o ppid= -p \$p | tr -d ' '); done; [ -n "\$p" ] && kill -TERM \$p; sleep 1; exit 1 ;; esac
 exec $realsk "\$@"
 SKI
 chmod +x "$t/skbin/ssh-keygen"
-PATH="$t/skbin:$PATH" TMPDIR=$t/tmp-int RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run >/dev/null 2>&1
+PATH="$t/skbin:$PATH" TMPDIR=$t/tmp-int RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run >/dev/null 2>&1; rc=$?
+expect "an interrupted preflight (TERM) exits 143" test $rc = 143
 expect "an interrupted preflight leaves no release-signcheck directory" test -z "$(ls "$t/tmp-int")"
 
 # ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters

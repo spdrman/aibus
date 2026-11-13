@@ -55,14 +55,10 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ### Providers, docs and doctor (F10, #118)
 
-* The providers epic in one place: a provider is a definition (a preset or a `[[provider]]`) that names a wire protocol, models carry their own capabilities, there are adapters for Gemini and for Claude on Bedrock and Vertex, OAuth works where a vendor publishes a login for third-party applications, the model tables live in `catalog/`, and accounts can fall back to one another. This closes what 0.1.0 listed as in the code but not usable: the OAuth method and the Bedrock and Vertex transports.
+* The providers epic in one place: a provider is a definition (a preset or a `[[provider]]`) that names a wire protocol, models carry their own capabilities, there are adapters for Gemini and for Claude on Bedrock and Vertex, OAuth works where a vendor publishes a login for third-party applications, the model tables live in `catalog/`, and accounts can fall back to one another. What 0.1.0 listed as in the code but not usable (the OAuth method and the Bedrock and Vertex transports) is covered by tests now: the Bedrock and Vertex adapters run through the conformance suite against fake servers, the native Gemini adapter has tests against fakes, and the OAuth flows run against a fake authorization server. None of it has had a live run.
 * `docs/PROVIDERS.md` is rewritten around account, provider definition, api and auth, with a page per api. `docs/CAPABILITIES.md` is new and generated (one row per preset, 24 of them) by a test that also fails when the committed page is out of date. `docs/MIGRATION.md` covers a 0.1.0 config: it loads unchanged, and three cases change shape. `docs/SECURITY.md` has rows for a hostile `[[provider]]` and for the OAuth callback, and notes on the `gcloud` subprocess and on the catalog never being fetched at run time.
 * `aibus doctor` prints a row per provider (wire, URL, preset or custom, auth, catalog rows, cache age) and warns about a `[[provider]]` no enabled account uses.
 * Loading a config warns, with the file and line, about a `base_url` that is plain `http://` to an address that is neither loopback nor a private network.
-
-### Known issues
-
-* No live run against Gemini, Bedrock or Vertex has happened in CI, the OpenRouter login has not been tried against openrouter.ai from a release build, and the Windows build has not been run on a Windows machine. `docs/RELEASE.md` lists the manual checks.
 
 ### Build
 
@@ -73,6 +69,7 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ### Known issues
 
+* These manual checks from `docs/RELEASE.md` were not run for 0.2.0: the keychain on each OS, the terminal emulators (iTerm2, Terminal.app, kitty, WezTerm, Windows Terminal), the Windows build on a Windows machine, a live run against Gemini, Bedrock and Vertex, and the OpenRouter login against openrouter.ai from a release build. Bedrock and Vertex are covered by the conformance suite against fake servers only, and Gemini by adapter tests against fakes.
 * The `?` screen shows the key map and not the commands; type `/` for the list, or read the table in the README. Drawing the commands there needs a second page, which changes every help snapshot (see G10 in `docs/DECISIONS.md`).
 * `/logout <text>` repeats the text in its notice when no account has that name, and the prompt history keeps the line. `/login` has no such echo.
 

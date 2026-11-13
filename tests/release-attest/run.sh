@@ -259,6 +259,86 @@ expect "no list file is left next to a destination" test -z "$(ls "$t" | grep -e
 r=$t/repo17; mkrepo "$r" 1.2.3
 expect "the attestation tree hash is still the tree id without release-attest/" test "$(tree_hash "$r" HEAD)" = "$(git -C "$r" rev-parse 'HEAD^{tree}')"
 
+# ---------- export_tree: blobs are read with `git cat-file --batch`, 500 per call (issue #237)
+# A stub git on PATH logs every call and delegates to the real git; STUB_MODE rewrites what a --batch reply looks like.
+sb=$t/stubbin; mkdir -p "$sb"; REAL_GIT=$(command -v git); export REAL_GIT
+cat >"$sb/git" <<'STUB'
+#!/bin/bash
+echo "$*" >>"$STUB_LOG"
+case " $* " in *" cat-file --batch"*) ;; *) exec "$REAL_GIT" "$@" ;; esac
+case ${STUB_MODE:-} in
+  fail)      "$REAL_GIT" "$@"; exit 3 ;;
+  truncate)  "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; print substr($d, 0, length($d) - 3)'; exit 0 ;;
+  missing)   read -r first; echo "$first missing"; exit 0 ;;
+  wrongsha)  "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^[0-9a-f]{40}/0000000000000000000000000000000000000000/; print $d'; exit 0 ;;
+  extra)     "$REAL_GIT" "$@"; echo junk; exit 0 ;;
+  shortsize) "$REAL_GIT" "$@" | perl -e 'local $/; $d = <STDIN>; $d =~ s/^([0-9a-f]+ blob )(\d+)/$1.($2+4)/e; print $d'; exit 0 ;;
+  *)         exec "$REAL_GIT" "$@" ;;
+esac
+STUB
+chmod +x "$sb/git"; export STUB_LOG=$t/stub.log
+bx=$t/bx; mkdir -p "$bx"; git -C "$bx" init -q; bg() { git -C "$bx" "$@"; }
+bsha() { bg hash-object -w --stdin; }   # content on stdin
+# trees of N entries over seven shared blobs (so the same sha repeats), named f1..fN
+mkn() { # n -> tree id
+  local n=$1 i; local -a sh=()
+  for i in 0 1 2 3 4 5 6; do sh[i]=$(printf 'content %s\n' "$i" | bsha); done
+  for ((i = 1; i <= n; i++)); do printf '100644 blob %s\tf%s\0' "${sh[i % 7]}" "$i"; done | bg mktree -z
+}
+same_as_tree() { # dir tree : every file hashes to the sha the tree lists, same names, no extra files
+  local d=$1 want got
+  want=$(bg ls-tree -r "$2" | sed 's/^[0-9]* blob //; s/\t/ /' | LC_ALL=C sort -k2)
+  got=$(cd "$d" && find . -type f | sed 's|^\./||' | while IFS= read -r f; do printf '%s %s\n' "$(bg hash-object --no-filters -- "$d/$f")" "$f"; done | LC_ALL=C sort -k2)
+  [ -n "$want" ] && [ "$want" = "$got" ]
+}
+rehash() { # workdir gitdir : the tree id of a directory's content
+  GIT_DIR=$2 GIT_WORK_TREE=$1 GIT_INDEX_FILE=$1.idx bash -c 'git add -A -f . && git write-tree'
+}
+for cnt in 499 500 501 1000 1001; do
+  tr=$(mkn $cnt); : >"$STUB_LOG"
+  PATH=$sb:$PATH export_tree "$bx" "$tr" "$t/bn$cnt" >/dev/null 2>&1
+  expect "$cnt entries with repeated shas are copied byte for byte" same_as_tree "$t/bn$cnt" "$tr"
+  calls=$(grep -c 'cat-file' "$STUB_LOG")
+  expect "...with at most $(((cnt + 499) / 500)) cat-file call(s) (got $calls)" test "$calls" -le $(((cnt + 499) / 500))
+done
+# awkward contents in one batch: a body that looks like a reply header, empty, NUL and high bytes, the word missing, a lone newline
+hdr=$(printf 'x' | bsha); fake=$(printf '%s blob 5\nhello\n%s missing\n' "$hdr" "$hdr" | bsha)
+e0=$(printf '' | bsha); bin=$(printf 'a\0b\377\376\0\0\n\n' | bsha); mis=$(printf 'missing' | bsha); nl=$(printf '\n' | bsha)
+big=$t/big20; head -c 20971520 /dev/urandom >"$big"; bigsha=$(bg hash-object -w "$big")
+lk=$(printf 'target dir/' | bsha)
+tr=$({ printf '100644 blob %s\t%s\0' "$fake" "hdr-lookalike" "$e0" "empty" "$bin" "binary" "$mis" "missing" "$nl" "newline" "$bigsha" "big" "$fake" "dup-lookalike"
+       printf '100755 blob %s\t%s\0' "$bin" "exec.sh"
+       printf '120000 blob %s\t%s\0' "$lk" "link"
+       printf '100644 blob %s\t%s\0' "$e0" $'new\nline' "$e0" $'tab\there' "$e0" "q\"uote'x" "$e0" "-dash" "$e0" "sp ace"; } | bg mktree -z)
+rm -rf "$t/bw"; PATH=$sb:$PATH export_tree "$bx" "$tr" "$t/bw" >/dev/null 2>&1
+expect "special blobs and names: the copy re-hashes to the same tree id" test "$(rehash "$t/bw" "$bx/.git")" = "$tr"
+expect "...20 MB blob identical" cmp -s "$big" "$t/bw/big"
+expect "...NUL and high bytes identical" test "$(cksum <"$t/bw/binary")" = "$(printf 'a\0b\377\376\0\0\n\n' | cksum)"
+expect "...exec bit kept" test -x "$t/bw/exec.sh" -a ! -x "$t/bw/binary"
+expect "...symlink kept with its exact target" test "$(readlink "$t/bw/link")" = "target dir/"
+# fail closed: a missing object, a short stream, a wrong header sha, a header with a wrong size, a non-zero exit
+tr=$(mkn 600)
+for m in missing truncate wrongsha shortsize extra fail; do
+  rm -rf "$t/bf-$m"
+  refuse "stub git ($m): the copy is refused" env STUB_MODE=$m PATH=$sb:$PATH bash -c ". '$tools/config.sh'; export_tree '$bx' '$tr' '$t/bf-$m'"
+done
+# a really missing object (no stub): the tree names a blob that is not in the repository
+gone=$(printf 'never stored\n' | bg hash-object --stdin)
+trm=$(printf '100644 blob %s\tgone\0' "$gone" | bg mktree -z --missing)
+refuse "a blob missing from the repository aborts the copy" export_tree "$bx" "$trm" "$t/bmiss"
+nulink=$(printf 'a\0b' | bsha)
+refuse "a symlink whose target holds a NUL aborts the copy" export_tree "$bx" "$(printf '120000 blob %s\tl\0' "$nulink" | bg mktree -z)" "$t/bnul"
+# a gitlink is never sent to cat-file
+trg=$(printf '160000 commit %s\tsub\0' 1111111111111111111111111111111111111111 | bg mktree -z --missing); : >"$STUB_LOG"
+PATH=$sb:$PATH export_tree "$bx" "$trg" "$t/bgl" >/dev/null 2>&1
+expect "a gitlink becomes an empty directory and starts no cat-file" test -d "$t/bgl/sub" -a "$(grep -c 'cat-file' "$STUB_LOG")" = 0
+# identity with git archive on this very repository's tree (it has no .gitattributes, so archive writes the same bytes)
+repo_root=$(cd "$here/../.." && pwd)
+rm -rf "$t/arc" "$t/exp-self"; mkdir -p "$t/arc"; git -C "$repo_root" archive HEAD | tar -x -C "$t/arc"
+export_tree "$repo_root" HEAD "$t/exp-self" >/dev/null 2>&1
+expect "this repository's tree: diff -r against git archive shows nothing" diff -r "$t/arc" "$t/exp-self"
+expect "...and the copy re-hashes to the commit's tree id" test "$(rehash "$t/exp-self" "$(git -C "$repo_root" rev-parse --absolute-git-dir)")" = "$(git -C "$repo_root" rev-parse 'HEAD^{tree}')"
+
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 echo "$n tests, $fails failed"

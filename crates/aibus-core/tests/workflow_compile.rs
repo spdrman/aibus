@@ -368,7 +368,7 @@ fn routes_parents_and_native_steps_compile_to_typed_edges_fan_out_and_an_envelop
             (
                 e["from"].as_str().unwrap().into(),
                 e["to"].as_str().unwrap().into(),
-                e["evidence"].as_str().unwrap().into(),
+                e["lineage"].as_str().unwrap().into(),
             )
         })
         .collect();

@@ -49,35 +49,162 @@ pub struct Decision {
     pub decision_source: String,
 }
 
-/// The table of runtimes this aibus knows.
+/// The table of runtimes this aibus knows. `aibus` is its own run loop. `cli.claude` is what
+/// the #281 spike observed of Claude Code 2.1.311 under `-p`: structured events, tool events and
+/// native child lineage, cancel only for the whole process, usage as a list-price estimate, no
+/// session resume, no host-side approval prompt and no workspace control (aibus owns worktrees).
+/// It stays `experimental` until #285 rules on the spike.
 pub fn runtime_info(rt: Runtime) -> RuntimeInfo {
-    let _ = rt;
-    unimplemented!("#283")
+    match rt {
+        Runtime::Aibus => RuntimeInfo {
+            id: "aibus",
+            status: "available",
+            capabilities: &[
+                "cancel",
+                "headless",
+                "interactive_approval",
+                "one_shot",
+                "session_resume",
+                "structured_events",
+                "tool_events",
+                "usage_report",
+                "workspace_control",
+            ],
+        },
+        Runtime::ClaudeCli => RuntimeInfo {
+            id: "cli.claude",
+            status: "experimental",
+            capabilities: &[
+                "cancel",
+                "headless",
+                "login_status",
+                "native_child_lineage",
+                "one_shot",
+                "structured_events",
+                "tool_events",
+                "usage_report",
+            ],
+        },
+    }
 }
 
 /// A warning for a step on a runtime that is not plainly available.
 pub fn status_note(rt: Runtime) -> Option<String> {
-    let _ = rt;
-    None
+    let info = runtime_info(rt);
+    (info.status != "available").then(|| {
+        format!(
+            "runtime {} is {}: the #281 spike proved it and #285 decides on it, so this step plans \
+             (aibus workflow plan --dry-run) and does not run yet",
+            info.id, info.status
+        )
+    })
 }
 
 /// `native_or_managed` becomes `native` when the runtime can show native child lineage and the
 /// parent runs on the same runtime (a native subagent lives in its parent's process); otherwise
 /// `aibus_managed`. The other two modes are what they say.
 pub fn resolve_mode(requested: Mode, runtime: Runtime, parent: Option<Runtime>) -> Mode {
-    let _ = (runtime, parent);
-    requested
+    match requested {
+        Mode::NativeOrManaged
+            if parent == Some(runtime)
+                && runtime_info(runtime)
+                    .capabilities
+                    .contains(&"native_child_lineage") =>
+        {
+            Mode::Native
+        }
+        Mode::NativeOrManaged => Mode::AibusManaged,
+        other => other,
+    }
 }
+
+/// The rules `decide` applies, in order. Part of what `policy_revision` hashes, so a change to
+/// them is a new revision.
+const RULES: &str = "jev-deterministic/1
+1 safety: risk_class is read_only, writes or side_effects, else stop (unknown_risk_class)
+2 policy: policy_revision is this one, else stop (stale_policy)
+3 availability: skip a candidate this aibus does not know or that is unavailable
+4 capabilities: skip a candidate missing a required capability (native mode requires native_child_lineage)
+5 preference: the first candidate left wins (pinned_runtime when it was the only one, else capability_match)
+6 mode: native_or_managed is native under a parent on the same runtime with native_child_lineage, else aibus_managed
+none left: no_candidate, and a person decides";
 
 /// The policy's revision: the hash of its rules and runtime table, so a plan records which
 /// policy made its decisions.
 pub fn policy_revision() -> String {
-    unimplemented!("#283")
+    let table = serde_json::to_string(&[
+        runtime_info(Runtime::Aibus),
+        runtime_info(Runtime::ClaudeCli),
+    ])
+    .unwrap_or_default();
+    super::compile::content_hash(&format!("{RULES}\n{table}\n"))
 }
 
 /// Decides one request (spec 5.2 precedence: safety, availability, capabilities, then the
 /// author's order).
 pub fn decide(req: &Request) -> Decision {
-    let _ = req;
-    unimplemented!("#283")
+    let decided = |runtime: Option<String>,
+                   mode: Option<Mode>,
+                   reason: &str,
+                   evidence: Vec<String>| Decision {
+        selected_runtime: runtime,
+        execution_mode: mode,
+        reason_code: reason.to_owned(),
+        policy_evidence: evidence,
+        decision_source: "jev_deterministic".to_owned(),
+    };
+    let mut evidence = vec![format!("risk:{}", req.risk_class)];
+    if !["read_only", "writes", "side_effects"].contains(&req.risk_class.as_str()) {
+        return decided(None, None, "unknown_risk_class", evidence);
+    }
+    if req.policy_revision != policy_revision() {
+        return decided(
+            None,
+            None,
+            "stale_policy",
+            vec![format!("policy_revision:{}", req.policy_revision)],
+        );
+    }
+    let mut needs: Vec<&str> = req.requires.iter().map(String::as_str).collect();
+    if req.requested_mode == Mode::Native && !needs.contains(&"native_child_lineage") {
+        needs.push("native_child_lineage");
+    }
+    let known = |id: &str| {
+        [Runtime::Aibus, Runtime::ClaudeCli]
+            .into_iter()
+            .find(|rt| rt.as_str() == id)
+    };
+    for id in &req.candidates {
+        let Some(rt) = known(id) else {
+            evidence.push(format!("unknown_runtime:{id}"));
+            continue;
+        };
+        let info = runtime_info(rt);
+        if info.status == "unavailable" {
+            evidence.push(format!("unavailable:{id}"));
+            continue;
+        }
+        if let Some(missing) = needs.iter().find(|c| !info.capabilities.contains(c)) {
+            evidence.push(format!("missing:{missing}@{id}"));
+            continue;
+        }
+        evidence.push(format!("status:{id}={}", info.status));
+        let parent = req.parent_runtime.as_deref().and_then(known);
+        let mode = resolve_mode(req.requested_mode, rt, parent);
+        evidence.push(
+            match (req.requested_mode, mode) {
+                (Mode::NativeOrManaged, Mode::Native) => "mode:native_child_lineage",
+                (Mode::NativeOrManaged, _) => "mode:no_native_parent",
+                _ => "mode:as_requested",
+            }
+            .to_owned(),
+        );
+        let reason = if req.candidates.len() == 1 {
+            "pinned_runtime"
+        } else {
+            "capability_match"
+        };
+        return decided(Some(id.clone()), Some(mode), reason, evidence);
+    }
+    decided(None, None, "no_candidate", evidence)
 }

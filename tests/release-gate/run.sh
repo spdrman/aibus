@@ -3,16 +3,21 @@
 # a fake e2e command, a fake attest runner and a fake `gh` on PATH. No container, no cargo, no real e2e.
 # Needs bash, git, jq, perl and ssh-keygen.
 set -u
+# Start from a known environment: whatever the calling shell exported for the gate must not change a result.
+unset RELEASE_E2E_HOST RELEASE_E2E_SKIP RELEASE_E2E_CMD RELEASE_E2E_TEST_STAMPS RELEASE_GATE_TEST RELEASE_ATTEST_SH DH_HOST DH_CPUS DH_MEMORY DH_UNFENCED
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/../.." && pwd)
-t=$(mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
+t=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/gate-test.XXXXXX") || exit 1
 [ -n "$t" ] && [ -d "$t" ] || exit 1   # no -e here: an empty $t would aim every rm -rf "$t/..." at a path under /
 trap 'rm -rf "$t"' EXIT
+# Everything the runs create (log files, kept log directories) goes under $t, which the trap above removes.
+mkdir "$t/tmp" && export TMPDIR=$t/tmp || exit 1
 # No test may reach the real dh.sh (or docker, or ssh): DH_SH points at a stub that logs the call and fails.
 # Tests that want a fake docker host set their own DH_SH on the command; this default catches the rest.
 printf '#!/bin/sh\necho "$*" >>"$DH_REAL_LOG"\nexit 1\n' >"$t/dh-real-stub.sh" && chmod +x "$t/dh-real-stub.sh" || exit 1
 export DH_SH=$t/dh-real-stub.sh DH_REAL_LOG=$t/dh-real.log
 fails=0 n=0
+. "$here/../lib/pty.sh"
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 bad() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $1"; }
 expect() { name=$1; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else bad "$name"; fi; }
@@ -63,6 +68,11 @@ mkrepo() { # dir : a work repo with an origin, the gate files, version 0.1.0
 usegate() { cd "$1" || exit 1; RELEASE_E2E_TEST_STAMPS=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)/release-e2e; export RELEASE_E2E_TEST_STAMPS; }
 export GH_LOG=$t/gh.log
 export PATH="$t/bin:$PATH"
+# issue #251: every gate script calls /usr/bin/mktemp by absolute path. This spy sits first on PATH, logs any
+# call that reaches it and answers with an existing directory; the check at the end of the file fails if a
+# gate script (its temp dir, kept logs, stamp, PR body, hooks, tree export) still calls a bare mktemp.
+mkdir "$t/spybin" "$t/spyvictim" && printf '#!/bin/sh\necho "$*" >>"$SPY_LOG"\necho "$SPY_VICTIM"\n' >"$t/spybin/mktemp" && chmod +x "$t/spybin/mktemp" || exit 1
+export SPY_LOG=$t/spy.log SPY_VICTIM=$t/spyvictim PATH="$t/spybin:$PATH"
 
 
 # ---------- hooks and runner
@@ -377,6 +387,146 @@ expect "Cargo.toml and the path crates in Cargo.lock moved" bash -c "grep -q '^v
 expect "no old workspace version is left (the registry crate's 0.1.0 stays on purpose)" bash -c "! grep -n '0\.1\.0' Cargo.toml && [ \$(grep -c '0\.1\.0' Cargo.lock) = 1 ]"
 expect "the script made no tag, locally or on origin" test -z "$(git tag -l)$(git ls-remote --tags origin)"
 
+# ---------- issue 236: sign preflight, no-bump wording
+realsk=$(command -v ssh-keygen); mkdir "$t/skbin"
+cat >"$t/skbin/ssh-keygen" <<SKS
+#!/bin/sh
+case " \$* " in *" -Y sign "*)
+  echo "askpass=\${SSH_ASKPASS_REQUIRE:-unset} args=\$*" >>"\$SK_LOG"
+  [ "\${SK_MODE:-ok}" = nosign ] && { echo "incorrect passphrase supplied to decrypt private key" >&2; exit 255; } ;;
+esac
+exec "$realsk" "\$@"
+SKS
+chmod +x "$t/skbin/ssh-keygen"; export SK_LOG=$t/sk.log
+cat >"$t/dh-pf.sh" <<'DHP'
+#!/bin/sh
+echo "$*" >>"$DH_PF_LOG"
+exit 1
+DHP
+chmod +x "$t/dh-pf.sh"
+r=$t/rel236; mkrepo "$r"; usegate "$r"; : >"$t/dh-pf.log"; : >"$SK_LOG"; rm -f "$t/e2e.marker"; : >"$GH_LOG"
+PATH="$t/skbin:$PATH" SK_MODE=nosign DH_SH="$t/dh-pf.sh" DH_PF_LOG="$t/dh-pf.log" RELEASE_E2E_CMD="touch $t/e2e.marker" RELEASE_ATTEST_SH=$t/attest-ok.sh \
+  tools/release-gate/release.sh 0.2.0 --key "$t/key" --yes >"$t/pf.out" 2>&1; rc=$?
+expect "a key that cannot sign without a prompt stops release.sh with exit 2" test $rc = 2
+expect "...with the ssh-add hint" grep -q 'the key cannot sign without a prompt: load it with ssh-add .*key first' "$t/pf.out"
+expect "...before the e2e, any dh.sh call, any branch or gh call" bash -c "[ ! -e '$t/e2e.marker' ] && [ ! -s '$t/dh-pf.log' ] && [ ! -s '$GH_LOG' ] && ! git show-ref -q refs/heads/release-prep/v0.2.0"
+expect "...and the tree is clean" test -z "$(git status --porcelain)"
+expect "the preflight signs with SSH_ASKPASS_REQUIRE=never" grep -q 'askpass=never' "$t/sk.log"
+: >"$SK_LOG"
+PATH="$t/skbin:$PATH" SK_MODE=nosign RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run >"$t/pf2.out" 2>&1; rc=$?
+expect "a dry run reports the unusable key too" test $rc = 2
+# wording: a dry run and the PR body say whether a bump commit is needed
+rel 0.2.0 --dry-run >"$t/dry-bump.out" 2>&1
+expect "a dry run on a lower manifest says it would set the version" grep -q 'would: set \[workspace.package\] version = "0.2.0"' "$t/dry-bump.out"
+mkdir "$t/bin-body"
+cat >"$t/bin-body/gh" <<'GHB'
+#!/bin/sh
+echo "$*" >>"$GH_LOG"
+while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cp "$2" "$GH_BODY"; shift; done
+echo https://example.invalid/pr/1
+GHB
+chmod +x "$t/bin-body/gh"; export GH_BODY=$t/pr-body.txt
+r=$t/rel236b; mkrepo "$r"; usegate "$r"
+sed -i.bak 's/^version = "0.1.0"/version = "0.2.0"/' Cargo.toml; rm Cargo.toml.bak
+perl -0pi -e 's/version = "0.1.0"\n(?!source)/version = "0.2.0"\n/g' Cargo.lock
+git commit -qam "manifest already at 0.2.0"; git push -q origin main
+rel 0.2.0 --dry-run >"$t/dry-nobump.out" 2>&1
+expect "a dry run with the manifest already at the version says no bump commit is needed" grep -q 'no bump commit needed, the manifest is already 0.2.0' "$t/dry-nobump.out"
+expect "...and does not say it would bump or set the version" bash -c "! grep -Eqi 'would: set|would bump' '$t/dry-nobump.out'"
+PATH="$t/bin-body:$PATH" rel 0.2.0 --yes --closes 9 >"$t/nobump.out" 2>&1; expect "a release with no bump needed succeeds" test $? = 0
+expect "...makes no bump commit" test "$(git log --format=%s -2 | tr '\n' ,)" = "Attest the suites for 0.2.0,manifest already at 0.2.0,"
+expect "...and the PR body does not claim a bump" bash -c "! grep -qi 'I bumped' '$GH_BODY'"
+expect "...but says the manifest already had the version" grep -q 'no bump commit, the manifest already said 0.2.0' "$GH_BODY"
+rm -f "$GH_BODY"
+r=$t/rel236c; mkrepo "$r"; usegate "$r"
+PATH="$t/bin-body:$PATH" rel 0.2.0 --yes >"$t/bump.out" 2>&1; expect "a release that needs the bump succeeds" test $? = 0
+expect "...and its PR body says I bumped the version" grep -q 'I bumped the version' "$GH_BODY"
+
+# ---------- review of #242: release.sh's preflight has no controlling terminal, and leaves nothing behind when interrupted
+ssh-keygen -q -t ed25519 -N 'pw236' -C pass -f "$t/pkey"   # a passphrase key; no agent is started or touched here
+if pty_available; then
+  r=$t/rel236p; mkrepo "$r"; usegate "$r"; cp "$t/pkey.pub" "$PUBKEY_PATH"; git commit -qam pub; git push -q origin main
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
+    pty_run 6 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel.out" 2>&1; rc=$?
+  expect "from a terminal, release.sh refuses a passphrase key that is not loaded at once (exit 2, no hang)" test $rc = 2
+  expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-rel.out' && ! grep -qi 'enter passphrase' '$t/pty-rel.out'"
+  printf 'set -m\n' >"$t/monitor.env"
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
+    pty_run 8 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel2.out" 2>&1; rc=$?
+  expect "with job control on, release.sh still refuses a passphrase key at once (exit 2), no prompt" bash -c "test $rc = 2 && ! grep -qi 'enter passphrase' '$t/pty-rel2.out'"
+else echo "SKIP: script(1) or timeout is missing, the pseudo-terminal test does not run" >&2; fi
+# an interrupt during the preflight leaves no release-signcheck.* directory
+r=$t/rel236t; mkrepo "$r"; usegate "$r"; mkdir "$t/tmp-int"
+cat >"$t/skbin/ssh-keygen" <<SKI
+#!/bin/sh
+case " \$* " in *" -Y sign "*) p=\$PPID; while [ -n "\$p" ] && ! ps -o command= -p \$p | grep -q 'release-gate/release.sh'; do p=\$(ps -o ppid= -p \$p | tr -d ' '); done; [ -n "\$p" ] && kill -TERM \$p; sleep 1; exit 1 ;; esac
+exec $realsk "\$@"
+SKI
+chmod +x "$t/skbin/ssh-keygen"
+PATH="$t/skbin:$PATH" TMPDIR=$t/tmp-int RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run >/dev/null 2>&1; rc=$?
+expect "an interrupted preflight (TERM) exits 143" test $rc = 143
+expect "an interrupted preflight leaves no release-signcheck directory" test -z "$(ls "$t/tmp-int")"
+
+# ---------- third review of #242: a hung ssh-keygen and signals (release.sh)
+mkdir "$t/hangbin"
+cat >"$t/hangbin/ssh-keygen" <<HGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; exec sleep 30 ;; esac
+exec $realsk "\$@"
+HGS
+chmod +x "$t/hangbin/ssh-keygen"
+hang_run() { # mode(group|pid) sig out cmd... ; sets hrc
+  local mode=$1 sig=$2 out=$3; shift 3; rm -f "$t/hang.pid" "$t/hang.ppid"
+  perl -MPOSIX -e 'setpgid(0,0); $SIG{INT} = "DEFAULT"; exec @ARGV' "$@" >"$out" 2>&1 </dev/null &
+  local hp=$! i
+  for i in $(seq 1 60); do [ -s "$t/hang.ppid" ] && break; sleep 0.25; done
+  if [ $mode = group ]; then kill -$sig -- -$hp 2>/dev/null; else kill -$sig $hp 2>/dev/null; fi
+  for i in $(seq 1 32); do kill -0 $hp 2>/dev/null || break; sleep 0.25; done
+  if kill -0 $hp 2>/dev/null; then kill -9 $hp 2>/dev/null; hrc=still-running; else wait $hp; hrc=$?; fi
+  sleep 0.5
+}
+gone() { [ -s "$t/hang.pid" ] && ! kill -0 "$(cat "$t/hang.pid")" 2>/dev/null && ! kill -0 "$(cat "$t/hang.ppid")" 2>/dev/null; }
+r=$t/rel236h; mkrepo "$r"; usegate "$r"; mkdir "$t/tmp-h"
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/h-$1-$2.out" env PATH="$t/hangbin:$PATH" TMPDIR=$t/tmp-h RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run
+  expect "release.sh, $2 to the $1 during a hung preflight: exit $3" test "$hrc" = "$3"
+  expect "...no wrong message" bash -c "! grep -q 'the key cannot sign\|ssh-keygen exited' '$t/h-$1-$2.out'"
+  expect "...the hung ssh-keygen and its wrapper are gone, and no release-signcheck directory is left" bash -c "$(declare -f gone); t='$t'; gone && [ -z \"\$(ls '$t/tmp-h')\" ]"
+done
+
+# #252: a ssh-keygen that ignores the signal is KILLed after the grace period, same exit codes
+mkdir "$t/ignbin"
+cat >"$t/ignbin/ssh-keygen" <<IGS
+#!/bin/sh
+case " \$* " in *" -Y sign "*) trap '' INT TERM HUP; echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; sleep 30 ;; esac
+exec $realsk "\$@"
+IGS
+chmod +x "$t/ignbin/ssh-keygen"; mkdir "$t/tmp-i"
+for spec in "group INT 130" "pid TERM 143" "pid HUP 129"; do
+  set -- $spec
+  hang_run $1 $2 "$t/i-$1-$2.out" env PATH="$t/ignbin:$PATH" TMPDIR=$t/tmp-i RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --dry-run
+  expect "#252 release.sh, $2 to the $1 with a child that ignores it: exit $3 within 8 s" test "$hrc" = "$3"
+  expect "...the child that ignored the signal and its wrapper are gone" gone
+done
+
+# ---------- fourth review of #242: Ctrl-C during step 5 stops release.sh with 130, not 'did not sign a green run'
+mkdir "$t/third"
+cat >"$t/third/ssh-keygen" <<TRD
+#!/bin/sh
+case " \$* " in *" -Y sign "*)
+  echo x >>"$t/sign.count"; n=\$(wc -l <"$t/sign.count" | tr -d ' ')
+  if [ "\$n" = 3 ]; then echo \$\$ >"$t/hang.pid"; echo \$PPID >"$t/hang.ppid"; exec sleep 30; fi ;;
+esac
+exec $realsk "\$@"
+TRD
+chmod +x "$t/third/ssh-keygen"
+r=$t/rel236s; mkrepo "$r"; usegate "$r"; rm -f "$t/sign.count"; : >"$GH_LOG"
+hang_run group INT "$t/h-step5.out" env PATH="$t/third:$PATH" RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh tools/release-gate/release.sh 0.2.0 --key "$t/key" --yes
+expect "release.sh: INT to the group while attest.sh signs (3rd sign call) exits 130" test "$hrc" = 130
+expect "...and does not say attest.sh did not sign a green run" bash -c "! grep -q 'did not sign' '$t/h-step5.out'"
+expect "...nothing was pushed or opened" bash -c "[ -z \"\$(git ls-remote origin 'refs/heads/release-prep/*')\" ] && [ ! -s '$GH_LOG' ]"
+
 # ---------- follow-up: checked stdin save, temp paths, characters in a reason, invisible characters
 base2 s20
 echo fu >fu; git add fu; git commit -qm fu
@@ -391,20 +541,19 @@ expect "an unusable TMPDIR (mktemp fails) refuses the push with a message of its
 # the test runners must not carry on with an empty temp dir: rm -rf "$t/..." would aim at paths under /
 runner_guarded=(0 0); ri=0
 for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
-  c1="grep -A1 '^t=\$(mktemp' '$src/$runner' | grep -q '|| exit 1'"
+  c1="grep -A1 '^t=\$(/usr/bin/mktemp' '$src/$runner' | grep -q '|| exit 1'"
   c2="grep -q '\[ -n \"\$t\" \] && \[ -d \"\$t\" \]' '$src/$runner'"
   expect "$runner stops when mktemp fails" bash -c "$c1"
   expect "$runner checks the temp dir is a non-empty directory" bash -c "$c2"
   if bash -c "$c1" >/dev/null 2>&1 && bash -c "$c2" >/dev/null 2>&1; then runner_guarded[$ri]=1; fi
   ri=$((ri + 1))
 done
-mkdir -p "$t/failmk"; printf '#!/bin/sh\nexit 1\n' >"$t/failmk/mktemp"; chmod +x "$t/failmk/mktemp"
 ri=0
 for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
   # run the stub only on a runner whose guard the grep above just confirmed: an unguarded runner (a mixed checkout) would carry on with t='' and aim rm -rf at /
   g=${runner_guarded[$ri]}; ri=$((ri + 1))
   [ "$g" = 1 ] || { bad "$runner is not guarded, so the failing-mktemp stub run was skipped"; continue; }
-  out=$(PATH="$t/failmk:$PATH" bash "$src/$runner" 2>&1); rc=$?
+  out=$(TMPDIR="$t/no-such-dir" bash "$src/$runner" 2>/dev/null); rc=$?
   expect "$runner exits 1 at once, running nothing, when mktemp fails" bash -c "test $rc = 1 && test -z \"\$1\"" _ "$out"
 done
 expect "e2e.sh no longer copies the red log to a predictable name" bash -c "! grep -q 'release-e2e-log-\\\$\\\$' '$src/tools/release-gate/e2e.sh'"
@@ -436,6 +585,67 @@ mkdir -p "$t/badperl"; realperl=$(command -v perl)
 printf '#!/bin/sh\ncase "$*" in *length*) printf x ;; *) exec %s "$@" ;; esac\n' "$realperl" >"$t/badperl/perl"; chmod +x "$t/badperl/perl"
 refuse "a character count that is not a number refuses the skip (e2e.sh, gate_skipped)" env PATH="$t/badperl:$PATH" RELEASE_E2E_SKIP="a perfectly long reason" tools/release-gate/e2e.sh
 refuse "...and in the push hook" bash -c "printf 'refs/heads/x %s refs/heads/release %s\n' '$fu_l' '$fu_t' | env PATH='$t/badperl:$PATH' RELEASE_E2E_SKIP='a perfectly long reason' bash .githooks/pre-push origin url"
+# ---------- #234: the skip reason rule (non-blank code points, same as the causl gates)
+# one codepoint repeated: cp HEX COUNT. Needs no locale: perl writes the UTF-8 bytes itself.
+cp() { perl -CO -e 'print chr(hex($ARGV[0])) x $ARGV[1]' "$1" "$2"; }
+mkdir -p "$t/ska" && cp_topic=topicsk
+git switch -q release 2>/dev/null; git reset -q --hard
+git switch -q -c $cp_topic; echo sk >sk.txt; git add sk.txt; git commit -qm sk; git switch -q release; echo skr >skr.txt; git add skr.txt; git commit -qm skr
+sk_head=$(git rev-parse HEAD)
+sk_l=$(git rev-parse HEAD); sk_t=$(git rev-parse origin/release)
+sk_push() { printf 'refs/heads/x %s refs/heads/release %s\n' "$sk_l" "$sk_t" | env LC_ALL="$1" RELEASE_E2E_SKIP="$2" bash .githooks/pre-push origin url; }
+sk_merge() { local rc; env LC_ALL="$1" RELEASE_E2E_SKIP="$2" git merge --no-ff -q -m m $cp_topic; rc=$?; git merge --abort 2>/dev/null; git reset -q --hard "$sk_head"; return $rc; }
+sk_gate() { env LC_ALL="$1" RELEASE_E2E_SKIP="$2" tools/release-gate/e2e.sh; }
+sk_each() { # name, expect|refuse, locale, reason: the push hook, the merge hook and gate_skipped all judge it the same way
+  local name=$1 verdict=$2 loc=$3 reason=$4
+  $verdict "[$loc] $name (push hook)" sk_push "$loc" "$reason"
+  $verdict "[$loc] $name (merge hook)" sk_merge "$loc" "$reason"
+  $verdict "[$loc] $name (gate_skipped)" sk_gate "$loc" "$reason"
+}
+for loc in C en_US.UTF-8; do
+  sk_each "a, ten spaces, b is refused" refuse $loc "a          b"
+  sk_each "a plus eleven U+0301 is refused" refuse $loc "a$(cp 301 11)"
+  for u in fff9 fffa fffb e000 0378 0600 13430 1d159 e0100 1d173 1bca0 200d 2800; do
+    sk_each "twelve U+$u are refused" refuse $loc "$(cp $u 12)"
+    sk_each "ab plus ten U+$u are refused" refuse $loc "ab$(cp $u 10)"
+  done
+  sk_each "bootstrap the gate passes" expect $loc "bootstrap the gate"
+  sk_each "cafe with an accent passes" expect $loc "caf$(cp e9 1) bootstrap"
+  sk_each "punctuation passes" expect $loc "bootstrap: gate, now (once)."
+  sk_each "U+FFFC and U+FFFD count as characters" expect $loc "ab$(cp fffc 5)$(cp fffd 5)"
+  sk_each "PERL5OPT=-CSD does not break a reason with an accent" expect $loc "$(PERL5OPT=-CSD; printf 'caf\303\251 gate bootstrap now')"
+done
+# PERL5OPT in the environment of the hook itself (the previous row only exported it for the printf)
+refuse "PERL5OPT=-CSD in the hook's environment still refuses twelve zero-width joiners (push)" env PERL5OPT=-CSD bash -c "$(declare -f cp sk_push); sk_push C \"\$(cp 200d 12)\""
+expect "PERL5OPT=-CSD in the hook's environment still passes an accented reason (push)" env PERL5OPT=-CSD bash -c "$(declare -f sk_push); sk_l=$sk_l; sk_t=$sk_t; sk_push C \"\$(printf 'caf\\303\\251 gate bootstrap now')\""
+# the two one-liners are the same bytes in the three places
+norm_of() { grep -o "perl -T -C0 -e 'use Encode qw(decode FB_CROAK);.*print \$d;'" "$1"; }
+count_of() { grep -o "perl -T -C0 -e 'use Encode qw(decode); local.*print length(\$d);'" "$1"; }
+for fn in norm_of count_of; do
+  a=$($fn "$src/.githooks/pre-push"); b=$($fn "$src/.githooks/pre-merge-commit"); c=$($fn "$src/tools/release-gate/lib.sh")
+  expect "$fn finds exactly one line in each file" bash -c '[ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] && [ "$(printf "%s\n" "$1" | wc -l)" -eq 1 ]' _ "$a" "$b" "$c"
+  expect "$fn is byte-identical in pre-push, pre-merge-commit and lib.sh" bash -c '[ "$1" = "$2" ] && [ "$2" = "$3" ]' _ "$a" "$b" "$c"
+done
+git reset -q --hard "$sk_head"
+
+# ---------- #235: the runners start from a clean environment and keep their files inside their own temp dir
+for runner in tests/release-gate/run.sh tests/release-attest/run.sh; do
+  mkdir -p "$t/hdr/a/b" "$t/hdr/outer"
+  { sed -n '/^set -u$/,/^export DH_SH=/p' "$src/$runner" | grep -v -e '^here=' -e '^src=' -e '^tools=' -e '^\. "\$tools' -e '^export DH_SH='
+    echo 'env | grep -E "^(RELEASE_|DH_)" | grep -v "^DH_SH=" | sed "s/^/LEAK /"'
+    echo 'case $TMPDIR in "$t"/*) echo inside ;; *) echo "outside $TMPDIR" ;; esac'
+    echo '/usr/bin/mktemp "${TMPDIR:-/tmp}/release-e2e-log.XXXXXX" >/dev/null; mkdir -p "${TMPDIR:-/tmp}/attest-logs-$$"'
+  } >"$t/hdr/a/b/head.sh"
+  out=$(env -u DH_SH -u DH_REAL_LOG PATH="${PATH#"$t/spybin:"}" RELEASE_E2E_HOST=x RELEASE_E2E_SKIP=x RELEASE_E2E_CMD=x RELEASE_E2E_TEST_STAMPS=x RELEASE_GATE_TEST=x RELEASE_ATTEST_SH=x DH_HOST=x DH_CPUS=1 DH_MEMORY=1g DH_UNFENCED=1 TMPDIR="$t/hdr/outer" bash "$t/hdr/a/b/head.sh" 2>&1)
+  expect "$runner: variables exported by the caller are gone before the first test" bash -c '! printf "%s\n" "$1" | grep -q LEAK' _ "$out"
+  expect "$runner: TMPDIR for the run is inside its own temp dir" bash -c 'printf "%s\n" "$1" | grep -qx inside' _ "$out"
+  expect "$runner: nothing is left in the caller's TMPDIR afterwards" test -z "$(ls -A "$t/hdr/outer")"
+  rm -rf "$t/hdr"
+done
+
+spy_hits=$(grep -E '/(release-e2e|release-e2e-log|\.tmp|release-signcheck|release-pr|release-gate-head|release-prepush|attest|attest-logs|\.attest-stage|attest-verify)\.XXXXXX|\.ls\.XXXXXX' "$SPY_LOG" 2>/dev/null)
+expect "no gate script called the mktemp found on PATH (all of them use /usr/bin/mktemp)" test -z "$spy_hits"
+[ -z "$spy_hits" ] || { echo "bare mktemp calls:" >&2; echo "$spy_hits" | sed "s#.*/##" | sort | uniq -c >&2; }
 expect "no test reached the real dh.sh or docker (the default DH_SH stub was never called)" test ! -s "$t/dh-real.log"
 [ -s "$t/dh-real.log" ] && { echo "calls that reached the dh.sh stub:" >&2; cat "$t/dh-real.log" >&2; }
 [ $fails = 0 ] || tail -8 "$t/green.out" >&2

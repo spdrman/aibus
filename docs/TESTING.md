@@ -32,6 +32,8 @@ Before a release I run the "every push" rows above as one signed attestation, fe
 and `tools/release-gate/e2e.sh` ("The local release gate" in `docs/RELEASE.md`); the hooks are installed with
 `tools/release-gate/install.sh`.
 
+A red e2e run keeps its container log as `release-e2e-log.*` in the caller's `TMPDIR` on purpose (a container killed for memory shows up as a missing EXIT line there); I delete those by hand once I have read them. The release gate scripts and git hooks (`tools/release-attest`, `tools/release-gate`, `.githooks`) call `/usr/bin/mktemp` by absolute path, so a `mktemp` earlier on `PATH` cannot choose what an exit trap removes; both test runners put a spy `mktemp` first on `PATH` and fail if any of those calls reaches it. The two test runners make their own temp dir with `/usr/bin/mktemp` too. The other bare `mktemp` calls (`install.sh`, `packaging/homebrew/render-formula.sh`, `tools/record-replay.sh` and `tests/installers/*.sh`) stay as they are on purpose: the installer runs with the caller's own `PATH` and resolves `curl`, `tar` and `rm` through it as well, so a hostile `PATH` already owns it, and the formula renderer and the installer tests run in throwaway containers (some of them Alpine, where `mktemp` is busybox's and there is no `/usr/bin/mktemp`).
+
 The conformance row says "both backends when available": the `causl-differential` job in
 `.github/workflows/causl-spike.yml` (manual dispatch) runs the `aibus-graph-causl` conformance and
 differential tests with `--features causl-rs`, plus the side-by-side `commit_stream` bench. The

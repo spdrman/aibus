@@ -25,7 +25,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/attest-verify.XXXXXX") || { echo "cannot make a temp directory; nothing verified" >&2; exit 2; }
+work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/attest-verify.XXXXXX") || { echo "cannot make a temp directory; nothing verified" >&2; exit 2; }
 [ -n "$work" ] && [ -d "$work" ] || { echo "the temp directory is unusable; nothing verified" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
 
@@ -40,7 +40,7 @@ if [ $sigonly = 1 ]; then
 fi
 
 bad=()
-show() { git -C "$repo" show "$commit:$1" 2>/dev/null; }
+show() { git_objects -C "$repo" show "$commit:$1" 2>/dev/null; }
 if ! show "$ATTEST_DIR/$ATTEST_FILE" >"$work/a.json"; then
   echo "not valid: $commit has no $ATTEST_DIR/$ATTEST_FILE. Run tools/release-attest/attest.sh on this tree, commit the two files it writes, and push."
   exit 1

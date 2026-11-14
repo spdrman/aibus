@@ -45,7 +45,7 @@ Global options (before or after the subcommand):
 
 ## 2. `aibus run`
 
-The headless mode. Stdout is NDJSON, one event per line, stderr is human-readable status. The prompt comes from the argument or stdin (`-` or no TTY on stdin).
+The headless mode. Stdout is NDJSON, one event per line, stderr is human-readable status. The prompt comes from the argument or stdin (`-` or no TTY on stdin). An argument is visible to every local user in `ps` while the run lives, and in shell history when typed, so pipe anything secret (`aibus mcp` always does, for the input of a workflow run).
 
 ```bash
 aibus run --agent code-reviewer --json "review the diff on this branch" > events.jsonl

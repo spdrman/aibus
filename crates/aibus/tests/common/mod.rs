@@ -22,9 +22,7 @@ pub fn command(home: &Path) -> Command {
     let proj = home.join("proj");
     std::fs::create_dir_all(&proj).unwrap();
     let mut c = Command::new(env!("CARGO_BIN_EXE_aibus"));
-    c.env("HOME", home)
-        .current_dir(&proj)
-        .stdin(Stdio::null());
+    c.env("HOME", home).current_dir(&proj).stdin(Stdio::null());
     for v in XDG {
         c.env_remove(v);
     }

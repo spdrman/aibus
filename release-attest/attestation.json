@@ -1,24 +1,24 @@
 {
   "schema": 1,
   "kind": "aibus-release-attestation",
-  "commit": "aa8f1b575acb87fae6a876aa1eaea1ee2ce42b96",
+  "commit": "c6cf6040b263f435ac28edd6c9f4eb539be9a3cb",
   "tree": {
-    "hash": "c4383374e6948f58e2a8e580718b4c5461ebdefb",
+    "hash": "72f30f8ce70e780a44083d1edc7c6484ccca902b",
     "algo": "mktree-top-level-sans-release-attest-v2"
   },
   "version": {
-    "declared": "0.2.0"
+    "declared": "0.2.1"
   },
   "run": {
-    "host": "mars",
-    "startedAt": "2026-11-13T02:35:33Z",
-    "finishedAt": "2026-11-13T02:42:17Z"
+    "host": "mercury",
+    "startedAt": "2026-11-14T06:05:59Z",
+    "finishedAt": "2026-11-14T06:17:02Z"
   },
   "suites": [
     {
       "name": "unit",
       "exit": 0,
-      "passed": 529,
+      "passed": 549,
       "failed": 0,
       "ignored": 0
     },
@@ -46,7 +46,7 @@
     {
       "name": "cli",
       "exit": 0,
-      "passed": 300,
+      "passed": 305,
       "failed": 0,
       "ignored": 0
     },
@@ -81,8 +81,8 @@
   ],
   "result": {
     "verdict": "green",
-    "total": 1374,
-    "passed": 1374,
+    "total": 1399,
+    "passed": 1399,
     "failed": 0,
     "ignored": 0
   }

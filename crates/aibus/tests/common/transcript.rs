@@ -41,7 +41,10 @@ impl Transcript {
         // Longest first, so `/private/var/x` is not cut at `/var/x`.
         homes.sort_by_key(|h| std::cmp::Reverse(h.len()));
         homes.dedup();
-        Self { homes, pairs: Vec::new() }
+        Self {
+            homes,
+            pairs: Vec::new(),
+        }
     }
 
     /// Records one exchange: the request as it was sent and the whole response message.
@@ -74,7 +77,8 @@ impl Transcript {
 
     fn normalise(&self, v: &mut Value) {
         let ulid = Regex::new(r"\b[0-9A-HJKMNP-TV-Z]{26}\b").unwrap();
-        let time = Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})").unwrap();
+        let time =
+            Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})").unwrap();
         match v {
             Value::String(s) => {
                 // A text block that holds JSON (`structuredContent` mirrored as text) is written
@@ -117,11 +121,16 @@ impl Transcript {
             return;
         }
         let want = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("{}: {e}\nthe transcript this run produced:\n{got}", path.display())
+            panic!(
+                "{}: {e}\nthe transcript this run produced:\n{got}",
+                path.display()
+            )
         });
         // Compared as values, so a golden file written by hand may order its keys as it likes.
         let parse = |t: &str| -> Vec<Value> {
-            t.lines().map(|l| serde_json::from_str(l).expect("a transcript line is JSON")).collect()
+            t.lines()
+                .map(|l| serde_json::from_str(l).expect("a transcript line is JSON"))
+                .collect()
         };
         assert!(
             parse(&want) == parse(&got),

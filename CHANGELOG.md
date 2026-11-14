@@ -3,6 +3,34 @@
 All notable changes go here, newest first. The section for a version is what the release workflow
 uses as the release notes, so every release needs its entry before it is merged into `release`.
 
+## [0.2.1] - 2026-11-13
+
+A maintenance release: `aibus mcp` handles a run's output and input more carefully, and the release gate and attestation scripts are harder to steer. Nothing in the `aibus` command line or the config format changes.
+
+### Security
+
+* `aibus mcp` no longer puts a run's input on the child's command line (#246). A run is started as `aibus run --workflow <name> -- -` and the input is written to the child's stdin, so `ps` cannot show it to other local users. Every trailing newline and carriage return of the input is dropped, as for any stdin prompt. A 200 KB input that used to fail to start on Linux (`Argument list too long`) now runs.
+* `aibus mcp` stores a run's output raw and redacts it when it is read (#247). Before, the failure message (300 bytes) and the tail (4 KiB) were cut first and redacted second, so a key near a cut, or a key sent in pieces over several stream events, left a fragment no pattern recognises. Now the fields of an attempt, the run id and the session are redacted whole before they are stored, the tail and the log keep a raw margin (about 28 to 36 KiB more than is shown), and the whole buffer is redacted before the cut. `docs/MCP.md` says what this covers and lists the residuals (for example a stderr line between two pieces of a key).
+* The release export ignores replace refs (#250). Every git call in `export_tree`, `tree_hash` and `declared_version` runs with `GIT_NO_REPLACE_OBJECTS=1` and `GIT_NO_LAZY_FETCH=1`, so a local replace ref can no longer make the attestation hash one tree while the exported bytes come from another, and a missing object fails instead of being fetched. `verify.sh` reads the attestation, signature and public key the same way (#260).
+* A symlink blob over 4096 bytes is refused from its `cat-file` header, before its body is read (#250).
+* Every `mktemp` in the release gate scripts and hooks is `/usr/bin/mktemp` (#251), so a `mktemp` earlier on `PATH` cannot pick what an exit trap deletes. Both test runners put a spy `mktemp` first on `PATH` and fail if a gate script reaches it. The runners make their own temp dir with `/usr/bin/mktemp` too (#260).
+* The skip reason rule is the one the causl gates use, in the push hook, the merge hook and `gate_skipped` (#234): it drops a wider set of invisible characters and counts only non-blank code points, so padding a reason with spaces, combining marks or invisible characters no longer gets a skip through. The docs say plainly that it is a speed bump.
+
+### Fixed
+
+* When the real signature in `attest.sh` fails (for example the key left ssh-agent mid-run), the message keeps ssh-keygen's own reason, minus any line that mentions a passphrase (#260). The key-drop message no longer repeats ssh-keygen's passphrase text, which read like a prompt (#252).
+* `release.sh` and `attest.sh` sign a scratch file first and stop with `load it with ssh-add <key> first` when the key cannot sign, a failed attestation leaves nothing behind, a failure or signal during the install undoes only the files whose rename had started (so `--replace` keeps the committed pair as it was), and both scripts clean up and then exit by the signal (#236). `attest.sh` now needs perl.
+
+### Changed
+
+* `export_tree` reads blobs through `git cat-file --batch` in batches of 500 (#237): this repo's 1500 files copy in about 0.8 s instead of 11.7 s, and a release does the copy twice. The checks on each path, on the reply header and on the size are unchanged.
+
+### Tests and docs
+
+* `tests/lib/pty.sh` is a portable pty helper (`pty_run`) that picks the `script` syntax from `uname`, so the ten terminal tests of the release suites pass on Linux and not only on macOS (#258).
+* The readiness check of the fake `gcloud` and `aibus` scripts in the test helpers no longer races with the fork of a freshly written file (the ETXTBSY flake, #232), and the aibus-mcp fakes keep a planted key out of their recorded argv (#241). The release test runners no longer depend on the caller's gate variables or leave files in `/var/folders` (#235).
+* `docs/RELEASE.md`, `docs/TESTING.md` and `docs/MCP.md` describe the above, including the `release-e2e-log.*` files a red e2e run keeps in `TMPDIR`.
+
 ## [0.2.0] - 2026-11-12
 
 ### Fixed
@@ -55,14 +83,10 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ### Providers, docs and doctor (F10, #118)
 
-* The providers epic in one place: a provider is a definition (a preset or a `[[provider]]`) that names a wire protocol, models carry their own capabilities, there are adapters for Gemini and for Claude on Bedrock and Vertex, OAuth works where a vendor publishes a login for third-party applications, the model tables live in `catalog/`, and accounts can fall back to one another. This closes what 0.1.0 listed as in the code but not usable: the OAuth method and the Bedrock and Vertex transports.
+* The providers epic in one place: a provider is a definition (a preset or a `[[provider]]`) that names a wire protocol, models carry their own capabilities, there are adapters for Gemini and for Claude on Bedrock and Vertex, OAuth works where a vendor publishes a login for third-party applications, the model tables live in `catalog/`, and accounts can fall back to one another. What 0.1.0 listed as in the code but not usable (the OAuth method and the Bedrock and Vertex transports) is covered by tests now: the Bedrock and Vertex adapters run through the conformance suite against fake servers, the native Gemini adapter has tests against fakes, and the OAuth flows run against a fake authorization server. None of it has had a live run.
 * `docs/PROVIDERS.md` is rewritten around account, provider definition, api and auth, with a page per api. `docs/CAPABILITIES.md` is new and generated (one row per preset, 24 of them) by a test that also fails when the committed page is out of date. `docs/MIGRATION.md` covers a 0.1.0 config: it loads unchanged, and three cases change shape. `docs/SECURITY.md` has rows for a hostile `[[provider]]` and for the OAuth callback, and notes on the `gcloud` subprocess and on the catalog never being fetched at run time.
 * `aibus doctor` prints a row per provider (wire, URL, preset or custom, auth, catalog rows, cache age) and warns about a `[[provider]]` no enabled account uses.
 * Loading a config warns, with the file and line, about a `base_url` that is plain `http://` to an address that is neither loopback nor a private network.
-
-### Known issues
-
-* No live run against Gemini, Bedrock or Vertex has happened in CI, the OpenRouter login has not been tried against openrouter.ai from a release build, and the Windows build has not been run on a Windows machine. `docs/RELEASE.md` lists the manual checks.
 
 ### Build
 
@@ -73,6 +97,7 @@ uses as the release notes, so every release needs its entry before it is merged 
 
 ### Known issues
 
+* These manual checks from `docs/RELEASE.md` were not run for 0.2.0: the keychain on each OS, the terminal emulators (iTerm2, Terminal.app, kitty, WezTerm, Windows Terminal), the Windows build on a Windows machine, a live run against Gemini, Bedrock and Vertex, and the OpenRouter login against openrouter.ai from a release build. Bedrock and Vertex are covered by the conformance suite against fake servers only, and Gemini by adapter tests against fakes.
 * The `?` screen shows the key map and not the commands; type `/` for the list, or read the table in the README. Drawing the commands there needs a second page, which changes every help snapshot (see G10 in `docs/DECISIONS.md`).
 * `/logout <text>` repeats the text in its notice when no account has that name, and the prompt history keeps the line. `/login` has no such echo.
 

@@ -424,6 +424,160 @@ pub(super) fn check(wf: &Workflow) -> Result<(), WorkflowError> {
             }
         }
     }
+    /// The checks a workflow with routes needs: route ends, cycles, loops, conditions,
+    /// reachability and what each step reads.
+    fn routes(wf: &Workflow, native: &[bool]) -> Result<(), WorkflowError> {
+        let n = wf.steps.len();
+        let at = |r: usize, why: String| WorkflowError::Invalid(format!("route {}: {why}", r + 1));
+        let short = |s: &str| s.chars().take(80).collect::<String>();
+        if wf.routes.len() > MAX_ROUTES {
+            return Err(WorkflowError::Invalid(format!(
+                "{} routes, the most is {MAX_ROUTES}",
+                wf.routes.len()
+            )));
+        }
+        let mut ends = Vec::new();
+        for (ri, r) in wf.routes.iter().enumerate() {
+            let f = wf
+                .index(&r.from)
+                .ok_or_else(|| at(ri, format!("`from` names no step: {}", short(&r.from))))?;
+            let t = wf
+                .index(&r.to)
+                .ok_or_else(|| at(ri, format!("`to` names no step: {}", short(&r.to))))?;
+            for (end, i) in [("from", f), ("to", t)] {
+                if native[i] {
+                    return Err(at(
+                        ri,
+                        format!(
+                            "`{end}` is a native subagent ({}); aibus does not schedule those, its parent does",
+                            wf.key(i)
+                        ),
+                    ));
+                }
+            }
+            if let Some(k) = r
+                .max_iterations
+                .filter(|k| !(1..=MAX_ITERATIONS).contains(k))
+            {
+                return Err(at(
+                    ri,
+                    format!("max_iterations {k}: want 1 to {MAX_ITERATIONS}"),
+                ));
+            }
+            if let Some(other) = ends.iter().position(|e| *e == (f, t)) {
+                return Err(at(
+                    ri,
+                    format!("goes from {} to {} like route {}", r.from, r.to, other + 1),
+                ));
+            }
+            ends.push((f, t));
+        }
+        // The first step is where a run starts; nothing but a loop goes back into it.
+        if let Some(ri) = wf
+            .routes
+            .iter()
+            .position(|r| r.max_iterations.is_none() && wf.index(&r.to) == Some(0))
+        {
+            return Err(at(
+                ri,
+                "the first step is where the workflow starts; only a loop (max_iterations) may go back to it".into(),
+            ));
+        }
+        let dag = Dag::of(wf);
+        if dag.order.len() < n {
+            // What Kahn's algorithm could not order: the steps on or after a cycle.
+            let names: Vec<&str> = (0..n)
+                .filter(|i| !dag.order.contains(i))
+                .take(8)
+                .map(|i| wf.key(i))
+                .collect();
+            return Err(WorkflowError::Invalid(format!(
+                "the routes make a cycle through {}; a loop needs max_iterations on the route that goes back",
+                names.join(", ")
+            )));
+        }
+        for (ri, r) in wf.routes.iter().enumerate() {
+            let (f, t) = ends[ri];
+            if r.max_iterations.is_some() && !(f == t || dag.before[f][t]) {
+                return Err(at(
+                    ri,
+                    "max_iterations is for a route that goes back to an earlier step".into(),
+                ));
+            }
+            for (name, what) in r.when.atoms() {
+                let Some(j) = wf.index(name) else {
+                    return Err(at(ri, format!("when: `{name}` names no step")));
+                };
+                if native[j] {
+                    return Err(at(
+                        ri,
+                        format!("when: `{name}` is a native subagent; aibus sees no outcome of its own for it"),
+                    ));
+                }
+                if j != f && !dag.before[f][j] {
+                    return Err(at(
+                        ri,
+                        format!("when: `{name}` does not run before this route"),
+                    ));
+                }
+                if what == Pred::ArtifactValid && wf.steps[j].output != Output::Json {
+                    return Err(at(
+                        ri,
+                        format!(
+                            "when: `{name}.artifact_valid` needs output = \"json\" on step {name}"
+                        ),
+                    ));
+                }
+            }
+        }
+        // Every scheduled step is reached from the first one.
+        let mut seen = vec![false; n];
+        let mut stack = vec![0];
+        while let Some(i) = stack.pop() {
+            if !std::mem::replace(&mut seen[i], true) {
+                stack.extend(dag.next[i].iter().copied());
+            }
+        }
+        if let Some(i) = (0..n).find(|&i| !seen[i] && !native[i]) {
+            return Err(WorkflowError::Invalid(format!(
+                "no route reaches step {} from the first step",
+                wf.key(i)
+            )));
+        }
+        for (i, s) in wf.steps.iter().enumerate().filter(|(i, _)| !native[*i]) {
+            let bad = |why: String| WorkflowError::Step { step: i + 1, why };
+            for key in reads(&s.prompt) {
+                match var(&key) {
+                    Some(Var::Prev) => {
+                        let into = dag.next.iter().filter(|next| next.contains(&i)).count();
+                        if into != 1 {
+                            return Err(bad(
+                                "`{{prev.summary}}` needs exactly one route into this step; name the step with {{steps.<key>.summary}}".into(),
+                            ));
+                        }
+                    }
+                    Some(Var::Step(name)) => match wf.index(&name) {
+                        Some(j) if dag.before[i][j] => {}
+                        _ => {
+                            return Err(bad(format!(
+                                "`{key}` names a step that does not run before this one"
+                            )))
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            if let Some(p) = s.parent.as_deref().and_then(|p| wf.index(p)) {
+                if !dag.before[i][p] {
+                    return Err(bad(format!(
+                        "parent `{}` does not run before this step",
+                        wf.key(p)
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
     if routed {
         routes(wf, &native)?;
     }
@@ -452,157 +606,6 @@ pub(super) fn check(wf: &Workflow) -> Result<(), WorkflowError> {
             return Err(file(format!(
                 "the workflow can start up to {worst} agent runs, more than limits.max_agent_runs = {max}"
             )));
-        }
-    }
-    Ok(())
-}
-
-fn routes(wf: &Workflow, native: &[bool]) -> Result<(), WorkflowError> {
-    let n = wf.steps.len();
-    let at = |r: usize, why: String| WorkflowError::Invalid(format!("route {}: {why}", r + 1));
-    let short = |s: &str| s.chars().take(80).collect::<String>();
-    if wf.routes.len() > MAX_ROUTES {
-        return Err(WorkflowError::Invalid(format!(
-            "{} routes, the most is {MAX_ROUTES}",
-            wf.routes.len()
-        )));
-    }
-    let mut ends = Vec::new();
-    for (ri, r) in wf.routes.iter().enumerate() {
-        let f = wf
-            .index(&r.from)
-            .ok_or_else(|| at(ri, format!("`from` names no step: {}", short(&r.from))))?;
-        let t = wf
-            .index(&r.to)
-            .ok_or_else(|| at(ri, format!("`to` names no step: {}", short(&r.to))))?;
-        for (end, i) in [("from", f), ("to", t)] {
-            if native[i] {
-                return Err(at(
-                    ri,
-                    format!(
-                        "`{end}` is a native subagent ({}); aibus does not schedule those, its parent does",
-                        wf.key(i)
-                    ),
-                ));
-            }
-        }
-        if let Some(k) = r
-            .max_iterations
-            .filter(|k| !(1..=MAX_ITERATIONS).contains(k))
-        {
-            return Err(at(
-                ri,
-                format!("max_iterations {k}: want 1 to {MAX_ITERATIONS}"),
-            ));
-        }
-        if let Some(other) = ends.iter().position(|e| *e == (f, t)) {
-            return Err(at(
-                ri,
-                format!("goes from {} to {} like route {}", r.from, r.to, other + 1),
-            ));
-        }
-        ends.push((f, t));
-    }
-    // The first step is where a run starts; nothing but a loop goes back into it.
-    if let Some(ri) = wf
-        .routes
-        .iter()
-        .position(|r| r.max_iterations.is_none() && wf.index(&r.to) == Some(0))
-    {
-        return Err(at(
-            ri,
-            "the first step is where the workflow starts; only a loop (max_iterations) may go back to it".into(),
-        ));
-    }
-    let dag = Dag::of(wf);
-    if dag.order.len() < n {
-        // What Kahn's algorithm could not order: the steps on or after a cycle.
-        let names: Vec<&str> = (0..n)
-            .filter(|i| !dag.order.contains(i))
-            .take(8)
-            .map(|i| wf.key(i))
-            .collect();
-        return Err(WorkflowError::Invalid(format!(
-            "the routes make a cycle through {}; a loop needs max_iterations on the route that goes back",
-            names.join(", ")
-        )));
-    }
-    for (ri, r) in wf.routes.iter().enumerate() {
-        let (f, t) = ends[ri];
-        if r.max_iterations.is_some() && !(f == t || dag.before[f][t]) {
-            return Err(at(
-                ri,
-                "max_iterations is for a route that goes back to an earlier step".into(),
-            ));
-        }
-        for (name, what) in r.when.atoms() {
-            let Some(j) = wf.index(name) else {
-                return Err(at(ri, format!("when: `{name}` names no step")));
-            };
-            if native[j] {
-                return Err(at(
-                    ri,
-                    format!("when: `{name}` is a native subagent; aibus sees no outcome of its own for it"),
-                ));
-            }
-            if j != f && !dag.before[f][j] {
-                return Err(at(
-                    ri,
-                    format!("when: `{name}` does not run before this route"),
-                ));
-            }
-            if what == Pred::ArtifactValid && wf.steps[j].output != Output::Json {
-                return Err(at(
-                    ri,
-                    format!("when: `{name}.artifact_valid` needs output = \"json\" on step {name}"),
-                ));
-            }
-        }
-    }
-    // Every scheduled step is reached from the first one.
-    let mut seen = vec![false; n];
-    let mut stack = vec![0];
-    while let Some(i) = stack.pop() {
-        if !std::mem::replace(&mut seen[i], true) {
-            stack.extend(dag.next[i].iter().copied());
-        }
-    }
-    if let Some(i) = (0..n).find(|&i| !seen[i] && !native[i]) {
-        return Err(WorkflowError::Invalid(format!(
-            "no route reaches step {} from the first step",
-            wf.key(i)
-        )));
-    }
-    for (i, s) in wf.steps.iter().enumerate().filter(|(i, _)| !native[*i]) {
-        let bad = |why: String| WorkflowError::Step { step: i + 1, why };
-        for key in reads(&s.prompt) {
-            match var(&key) {
-                Some(Var::Prev) => {
-                    let into = dag.next.iter().filter(|next| next.contains(&i)).count();
-                    if into != 1 {
-                        return Err(bad(
-                            "`{{prev.summary}}` needs exactly one route into this step; name the step with {{steps.<key>.summary}}".into(),
-                        ));
-                    }
-                }
-                Some(Var::Step(name)) => match wf.index(&name) {
-                    Some(j) if dag.before[i][j] => {}
-                    _ => {
-                        return Err(bad(format!(
-                            "`{key}` names a step that does not run before this one"
-                        )))
-                    }
-                },
-                _ => {}
-            }
-        }
-        if let Some(p) = s.parent.as_deref().and_then(|p| wf.index(p)) {
-            if !dag.before[i][p] {
-                return Err(bad(format!(
-                    "parent `{}` does not run before this step",
-                    wf.key(p)
-                )));
-            }
         }
     }
     Ok(())

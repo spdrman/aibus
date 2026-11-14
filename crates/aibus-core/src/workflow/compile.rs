@@ -202,19 +202,6 @@ pub fn native_agents(
     out
 }
 
-/// How many bytes of a prompt come before its first template: the part that is the same on
-/// every run.
-fn stable_prefix(prompt: &str) -> usize {
-    prompt.find("{{").unwrap_or(prompt.len())
-}
-
-/// Whether nothing but whitespace follows the last template.
-fn volatile_at_end(prompt: &str) -> bool {
-    prompt
-        .rfind("}}")
-        .is_none_or(|end| prompt[end + 2..].trim().is_empty())
-}
-
 /// Compiles `wf` (read from `source`) against `agents`. `Err` is every problem found, and a
 /// workflow with any is never planned.
 pub fn compile(
@@ -254,6 +241,81 @@ pub fn compile(
     problems.extend(capability_problems(wf, agents));
     if !problems.is_empty() {
         return Err(problems);
+    }
+
+    /// The process a `cli.claude` step would start: the official executable with an argv vector and
+    /// no shell, null stdin, a bounded environment, `--permission-prompts none` so anything that
+    /// would ask is denied, only read-only tools approved in advance, and its native subagents inline
+    /// in `--agents`, which writes no file. The prompt is rendered at run time from the versioned
+    /// template, so the plan names it by hash.
+    fn claude_invocation(
+        wf: &Workflow,
+        agents: &IndexMap<AgentName, AgentDef>,
+        i: usize,
+        prompt_sha: &str,
+    ) -> Value {
+        let key = wf.key(i);
+        let def = &agents[&wf.steps[i].agent];
+        let children = native_agents(wf, agents, i);
+        let tools = claude_tools(def, !children.is_empty());
+        let mut argv: Vec<String> = vec![
+            "-p".into(),
+            format!("<prompt of step {key}, template {prompt_sha}, rendered at run time>"),
+        ];
+        for a in [
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--setting-sources",
+            "project",
+            "--strict-mcp-config",
+            "--permission-prompts",
+            "none",
+        ] {
+            argv.push(a.into());
+        }
+        if let Some(m) = claude_model(def) {
+            argv.extend(["--model".into(), m.into()]);
+        }
+        let read_only = ["Agent", "Glob", "Grep", "Read"];
+        let approved: Vec<&str> = tools
+            .iter()
+            .copied()
+            .filter(|t| read_only.contains(t))
+            .collect();
+        let denied: Vec<&str> = tools
+            .iter()
+            .copied()
+            .filter(|t| !read_only.contains(t))
+            .collect();
+        if !tools.is_empty() {
+            argv.extend(["--tools".into(), tools.join(",")]);
+        }
+        if !approved.is_empty() {
+            argv.extend(["--allowedTools".into(), approved.join(",")]);
+        }
+        let mut out = json!({
+            "kind": "process",
+            "program": "claude",
+            "shell": false,
+            "stdin": "null",
+            "env_allowlist": ["CLAUDE_CONFIG_DIR", "HOME", "LANG", "PATH", "USER"],
+            "writes_files": [],
+            "denied_until_approved": denied,
+        });
+        if !children.is_empty() {
+            let inline = Value::Object(children.clone().into_iter().collect::<Map<_, _>>());
+            argv.extend([
+                "--agents".into(),
+                format!("<agents json {}>", content_hash(&canonical_json(&inline))),
+            ]);
+            out["agents"] = inline;
+            out["delegation"] =
+                json!({ "foreground": "requested_in_prompt", "host_enforced": false });
+        }
+        out["argv"] = json!(argv);
+        out
     }
 
     let n = wf.steps.len();
@@ -299,7 +361,8 @@ pub fn compile(
         );
         let prompt_sha = content_hash(&s.prompt);
         prompts.insert(prompt_sha.clone(), s.prompt.replace("\r\n", "\n"));
-        let prefix = stable_prefix(&s.prompt);
+        // The part of the prompt that is the same on every run: everything before its first template.
+        let prefix = s.prompt.find("{{").unwrap_or(s.prompt.len());
         if prefix == 0 {
             notes.push(format!(
                 "step {key}: the prompt starts with a template, so it has no stable prefix for the prompt cache; put the task text at the end"
@@ -391,7 +454,7 @@ pub fn compile(
                 "sha256": prompt_sha,
                 "reads": reads(&s.prompt),
                 "stable_prefix_bytes": prefix,
-                "volatile_at_end": volatile_at_end(&s.prompt),
+                "volatile_at_end": s.prompt.rfind("}}").is_none_or(|end| s.prompt[end + 2..].trim().is_empty()),
             },
             "invocation": invocation,
         }));
@@ -500,78 +563,4 @@ pub fn compile(
     let hash = plan_hash(&plan);
     plan["plan_hash"] = json!(hash);
     Ok(plan)
-}
-
-/// The process a `cli.claude` step would start: the official executable with an argv vector and
-/// no shell, null stdin, a bounded environment, `--permission-prompts none` so anything that
-/// would ask is denied, only read-only tools approved in advance, and its native subagents inline
-/// in `--agents`, which writes no file. The prompt is rendered at run time from the versioned
-/// template, so the plan names it by hash.
-fn claude_invocation(
-    wf: &Workflow,
-    agents: &IndexMap<AgentName, AgentDef>,
-    i: usize,
-    prompt_sha: &str,
-) -> Value {
-    let key = wf.key(i);
-    let def = &agents[&wf.steps[i].agent];
-    let children = native_agents(wf, agents, i);
-    let tools = claude_tools(def, !children.is_empty());
-    let mut argv: Vec<String> = vec![
-        "-p".into(),
-        format!("<prompt of step {key}, template {prompt_sha}, rendered at run time>"),
-    ];
-    for a in [
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--no-session-persistence",
-        "--setting-sources",
-        "project",
-        "--strict-mcp-config",
-        "--permission-prompts",
-        "none",
-    ] {
-        argv.push(a.into());
-    }
-    if let Some(m) = claude_model(def) {
-        argv.extend(["--model".into(), m.into()]);
-    }
-    let read_only = ["Agent", "Glob", "Grep", "Read"];
-    let approved: Vec<&str> = tools
-        .iter()
-        .copied()
-        .filter(|t| read_only.contains(t))
-        .collect();
-    let denied: Vec<&str> = tools
-        .iter()
-        .copied()
-        .filter(|t| !read_only.contains(t))
-        .collect();
-    if !tools.is_empty() {
-        argv.extend(["--tools".into(), tools.join(",")]);
-    }
-    if !approved.is_empty() {
-        argv.extend(["--allowedTools".into(), approved.join(",")]);
-    }
-    let mut out = json!({
-        "kind": "process",
-        "program": "claude",
-        "shell": false,
-        "stdin": "null",
-        "env_allowlist": ["CLAUDE_CONFIG_DIR", "HOME", "LANG", "PATH", "USER"],
-        "writes_files": [],
-        "denied_until_approved": denied,
-    });
-    if !children.is_empty() {
-        let inline = Value::Object(children.clone().into_iter().collect::<Map<_, _>>());
-        argv.extend([
-            "--agents".into(),
-            format!("<agents json {}>", content_hash(&canonical_json(&inline))),
-        ]);
-        out["agents"] = inline;
-        out["delegation"] = json!({ "foreground": "requested_in_prompt", "host_enforced": false });
-    }
-    out["argv"] = json!(argv);
-    out
 }

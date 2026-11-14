@@ -17,12 +17,6 @@ use crate::cli::Global;
 /// The biggest workflow file or saved plan these commands read.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
-/// Exit status when a plan differs from the one it is locked to.
-const DRIFT: u8 = 13;
-
-/// Exit status for a workflow that does not validate, as `workflow validate` uses.
-const INVALID: u8 = 12;
-
 /// The file `target` names: a path (it ends in `.toml` or `.json`, has a separator, or is a file
 /// in the project), else a workflow name, looked up as `workflow run` would.
 fn resolve(g: &Global, target: &str) -> Result<PathBuf, AibusError> {
@@ -82,7 +76,8 @@ fn refuse(g: &Global, path: &Path, errors: &[Problem]) -> u8 {
             println!("error: {}: {step}{field}{}", path.display(), p.message);
         }
     }
-    INVALID
+    // As `workflow validate` exits for errors.
+    12
 }
 
 /// Compiles `target`. `Err(code)` is a workflow that got no plan, already reported.
@@ -118,6 +113,109 @@ pub fn plan(
     locked: Option<&Path>,
     redactor: &Redactor,
 ) -> Result<u8, AibusError> {
+    fn print_plan(path: &Path, plan: &Value) {
+        let w = &plan["workflow"];
+        let revision = w["revision"]
+            .as_str()
+            .map(|r| format!("  revision {r}"))
+            .unwrap_or_default();
+        println!("{}{revision}  ({})", short(&w["name"]), path.display());
+        println!("plan_hash {}", short(&plan["plan_hash"]));
+        match plan["plan_only_because"].as_str() {
+            None => println!("runs now: yes, as a chain"),
+            Some(why) => println!("runs now: no: {why}"),
+        }
+        println!("\nsteps:");
+        for s in plan["steps"].as_array().into_iter().flatten() {
+            let mode = if s["mode"] == s["mode_requested"] {
+                short(&s["mode"])
+            } else {
+                format!(
+                    "{} (asked {})",
+                    short(&s["mode"]),
+                    short(&s["mode_requested"])
+                )
+            };
+            let parent = s["parent"]
+                .as_str()
+                .map(|p| format!("  under {p}"))
+                .unwrap_or_default();
+            println!(
+                "  {} {}  agent {}  {}  {mode}{parent}  prompt {}",
+                s["n"],
+                short(&s["key"]),
+                short(&s["agent"]),
+                short(&s["runtime"]),
+                short(&s["prompt"]["sha256"])
+            );
+            let inv = &s["invocation"];
+            match inv["kind"].as_str() {
+                Some("process") => {
+                    let argv: Vec<String> = inv["argv"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(short)
+                        .collect();
+                    println!("      runs: {} {}", short(&inv["program"]), argv.join(" "));
+                }
+                Some("native_subagent") => println!(
+                    "      native subagent of {}, passed with --agents",
+                    short(&inv["launched_by"])
+                ),
+                _ => println!(
+                    "      an aibus run of {} under the lead",
+                    short(&s["agent"])
+                ),
+            }
+            if let Some(gate) = s["gate"].as_str() {
+                println!("      gate: {gate}");
+            }
+        }
+        println!("\nedges:");
+        for e in plan["edges"].as_array().into_iter().flatten() {
+            let mut line = format!(
+                "  {} {} -> {}",
+                short(&e["kind"]),
+                short(&e["from"]),
+                short(&e["to"])
+            );
+            for (k, label) in [
+                ("when", "when"),
+                ("via", "via"),
+                ("lineage", "lineage"),
+                ("max_iterations", "at most"),
+            ] {
+                if !e[k].is_null() {
+                    line.push_str(&format!("  {label} {}", short(&e[k])));
+                }
+            }
+            println!("{line}");
+        }
+        let env = &plan["envelope"];
+        println!(
+            "\nenvelope: up to {} agent runs; max_agent_runs {}, max_parallel {}, max_wall_seconds {}",
+            env["worst_case_agent_runs"],
+            short(&env["max_agent_runs"]),
+            short(&env["max_parallel"]),
+            short(&env["max_wall_seconds"])
+        );
+        if let Some(held) = plan["approvals"]["steps"]
+            .as_object()
+            .filter(|m| !m.is_empty())
+        {
+            println!("approvals:");
+            for (step, kinds) in held {
+                let kinds: Vec<String> =
+                    kinds.as_array().into_iter().flatten().map(short).collect();
+                println!("  {step}: {}", kinds.join(", "));
+            }
+        }
+        for note in plan["notes"].as_array().into_iter().flatten() {
+            println!("note: {}", short(note));
+        }
+    }
+
     if !dry_run {
         return Err(AibusError::Usage(
             "workflow plan only runs as --dry-run: running a plan is the scheduler's job (#288)"
@@ -139,7 +237,8 @@ pub fn plan(
                 path.display(),
                 lock.display()
             );
-            return Ok(DRIFT);
+            // Drift from the locked plan.
+            return Ok(13);
         }
     }
     if g.json {
@@ -197,108 +296,6 @@ fn print_changes(g: &Global, a: &Value, b: &Value, changes: &[Change]) {
         for c in changes {
             println!("{}: {} -> {}", c.path, short(&c.a), short(&c.b));
         }
-    }
-}
-
-fn print_plan(path: &Path, plan: &Value) {
-    let w = &plan["workflow"];
-    let revision = w["revision"]
-        .as_str()
-        .map(|r| format!("  revision {r}"))
-        .unwrap_or_default();
-    println!("{}{revision}  ({})", short(&w["name"]), path.display());
-    println!("plan_hash {}", short(&plan["plan_hash"]));
-    match plan["plan_only_because"].as_str() {
-        None => println!("runs now: yes, as a chain"),
-        Some(why) => println!("runs now: no: {why}"),
-    }
-    println!("\nsteps:");
-    for s in plan["steps"].as_array().into_iter().flatten() {
-        let mode = if s["mode"] == s["mode_requested"] {
-            short(&s["mode"])
-        } else {
-            format!(
-                "{} (asked {})",
-                short(&s["mode"]),
-                short(&s["mode_requested"])
-            )
-        };
-        let parent = s["parent"]
-            .as_str()
-            .map(|p| format!("  under {p}"))
-            .unwrap_or_default();
-        println!(
-            "  {} {}  agent {}  {}  {mode}{parent}  prompt {}",
-            s["n"],
-            short(&s["key"]),
-            short(&s["agent"]),
-            short(&s["runtime"]),
-            short(&s["prompt"]["sha256"])
-        );
-        let inv = &s["invocation"];
-        match inv["kind"].as_str() {
-            Some("process") => {
-                let argv: Vec<String> = inv["argv"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(short)
-                    .collect();
-                println!("      runs: {} {}", short(&inv["program"]), argv.join(" "));
-            }
-            Some("native_subagent") => println!(
-                "      native subagent of {}, passed with --agents",
-                short(&inv["launched_by"])
-            ),
-            _ => println!(
-                "      an aibus run of {} under the lead",
-                short(&s["agent"])
-            ),
-        }
-        if let Some(gate) = s["gate"].as_str() {
-            println!("      gate: {gate}");
-        }
-    }
-    println!("\nedges:");
-    for e in plan["edges"].as_array().into_iter().flatten() {
-        let mut line = format!(
-            "  {} {} -> {}",
-            short(&e["kind"]),
-            short(&e["from"]),
-            short(&e["to"])
-        );
-        for (k, label) in [
-            ("when", "when"),
-            ("via", "via"),
-            ("lineage", "lineage"),
-            ("max_iterations", "at most"),
-        ] {
-            if !e[k].is_null() {
-                line.push_str(&format!("  {label} {}", short(&e[k])));
-            }
-        }
-        println!("{line}");
-    }
-    let env = &plan["envelope"];
-    println!(
-        "\nenvelope: up to {} agent runs; max_agent_runs {}, max_parallel {}, max_wall_seconds {}",
-        env["worst_case_agent_runs"],
-        short(&env["max_agent_runs"]),
-        short(&env["max_parallel"]),
-        short(&env["max_wall_seconds"])
-    );
-    if let Some(held) = plan["approvals"]["steps"]
-        .as_object()
-        .filter(|m| !m.is_empty())
-    {
-        println!("approvals:");
-        for (step, kinds) in held {
-            let kinds: Vec<String> = kinds.as_array().into_iter().flatten().map(short).collect();
-            println!("  {step}: {}", kinds.join(", "));
-        }
-    }
-    for note in plan["notes"].as_array().into_iter().flatten() {
-        println!("note: {}", short(note));
     }
 }
 

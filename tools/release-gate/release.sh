@@ -204,8 +204,11 @@ git add release-attest
 git commit -q -m "Attest the suites for $ver"
 "$here/../release-attest/verify.sh" --expect-version "$ver" || fail "verify.sh rejects the attestation (it is committed locally, nothing pushed)"
 if [ $yes = 0 ]; then
-  read -r -p "push $branch and open the release PR against release? [y/N] " a </dev/tty || a=n
-  [ "$a" = y ] || fail "not confirmed (the commits stay local)"
+  IFS= read -r -p "push $branch and open the release PR against release? [y/N] " a </dev/tty || a=n
+  case $a in
+    y|Y|yes|YES|Yes) ;;
+    *) fail "not confirmed: only y or yes pushes (the commits stay local)" ;;
+  esac
 fi
 git push -q -u origin "$branch"
 body=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/release-pr.XXXXXX") || refuse "could not make a temp file for the PR body; nothing was pushed"

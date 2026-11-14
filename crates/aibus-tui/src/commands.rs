@@ -986,6 +986,31 @@ mod tests {
     }
 
     #[test]
+    fn quit_exit_and_q_quit_like_the_palette_row() {
+        let want = "Command(CloseModal)|Command(Quit { force: false })";
+        for word in ["/quit", "/exit", "/q"] {
+            assert_eq!(msgs(word, &[], &[]), want, "{word}");
+        }
+    }
+
+    #[test]
+    fn quit_with_arguments_is_refused_with_one_line() {
+        for line in ["/quit now", "/exit now", "/q now", "/quit --force"] {
+            let got = msgs(line, &[], &[]);
+            assert!(got.starts_with("BAD /"), "{line}: {got}");
+            assert!(!got.contains("Quit") && !got.contains('\n'), "{line}: {got}");
+        }
+    }
+
+    #[test]
+    fn quit_exit_and_q_are_in_help() {
+        let help: Vec<String> = help_lines().into_iter().map(|(e, _)| e).collect();
+        for e in ["/quit", "/exit", "/q"] {
+            assert!(help.contains(&e.to_owned()), "{e} is not in /help");
+        }
+    }
+
+    #[test]
     fn registry_matches_spec_05_section_4() {
         let mut ours: Vec<String> = REGISTRY.iter().filter(|s| s.surfaces.slash > 0).map(|s| s.name.to_owned()).collect();
         ours.sort();

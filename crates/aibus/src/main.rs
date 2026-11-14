@@ -47,7 +47,7 @@ fn main() -> std::process::ExitCode {
     match outcome {
         Ok(Ok(code)) => std::process::ExitCode::from(code),
         Ok(Err(e)) => {
-            eprintln!("aibus: {}", redactor.redact(&e.to_string()));
+            eprintln!("aibus: {}", aibus_core::text::strip_ansi(&redactor.redact(&e.to_string())));
             std::process::ExitCode::from(e.exit_code())
         }
         Err(_) => std::process::ExitCode::from(1),

@@ -62,7 +62,9 @@ pub fn apply<G: Graph>(op: &WorkflowFile, app: &App<G>, files: &WorkflowFiles, a
                     line = format!("{line}; not runnable: {why}");
                 }
             }
-            let mut text = files.redactor.redact(&raw).into_owned();
+            // A file can hold escape sequences; the modal draws none of them.
+            let mut text = aibus_core::text::strip_ansi(&files.redactor.redact(&raw)).into_owned();
+            let line = aibus_core::text::strip_ansi(&line).into_owned();
             if text.len() > files.cap {
                 let mut cut = files.cap;
                 while !text.is_char_boundary(cut) {

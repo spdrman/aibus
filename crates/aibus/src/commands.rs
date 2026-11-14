@@ -12,6 +12,12 @@ use crate::account::{self, Io};
 use crate::cli::{AccountCmd, ConfigCmd, Global};
 use crate::keychain::OsKeychain;
 
+/// One line of human output with escape sequences and control characters taken out: workflow
+/// text comes from files, some of them someone else's.
+fn out(line: String) {
+    println!("{}", aibus_core::text::strip_ansi(&line));
+}
+
 /// The account commands against the real keychain, environment, terminal and providers.
 pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
     let stdin = std::io::stdin();
@@ -93,10 +99,10 @@ pub fn workflow_list(g: &Global, names: bool) -> Result<u8, AibusError> {
         match (&f.parsed, f.runnable()) {
             (Ok(w), Ok(_)) => {
                 let agents: Vec<&str> = w.steps.iter().map(|s| s.agent.as_str()).collect();
-                println!("{name}\t{}\t{}\t{source}", w.description, agents.join(" > "));
+                out(format!("{name}\t{}\t{}\t{source}", w.description, agents.join(" > ")));
             }
-            (Ok(_), Err(why)) => println!("{name}\t(not runnable: {why})\t\t{source}"),
-            (Err(e), _) => println!("{name}\t(invalid: {e})\t{}\t{source}", f.path.display()),
+            (Ok(_), Err(why)) => out(format!("{name}\t(not runnable: {why})\t\t{source}")),
+            (Err(e), _) => out(format!("{name}\t(invalid: {e})\t{}\t{source}", f.path.display())),
         }
     }
     Ok(0)
@@ -314,7 +320,7 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
             for (path, p) in list {
                 let step = p.step.map_or(String::new(), |n| format!("step {n}: "));
                 let field = p.field.as_deref().map_or(String::new(), |f| format!("{f}: "));
-                println!("{kind}: {}: {step}{field}{}", path.display(), p.message);
+                out(format!("{kind}: {}: {step}{field}{}", path.display(), p.message));
             }
         }
         if ok {
@@ -357,23 +363,23 @@ pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
         println!("{shown}");
         return Ok(0);
     }
-    println!("{}  ({}, {source})", w.name, path.display());
+    out(format!("{}  ({}, {source})", w.name, path.display()));
     if let Some(why) = &not_runnable {
-        println!("not runnable: {why}");
+        out(format!("not runnable: {why}"));
     }
     if !w.description.is_empty() {
-        println!("{}", w.description);
+        out(w.description.clone());
     }
     for (i, s) in w.steps.iter().enumerate() {
-        println!("\nstep {}: {}", i + 1, s.agent);
+        out(format!("\nstep {}: {}", i + 1, s.agent));
         for line in s.prompt.trim_end().lines() {
-            println!("  {line}");
+            out(format!("  {line}"));
         }
         if let Some(gate) = &s.gate {
-            println!("  gate: {gate}");
+            out(format!("  gate: {gate}"));
         }
         if let Some(r) = on_fail(s.retries) {
-            println!("  on_fail: {r}");
+            out(format!("  on_fail: {r}"));
         }
     }
     Ok(0)
@@ -478,7 +484,14 @@ pub fn workflow_install(
     }
     let bytes = std::fs::read(file).map_err(|e| usage(format!("{}: {e}", file.display())))?;
     let paths = g.paths()?;
-    let base = if user { paths.config.clone() } else { project_dir(&g.project_dir()?) };
+    // The user's config directory may itself be a link (a dotfiles checkout), which is theirs
+    // to make, so it is resolved here; under it, and for the project's `.aibus`, install refuses
+    // any symlink.
+    let base = if user {
+        std::fs::canonicalize(&paths.config).unwrap_or_else(|_| paths.config.clone())
+    } else {
+        project_dir(&g.project_dir()?)
+    };
     let roster: Vec<_> = crate::agent_cmd::Env::load(g)?.discover(g)?.agents.into_keys().collect();
     let to = Install {
         workflows_dir: base.join("workflows"),
@@ -488,6 +501,16 @@ pub fn workflow_install(
         allow_gates,
     };
     let wrote = bundle::install(&bytes, &to, redactor).map_err(|e| usage(e.to_string()))?;
+    let builtins = aibus_core::agent::builtin::names();
+    for p in wrote.iter().filter(|p| p.starts_with(&to.agents_dir)) {
+        let name = p.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+        if builtins.iter().any(|b| b.as_str() == name) {
+            eprintln!(
+                "aibus: warning: {} replaces the built-in {name} for every session that reads this directory",
+                p.display()
+            );
+        }
+    }
     if g.json {
         println!("{}", json!({ "wrote": wrote }));
     } else {

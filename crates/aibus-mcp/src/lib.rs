@@ -342,7 +342,7 @@ impl Server {
 
     /// `{workflows:[{name, scope, path, description, ok, runnable, bundle?, error?}]}`, paths
     /// relative to the project or to `~`. `bundle` is the `.aibus` file a workflow came from;
-    /// `runnable` is false for a broken file and for a bundled workflow with a gate.
+    /// `ok` and `runnable` are false for a broken file and for a bundled workflow with a gate.
     fn list_workflows(&self) -> Value {
         let dirs = workflow::dirs(&self.project, Some(&self.config));
         let shorten = |text: &str| self.shorten(text);
@@ -354,7 +354,8 @@ impl Server {
                     "scope": found.scope,
                     "path": shorten(&found.path.to_string_lossy().replace('\\', "/")),
                     "description": "",
-                    "ok": found.parsed.is_ok(),
+                    // `ok` is what an older client reads as "can run", so a gated bundle is not ok.
+                    "ok": found.runnable().is_ok(),
                     "runnable": found.runnable().is_ok(),
                 });
                 if let Some(b) = &found.bundle {

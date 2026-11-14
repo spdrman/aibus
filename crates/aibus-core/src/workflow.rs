@@ -59,6 +59,8 @@ pub enum WorkflowError {
     Step { step: usize, why: String },
     #[error("bundle refused: {0}")]
     Bundle(String),
+    #[error("{0}")]
+    File(String),
 }
 
 #[derive(Deserialize)]
@@ -316,6 +318,9 @@ pub fn dirs(project: &Path, config: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The most a loose workflow file may be for aibus to read it (the MCP read tools' cap).
+pub const LOOSE_MAX_BYTES: u64 = 1024 * 1024;
+
 /// Largest workflow file a remote author may write, and the most any file in a bundle may be.
 pub const MAX_BYTES: usize = 64 * 1024;
 
@@ -396,10 +401,14 @@ pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let text = std::fs::read_to_string(path);
+        // Opened without blocking and capped, so a fifo, a device or a huge file is a row that
+        // says so rather than a hang.
+        let text = crate::persist::fs::read_regular(path, LOOSE_MAX_BYTES)
+            .map_err(|e| e.to_string())
+            .and_then(|b| String::from_utf8(b).map_err(|_| "not UTF-8 text".to_owned()));
         let parsed = match &text {
             Ok(t) => Workflow::parse(stem, t),
-            Err(e) => Err(WorkflowError::Toml(e.to_string())),
+            Err(e) => Err(WorkflowError::File(e.clone())),
         };
         out.push(Found {
             name: stem.to_owned(),
@@ -411,6 +420,7 @@ pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
         });
     }
     let redactor = bundle_redactor();
+    let mut bundles = 0;
     for path in paths
         .iter()
         .filter(|p| p.extension().is_some_and(|x| x == bundle::EXTENSION))
@@ -423,6 +433,21 @@ pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
             .file_stem()
             .is_none_or(|s| s.is_empty() || s.to_string_lossy().starts_with('.'))
         {
+            continue;
+        }
+        bundles += 1;
+        if bundles > bundle::MAX_BUNDLES_PER_DIR {
+            out.push(Found {
+                name: file.to_owned(),
+                scope,
+                path: path.clone(),
+                bundle: Some(file.to_owned()),
+                text: None,
+                parsed: Err(WorkflowError::Bundle(format!(
+                    "not read: there are more than {} bundles in this directory",
+                    bundle::MAX_BUNDLES_PER_DIR
+                ))),
+            });
             continue;
         }
         match bundle::read_file(path, redactor) {
@@ -516,18 +541,23 @@ pub struct WorkflowRow {
 
 
 
-/// The rows of `dirs` (as `list` finds them); the first directory is the project's.
+/// The rows of `dirs` (as `list` finds them); the first directory is the project's. Text from a
+/// file goes through `strip_ansi`, since the dashboard draws it.
 pub fn rows(dirs: &[PathBuf]) -> Vec<WorkflowRow> {
     list(dirs)
         .into_iter()
         .map(|found| {
             let (description, agents, error) = match &found.parsed {
                 Ok(w) => (
-                    w.description.clone(),
+                    crate::text::strip_ansi(&w.description).into_owned(),
                     w.steps.iter().map(|s| s.agent.to_string()).collect(),
-                    found.runnable().err(),
+                    found.runnable().err().map(|e| crate::text::strip_ansi(&e).into_owned()),
                 ),
-                Err(e) => (String::new(), Vec::new(), Some(e.to_string())),
+                Err(e) => (
+                    String::new(),
+                    Vec::new(),
+                    Some(crate::text::strip_ansi(&e.to_string()).into_owned()),
+                ),
             };
             WorkflowRow {
                 name: found.name,

@@ -45,7 +45,7 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 
 | Tool | What it does |
 |---|---|
-| `workflow_list` | every workflow of the project and of the user, loose files and `.aibus` bundles, with the parse error of a broken file; `bundle` names the bundle a workflow came from, and `runnable` is false for a broken file and for a bundled workflow with a gate (its `error` says how to trust it) |
+| `workflow_list` | every workflow of the project and of the user, loose files and `.aibus` bundles, with the parse error of a broken file; `bundle` names the bundle a workflow came from, and `ok` and `runnable` are false for a broken file and for a bundled workflow with a gate (its `error` says how to trust it; an older client that reads `ok` as "can run" stays right) |
 | `workflow_get {name, scope?}` | the file text, its SHA-256 `revision` and the parsed steps |
 | `workflow_explain {name, scope?}` | one paragraph per step (which agent, what it reads, what blocks it, how often it retries) and the data flow between steps; an edge `from: 0` is the workflow input |
 | `workflow_validate {name?, scope?, toml?}` | an existing workflow or a draft `toml`, checked against the real roster (built-in, project, user); same shape as `aibus workflow validate --json`, so a draft that names an unknown agent is `ok: false` with the step number |
@@ -67,7 +67,7 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 * The text is at most 64 KiB and 32 steps, and `workflow_validate`'s checks pass with no errors (warnings come back in the result). Text a redactor would change, a credential, is refused and never echoed.
 * A step with a `gate` is refused unless the server was started with `--allow gates`. A gate is a shell command aibus runs as you when the chain reaches that step, so a remote author writing one is writing code that runs later. `workflow_validate` and `workflow_dry_run` always show the command text.
 * The directory is the scope's `workflows` directory, resolved through symlinks, and it has to land exactly where it should: a symlink out of it is refused, and so is a workflow file that is itself a link. The user directory is created when missing; the project scope needs `.aibus/` to exist already.
-* The file is written with the atomic write (temp file, fsync, rename), mode 0600, and starts with `# written through aibus mcp, <time>`. An update keeps the line the file already had instead of adding another.
+* The file is written with the atomic write (a temp file under a random name made with `O_CREAT|O_EXCL`, so a symlink planted in the directory is never written through; fsync; rename; then a check that the result is a plain file), mode 0600, and starts with `# written through aibus mcp, <time>`. An update keeps the line the file already had instead of adding another.
 
 `workflow_create` and `workflow_update` write single loose files, never a bundle. The project scope is the directory the server was started in (`--cwd`, or its working directory), and aibus does not walk up from it: a session started in another directory, a subdirectory included, does not see a project workflow written here. That is why a workflow written through MCP could be missing from `/workflow list`. `workflow_list` and `aibus workflow list` say where each workflow came from; use `scope: "user"` for a workflow every session should see.
 

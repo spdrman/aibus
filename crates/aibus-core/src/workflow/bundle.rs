@@ -14,7 +14,6 @@
 //! hard limits, and refused whole at the first thing that is not exactly that layout.
 
 use std::collections::BTreeSet;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use super::{valid_name, validate, Workflow, MAX_STEPS};
 use crate::agent::{def, DefSource, PermissionMode, Scope};
 use crate::ids::AgentName;
-use crate::persist::fs::{create_private_dir, write_atomic};
+use crate::persist::fs::{
+    commit_staged, create_private_dir, read_regular, stage_private, ReadError,
+};
 use crate::Redactor;
 
 /// The file extension, without the dot. A bundle is `<name>.aibus`, never a bare `.aibus` (that
@@ -114,6 +115,36 @@ pub enum BundleError {
 
 /// A tar block.
 const BLOCK: usize = 512;
+
+/// `text` with every control character written as an escape, for an error message: a name from a
+/// bundle never reaches a terminal raw.
+fn esc(text: &str) -> String {
+    text.chars()
+        .flat_map(|c| -> Box<dyn Iterator<Item = char>> {
+            if c.is_control() {
+                Box::new(c.escape_default())
+            } else {
+                Box::new(std::iter::once(c))
+            }
+        })
+        .collect()
+}
+
+/// A control character other than tab, newline and carriage return.
+fn control(text: &str) -> bool {
+    text.chars()
+        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+}
+
+/// Whether any string inside `v` holds a control character (for a parsed agent definition).
+fn control_in(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::String(s) => control(s),
+        serde_json::Value::Array(a) => a.iter().any(control_in),
+        serde_json::Value::Object(o) => o.iter().any(|(k, v)| control(k) || control_in(v)),
+        _ => false,
+    }
+}
 
 /// What one header says, once it has passed the header checks.
 enum Kind {
@@ -242,9 +273,11 @@ fn entries(bytes: &[u8]) -> Result<Vec<(String, &[u8])>, BundleError> {
         } else {
             [prefix, b"/".to_vec(), name].concat()
         };
-        let path = String::from_utf8(raw).map_err(|e| {
-            BundleError::NotUtf8(String::from_utf8_lossy(e.as_bytes()).into_owned())
-        })?;
+        let path = String::from_utf8(raw)
+            .map_err(|e| BundleError::NotUtf8(esc(&String::from_utf8_lossy(e.as_bytes()))))?;
+        if control(&path) {
+            return Err(BundleError::Control(esc(&path)));
+        }
         let kind = match h[156] {
             b'0' | 0 => Kind::File,
             b'5' => Kind::Dir,
@@ -297,7 +330,7 @@ fn matches(listed: &[String], present: &[(String, String)], what: &str) -> Resul
     let mut seen = BTreeSet::new();
     for n in listed {
         if !valid_name(n) {
-            return Err(BundleError::BadName(n.clone()));
+            return Err(BundleError::BadName(esc(n)));
         }
         if !seen.insert(n.as_str()) {
             return Err(BundleError::Duplicate(format!(
@@ -328,6 +361,9 @@ pub fn read(bytes: &[u8], redactor: &Redactor) -> Result<Bundle, BundleError> {
         if redactor.redact(text) != text {
             return Err(BundleError::Credential(path));
         }
+        if control(text) {
+            return Err(BundleError::Control(path));
+        }
         let text = text.to_owned();
         if path == "manifest.toml" {
             manifest = Some(text);
@@ -349,6 +385,9 @@ pub fn read(bytes: &[u8], redactor: &Redactor) -> Result<Bundle, BundleError> {
         manifest.ok_or_else(|| BundleError::Manifest("there is no manifest.toml".into()))?;
     let manifest: Manifest =
         toml::from_str(&manifest).map_err(|e| BundleError::Manifest(e.message().to_owned()))?;
+    if control(&manifest.name) || control(&manifest.description) {
+        return Err(BundleError::Control("manifest.toml".into()));
+    }
     if manifest.format != FORMAT {
         return Err(BundleError::Manifest(format!(
             "format {} is not one this aibus reads (it reads {FORMAT})",
@@ -356,7 +395,7 @@ pub fn read(bytes: &[u8], redactor: &Redactor) -> Result<Bundle, BundleError> {
         )));
     }
     if !valid_name(&manifest.name) {
-        return Err(BundleError::BadName(manifest.name));
+        return Err(BundleError::BadName(esc(&manifest.name)));
     }
     if manifest.workflows.is_empty() {
         return Err(BundleError::Manifest("it lists no workflows".into()));
@@ -375,6 +414,14 @@ pub fn read(bytes: &[u8], redactor: &Redactor) -> Result<Bundle, BundleError> {
                 ),
             ));
         }
+        let texts = std::iter::once(wf.description.as_str()).chain(
+            wf.steps
+                .iter()
+                .flat_map(|s| std::iter::once(s.prompt.as_str()).chain(s.gate.as_deref())),
+        );
+        if texts.into_iter().any(control) {
+            return Err(BundleError::Control(format!("workflows/{name}.toml")));
+        }
         if wf.steps.len() > MAX_STEPS {
             return Err(BundleError::Workflow(
                 name.clone(),
@@ -389,6 +436,9 @@ pub fn read(bytes: &[u8], redactor: &Redactor) -> Result<Bundle, BundleError> {
         };
         let (d, _) = def::parse(text, source)
             .map_err(|e| BundleError::Agent(name.clone(), e.to_string()))?;
+        if serde_json::to_value(&d).is_ok_and(|v| control_in(&v)) {
+            return Err(BundleError::Control(format!("agents/{name}.md")));
+        }
         if d.name.as_str() != name {
             return Err(BundleError::Agent(
                 name.clone(),
@@ -414,22 +464,13 @@ pub fn read(bytes: &[u8], redactor: &Redactor) -> Result<Bundle, BundleError> {
     })
 }
 
-/// Reads the bundle at `path`: a regular file of at most `MAX_BUNDLE_BYTES`, then `read`.
+/// Reads the bundle at `path`: a regular file of at most `MAX_BUNDLE_BYTES` (checked on the open
+/// file, opened without blocking, so a fifo or a device is refused at once), then `read`.
 pub fn read_file(path: &Path, redactor: &Redactor) -> Result<Bundle, BundleError> {
-    let shown = path.display().to_string();
-    let io = |e: std::io::Error| BundleError::Io(shown.clone(), e.to_string());
-    let file = std::fs::File::open(path).map_err(io)?;
-    let md = file.metadata().map_err(io)?;
-    if !md.is_file() {
-        return Err(BundleError::Io(shown, "not a regular file".into()));
-    }
-    if md.len() > MAX_BUNDLE_BYTES as u64 {
-        return Err(BundleError::TooBig(md.len()));
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_BUNDLE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(io)?;
+    let bytes = read_regular(path, MAX_BUNDLE_BYTES as u64).map_err(|e| match e {
+        ReadError::TooBig(n, _) => BundleError::TooBig(n),
+        e => BundleError::Io(path.display().to_string(), e.to_string()),
+    })?;
     read(&bytes, redactor)
 }
 
@@ -576,15 +617,24 @@ pub fn install(
             }
         }
     }
+    let builtins = crate::agent::builtin::names();
     for (name, text) in &bundle.agents {
+        if !to.force && builtins.iter().any(|b| b.as_str() == name) {
+            return Err(InstallError::ShadowsBuiltin(name.clone()));
+        }
         let source = DefSource {
             path: None,
             scope: Scope::Project,
         };
         let (d, _) = def::parse(text, source)
             .map_err(|e| InstallError::Invalid(name.clone(), e.to_string()))?;
-        if !to.allow_gates && (!d.hooks.is_empty() || d.permission_mode != PermissionMode::Default)
-        {
+        // What an agent can do as you without asking: hooks, a permission mode, an account it
+        // spends on, a prompt it starts with.
+        let powers = !d.hooks.is_empty()
+            || d.permission_mode != PermissionMode::Default
+            || d.account.is_some()
+            || d.initial_prompt.is_some();
+        if !to.allow_gates && powers {
             return Err(InstallError::AgentPowers(name.clone()));
         }
     }
@@ -605,38 +655,95 @@ pub fn install(
     let dirs: Vec<&Path> = std::iter::once(to.workflows_dir.as_path())
         .chain((!bundle.agents.is_empty()).then_some(to.agents_dir.as_path()))
         .collect();
-    for dir in &dirs {
+    // Each directory and its parent (`.aibus`, or the config directory) has to be a real
+    // directory or missing: a symlink at either would send the files somewhere else.
+    for dir in dirs.iter().flat_map(|d| [d.parent(), Some(*d)]).flatten() {
         match std::fs::symlink_metadata(dir) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(InstallError::Io(format!("{}: {e}", dir.display()))),
-            Ok(md) if !md.is_dir() => return Err(InstallError::NotPlain(dir.to_path_buf())),
+            Ok(md) if md.file_type().is_symlink() || !md.is_dir() => {
+                return Err(InstallError::NotPlain(dir.to_path_buf()))
+            }
             Ok(_) => {}
         }
     }
     let mut taken = Vec::new();
+    let mut existed = Vec::new();
     for (path, _) in &files {
         match std::fs::symlink_metadata(path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => existed.push(false),
             Err(e) => return Err(InstallError::Io(format!("{}: {e}", path.display()))),
             Ok(md) if md.file_type().is_symlink() || !md.is_file() => {
                 return Err(InstallError::NotPlain(path.clone()))
             }
             Ok(_) if !to.force => taken.push(path.clone()),
-            Ok(_) => {}
+            Ok(_) => existed.push(true),
         }
     }
     if !taken.is_empty() {
         return Err(InstallError::Exists(taken));
     }
 
-    for dir in dirs {
-        create_private_dir(dir).map_err(|e| InstallError::Io(format!("{}: {e}", dir.display())))?;
+    // All or nothing: make the directories, stage every file next to its target, then rename
+    // them in order. Any failure removes what this call made.
+    let mut made: Vec<PathBuf> = Vec::new();
+    let undo = |made: &[PathBuf], staged: &[PathBuf], committed: &[PathBuf]| {
+        for p in staged.iter().chain(committed) {
+            let _ = std::fs::remove_file(p);
+        }
+        for d in made.iter().rev() {
+            let _ = std::fs::remove_dir(d);
+        }
+    };
+    for dir in &dirs {
+        for d in [dir.parent(), Some(*dir)].into_iter().flatten() {
+            if std::fs::symlink_metadata(d).is_err() {
+                if let Err(e) = create_private_dir(d) {
+                    undo(&made, &[], &[]);
+                    return Err(InstallError::Io(format!("{}: {e}", d.display())));
+                }
+                made.push(d.to_path_buf());
+            }
+        }
+        // Made or not, it has to resolve to exactly where it says.
+        let real = |p: &Path| std::fs::canonicalize(p).ok();
+        let want = dir.parent().and_then(|p| {
+            Some(
+                real(p.parent()?)?
+                    .join(p.file_name()?)
+                    .join(dir.file_name()?),
+            )
+        });
+        if want.is_none() || real(dir) != want {
+            undo(&made, &[], &[]);
+            return Err(InstallError::NotPlain(dir.to_path_buf()));
+        }
     }
-    let mut wrote = Vec::new();
-    for (path, text) in files {
-        write_atomic(&path, text)
-            .map_err(|e| InstallError::Io(format!("{}: {e}", path.display())))?;
-        wrote.push(path);
+    let mut staged = Vec::new();
+    for (path, text) in &files {
+        match stage_private(path, text) {
+            Ok(tmp) => staged.push(tmp),
+            Err(e) => {
+                undo(&made, &staged, &[]);
+                return Err(InstallError::Io(format!("{}: {e}", path.display())));
+            }
+        }
     }
-    Ok(wrote)
+    let mut committed = Vec::new();
+    for (i, ((path, _), tmp)) in files.iter().zip(&staged).enumerate() {
+        if let Err(e) = commit_staged(tmp, path) {
+            // A file that was there before (`--force`) cannot be put back; a new one goes.
+            let new: Vec<PathBuf> = committed
+                .iter()
+                .zip(&existed)
+                .filter(|(_, e)| !**e)
+                .map(|(p, _)| p)
+                .cloned()
+                .collect();
+            undo(&made, &staged[i + 1..], &new);
+            return Err(InstallError::Io(format!("{}: {e}", path.display())));
+        }
+        committed.push(path.clone());
+    }
+    Ok(committed)
 }

@@ -97,7 +97,7 @@ aibus --agents '{"reviewer":{"description":"...","prompt":"...","tools":["read",
 | `audit` | worker | same, `isolation: worktree` | `read, grep, glob, bash(git *), bash(cargo *), bash(npm *)` | Runs checks in a worktree (third card). |
 | `workflow-author` | worker | `inherit` | `read, glob, grep, mcp:aibus:*` | Drafts a workflow for a goal over `aibus mcp` on stdio (read-only: validate and dry run, never a write), for `/workflow new`. Its `max_cost_usd` is a quarter of `limits.max_cost_usd`. |
 
-Built-ins can be overridden by a project or user definition with the same name. `aibus agent show explore` prints the built-in's effective definition so you can copy it.
+Built-ins can be overridden by a project or user definition with the same name, and the override is total: every session that reads that directory gets the file's definition for that name, as the lead, as a worker and in every workflow step. `aibus workflow install` refuses a bundle whose agent has a built-in's name unless `--force` is given, and says which built-in it replaces. `aibus agent show explore` prints the built-in's effective definition so you can copy it.
 
 ### 1.4 Validation
 

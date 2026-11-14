@@ -197,7 +197,7 @@ fn a_writer_killed_mid_append_leaves_only_whole_events() {
     .unwrap();
     assert_eq!(recovery.corrupt_lines, 0);
     let next = s.next_sequence();
-    s.append(one(ev(u64::MAX, EventKind::AttemptFailed)))
+    s.append(one(ev(1 << 40, EventKind::AttemptFailed)))
         .unwrap();
     let (events, report) = TraceStore::read(&dir).unwrap();
     assert_eq!(report.corrupt_lines + report.torn_bytes, 0);

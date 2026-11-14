@@ -74,7 +74,20 @@ fn the_config_dir_is_only_ever_passed_through_by_name() {
         })
         .collect();
     assert_eq!(uses.len(), 1, "one mention, in the allowlist: {uses:#?}");
-    assert!(uses[0].contains("ALLOW"), "{uses:#?}");
+    let cli = src("aibus-supervisor")
+        .into_iter()
+        .find(|(p, _)| p.ends_with("cli.rs"))
+        .unwrap()
+        .1;
+    let allow = cli
+        .split("const ALLOW")
+        .nth(1)
+        .and_then(|r| r.split("];").next())
+        .expect("the allowlist");
+    assert!(
+        allow.contains("CLAUDE_CONFIG_DIR"),
+        "the one mention is in the allowlist"
+    );
 }
 
 #[cfg(unix)]

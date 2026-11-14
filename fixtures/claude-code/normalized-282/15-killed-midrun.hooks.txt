@@ -1,0 +1,31 @@
+attempt 00000000-0000-0000-0000-000002820002 status=interrupted reconcile=false evidence=#1:observed/aibus_scheduler,#22:observed/aibus_scheduler
+agent b9e1f467-095e-4945-84ba-12e90536fb30 role=lead status=process_exited evidence=#2:observed/cli_stream,#11:correlated/hook,#21:observed/aibus_scheduler
+agent a718fd2cb8d6a06a0 role=reader-a status=ended_with_process evidence=#4:observed/cli_stream,#13:correlated/hook,#19:inferred/derived
+agent ad104ff9b55122a27 role=reader-b status=ended_with_process evidence=#7:observed/cli_stream,#15:correlated/hook,#20:inferred/derived
+edge b9e1f467-095e-4945-84ba-12e90536fb30 -> a718fd2cb8d6a06a0 via toolu_01LXiivzcBE9A5bA3rsBxAS9 level=observed cross_checked=true sources=#3:observed/cli_stream,#4:observed/cli_stream,#12:correlated/hook,#13:correlated/hook
+edge b9e1f467-095e-4945-84ba-12e90536fb30 -> ad104ff9b55122a27 via toolu_01FpE8DdVW9iUxbz2fL1TTPs level=observed cross_checked=true sources=#6:observed/cli_stream,#7:observed/cli_stream,#14:correlated/hook,#15:correlated/hook
+tool toolu_016gxuvDM7gGDyxyqV9fTuQU agent=a718fd2cb8d6a06a0 name=Read outcome=completed evidence=#9:observed/cli_stream,#10:observed/cli_stream,#16:correlated/hook,#17:correlated/hook
+gap #18 stream_truncated
+timeline
+#1 2026-11-14T21:34:22.867Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:34:23.201Z - agent_started observed cli_stream agent=b9e1f467-095e-4945-84ba-12e90536fb30
+#3 2026-11-14T21:34:24.169Z 2026-11-14T21:34:24.168Z task_delegated observed cli_stream agent=b9e1f467-095e-4945-84ba-12e90536fb30
+#4 2026-11-14T21:34:24.194Z - agent_started observed cli_stream agent=a718fd2cb8d6a06a0
+#5 2026-11-14T21:34:24.196Z 2026-11-14T21:34:24.190Z message_chunk observed cli_stream agent=a718fd2cb8d6a06a0
+#6 2026-11-14T21:34:24.538Z 2026-11-14T21:34:24.538Z task_delegated observed cli_stream agent=b9e1f467-095e-4945-84ba-12e90536fb30
+#7 2026-11-14T21:34:24.561Z - agent_started observed cli_stream agent=ad104ff9b55122a27
+#8 2026-11-14T21:34:24.563Z 2026-11-14T21:34:24.560Z message_chunk observed cli_stream agent=ad104ff9b55122a27
+#9 2026-11-14T21:34:24.959Z 2026-11-14T21:34:24.952Z tool_started observed cli_stream agent=a718fd2cb8d6a06a0
+#10 2026-11-14T21:34:24.986Z 2026-11-14T21:34:24.985Z tool_completed observed cli_stream agent=a718fd2cb8d6a06a0
+#11 2026-11-14T21:34:25.073Z - agent_started correlated hook agent=b9e1f467-095e-4945-84ba-12e90536fb30 corroborates
+#12 2026-11-14T21:34:25.073Z - task_delegated correlated hook agent=b9e1f467-095e-4945-84ba-12e90536fb30 corroborates
+#13 2026-11-14T21:34:25.073Z - agent_started correlated hook agent=a718fd2cb8d6a06a0 corroborates
+#14 2026-11-14T21:34:25.073Z - task_delegated correlated hook agent=b9e1f467-095e-4945-84ba-12e90536fb30 corroborates
+#15 2026-11-14T21:34:25.073Z - agent_started correlated hook agent=ad104ff9b55122a27 corroborates
+#16 2026-11-14T21:34:25.073Z - tool_started correlated hook agent=a718fd2cb8d6a06a0 corroborates
+#17 2026-11-14T21:34:25.073Z - tool_completed correlated hook agent=a718fd2cb8d6a06a0 corroborates
+#18 2026-11-14T21:34:25.073Z - gap_detected unavailable cli_stream agent=-
+#19 2026-11-14T21:34:25.073Z - agent_stopped inferred derived agent=a718fd2cb8d6a06a0
+#20 2026-11-14T21:34:25.073Z - agent_stopped inferred derived agent=ad104ff9b55122a27
+#21 2026-11-14T21:34:25.073Z - agent_stopped observed aibus_scheduler agent=b9e1f467-095e-4945-84ba-12e90536fb30
+#22 2026-11-14T21:34:25.073Z - attempt_failed observed aibus_scheduler agent=b9e1f467-095e-4945-84ba-12e90536fb30

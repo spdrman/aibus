@@ -1,0 +1,58 @@
+attempt 00000000-0000-0000-0000-000002820002 status=completed reconcile=false evidence=#1:observed/aibus_scheduler,#40:observed/aibus_scheduler
+  usage input_tokens=4 tokens (reported, result.usage)
+  usage output_tokens=316 tokens (reported, result.usage)
+  usage cache_creation_input_tokens=2223 tokens (reported, result.usage)
+  usage cache_read_input_tokens=13036 tokens (reported, result.usage)
+  usage num_turns=3 turns (reported, result.num_turns)
+  usage duration_ms=2908 ms (reported, result.duration_ms)
+  usage cost_usd=0.0010430450000000005 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd=unknown usd (unknown, not reported by the CLI)
+agent 20d7adb0-33a7-4cb1-b8b8-661dcf32e384 role=lead status=process_exited evidence=#2:observed/cli_stream,#26:correlated/hook,#39:observed/aibus_scheduler
+agent a51dc098ebaef1926 role=reader-a status=completed evidence=#4:observed/cli_stream,#20:observed/cli_stream,#21:observed/cli_stream,#23:observed/cli_stream,#28:correlated/hook,#37:correlated/hook,#38:correlated/hook
+agent a8462ecb2e68a2980 role=reader-b status=completed evidence=#7:observed/cli_stream,#14:observed/cli_stream,#15:observed/cli_stream,#17:observed/cli_stream,#30:correlated/hook,#35:correlated/hook,#36:correlated/hook
+edge 20d7adb0-33a7-4cb1-b8b8-661dcf32e384 -> a51dc098ebaef1926 via toolu_01Mogri4cjssotDxPiAw6PWk level=observed cross_checked=true sources=#3:observed/cli_stream,#4:observed/cli_stream,#27:correlated/hook,#28:correlated/hook
+edge 20d7adb0-33a7-4cb1-b8b8-661dcf32e384 -> a8462ecb2e68a2980 via toolu_01AU2rDESJUnNTzAAvW2kqgT level=observed cross_checked=true sources=#6:observed/cli_stream,#7:observed/cli_stream,#29:correlated/hook,#30:correlated/hook
+tool toolu_01JeiGnoxNemZFWUdfSfJttH agent=a51dc098ebaef1926 name=Read outcome=completed evidence=#9:observed/cli_stream,#10:observed/cli_stream,#31:correlated/hook,#32:correlated/hook
+tool toolu_01W7MEo4jNqMwkNhgW9R3Gc4 agent=a8462ecb2e68a2980 name=Read outcome=completed evidence=#11:observed/cli_stream,#12:observed/cli_stream,#33:correlated/hook,#34:correlated/hook
+gap #18 reasoning_not_exposed
+timeline
+#1 2026-11-14T21:19:41.292Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:19:41.662Z - agent_started observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+#3 2026-11-14T21:19:42.528Z 2026-11-14T21:19:42.527Z task_delegated observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+#4 2026-11-14T21:19:42.550Z - agent_started observed cli_stream agent=a51dc098ebaef1926
+#5 2026-11-14T21:19:42.552Z 2026-11-14T21:19:42.546Z message_chunk observed cli_stream agent=a51dc098ebaef1926
+#6 2026-11-14T21:19:42.853Z 2026-11-14T21:19:42.853Z task_delegated observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+#7 2026-11-14T21:19:42.873Z - agent_started observed cli_stream agent=a8462ecb2e68a2980
+#8 2026-11-14T21:19:42.874Z 2026-11-14T21:19:42.872Z message_chunk observed cli_stream agent=a8462ecb2e68a2980
+#9 2026-11-14T21:19:43.240Z 2026-11-14T21:19:43.233Z tool_started observed cli_stream agent=a51dc098ebaef1926
+#10 2026-11-14T21:19:43.271Z 2026-11-14T21:19:43.270Z tool_completed observed cli_stream agent=a51dc098ebaef1926
+#11 2026-11-14T21:19:43.613Z 2026-11-14T21:19:43.611Z tool_started observed cli_stream agent=a8462ecb2e68a2980
+#12 2026-11-14T21:19:43.634Z 2026-11-14T21:19:43.633Z tool_completed observed cli_stream agent=a8462ecb2e68a2980
+#13 2026-11-14T21:19:43.960Z 2026-11-14T21:19:43.960Z message_chunk observed cli_stream agent=a8462ecb2e68a2980
+#14 2026-11-14T21:19:43.999Z 2026-11-14T21:19:43.998Z agent_stopped observed cli_stream agent=a8462ecb2e68a2980
+#15 2026-11-14T21:19:43.999Z - agent_stopped observed cli_stream agent=a8462ecb2e68a2980 corroborates
+#16 2026-11-14T21:19:43.999Z - usage_reported observed cli_stream agent=a8462ecb2e68a2980
+#17 2026-11-14T21:19:44.010Z 2026-11-14T21:19:44.010Z agent_stopped observed cli_stream agent=a8462ecb2e68a2980 corroborates
+#18 2026-11-14T21:19:44.066Z 2026-11-14T21:19:44.066Z gap_detected unavailable cli_stream agent=a51dc098ebaef1926
+#19 2026-11-14T21:19:44.082Z 2026-11-14T21:19:44.081Z message_chunk observed cli_stream agent=a51dc098ebaef1926
+#20 2026-11-14T21:19:44.102Z 2026-11-14T21:19:44.102Z agent_stopped observed cli_stream agent=a51dc098ebaef1926
+#21 2026-11-14T21:19:44.102Z - agent_stopped observed cli_stream agent=a51dc098ebaef1926 corroborates
+#22 2026-11-14T21:19:44.102Z - usage_reported observed cli_stream agent=a51dc098ebaef1926
+#23 2026-11-14T21:19:44.110Z 2026-11-14T21:19:44.110Z agent_stopped observed cli_stream agent=a51dc098ebaef1926 corroborates
+#24 2026-11-14T21:19:44.489Z 2026-11-14T21:19:44.488Z message_chunk observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+#25 2026-11-14T21:19:44.515Z - usage_reported observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+#26 2026-11-14T21:19:45.168Z - agent_started correlated hook agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 corroborates
+#27 2026-11-14T21:19:45.168Z - task_delegated correlated hook agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 corroborates
+#28 2026-11-14T21:19:45.168Z - agent_started correlated hook agent=a51dc098ebaef1926 corroborates
+#29 2026-11-14T21:19:45.168Z - task_delegated correlated hook agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 corroborates
+#30 2026-11-14T21:19:45.168Z - agent_started correlated hook agent=a8462ecb2e68a2980 corroborates
+#31 2026-11-14T21:19:45.168Z - tool_started correlated hook agent=a51dc098ebaef1926 corroborates
+#32 2026-11-14T21:19:45.168Z - tool_completed correlated hook agent=a51dc098ebaef1926 corroborates
+#33 2026-11-14T21:19:45.168Z - tool_started correlated hook agent=a8462ecb2e68a2980 corroborates
+#34 2026-11-14T21:19:45.168Z - tool_completed correlated hook agent=a8462ecb2e68a2980 corroborates
+#35 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a8462ecb2e68a2980 corroborates
+#36 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a8462ecb2e68a2980 corroborates
+#37 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a51dc098ebaef1926 corroborates
+#38 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a51dc098ebaef1926 corroborates
+#39 2026-11-14T21:19:45.168Z - agent_stopped observed aibus_scheduler agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+#40 2026-11-14T21:19:45.168Z - attempt_completed observed aibus_scheduler agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384

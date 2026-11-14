@@ -10,10 +10,18 @@ set -eu
 # the working copy, and nothing is formatted or written here.
 if command -v rustfmt >/dev/null 2>&1; then
   fmt_bad=0 fmt_state=status
-  # rustfmt on stdin exits 0 even with --check; a difference shows only as output, so clean means no output
-  fmt_clean() { fmt_out=$(git cat-file blob "$1" | rustfmt --check --edition 2021 2>&1) && [ -z "$fmt_out" ]; }
-  git diff --cached --name-status -z -M --diff-filter=ACMR | tr '\0' '\n' | {
-    while IFS= read -r tok; do
+  # rustfmt on stdin exits 0 even with --check; a difference shows only as output. Returns 0 clean, 1 not
+  # clean, 2 when rustfmt itself failed (non-zero exit and no "Diff in" line: a missing component, a syntax
+  # error), which must never read as "not clean" and get a file skipped.
+  fmt_clean() {
+    fmt_rc=0; fmt_out=$(git cat-file blob "$1" | rustfmt --check --edition 2021 2>&1) || fmt_rc=$?
+    case $fmt_out in *"Diff in "*) return 1 ;; esac
+    [ "$fmt_rc" = 0 ] || return 2
+    [ -z "$fmt_out" ]
+  }
+  fmt_fail() { echo "pre-commit: rustfmt failed on $1, cannot check it: $(printf '%s\n' "$fmt_out" | head -1)" >&2; }
+  git diff --cached --name-status -z -M --diff-filter=ACMR | {
+    while IFS= read -r -d '' tok; do
       case $fmt_state in
         status)
           case $tok in
@@ -27,11 +35,19 @@ if command -v rustfmt >/dev/null 2>&1; then
         newpath) fmt_new=$tok; fmt_state=status ;;
       esac
       case $fmt_new in *.rs) ;; *) continue ;; esac
-      if git cat-file -e "HEAD:$fmt_old" 2>/dev/null && ! fmt_clean "HEAD:$fmt_old"; then
+      fmt_head=0
+      if git cat-file -e "HEAD:$fmt_old" 2>/dev/null; then
+        fmt_clean "HEAD:$fmt_old" && fmt_head=clean || fmt_head=$?
+        if [ "$fmt_head" = 2 ]; then fmt_fail "$fmt_old at HEAD"; fmt_bad=1; continue; fi
+      fi
+      if [ "$fmt_head" = 1 ]; then
         echo "$fmt_new was not rustfmt-clean before this commit, format check skipped" >&2
-      elif ! fmt_clean ":$fmt_new"; then
-        echo "pre-commit: $fmt_new is not rustfmt-clean (run rustfmt --edition 2021 on it)" >&2
-        fmt_bad=1
+      else
+        fmt_rc=0; fmt_clean ":$fmt_new" || fmt_rc=$?
+        if [ "$fmt_rc" = 2 ]; then fmt_fail "$fmt_new"; fmt_bad=1
+        elif [ "$fmt_rc" = 1 ]; then
+          echo "pre-commit: $fmt_new is not rustfmt-clean (run rustfmt --edition 2021 on it)" >&2; fmt_bad=1
+        fi
       fi
     done
     exit $fmt_bad

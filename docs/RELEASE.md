@@ -229,7 +229,14 @@ copy) on stdin with the same `rustfmt --check --edition 2021`: a new file must p
 `HEAD` (at its old path, for a rename or copy) must still be clean; a file that was not clean at `HEAD` is
 skipped with one line, `<file> was not rustfmt-clean before this commit, format check skipped`. Deleted
 files are not looked at, and the hook never formats or writes anything. That is how new code stays clean
-without a mass reformat. Tests: `bash tests/pre-commit/run.sh` (a fake `rustfmt` on `PATH`, throwaway repos).
+without a mass reformat. If rustfmt itself fails on either side (a non-zero exit with no `Diff in` line, such as a missing component
+or a syntax error) the hook refuses and says so, so a broken toolchain never reads as "not clean" and skips
+a file; with no `rustfmt` on `PATH` at all it passes, as the old hook did. Paths are read NUL-separated, so
+names with spaces or newlines work. Edge cases I know about and kept: rustfmt reads the blob on stdin
+because a temp copy would break on `mod` declarations, so a new file with `#![rustfmt::skip]` and a new
+symlink named `*.rs` are refused (stdin prints the source back), and a parent file is not judged on an
+unstaged child, since stdin does not follow `mod`. Tests: `bash tests/pre-commit/run.sh` (a fake `rustfmt` on
+`PATH`, throwaway repos).
 
 **Merging into `release`** (`pre-merge-commit`): when the current branch is `release`, a merge that
 auto-commits runs the full e2e first and is aborted if it is red. The e2e is

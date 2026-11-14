@@ -24,13 +24,13 @@ fn run_dir(home: &Path) -> PathBuf {
 }
 
 /// A live session `id` in `home`'s runtime directory, answered by a stand-in loop.
-fn session(rt: &tokio::runtime::Runtime, home: &Path, id: &str, seen: Seen) -> Endpoint {
+fn session(rt: &Rt, home: &Path, id: &str, seen: Seen) -> Endpoint {
     let dir = runtime_dir(Some(run_dir(home).as_os_str()), home);
     private_dir(&dir).unwrap();
     let info = json!({"id": id, "cwd": "~/app", "lead": "lead", "model": "sonnet", "started": "2026-11-14T10:00:00Z"});
     let mut ep = Endpoint::open(&dir, id, &info).unwrap();
     let (tx, mut rx) = mpsc::channel::<Remote>(16);
-    rt.spawn(async move {
+    rt.handle.spawn(async move {
         while let Some(event) = rx.recv().await {
             let line = match event {
                 Remote::Connected { client } => format!("connected {client}"),
@@ -44,17 +44,34 @@ fn session(rt: &tokio::runtime::Runtime, home: &Path, id: &str, seen: Seen) -> E
             seen.lock().unwrap().push(line);
         }
     });
-    let _in = rt.enter();
+    let _in = rt.handle.enter();
     ep.serve(tx, Redactor::new()).unwrap();
     ep
 }
 
-fn runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+/// A current-thread runtime driven on a thread of its own until the returned guard drops; the
+/// test thread meanwhile blocks on the `aibus mcp` child.
+struct Rt {
+    handle: tokio::runtime::Handle,
+    _stop: tokio::sync::oneshot::Sender<()>,
+}
+
+fn runtime() -> Rt {
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .unwrap()
+        .unwrap();
+    let handle = rt.handle().clone();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        rt.block_on(async {
+            let _ = stopped.await;
+        })
+    });
+    Rt {
+        handle,
+        _stop: stop,
+    }
 }
 
 fn client(home: &Path, p: Protocol, args: &[&str]) -> McpClient {

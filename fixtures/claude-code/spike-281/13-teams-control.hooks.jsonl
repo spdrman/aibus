@@ -1,0 +1,8 @@
+{"session_id":"4e7753d6-e214-44ba-ad50-7b0747e5bf1f","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-teams/4e7753d6-e214-44ba-ad50-7b0747e5bf1f.jsonl","cwd":"/spike/work/teams","hook_event_name":"SessionStart","source":"startup"}
+
+{"session_id":"4e7753d6-e214-44ba-ad50-7b0747e5bf1f","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-teams/4e7753d6-e214-44ba-ad50-7b0747e5bf1f.jsonl","cwd":"/spike/work/teams","prompt_id":"806369a6-3d07-45af-8b2c-e72549a2891a","permission_mode":"default","hook_event_name":"UserPromptSubmit","prompt":"Reply with exactly the word: ok"}
+
+{"session_id":"4e7753d6-e214-44ba-ad50-7b0747e5bf1f","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-teams/4e7753d6-e214-44ba-ad50-7b0747e5bf1f.jsonl","cwd":"/spike/work/teams","prompt_id":"806369a6-3d07-45af-8b2c-e72549a2891a","permission_mode":"default","effort":{"level":"medium"},"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"ok","background_tasks":[],"session_crons":[]}
+
+{"session_id":"4e7753d6-e214-44ba-ad50-7b0747e5bf1f","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-teams/4e7753d6-e214-44ba-ad50-7b0747e5bf1f.jsonl","cwd":"/spike/work/teams","prompt_id":"806369a6-3d07-45af-8b2c-e72549a2891a","hook_event_name":"SessionEnd","reason":"other"}
+

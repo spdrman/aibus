@@ -32,10 +32,7 @@ fn want(names: &[&str]) -> BTreeSet<String> {
 }
 
 fn view_of(app: &aibus_core::App<aibus_graph::mini::MiniGraph>, key: &str) -> Value {
-    app.graph
-        .read_key(key)
-        .unwrap_or_else(|| panic!("{key} is not registered"))
-        .clone()
+    app.graph.read_key(key).unwrap_or_else(|| panic!("{key} is not registered")).clone()
 }
 
 // ---- the views ------------------------------------------------------------------------------
@@ -43,13 +40,7 @@ fn view_of(app: &aibus_core::App<aibus_graph::mini::MiniGraph>, key: &str) -> Va
 #[test]
 fn the_views_have_the_shapes_of_05_section_2() {
     let mut app = replay_app();
-    log_row(
-        &mut app,
-        1_700_000_000_000,
-        "router",
-        "which file → src/auth.ts",
-        vec![],
-    );
+    log_row(&mut app, 1_700_000_000_000, "router", "which file → src/auth.ts", vec![]);
     assert_eq!(
         keys(&view_of(&app, view::LEAD_BOX)),
         want(&["model_label", "label", "effort", "model_flag", "highlight"])
@@ -61,15 +52,8 @@ fn the_views_have_the_shapes_of_05_section_2() {
     assert_eq!(
         keys(&as_list(&view_of(&app, view::CARDS))[0]),
         want(&[
-            "run_id",
-            "name",
-            "model_label",
-            "progress",
-            "label",
-            "status",
-            "spinner_phase",
-            "border",
-            "selected"
+            "run_id", "name", "model_label", "progress", "label", "status", "spinner_phase",
+            "border", "selected"
         ])
     );
     assert_eq!(
@@ -78,38 +62,19 @@ fn the_views_have_the_shapes_of_05_section_2() {
     );
     assert_eq!(
         keys(&view_of(&app, view::RAIL)),
-        want(&[
-            "title",
-            "subtitle",
-            "checkpoints",
-            "advice",
-            "typing_cursor",
-            "calls",
-            "tokens_read",
-            "status"
-        ])
+        want(&["title", "subtitle", "checkpoints", "advice", "typing_cursor", "calls", "tokens_read", "status"])
     );
     assert_eq!(
         keys(&view_of(&app, view::FORK_LAYER)),
         want(&["title", "forks", "rows", "any_split", "enabled"])
     );
-    let line = as_list(&view_of(&app, view::LOG_LINES))
-        .last()
-        .unwrap()
-        .clone();
+    let line = as_list(&view_of(&app, view::LOG_LINES)).last().unwrap().clone();
     let k = keys(&line);
     for name in ["time", "actor", "actor_colour", "text", "p", "verdict"] {
         assert!(k.contains(name), "{name} is in {k:?}");
     }
     let status = keys(&view_of(&app, view::STATUS_BAR));
-    for name in [
-        "swarm",
-        "subagents",
-        "advisor",
-        "router",
-        "ledger",
-        "alerts",
-    ] {
+    for name in ["swarm", "subagents", "advisor", "router", "ledger", "alerts"] {
         assert!(status.contains(name), "{name} is in {status:?}");
     }
 }
@@ -140,34 +105,16 @@ fn the_model_flag_is_dim_and_right_aligned_and_missing_on_the_default() {
     assert!(lead.trim_end().ends_with("--model sonnet │"), "{lead}");
 
     let mut app = session();
-    app.set_session_view(None, (Some("opus 5.5"), true), (Some("jev"), true))
-        .unwrap();
-    assert!(
-        !rig(app, (98, 46)).text().contains("--model sonnet │"),
-        "the default shows no flag"
-    );
+    app.set_session_view(None, (Some("opus 5.5"), true), (Some("jev"), true)).unwrap();
+    assert!(!rig(app, (98, 46)).text().contains("--model sonnet │"), "the default shows no flag");
 }
 
 // ---- the cards ------------------------------------------------------------------------------
 
 fn three_running() -> aibus_core::App<aibus_graph::mini::MiniGraph> {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "search",
-        "maps the repo",
-        Some(0.71),
-        "running",
-    );
-    worker(
-        &mut app,
-        3,
-        "grep",
-        "finds call sites",
-        Some(0.35),
-        "running",
-    );
+    worker(&mut app, 2, "search", "maps the repo", Some(0.71), "running");
+    worker(&mut app, 3, "grep", "finds call sites", Some(0.35), "running");
     worker(&mut app, 4, "audit", "runs in a worktree", None, "running");
     app
 }
@@ -175,23 +122,11 @@ fn three_running() -> aibus_core::App<aibus_graph::mini::MiniGraph> {
 #[test]
 fn a_fraction_is_a_bar_and_a_percentage_and_an_unknown_one_a_bouncing_block() {
     let r = rig(three_running(), (98, 46));
-    assert!(
-        r.text().contains("71%") && r.text().contains("35%"),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().contains("71%") && r.text().contains("35%"), "{}", r.text());
     let blocks = |r: &Rig| {
         let card = r.rect(HitId::Card(2));
-        let row = r
-            .text()
-            .lines()
-            .nth(usize::from(card.y) + 2)
-            .unwrap()
-            .to_owned();
-        row.chars()
-            .skip(usize::from(card.x) + 2)
-            .take(10)
-            .collect::<String>()
+        let row = r.text().lines().nth(usize::from(card.y) + 2).unwrap().to_owned();
+        row.chars().skip(usize::from(card.x) + 2).take(10).collect::<String>()
     };
     // The indeterminate card has a 2-cell block that moves one cell per tick and turns at the end.
     let mut seen = Vec::new();
@@ -204,41 +139,22 @@ fn a_fraction_is_a_bar_and_a_percentage_and_an_unknown_one_a_bouncing_block() {
         r.settle();
     }
     let steps: Vec<i64> = seen.windows(2).map(|w| w[1] as i64 - w[0] as i64).collect();
-    assert!(
-        steps.iter().all(|s| s.abs() == 1),
-        "one cell per tick: {seen:?}"
-    );
-    assert!(
-        seen.contains(&0) && seen.contains(&8),
-        "end to end: {seen:?}"
-    );
-    assert!(
-        steps.contains(&1) && steps.contains(&-1),
-        "and back: {seen:?}"
-    );
+    assert!(steps.iter().all(|s| s.abs() == 1), "one cell per tick: {seen:?}");
+    assert!(seen.contains(&0) && seen.contains(&8), "end to end: {seen:?}");
+    assert!(steps.contains(&1) && steps.contains(&-1), "and back: {seen:?}");
 }
 
 #[test]
 fn a_done_card_is_a_full_bar_and_a_green_done_that_stays() {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(1.0), "completed");
     let mut r = rig(app, (98, 46));
     assert!(r.text().contains("100%"));
     assert!(r.text().contains("██████████ 100%"), "{}", r.text());
     assert_eq!(r.cell_of("✓ done").fg, TH.ok);
     ticks(&mut r.app, 120);
     r.settle();
-    assert!(
-        r.text().contains("✓ done"),
-        "done stays until it is dismissed or replaced"
-    );
+    assert!(r.text().contains("✓ done"), "done stays until it is dismissed or replaced");
 }
 
 #[test]
@@ -246,12 +162,7 @@ fn the_spinner_turns_per_tick_and_each_card_starts_somewhere_else() {
     let mut r = rig(three_running(), (98, 46));
     let glyph = |r: &Rig, card: usize| {
         let c = r.rect(HitId::Card(card));
-        let row = r
-            .text()
-            .lines()
-            .nth(usize::from(c.y) + 5)
-            .unwrap()
-            .to_owned();
+        let row = r.text().lines().nth(usize::from(c.y) + 5).unwrap().to_owned();
         row.chars().nth(usize::from(c.x) + 2).unwrap()
     };
     let mut cycle = Vec::new();
@@ -291,10 +202,7 @@ fn more_than_three_cards_scroll_with_edge_markers_and_h_l() {
         r.press('l');
     }
     assert!(r.text().contains("◂ 2 more"), "{}", r.text());
-    assert!(
-        !r.text().contains("more ▸"),
-        "nothing to the right any more"
-    );
+    assert!(!r.text().contains("more ▸"), "nothing to the right any more");
     for _ in 0..6 {
         r.press('h');
     }
@@ -309,10 +217,7 @@ fn fewer_than_three_cards_are_centred() {
     let card = r.rect(HitId::Card(0));
     let centre = r.ui.drawn.areas.centre;
     let (left, right) = (card.x - centre.x, centre.right() - card.right());
-    assert!(
-        left.abs_diff(right) <= 1,
-        "{left} left of it, {right} right of it"
-    );
+    assert!(left.abs_diff(right) <= 1, "{left} left of it, {right} right of it");
     assert_eq!(card.width, 19, "19 columns wide");
 }
 
@@ -344,22 +249,8 @@ fn a_dot_travels_one_cell_per_tick_down_the_path_to_a_working_card() {
     // Only the leftmost of three cards is working, so the path to it is the long one.
     let mut app = session();
     worker(&mut app, 2, "search", "maps the repo", Some(0.5), "running");
-    worker(
-        &mut app,
-        3,
-        "grep",
-        "finds call sites",
-        Some(1.0),
-        "completed",
-    );
-    worker(
-        &mut app,
-        4,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 3, "grep", "finds call sites", Some(1.0), "completed");
+    worker(&mut app, 4, "audit", "runs in a worktree", Some(1.0), "completed");
     let mut r = rig(app, (98, 46));
     let mut at = Vec::new();
     for _ in 0..24 {
@@ -376,10 +267,7 @@ fn a_dot_travels_one_cell_per_tick_down_the_path_to_a_working_card() {
         // box is in the way, so allow a gap of two.
         assert!(step <= 2 || b.1 < a.1, "{a:?} -> {b:?}");
     }
-    assert!(
-        at.iter().collect::<BTreeSet<_>>().len() > 15,
-        "it moves along the path: {at:?}"
-    );
+    assert!(at.iter().collect::<BTreeSet<_>>().len() > 15, "it moves along the path: {at:?}");
     // The rest of the path is dotted.
     assert!(r.text().contains('·'));
 }
@@ -387,14 +275,7 @@ fn a_dot_travels_one_cell_per_tick_down_the_path_to_a_working_card() {
 #[test]
 fn no_dot_travels_to_a_card_that_is_done() {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(1.0), "completed");
     let r = rig(app, (98, 46));
     assert!(dots(&r, TH.swarm).is_empty());
 }
@@ -424,11 +305,7 @@ fn the_arrowhead_pulses_while_a_result_is_in_flight_and_not_otherwise() {
 }
 
 fn poke_status(app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>, seq: u128, st: &str) {
-    aibus_testkit::tui::poke(
-        app,
-        &format!("model:run:{}:status", run_id(seq)),
-        Value::Str(st.into()),
-    );
+    aibus_testkit::tui::poke(app, &format!("model:run:{}:status", run_id(seq)), Value::Str(st.into()));
 }
 
 #[test]
@@ -438,18 +315,10 @@ fn borders_turn_purple_for_the_checkpoint_they_belong_to() {
         worker(&mut app, 2, "search", "maps the repo", Some(0.5), "running");
         app.step(Msg::RunFailed {
             run: run_id(2),
-            error: RunError {
-                kind: RunErrorKind::Tool,
-                message: "e".into(),
-                retryable: true,
-            },
+            error: RunError { kind: RunErrorKind::Tool, message: "e".into(), retryable: true },
         })
         .unwrap();
-        app.step(Msg::CheckpointHit {
-            checkpoint,
-            detail: String::new(),
-        })
-        .unwrap();
+        app.step(Msg::CheckpointHit { checkpoint, detail: String::new() }).unwrap();
         rig(app, (98, 46))
     };
     // before_plan: the lead box (its top border row carries the title).
@@ -464,22 +333,14 @@ fn borders_turn_purple_for_the_checkpoint_they_belong_to() {
     // before_done: the box that takes the results back.
     let r = hit(Checkpoint::BeforeDone);
     assert_eq!(r.cell_of("┌ back to").fg, TH.advisor);
-    assert_eq!(
-        r.cell(r.rect(HitId::Card(0)).x, r.rect(HitId::Card(0)).y)
-            .fg,
-        TH.swarm
-    );
+    assert_eq!(r.cell(r.rect(HitId::Card(0)).x, r.rect(HitId::Card(0)).y).fg, TH.swarm);
 }
 
 #[test]
 fn the_active_checkpoint_is_joined_to_its_box_by_a_path_with_a_travelling_dot() {
     let mut app = session();
     worker(&mut app, 2, "search", "maps the repo", Some(0.5), "running");
-    app.step(Msg::CheckpointHit {
-        checkpoint: Checkpoint::BeforePlan,
-        detail: String::new(),
-    })
-    .unwrap();
+    app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforePlan, detail: String::new() }).unwrap();
     let mut r = rig(app, (98, 46));
     let mut at = BTreeSet::new();
     for _ in 0..6 {
@@ -505,10 +366,7 @@ fn the_rail_types_its_advice_one_character_per_tick_and_f31_is_reproducible() {
     })
     .unwrap();
     let mut r = rig(app, (98, 46));
-    assert!(
-        r.text().lines().any(|l| l.contains("│ »")),
-        "starts as a bare »"
-    );
+    assert!(r.text().lines().any(|l| l.contains("│ »")), "starts as a bare »");
     assert!(!r.text().contains("wrong"), "nothing typed yet");
     ticks(&mut r.app, 10);
     r.settle();
@@ -526,92 +384,54 @@ fn the_rail_types_its_advice_one_character_per_tick_and_f31_is_reproducible() {
 fn tokens_read_is_in_thousands_up_to_1020k() {
     let mut app = session();
     for k in [122_000, 898_000] {
-        app.step(Msg::AdvisorSpoke {
-            checkpoint: Checkpoint::BeforePlan,
-            advice: "x".into(),
-            tokens_read: k,
-        })
-        .unwrap();
+        app.step(Msg::AdvisorSpoke { checkpoint: Checkpoint::BeforePlan, advice: "x".into(), tokens_read: k })
+            .unwrap();
     }
     ticks(&mut app, 5);
     let r = rig(app, (98, 46));
-    assert!(
-        r.text()
-            .lines()
-            .any(|l| l.contains("tokens read") && l.contains("1020k")),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().lines().any(|l| l.contains("tokens read") && l.contains("1020k")), "{}", r.text());
     let r2 = rig(replay_app(), (98, 46));
-    assert!(
-        r2.text()
-            .lines()
-            .any(|l| l.contains("tokens read") && l.contains("122k")),
-        "{}",
-        r2.text()
-    );
+    assert!(r2.text().lines().any(|l| l.contains("tokens read") && l.contains("122k")), "{}", r2.text());
 }
 
 #[test]
 fn the_subtitle_follows_the_advisor_on_call_reading_advising_off() {
     let sub = |r: &Rig| {
-        [
-            "advisor · on call",
-            "advisor · reading",
-            "advisor · advising",
-            "advisor · off",
-        ]
-        .into_iter()
-        .find(|s| r.text().contains(s))
-        .map(str::to_owned)
+        ["advisor · on call", "advisor · reading", "advisor · advising", "advisor · off"]
+            .into_iter()
+            .find(|s| r.text().contains(s))
+            .map(str::to_owned)
     };
     // Each stage is a fresh session taken that far.
     let stage = |n: u8| {
         let mut app = session();
         if n >= 1 {
-            app.step(Msg::CheckpointHit {
-                checkpoint: Checkpoint::BeforePlan,
-                detail: String::new(),
-            })
-            .unwrap();
+            app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforePlan, detail: String::new() }).unwrap();
         }
         if n >= 2 {
-            app.step(Msg::AdvisorSpoke {
-                checkpoint: Checkpoint::BeforePlan,
-                advice: "plan skips auth".into(),
-                tokens_read: 1,
-            })
-            .unwrap();
+            app.step(Msg::AdvisorSpoke { checkpoint: Checkpoint::BeforePlan, advice: "plan skips auth".into(), tokens_read: 1 })
+                .unwrap();
         }
         if n >= 3 {
             ticks(&mut app, 40);
         }
         rig(app, (98, 46))
     };
-    assert_eq!(
-        sub(&rig(session(), (98, 46))).as_deref(),
-        Some("advisor · on call")
-    );
+    assert_eq!(sub(&rig(session(), (98, 46))).as_deref(), Some("advisor · on call"));
     assert_eq!(sub(&stage(1)).as_deref(), Some("advisor · reading"));
     assert_eq!(sub(&stage(2)).as_deref(), Some("advisor · advising"));
     assert_eq!(sub(&stage(3)).as_deref(), Some("advisor · on call"));
     let mut off = session();
-    off.set_session_view(None, (Some("opus 5.5"), false), (Some("jev"), true))
-        .unwrap();
+    off.set_session_view(None, (Some("opus 5.5"), false), (Some("jev"), true)).unwrap();
     let r = rig(off, (98, 46));
     assert_eq!(sub(&r).as_deref(), Some("advisor · off"));
-    assert!(
-        r.text().contains("opus [off]"),
-        "the status bar says so too"
-    );
+    assert!(r.text().contains("opus [off]"), "the status bar says so too");
 }
 
 #[test]
 fn the_active_diamond_is_filled_and_its_row_highlighted() {
     let r = rig(replay_app(), (98, 46));
-    let (x, y) = r
-        .find("◆ before a plan")
-        .expect("the active checkpoint is a filled diamond");
+    let (x, y) = r.find("◆ before a plan").expect("the active checkpoint is a filled diamond");
     assert_eq!(r.cell(x, y).bg, TH.highlight);
     assert!(r.text().contains("◇ same error x2") && r.text().contains("◇ before done"));
     let (x, y) = r.find("◇ same error x2").unwrap();
@@ -631,19 +451,13 @@ fn enter_on_the_rail_shows_the_full_advice_even_while_it_is_still_typing() {
     assert!(!r.text().contains("three PRs"), "still typing");
     r.click(HitId::Pane(Pane::Advisor));
     r.key(crossterm::event::KeyCode::Enter);
-    assert!(
-        r.text().contains("» split the work in three PRs"),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().contains("» split the work in three PRs"), "{}", r.text());
 }
 
 // ---- the fork layer --------------------------------------------------------------------------
 
 fn fork_row(r: &Rig, label: &str) -> (String, Vec<ratatui::buffer::Cell>) {
-    let (x, y) = r
-        .find(label)
-        .unwrap_or_else(|| panic!("{label}: {}", r.text()));
+    let (x, y) = r.find(label).unwrap_or_else(|| panic!("{label}: {}", r.text()));
     let cells: Vec<_> = (x + 15..x + 25).map(|c| r.cell(c, y)).collect();
     (cells.iter().map(|c| c.symbol().to_owned()).collect(), cells)
 }
@@ -660,18 +474,10 @@ fn bars_are_ten_cells_filled_to_round_p_times_ten_with_a_half_cell() {
     assert!(bar.contains('▌'), "0.94 is 9 and a half: {bar:?}");
     assert!(cells.iter().all(|c| c.fg == TH.router));
     let (bar, _) = fork_row(&r, "which tool");
-    assert_eq!(
-        (bar.matches('█').count(), bar.contains('▌')),
-        (5, false),
-        "{bar:?}"
-    );
+    assert_eq!((bar.matches('█').count(), bar.contains('▌')), (5, false), "{bar:?}");
     // A split row: orange bar, the rest in split_rest.
     let (bar, cells) = fork_row(&r, "retry or stop");
-    assert_eq!(
-        bar.chars().filter(|c| *c == '█').count(),
-        10,
-        "6 filled and 4 remainder: {bar:?}"
-    );
+    assert_eq!(bar.chars().filter(|c| *c == '█').count(), 10, "6 filled and 4 remainder: {bar:?}");
     assert!(cells[..6].iter().all(|c| c.fg == TH.split));
     assert!(cells[6..].iter().all(|c| c.fg == TH.split_rest));
     assert!(r.text().contains("0.94 sharp") && r.text().contains("0.58 split"));
@@ -693,11 +499,7 @@ fn the_footer_names_the_lead_and_lights_up_only_when_a_row_is_split() {
     let mut app = session();
     answer(&mut app, 1, "which_file", 0.94, Verdict::Sharp);
     let r = rig(app, (98, 46));
-    assert!(
-        r.text().contains("sharp → runs in code  split → Sonnet"),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().contains("sharp → runs in code  split → Sonnet"), "{}", r.text());
     assert_eq!(r.cell_of("split → Sonnet").fg, TH.dim_text);
     let mut app = session();
     answer(&mut app, 1, "which_file", 0.94, Verdict::Sharp);
@@ -734,16 +536,10 @@ fn the_title_is_the_router_label_and_off_says_router_off() {
     let r = rig(session(), (98, 46));
     assert!(r.text().contains("JEV · fork layer"), "{}", r.text());
     let mut app = session();
-    app.set_session_view(
-        Some("--model sonnet"),
-        (Some("opus 5.5"), true),
-        (None, true),
-    )
-    .unwrap();
+    app.set_session_view(Some("--model sonnet"), (Some("opus 5.5"), true), (None, true)).unwrap();
     assert!(rig(app, (98, 46)).text().contains("ROUTER · fork layer"));
     let mut app = session();
-    app.set_session_view(None, (Some("opus 5.5"), true), (Some("jev"), false))
-        .unwrap();
+    app.set_session_view(None, (Some("opus 5.5"), true), (Some("jev"), false)).unwrap();
     let r = rig(app, (98, 46));
     assert!(r.text().contains("router · off"), "{}", r.text());
     assert!(!r.text().contains("fork layer"));
@@ -756,52 +552,16 @@ fn spec_log() -> aibus_core::App<aibus_graph::mini::MiniGraph> {
     let mut app = session();
     let t = 1_700_000_000_000u64;
     let sharp = |p: f64| vec![("p", Value::F64(p)), ("verdict", s("sharp"))];
-    log_row(
-        &mut app,
-        t,
-        "router",
-        "which file → src/auth.ts",
-        sharp(0.94),
-    );
-    log_row(
-        &mut app,
-        t + 2000,
-        "advisor",
-        "before a plan · reading full session",
-        vec![],
-    );
-    log_row(
-        &mut app,
-        t + 3000,
-        "router",
-        "which tool → edit",
-        sharp(0.94),
-    );
+    log_row(&mut app, t, "router", "which file → src/auth.ts", sharp(0.94));
+    log_row(&mut app, t + 2000, "advisor", "before a plan · reading full session", vec![]);
+    log_row(&mut app, t + 3000, "router", "which tool → edit", sharp(0.94));
     log_row(&mut app, t + 5000, "audit", "1 issue flagged", vec![]);
     log_row(&mut app, t + 6000, "search", "mapped 4 modules", vec![]);
     log_row(&mut app, t + 7000, "grep", "4 call sites found", vec![]);
     log_row(&mut app, t + 8000, "search", "read 23 files", vec![]);
-    log_row(
-        &mut app,
-        t + 9000,
-        "router",
-        "retry or stop → retry",
-        vec![("p", Value::F64(0.58)), ("verdict", s("split"))],
-    );
-    log_row(
-        &mut app,
-        t + 10000,
-        "advisor",
-        "same error x2 · reading full session",
-        vec![],
-    );
-    log_row(
-        &mut app,
-        t + 11000,
-        "advisor",
-        "before done · advice sent, back to sonnet",
-        vec![],
-    );
+    log_row(&mut app, t + 9000, "router", "retry or stop → retry", vec![("p", Value::F64(0.58)), ("verdict", s("split"))]);
+    log_row(&mut app, t + 10000, "advisor", "same error x2 · reading full session", vec![]);
+    log_row(&mut app, t + 11000, "advisor", "before done · advice sent, back to sonnet", vec![]);
     app
 }
 
@@ -809,38 +569,17 @@ fn spec_log() -> aibus_core::App<aibus_graph::mini::MiniGraph> {
 fn the_newest_row_is_at_the_bottom_and_older_rows_scroll_off_the_top() {
     let r = rig(spec_log(), (98, 46));
     let log = r.ui.drawn.areas.log;
-    let rows: Vec<String> = r
-        .text()
-        .lines()
-        .skip(usize::from(log.y) + 1)
-        .take(4)
-        .map(str::to_owned)
-        .collect();
-    assert!(
-        rows[3].contains("before done · advice sent, back to sonnet"),
-        "{rows:#?}"
-    );
-    assert!(
-        rows[0].contains("retry or stop → retry") || rows[0].contains("read 23 files"),
-        "{rows:#?}"
-    );
-    assert!(
-        !r.text().contains("which file → src/auth.ts"),
-        "scrolled off the top"
-    );
+    let rows: Vec<String> = r.text().lines().skip(usize::from(log.y) + 1).take(4).map(str::to_owned).collect();
+    assert!(rows[3].contains("before done · advice sent, back to sonnet"), "{rows:#?}");
+    assert!(rows[0].contains("retry or stop → retry") || rows[0].contains("read 23 files"), "{rows:#?}");
+    assert!(!r.text().contains("which file → src/auth.ts"), "scrolled off the top");
     assert_eq!(r.ui.drawn.log.visible, 4);
 }
 
 #[test]
 fn the_time_is_dim_the_actor_has_its_colour_and_router_rows_carry_p_and_the_verdict() {
     let mut r = rig(spec_log(), (98, 46));
-    r.app
-        .step(Msg::Ui(UiIntent::Scroll {
-            pane: Pane::Log,
-            lines: 6,
-            sideways: false,
-        }))
-        .unwrap();
+    r.app.step(Msg::Ui(UiIntent::Scroll { pane: Pane::Log, lines: 6, sideways: false })).unwrap();
     r.settle();
     assert!(r.text().contains("p=0.94"), "{}", r.text());
     assert!(r.text().contains("sharp → code"));
@@ -851,26 +590,10 @@ fn the_time_is_dim_the_actor_has_its_colour_and_router_rows_carry_p_and_the_verd
     let (x, y) = r.find("22:13").unwrap();
     assert_eq!(r.cell(x, y).fg, TH.dim_text);
     // A split row says where it went, in orange.
-    r.app
-        .step(Msg::Ui(UiIntent::Scroll {
-            pane: Pane::Log,
-            lines: -9,
-            sideways: false,
-        }))
-        .unwrap();
-    r.app
-        .step(Msg::Ui(UiIntent::Scroll {
-            pane: Pane::Log,
-            lines: 2,
-            sideways: false,
-        }))
-        .unwrap();
+    r.app.step(Msg::Ui(UiIntent::Scroll { pane: Pane::Log, lines: -9, sideways: false })).unwrap();
+    r.app.step(Msg::Ui(UiIntent::Scroll { pane: Pane::Log, lines: 2, sideways: false })).unwrap();
     r.settle();
-    assert!(
-        r.text().contains("p=0.58") && r.text().contains("split → sonnet 5.5"),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().contains("p=0.58") && r.text().contains("split → sonnet 5.5"), "{}", r.text());
     assert_eq!(r.cell_of("split → sonnet 5.5").fg, TH.split);
 }
 
@@ -894,21 +617,13 @@ fn j_and_k_scroll_the_log_and_f_follows_again() {
     for _ in 0..3 {
         r.press('k');
     }
-    assert_eq!(
-        r.int("ctrl:scroll:log"),
-        Some(3),
-        "k goes towards older rows"
-    );
+    assert_eq!(r.int("ctrl:scroll:log"), Some(3), "k goes towards older rows");
     assert!(r.text().contains("paused"), "scrolled away: not following");
     assert!(!r.text().contains("before done · advice sent"));
     r.press('j');
     assert_eq!(r.int("ctrl:scroll:log"), Some(2));
     r.press('f');
-    assert_eq!(
-        r.int("ctrl:scroll:log"),
-        Some(0),
-        "f jumps to the newest and follows"
-    );
+    assert_eq!(r.int("ctrl:scroll:log"), Some(0), "f jumps to the newest and follows");
     assert!(!r.text().contains("paused") && r.text().contains("before done · advice sent"));
     r.press('f');
     assert!(r.text().contains("paused"), "f again holds the place");
@@ -952,17 +667,11 @@ fn enter_on_a_row_of_a_run_opens_that_runs_transcript() {
     let mut r = rig(app, (98, 46));
     // The row that says the worker started names its run.
     let rows = aibus_tui::input::Context::read(&r.app.graph).log_runs;
-    let at = rows
-        .iter()
-        .position(|x| *x == Some(run_id(2)))
-        .expect("a row of the worker");
+    let at = rows.iter().position(|x| *x == Some(run_id(2))).expect("a row of the worker");
     r.click(HitId::LogRow(at));
     r.key(crossterm::event::KeyCode::Enter);
     let modal = r.app.graph.read_key("ctrl:modal").cloned();
-    assert_eq!(
-        modal,
-        Some(Value::Str(format!("transcript:{}", run_id(2)).into()))
-    );
+    assert_eq!(modal, Some(Value::Str(format!("transcript:{}", run_id(2)).into())));
 }
 
 // ---- the status bar --------------------------------------------------------------------------
@@ -986,14 +695,7 @@ fn the_status_bar_has_four_segments() {
     assert_eq!(r.cell_of("opus [on call]").fg, TH.advisor);
     assert_eq!(r.cell_of("jev [").fg, TH.router);
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(1.0), "completed");
     assert!(status(&rig(app, (98, 46))).contains("haiku [idle]"));
 }
 
@@ -1001,24 +703,12 @@ fn the_status_bar_has_four_segments() {
 fn the_ledger_shows_from_100_columns_and_the_alerts_beside_it() {
     let ledger = |cols| {
         let mut app = session();
-        app.step(Msg::Command(Command::LedgerUpdate {
-            section: "goal".into(),
-            text: "ship".into(),
-        }))
-        .unwrap();
-        app.step(Msg::Command(Command::LedgerUpdate {
-            section: "now".into(),
-            text: "test".into(),
-        }))
-        .unwrap();
+        app.step(Msg::Command(Command::LedgerUpdate { section: "goal".into(), text: "ship".into() })).unwrap();
+        app.step(Msg::Command(Command::LedgerUpdate { section: "now".into(), text: "test".into() })).unwrap();
         status(&rig(app, (cols, 46)))
     };
     assert!(!ledger(98).contains("ledger"));
-    assert!(
-        ledger(110).contains("ledger: ship · now: test"),
-        "{}",
-        ledger(110)
-    );
+    assert!(ledger(110).contains("ledger: ship · now: test"), "{}", ledger(110));
     assert!(ledger(120).contains("ledger: ship · now: test"));
 }
 
@@ -1043,10 +733,7 @@ fn a_waiting_permission_a_bypass_and_memory_have_their_own_segments() {
     assert!(s.contains("! 1 permission waiting (p)"), "{s}");
     assert!(s.contains("BYPASS") && s.contains("mem 212M"), "{s}");
     assert_eq!(r.cell_of("BYPASS").fg, TH.error);
-    assert!(r
-        .cell_of("BYPASS")
-        .modifier
-        .contains(ratatui::style::Modifier::BOLD));
+    assert!(r.cell_of("BYPASS").modifier.contains(ratatui::style::Modifier::BOLD));
     assert_eq!(r.cell_of("! 1 permission").fg, TH.warn);
     // Without `-v` there is no memory sampled, so no segment.
     let quiet = rig(session(), (120, 46));
@@ -1057,11 +744,7 @@ fn a_waiting_permission_a_bypass_and_memory_have_their_own_segments() {
 
 #[test]
 fn per_widget_snapshots_at_98x46() {
-    let snap = |name: &str,
-                mut app: aibus_core::App<aibus_graph::mini::MiniGraph>,
-                ticks_to: u32,
-                pick: &dyn Fn(&Rig) -> ratatui::layout::Rect,
-                styles: bool| {
+    let snap = |name: &str, mut app: aibus_core::App<aibus_graph::mini::MiniGraph>, ticks_to: u32, pick: &dyn Fn(&Rig) -> ratatui::layout::Rect, styles: bool| {
         common::ticks(&mut app, ticks_to);
         let r = rig(app, (98, 46));
         assert_crop(&r.frame(), pick(&r), name, styles);
@@ -1070,27 +753,13 @@ fn per_widget_snapshots_at_98x46() {
     // The label, the paths down to the cards, the cards, their markers and the merge row.
     let cards = |r: &Rig| {
         let c = a(r).centre;
-        let top =
-            r.ui.drawn
-                .hits
-                .find(HitId::Card(0))
-                .map_or(c.y + 12, |h| h.rect.y - 3);
-        ratatui::layout::Rect {
-            x: c.x,
-            y: top,
-            width: c.width,
-            height: 12,
-        }
+        let top = r.ui.drawn.hits.find(HitId::Card(0)).map_or(c.y + 12, |h| h.rect.y - 3);
+        ratatui::layout::Rect { x: c.x, y: top, width: c.width, height: 12 }
     };
     let rail = |r: &Rig| a(r).rail;
     let fork = |r: &Rig| {
         let c = a(r).centre;
-        ratatui::layout::Rect {
-            x: c.x + (c.width - 40) / 2,
-            y: c.y + 6,
-            width: 40,
-            height: 6,
-        }
+        ratatui::layout::Rect { x: c.x + (c.width - 40) / 2, y: c.y + 6, width: 40, height: 6 }
     };
     let log = |r: &Rig| a(r).log;
     let statusbar = |r: &Rig| a(r).status;
@@ -1098,40 +767,20 @@ fn per_widget_snapshots_at_98x46() {
     // Cards: three running, one done, five with the row scrolled, none.
     snap("w_cards_three_running", three_running(), 3, &cards, true);
     let mut done = session();
-    worker(
-        &mut done,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut done, 2, "audit", "runs in a worktree", Some(1.0), "completed");
     snap("w_cards_one_done", done, 3, &cards, true);
     let mut five = three_running();
     worker(&mut five, 5, "lint", "checks style", Some(0.1), "running");
     worker(&mut five, 6, "docs", "writes docs", Some(0.2), "running");
-    five.step(Msg::Ui(UiIntent::Select(Pane::Cards, Selection::Index(4))))
-        .unwrap();
+    five.step(Msg::Ui(UiIntent::Select(Pane::Cards, Selection::Index(4)))).unwrap();
     snap("w_cards_five_scrolled", five, 3, &cards, false);
     snap("w_cards_zero", session(), 3, &cards, false);
 
     // The rail in the states of f01, f04 and f09, and collapsed.
-    let advice = |app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>,
-                  text: &str,
-                  read: u64,
-                  cp: Checkpoint| {
-        app.step(Msg::AdvisorSpoke {
-            checkpoint: cp.clone(),
-            advice: text.into(),
-            tokens_read: read,
-        })
-        .unwrap();
+    let advice = |app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>, text: &str, read: u64, cp: Checkpoint| {
+        app.step(Msg::AdvisorSpoke { checkpoint: cp.clone(), advice: text.into(), tokens_read: read }).unwrap();
         ticks(app, 40);
-        app.step(Msg::CheckpointHit {
-            checkpoint: cp,
-            detail: String::new(),
-        })
-        .unwrap();
+        app.step(Msg::CheckpointHit { checkpoint: cp, detail: String::new() }).unwrap();
     };
     let mut f01 = session();
     advice(&mut f01, "plan skips auth", 122_000, Checkpoint::BeforePlan);
@@ -1154,37 +803,18 @@ fn per_widget_snapshots_at_98x46() {
         assert_crop(&r.frame(), r.ui.drawn.areas.rail, "w_rail_collapsed", false);
     };
     let mut collapsed = session();
-    advice(
-        &mut collapsed,
-        "plan skips auth",
-        122_000,
-        Checkpoint::BeforePlan,
-    );
+    advice(&mut collapsed, "plan skips auth", 122_000, Checkpoint::BeforePlan);
     strip(collapsed);
 
     // The fork layer in f01 (all sharp), f02 (one split), f17 (two split) and off.
     let forks = |split: &[bool; 3]| {
         let mut app = session();
-        for (i, (kind, p, p_split)) in [
-            ("which_file", 0.94, 0.5),
-            ("which_tool", 0.94, 0.5),
-            ("retry_or_stop", 0.88, 0.58),
-        ]
-        .iter()
-        .enumerate()
+        for (i, (kind, p, p_split)) in [("which_file", 0.94, 0.5), ("which_tool", 0.94, 0.5), ("retry_or_stop", 0.88, 0.58)]
+            .iter()
+            .enumerate()
         {
-            let v = if split[i] {
-                Verdict::Split
-            } else {
-                Verdict::Sharp
-            };
-            answer(
-                &mut app,
-                1312 + i as u64,
-                kind,
-                if split[i] { *p_split } else { *p },
-                v,
-            );
+            let v = if split[i] { Verdict::Split } else { Verdict::Sharp };
+            answer(&mut app, 1312 + i as u64, kind, if split[i] { *p_split } else { *p }, v);
         }
         app
     };
@@ -1192,8 +822,7 @@ fn per_widget_snapshots_at_98x46() {
     snap("w_fork_f02", forks(&[false, false, true]), 3, &fork, true);
     snap("w_fork_f17", forks(&[true, false, true]), 3, &fork, false);
     let mut off = forks(&[false; 3]);
-    off.set_session_view(None, (Some("opus 5.5"), true), (Some("jev"), false))
-        .unwrap();
+    off.set_session_view(None, (Some("opus 5.5"), true), (Some("jev"), false)).unwrap();
     snap("w_fork_off", off, 3, &fork, false);
 
     // The log with the ten lines of 05 section 2.7, tall enough to hold them.
@@ -1214,22 +843,8 @@ fn per_widget_snapshots_at_98x46() {
 #[test]
 fn x_dismisses_a_finished_card_and_stops_a_running_one() {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
-    worker(
-        &mut app,
-        3,
-        "grep",
-        "finds call sites",
-        Some(0.4),
-        "running",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(1.0), "completed");
+    worker(&mut app, 3, "grep", "finds call sites", Some(0.4), "running");
     let mut r = rig(app, (98, 46));
     r.key(crossterm::event::KeyCode::Tab);
     assert_eq!(r.ui.drawn.cards, 2);
@@ -1248,39 +863,18 @@ fn x_dismisses_a_finished_card_and_stops_a_running_one() {
 #[test]
 fn a_new_run_of_the_same_agent_replaces_a_finished_card() {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(1.0), "completed");
     let r = rig(app, (98, 46));
     assert!(r.text().contains("✓ done"));
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(1.0), "completed");
     worker(&mut app, 3, "audit", "runs it again", Some(0.2), "running");
     let r = rig(app, (98, 46));
     assert_eq!(r.ui.drawn.cards, 1, "one card for one agent");
     assert!(r.text().contains("runs it again") && !r.text().contains("✓ done"));
     // A still-running card is not replaced: two runs at once are two cards.
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "audit",
-        "runs in a worktree",
-        Some(0.5),
-        "running",
-    );
+    worker(&mut app, 2, "audit", "runs in a worktree", Some(0.5), "running");
     worker(&mut app, 3, "audit", "runs it again", Some(0.2), "running");
     assert_eq!(rig(app, (98, 46)).ui.drawn.cards, 2);
 }
@@ -1293,14 +887,7 @@ fn the_card_hit_rects_are_the_ones_the_window_gives_for_1_3_and_8_cards() {
         for n in [1usize, 3, 8] {
             let mut app = session();
             for k in 0..n {
-                worker(
-                    &mut app,
-                    2 + k as u128,
-                    &format!("w{k}"),
-                    "does a thing",
-                    Some(0.5),
-                    "running",
-                );
+                worker(&mut app, 2 + k as u128, &format!("w{k}"), "does a thing", Some(0.5), "running");
             }
             let r = rig(app, size);
             let centre = r.ui.drawn.areas.centre;
@@ -1308,19 +895,11 @@ fn the_card_hit_rects_are_the_ones_the_window_gives_for_1_3_and_8_cards() {
             assert_eq!(want.len(), n.min(3));
             for (i, w) in want {
                 let got = r.rect(HitId::Card(i));
-                assert_eq!(
-                    (got.x, got.width),
-                    (w.x, w.width),
-                    "{size:?} {n} cards, card {i}"
-                );
+                assert_eq!((got.x, got.width), (w.x, w.width), "{size:?} {n} cards, card {i}");
                 assert_eq!(got.height, 7, "{size:?} {n} cards, card {i}");
             }
             // The fourth card's left edge is on the canvas beside the window and is hit-testable too (#89).
-            assert_eq!(
-                r.ui.drawn.hits.find(HitId::Card(3)).is_some(),
-                n > 3,
-                "{size:?} {n} cards, card 3"
-            );
+            assert_eq!(r.ui.drawn.hits.find(HitId::Card(3)).is_some(), n > 3, "{size:?} {n} cards, card 3");
         }
     }
 }

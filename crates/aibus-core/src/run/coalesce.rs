@@ -67,9 +67,7 @@ impl Coalescer {
                 self.chunks.push(chunk);
             }
         }
-        (boundary || self.bytes >= FLUSH_BYTES)
-            .then(|| self.take())
-            .flatten()
+        (boundary || self.bytes >= FLUSH_BYTES).then(|| self.take()).flatten()
     }
 
     /// Whatever is pending, or `None` when nothing is.

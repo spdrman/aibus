@@ -56,8 +56,7 @@ impl Index {
         }
         let conn = Connection::open(path).map_err(io_err)?;
         conn.busy_timeout(BUSY_TIMEOUT).map_err(io_err)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(io_err)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;").map_err(io_err)?;
         conn.execute_batch(SCHEMA).map_err(io_err)?;
         #[cfg(unix)]
         {
@@ -116,10 +115,8 @@ impl Index {
 
     pub fn forget(&mut self, id: &str) -> io::Result<()> {
         let tx = self.conn.transaction().map_err(io_err)?;
-        tx.execute("DELETE FROM runs WHERE session_id = ?1", [id])
-            .map_err(io_err)?;
-        tx.execute("DELETE FROM sessions WHERE id = ?1", [id])
-            .map_err(io_err)?;
+        tx.execute("DELETE FROM runs WHERE session_id = ?1", [id]).map_err(io_err)?;
+        tx.execute("DELETE FROM sessions WHERE id = ?1", [id]).map_err(io_err)?;
         tx.commit().map_err(io_err)
     }
 
@@ -207,24 +204,13 @@ mod tests {
     #[test]
     fn bundled_sqlite_is_at_least_3_54() {
         let conn = Connection::open_in_memory().unwrap();
-        let version: String = conn
-            .query_row("SELECT sqlite_version()", [], |r| r.get(0))
-            .unwrap();
+        let version: String = conn.query_row("SELECT sqlite_version()", [], |r| r.get(0)).unwrap();
         let parts: Vec<u32> = version.split('.').map(|p| p.parse().unwrap()).collect();
-        assert!(
-            parts[..2] >= [3, 54][..],
-            "bundled SQLite {version} is older than 3.54.0"
-        );
+        assert!(parts[..2] >= [3, 54][..], "bundled SQLite {version} is older than 3.54.0");
     }
 
     fn session(id: &str, started: &str) -> SessionMeta {
-        let mut m = SessionMeta::new(
-            SessionId::new(),
-            started.into(),
-            Some("t".into()),
-            "/p".into(),
-            "lead",
-        );
+        let mut m = SessionMeta::new(SessionId::new(), started.into(), Some("t".into()), "/p".into(), "lead");
         m.id = id.into();
         m
     }
@@ -247,37 +233,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("data/index.sqlite");
         let idx = Index::open(&path).unwrap();
-        let mode: String = idx
-            .conn
-            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
-            .unwrap();
+        let mode: String = idx.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode, "wal");
-        let busy: i64 = idx
-            .conn
-            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
-            .unwrap();
+        let busy: i64 = idx.conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
         assert_eq!(busy, 5000);
         idx.conn
-            .execute(
-                "INSERT INTO memory_fts VALUES ('a.md', 'user', 'memory', 'the quick brown foxes')",
-                [],
-            )
+            .execute("INSERT INTO memory_fts VALUES ('a.md', 'user', 'memory', 'the quick brown foxes')", [])
             .unwrap();
         let hit: String = idx
             .conn
-            .query_row(
-                "SELECT path FROM memory_fts WHERE memory_fts MATCH 'fox'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT path FROM memory_fts WHERE memory_fts MATCH 'fox'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(hit, "a.md", "the porter tokenizer stems foxes to fox");
         for t in ["sessions", "runs", "memory_files"] {
-            idx.conn
-                .query_row(&format!("SELECT count(*) FROM {t}"), [], |r| {
-                    r.get::<_, i64>(0)
-                })
-                .unwrap();
+            idx.conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get::<_, i64>(0)).unwrap();
         }
     }
 
@@ -285,22 +254,13 @@ mod tests {
     fn list_and_show_read_what_upsert_wrote_and_a_second_upsert_replaces_the_runs() {
         let dir = tempfile::tempdir().unwrap();
         let mut idx = Index::open(&dir.path().join("i.sqlite")).unwrap();
-        idx.upsert(
-            &session("S1", "2026-11-01T00:00:00.000Z"),
-            &[run("R1", 0.5), run("R2", 0.25)],
-        )
-        .unwrap();
-        idx.upsert(&session("S2", "2026-11-02T00:00:00.000Z"), &[])
-            .unwrap();
+        idx.upsert(&session("S1", "2026-11-01T00:00:00.000Z"), &[run("R1", 0.5), run("R2", 0.25)]).unwrap();
+        idx.upsert(&session("S2", "2026-11-02T00:00:00.000Z"), &[]).unwrap();
         let list = idx.list().unwrap();
         assert_eq!(list[0]["id"], "S2");
         assert_eq!(list[1]["runs"], 2);
         assert_eq!(list[1]["cost_usd"], 0.75);
-        idx.upsert(
-            &session("S1", "2026-11-01T00:00:00.000Z"),
-            &[run("R3", 1.0)],
-        )
-        .unwrap();
+        idx.upsert(&session("S1", "2026-11-01T00:00:00.000Z"), &[run("R3", 1.0)]).unwrap();
         let shown = idx.show("S1").unwrap().unwrap();
         assert_eq!(shown["runs"].as_array().unwrap().len(), 1);
         assert_eq!(shown["runs"][0]["usage"]["input_tokens"], 400);
@@ -315,18 +275,11 @@ mod tests {
         let sessions = dir.path().join("sessions");
         let s1 = sessions.join("S1");
         fs::create_dir_all(s1.join("runs/R1")).unwrap();
-        session("S1", "2026-11-01T00:00:00.000Z")
-            .write(&s1)
-            .unwrap();
-        fs::write(
-            s1.join("runs/R1/meta.json"),
-            serde_json::to_string(&run("R1", 0.5)).unwrap(),
-        )
-        .unwrap();
+        session("S1", "2026-11-01T00:00:00.000Z").write(&s1).unwrap();
+        fs::write(s1.join("runs/R1/meta.json"), serde_json::to_string(&run("R1", 0.5)).unwrap()).unwrap();
         fs::create_dir_all(sessions.join("junk")).unwrap();
         let mut idx = Index::open(&dir.path().join("i.sqlite")).unwrap();
-        idx.upsert(&session("GONE", "2026-10-01T00:00:00.000Z"), &[])
-            .unwrap();
+        idx.upsert(&session("GONE", "2026-10-01T00:00:00.000Z"), &[]).unwrap();
         assert_eq!(idx.rebuild(&sessions).unwrap(), 1);
         let list = idx.list().unwrap();
         assert_eq!(list.len(), 1);

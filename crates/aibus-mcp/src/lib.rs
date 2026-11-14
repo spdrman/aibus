@@ -23,18 +23,18 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
     GetPromptResponse, Implementation, JsonObject, ListPromptsResult, ListResourceTemplatesResult,
     ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
-    ServerConfig, Tool, ToolAnnotations,
+    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig,
+    Tool, ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler, ServiceExt};
 use serde_json::{json, Map, Value};
 
 use audit::AuditLog;
-use confirm::Confirm;
 pub use confirm::ConfirmConfig;
-use limits::RateLimiter;
+use confirm::Confirm;
 pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES, RUNS_PER_MINUTE, WRITES_PER_MINUTE};
+use limits::RateLimiter;
 pub use run::RunConfig;
 
 /// Tools per `tools/list` page.
@@ -77,24 +77,11 @@ pub struct Caps {
 impl Caps {
     /// `Err` is a usage error: a gate is a shell command that runs later, so `gates` only makes
     /// sense on top of `write`.
-    pub fn new(
-        write: bool,
-        gates: bool,
-        run: bool,
-        allow_tools: Vec<String>,
-    ) -> Result<Self, String> {
+    pub fn new(write: bool, gates: bool, run: bool, allow_tools: Vec<String>) -> Result<Self, String> {
         if gates && !write {
-            return Err(
-                "--allow gates needs --allow write: a gate is part of a written workflow".into(),
-            );
+            return Err("--allow gates needs --allow write: a gate is part of a written workflow".into());
         }
-        Ok(Self {
-            write,
-            gates,
-            run,
-            allow_tools,
-            no_provenance: false,
-        })
+        Ok(Self { write, gates, run, allow_tools, no_provenance: false })
     }
 }
 
@@ -273,16 +260,7 @@ impl Server {
             let given = args.get("run")?.as_str()?;
             (given.starts_with("run-") && given.len() <= 40).then(|| given.to_owned())
         });
-        self.audit.record(
-            client,
-            addr,
-            "tools/call",
-            Some(name),
-            run.as_deref(),
-            &args,
-            ok,
-            started.elapsed(),
-        );
+        self.audit.record(client, addr, "tools/call", Some(name), run.as_deref(), &args, ok, started.elapsed());
         result
     }
 
@@ -297,15 +275,8 @@ impl Server {
         args: Option<JsonObject>,
         now: Instant,
     ) -> Result<CallToolResult, ErrorData> {
-        let id = args
-            .as_ref()
-            .and_then(|a| a.get("run"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let wait_ms = args
-            .as_ref()
-            .and_then(|a| a.get("wait_ms"))
-            .and_then(Value::as_u64);
+        let id = args.as_ref().and_then(|a| a.get("run")).and_then(Value::as_str).map(str::to_owned);
+        let wait_ms = args.as_ref().and_then(|a| a.get("wait_ms")).and_then(Value::as_u64);
         let (Some(runs), true, Some(id)) = (&self.runs, self.caps.run, id) else {
             return self.call_from(client, addr, name, args, now);
         };
@@ -345,11 +316,7 @@ impl Server {
                 None,
             ));
         }
-        let limited = self
-            .limiter
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take(now);
+        let limited = self.limiter.lock().unwrap_or_else(|e| e.into_inner()).take(now);
         if let Err(secs) = limited {
             return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "rate limit: at most {CALLS_PER_MINUTE} tool calls a minute, try again in {secs} s"
@@ -358,10 +325,7 @@ impl Server {
         match name {
             "workflow_list" => {
                 if args.as_object().is_some_and(|a| !a.is_empty()) {
-                    return Err(ErrorData::invalid_params(
-                        "workflow_list takes no arguments",
-                        None,
-                    ));
+                    return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));
                 }
                 let mut found = self.list_workflows();
                 self.redactor.redact_json(&mut found);
@@ -457,21 +421,12 @@ impl ServerHandler for Server {
     ) -> Result<CallToolResponse, ErrorData> {
         let client = context.client_info();
         let addr = peer(&context);
-        if let Some(stop) = self
-            .confirm(&request, &context, client.as_ref(), addr)
-            .await
-        {
+        if let Some(stop) = self.confirm(&request, &context, client.as_ref(), addr).await {
             return Ok(stop);
         }
-        self.call_async(
-            client.as_ref(),
-            addr,
-            &request.name,
-            request.arguments,
-            Instant::now(),
-        )
-        .await
-        .map(CallToolResponse::from)
+        self.call_async(client.as_ref(), addr, &request.name, request.arguments, Instant::now())
+            .await
+            .map(CallToolResponse::from)
     }
 
     async fn list_resources(
@@ -515,20 +470,13 @@ impl ServerHandler for Server {
             peer(&context),
             "resources/read",
             None,
-            request
-                .uri
-                .strip_prefix("aibus://runs/")
-                .and_then(|r| r.split('/').next())
-                .filter(|r| r.starts_with("run-") && r.len() <= 40),
+            request.uri.strip_prefix("aibus://runs/").and_then(|r| r.split('/').next()).filter(|r| r.starts_with("run-") && r.len() <= 40),
             &json!({ "uri": uri }),
             read.is_ok(),
             started.elapsed(),
         );
         let (mime, text) = read?;
-        Ok(
-            ReadResourceResult::new(vec![ResourceContents::text(text, uri).with_mime_type(mime)])
-                .into(),
-        )
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(text, uri).with_mime_type(mime)]).into())
     }
 
     async fn list_prompts(
@@ -570,19 +518,9 @@ pub fn serve_stdio(server: Server) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     runtime.block_on(async {
-        tracing::debug!(
-            version = env!("CARGO_PKG_VERSION"),
-            "aibus mcp serving on stdio"
-        );
-        let running = server
-            .serve(rmcp::transport::stdio())
-            .await
-            .map_err(|e| e.to_string())?;
-        running
-            .waiting()
-            .await
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        tracing::debug!(version = env!("CARGO_PKG_VERSION"), "aibus mcp serving on stdio");
+        let running = server.serve(rmcp::transport::stdio()).await.map_err(|e| e.to_string())?;
+        running.waiting().await.map(|_| ()).map_err(|e| e.to_string())
     })
 }
 
@@ -603,39 +541,22 @@ pub(crate) fn arguments<'a>(
     let map = match args {
         Value::Object(m) => m,
         Value::Null => EMPTY.get_or_init(Map::new),
-        _ => {
-            return Err(ErrorData::invalid_params(
-                format!("{tool} takes an object"),
-                None,
-            ))
-        }
+        _ => return Err(ErrorData::invalid_params(format!("{tool} takes an object"), None)),
     };
     if let Some(k) = required.iter().find(|k| !map.contains_key(**k)) {
         return Err(ErrorData::invalid_params(format!("{tool} needs {k}"), None));
     }
-    if let Some(k) = map
-        .keys()
-        .find(|k| !required.contains(&k.as_str()) && !optional.contains(&k.as_str()))
-    {
-        return Err(ErrorData::invalid_params(
-            format!("{tool} has no argument {k:.40}"),
-            None,
-        ));
+    if let Some(k) = map.keys().find(|k| !required.contains(&k.as_str()) && !optional.contains(&k.as_str())) {
+        return Err(ErrorData::invalid_params(format!("{tool} has no argument {k:.40}"), None));
     }
     Ok(map)
 }
 
 /// The string at `key`, which `arguments` has already said is there if it is required.
-pub(crate) fn text<'a>(
-    tool: &str,
-    map: &'a Map<String, Value>,
-    key: &str,
-) -> Result<&'a str, ErrorData> {
+pub(crate) fn text<'a>(tool: &str, map: &'a Map<String, Value>, key: &str) -> Result<&'a str, ErrorData> {
     match map.get(key) {
         Some(Value::String(s)) => Ok(s),
-        _ => Err(ErrorData::invalid_params(
-            format!("{tool}: {key} must be a string"),
-            None,
-        )),
+        _ => Err(ErrorData::invalid_params(format!("{tool}: {key} must be a string"), None)),
     }
 }
+

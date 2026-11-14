@@ -139,12 +139,7 @@ impl Theme {
     /// The theme a session runs with (05 section 7): the configured one (an unknown name falls
     /// back to `recording`), `mono` when `NO_COLOR` is set and not empty, hex colours when
     /// `COLORTERM` says `truecolor` or `24bit` and the nearest 256-colour index otherwise.
-    pub fn resolve(
-        name: &str,
-        no_color: Option<&str>,
-        colorterm: Option<&str>,
-        ascii: bool,
-    ) -> Self {
+    pub fn resolve(name: &str, no_color: Option<&str>, colorterm: Option<&str>, ascii: bool) -> Self {
         let mut t = if no_color.is_some_and(|v| !v.is_empty()) {
             Self::mono()
         } else {
@@ -298,9 +293,7 @@ mod tests {
             }
         }
         for t in [Theme::recording(), Theme::light()] {
-            for c in [
-                t.bg, t.panel, t.fg, t.dim, t.lead, t.swarm, t.router, t.advisor, t.split,
-            ] {
+            for c in [t.bg, t.panel, t.fg, t.dim, t.lead, t.swarm, t.router, t.advisor, t.split] {
                 if let Color::Rgb(r, g, b) = c {
                     samples.push([r, g, b]);
                 }
@@ -363,10 +356,7 @@ mod tests {
     fn names_resolve_and_an_unknown_one_is_the_recording() {
         assert_eq!(Theme::by_name("light"), Some(Theme::light()));
         assert_eq!(Theme::by_name("nope"), None);
-        assert_eq!(
-            resolved("nope", None, Some("truecolor")),
-            Theme::recording()
-        );
+        assert_eq!(resolved("nope", None, Some("truecolor")), Theme::recording());
         assert!(Theme::resolve("light", None, Some("truecolor"), true).ascii);
     }
 
@@ -375,9 +365,6 @@ mod tests {
         let t = Theme::mono();
         let all = [Interact::Hover, Interact::Pressed, Interact::Selected].map(|s| t.interact(s));
         assert!(all[0] != all[1] && all[1] != all[2] && all[0] != all[2]);
-        assert_eq!(
-            Theme::recording().interact(Interact::Hover).bg,
-            Some(Theme::recording().hover)
-        );
+        assert_eq!(Theme::recording().interact(Interact::Hover).bg, Some(Theme::recording().hover));
     }
 }

@@ -12,24 +12,16 @@ use wiremock::{Mock, MockServer};
 
 async fn run(cassette_name: &str, preset_id: &str) -> (aibus_provider::Usage, serde_json::Value) {
     let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/chat/completions"))
-        .respond_with(cassette(cassette_name).template())
-        .mount(&server)
-        .await;
+    Mock::given(method("POST")).and(path("/chat/completions")).respond_with(cassette(cassette_name).template()).mount(&server).await;
     let mut def = preset(preset_id).unwrap().clone();
     def.base_url = Some(server.uri());
-    let cfg = ProviderConfig {
-        def: Some(def),
-        ..ProviderConfig::default()
-    };
+    let cfg = ProviderConfig { def: Some(def), ..ProviderConfig::default() };
     let p = Factory::compatible().build(&cfg).unwrap();
     let mut req = request("hi");
     req.model = ModelId("openai/gpt-4.1".into());
     let (result, _) = collect(&*p, &cred(AuthMethodKind::ApiKey), req).await;
     let usage = result.unwrap().usage;
-    let sent: serde_json::Value =
-        serde_json::from_slice(&server.received_requests().await.unwrap().remove(0).body).unwrap();
+    let sent: serde_json::Value = serde_json::from_slice(&server.received_requests().await.unwrap().remove(0).body).unwrap();
     (usage, sent)
 }
 
@@ -38,11 +30,7 @@ async fn openrouter_reported_cost_replaces_the_estimate_and_is_marked() {
     let (usage, sent) = run("openrouter_with_cost", "openrouter").await;
     assert_eq!(usage.cost_usd, 0.00042);
     assert_eq!(usage.cost_source, CostSource::Provider);
-    assert_eq!(
-        sent["usage"],
-        serde_json::json!({"include": true}),
-        "the gateway is asked to report it"
-    );
+    assert_eq!(sent["usage"], serde_json::json!({"include": true}), "the gateway is asked to report it");
 }
 
 #[tokio::test]

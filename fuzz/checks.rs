@@ -20,15 +20,9 @@ fn utf8(data: &[u8]) -> Option<&str> {
 /// `agent::def::parse`: never panics, and a definition it accepts has a name that parses again.
 pub fn agent_def(data: &[u8]) {
     let Some(text) = utf8(data) else { return };
-    let source = DefSource {
-        path: None,
-        scope: Scope::Project,
-    };
+    let source = DefSource { path: None, scope: Scope::Project };
     if let Ok((def, _warnings)) = parse(text, source) {
-        assert_eq!(
-            def.name.as_str().parse::<AgentName>().ok().as_ref(),
-            Some(&def.name)
-        );
+        assert_eq!(def.name.as_str().parse::<AgentName>().ok().as_ref(), Some(&def.name));
     }
 }
 
@@ -48,9 +42,7 @@ pub fn handoff(data: &[u8]) {
 /// shape of any built-in pattern that is built from the same bytes.
 pub fn redactor(data: &[u8]) {
     static REDACTOR: OnceLock<Redactor> = OnceLock::new();
-    let Some((&n, rest)) = data.split_first() else {
-        return;
-    };
+    let Some((&n, rest)) = data.split_first() else { return };
     let (secret_bytes, around) = rest.split_at(rest.len().min(usize::from(n % 33)));
     let around = String::from_utf8_lossy(around);
     let hex: String = secret_bytes.iter().map(|b| format!("{b:02x}")).collect();
@@ -61,9 +53,7 @@ pub fn redactor(data: &[u8]) {
     // Shared across calls on purpose, so register and replace the one entry each time.
     r.register(&account, &secret);
     let b64 = base64::engine::general_purpose::STANDARD.encode(&secret);
-    let out = r
-        .redact(&format!("{around} {secret} {around} {b64} {around}"))
-        .into_owned();
+    let out = r.redact(&format!("{around} {secret} {around} {b64} {around}")).into_owned();
     r.unregister(&account);
     if secret.len() >= 6 {
         assert!(!out.contains(&secret), "the credential survived: {out}");
@@ -71,10 +61,7 @@ pub fn redactor(data: &[u8]) {
     }
 
     // Built-in shapes made of the same bytes: all of these are keys and none may survive.
-    let pad: String = hex
-        .chars()
-        .chain("0123456789abcdef0123456789abcdef0123456789".chars())
-        .collect();
+    let pad: String = hex.chars().chain("0123456789abcdef0123456789abcdef0123456789".chars()).collect();
     let upper = pad.to_ascii_uppercase();
     let tokens = [
         format!("sk-ant-{pad}"),
@@ -92,10 +79,7 @@ pub fn redactor(data: &[u8]) {
     for token in tokens {
         let text = format!("{around} {token} {around}");
         let out = r.redact(&text).into_owned();
-        assert!(
-            out.matches(&token).count() < text.matches(&token).count(),
-            "{token} survived in {out}"
-        );
+        assert!(out.matches(&token).count() < text.matches(&token).count(), "{token} survived in {out}");
     }
 }
 
@@ -113,11 +97,7 @@ pub fn tool_pattern(data: &[u8]) {
         }
     }
     let norm = normalise_command(text);
-    assert_eq!(
-        normalise_command(&norm),
-        norm,
-        "normalising twice changed {norm:?}"
-    );
+    assert_eq!(normalise_command(&norm), norm, "normalising twice changed {norm:?}");
     if let Ok(parts) = split(text) {
         for part in parts {
             assert_eq!(normalise_command(&part), part);

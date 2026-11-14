@@ -11,9 +11,9 @@ use tokio::task::JoinHandle;
 use crate::effects::Effects;
 use crate::error::AibusError;
 use crate::msg::Msg;
-use crate::orchestrator::Limits;
 use crate::persist::commits::CommitRecord;
 use crate::persist::time::rfc3339;
+use crate::orchestrator::Limits;
 use crate::state::reduce::{reduce, Env};
 use crate::state::store::Store;
 use crate::state::{self, register_run, router_last, ANIMATING, PERMISSIONS_BYPASS, SHUTDOWN};
@@ -223,10 +223,7 @@ impl<G: Graph> App<G> {
     }
 
     pub fn take_journal(&mut self) -> Vec<CommitRecord> {
-        self.journal
-            .as_mut()
-            .map(std::mem::take)
-            .unwrap_or_default()
+        self.journal.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     /// Registers any run keys the writes name, commits them under `intent` and journals them.

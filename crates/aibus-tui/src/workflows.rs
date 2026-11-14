@@ -23,10 +23,7 @@ pub struct WorkflowFiles {
 /// The agents the session has, which is what a step may name.
 fn roster<G: Graph>(app: &App<G>) -> Vec<AgentName> {
     let defs = app.graph.read_key(AGENTS_DEFS).map_or(&[][..], as_list);
-    defs.iter()
-        .filter_map(|d| get(d, "name").and_then(as_str))
-        .filter_map(|n| AgentName::new(n).ok())
-        .collect()
+    defs.iter().filter_map(|d| get(d, "name").and_then(as_str)).filter_map(|n| AgentName::new(n).ok()).collect()
 }
 
 /// The drafted TOML, if there is one.
@@ -38,12 +35,7 @@ fn draft<G: Graph>(app: &App<G>) -> Option<String> {
 }
 
 /// What `op` does, as messages for the loop to step. `at` stamps a saved file.
-pub fn apply<G: Graph>(
-    op: &WorkflowFile,
-    app: &App<G>,
-    files: &WorkflowFiles,
-    at: SystemTime,
-) -> Vec<Msg> {
+pub fn apply<G: Graph>(op: &WorkflowFile, app: &App<G>, files: &WorkflowFiles, at: SystemTime) -> Vec<Msg> {
     let loaded = |shown: Option<WorkflowShown>, said: Option<String>| Msg::WorkflowsLoaded {
         rows: workflow::rows(&files.dirs),
         shown,
@@ -51,28 +43,16 @@ pub fn apply<G: Graph>(
     };
     let open = |screen| Msg::Command(Command::OpenScreen(screen));
     // The reducer logs `io error in <context>`, so the sentence goes in the context.
-    let refused = |why: String| Msg::IoError {
-        context: why,
-        error: String::new(),
-    };
+    let refused = |why: String| Msg::IoError { context: why, error: String::new() };
     let roster = roster(app);
     match op {
         WorkflowFile::List => vec![loaded(None, None), open(Screen::Workflows)],
         WorkflowFile::Show(name) => {
-            let Some(found) = workflow::list(&files.dirs)
-                .into_iter()
-                .find(|f| f.name == *name)
-            else {
-                return vec![refused(format!(
-                    "no workflow named {name} (/workflow list)"
-                ))];
+            let Some(found) = workflow::list(&files.dirs).into_iter().find(|f| f.name == *name) else {
+                return vec![refused(format!("no workflow named {name} (/workflow list)"))];
             };
             let Some(raw) = found.text.clone() else {
-                let why = found
-                    .parsed
-                    .err()
-                    .map(|e| e.to_string())
-                    .unwrap_or_default();
+                let why = found.parsed.err().map(|e| e.to_string()).unwrap_or_default();
                 return vec![refused(format!("{}: {why}", found.path.display()))];
             };
             let (_, mut line) = workflow::summarise(&raw, name, &roster);
@@ -91,37 +71,24 @@ pub fn apply<G: Graph>(
                 text.truncate(cut);
                 text.push_str("\n... cut here");
             }
-            let shown = WorkflowShown {
-                name: name.clone(),
-                text,
-                summary: line,
-            };
+            let shown = WorkflowShown { name: name.clone(), text, summary: line };
             vec![loaded(Some(shown), None), open(Screen::WorkflowShow)]
         }
         WorkflowFile::Save { name, user, force } => {
             let Some(text) = draft(app) else {
-                return vec![refused(
-                    "workflow save: there is no drafted workflow, /workflow new <goal> makes one"
-                        .into(),
-                )];
+                return vec![refused("workflow save: there is no drafted workflow, /workflow new <goal> makes one".into())];
             };
             if files.redactor.redact(&text).as_ref() != text.as_str() {
                 return vec![refused("workflow save: the draft contains something that looks like a credential, nothing was written".into())];
             }
             match workflow::save(&files.dirs, *user, name, &text, *force, &roster, at) {
-                Ok(path) => vec![loaded(
-                    None,
-                    Some(format!("saved workflow {name} to {}", path.display())),
-                )],
+                Ok(path) => vec![loaded(None, Some(format!("saved workflow {name} to {}", path.display())))],
                 Err(SaveError::Invalid(problems)) => {
                     let lines: Vec<String> = problems
                         .iter()
                         .map(|p| {
                             let step = p.step.map_or(String::new(), |n| format!("step {n}: "));
-                            let field = p
-                                .field
-                                .as_deref()
-                                .map_or(String::new(), |f| format!("{f}: "));
+                            let field = p.field.as_deref().map_or(String::new(), |f| format!("{f}: "));
                             format!("{step}{field}{}", p.message)
                         })
                         .collect();

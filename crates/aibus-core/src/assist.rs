@@ -7,9 +7,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use aibus_provider::{
-    ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind, StreamChunk,
-};
+use aibus_provider::{ChatRequest, ChatResponse, Provider, ProviderError, ProviderErrorKind, StreamChunk};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -93,33 +91,19 @@ impl Assist {
     /// `None` when it was never configured or has been turned off.
     pub fn advisor_now(&self) -> Option<AdvisorSeat> {
         let base = self.advisor.as_ref()?;
-        match &*self
-            .chosen_advisor
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-        {
+        match &*self.chosen_advisor.lock().unwrap_or_else(PoisonError::into_inner) {
             None => Some(base.clone()),
             Some(None) => None,
-            Some(Some(seat)) => Some(AdvisorSeat {
-                seat: seat.clone(),
-                ..base.clone()
-            }),
+            Some(Some(seat)) => Some(AdvisorSeat { seat: seat.clone(), ..base.clone() }),
         }
     }
 
     pub fn router_now(&self) -> Option<RouterSeat> {
         let base = self.router.as_ref()?;
-        match &*self
-            .chosen_router
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-        {
+        match &*self.chosen_router.lock().unwrap_or_else(PoisonError::into_inner) {
             None => Some(base.clone()),
             Some(None) => None,
-            Some(Some(seat)) => Some(RouterSeat {
-                seat: seat.clone(),
-                ..base.clone()
-            }),
+            Some(Some(seat)) => Some(RouterSeat { seat: seat.clone(), ..base.clone() }),
         }
     }
 
@@ -138,12 +122,7 @@ pub async fn complete(
     cancel: &CancellationToken,
 ) -> Result<(ChatResponse, Vec<(String, f32)>), ProviderError> {
     let mut tried = vec![seat.account.clone()];
-    let mut on = (
-        seat.provider.clone(),
-        seat.creds.clone(),
-        seat.account.clone(),
-        req.model.clone(),
-    );
+    let mut on = (seat.provider.clone(), seat.creds.clone(), seat.account.clone(), req.model.clone());
     loop {
         let mut req = req.clone();
         req.model = on.3.clone();
@@ -151,11 +130,7 @@ pub async fn complete(
             Ok(done) => return Ok(done),
             Err(e) => e,
         };
-        let Some(to) = seat
-            .fallback
-            .as_ref()
-            .and_then(|f| f.next(&on.2, &tried, &e))
-        else {
+        let Some(to) = seat.fallback.as_ref().and_then(|f| f.next(&on.2, &tried, &e)) else {
             return Err(e);
         };
         tried.push(to.account.clone());

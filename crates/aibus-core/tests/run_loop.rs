@@ -17,8 +17,8 @@ use aibus_provider::{
     ContentBlock, ProviderError, ProviderErrorKind, StopReason, StreamChunk, ToolSpec,
 };
 use aibus_testkit::{fake_credential, FakeClock};
-use aibus_testkit::{xdg_temp, Xdg};
 use serde_json::{json, Value};
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -62,13 +62,7 @@ fn runner(dir: &Path) -> Arc<HookRunner> {
 }
 
 fn executor(dir: &Path) -> Arc<ToolExecutor> {
-    let bash = Arc::new(Bash::new(
-        20,
-        vec![],
-        path_env(),
-        dir.to_path_buf(),
-        "s".into(),
-    ));
+    let bash = Arc::new(Bash::new(20, vec![], path_env(), dir.to_path_buf(), "s".into()));
     Arc::new(ToolExecutor::new(ToolRegistry::standard(bash)))
 }
 
@@ -195,10 +189,7 @@ impl Done {
 
 async fn collect(p: Plan, mut rx: mpsc::Receiver<Msg>, before: impl FnOnce(&RunHandle)) -> Done {
     let Plan {
-        cfg,
-        deps,
-        fake,
-        dir,
+        cfg, deps, fake, dir,
     } = p;
     let handle = spawn(cfg, deps);
     before(&handle);
@@ -223,25 +214,11 @@ async fn run(script: Script, def: AgentDef) -> Done {
 
 #[tokio::test]
 async fn pre_tool_use_exit_two_blocks_the_call_and_the_model_reads_the_stderr() {
-    let d = def(
-        "general",
-        &[(
-            "pre_tool_use",
-            Some("bash"),
-            "echo psql is off limits >&2; exit 2",
-        )],
-    );
-    let s = script(
-        call("bash", json!({"command": "touch marker"}))
-            .into_iter()
-            .chain([Step::Text("ok".into())]),
-    );
+    let d = def("general", &[("pre_tool_use", Some("bash"), "echo psql is off limits >&2; exit 2")]);
+    let s = script(call("bash", json!({"command": "touch marker"})).into_iter().chain([Step::Text("ok".into())]));
     let done = run(s, d).await;
 
-    assert!(
-        !done.dir.path().join("marker").exists(),
-        "the command never ran"
-    );
+    assert!(!done.dir.path().join("marker").exists(), "the command never ran");
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Completed);
     let seen = done.results(1);
@@ -267,17 +244,9 @@ async fn pre_tool_use_exit_two_blocks_the_call_and_the_model_reads_the_stderr() 
 async fn updated_input_replaces_the_arguments_before_the_tool_runs() {
     let d = def(
         "general",
-        &[(
-            "pre_tool_use",
-            Some("bash"),
-            r#"echo '{"updated_input":{"command":"echo changed > out.txt"}}'"#,
-        )],
+        &[("pre_tool_use", Some("bash"), r#"echo '{"updated_input":{"command":"echo changed > out.txt"}}'"#)],
     );
-    let s = script(
-        call("bash", json!({"command": "touch marker"}))
-            .into_iter()
-            .chain([Step::Text("ok".into())]),
-    );
+    let s = script(call("bash", json!({"command": "touch marker"})).into_iter().chain([Step::Text("ok".into())]));
     let done = run(s, d).await;
     assert!(!done.dir.path().join("marker").exists());
     assert_eq!(done.file("out.txt").trim(), "changed");
@@ -293,16 +262,8 @@ async fn post_tool_use_stderr_and_failures_reach_the_model() {
     let d = def(
         "general",
         &[
-            (
-                "post_tool_use",
-                Some("bash"),
-                "echo lint failed >&2; exit 2",
-            ),
-            (
-                "post_tool_use_failure",
-                Some("read"),
-                "cat > failure.json; echo check the path >&2; exit 2",
-            ),
+            ("post_tool_use", Some("bash"), "echo lint failed >&2; exit 2"),
+            ("post_tool_use_failure", Some("read"), "cat > failure.json; echo check the path >&2; exit 2"),
         ],
     );
     let s = script(
@@ -313,11 +274,7 @@ async fn post_tool_use_stderr_and_failures_reach_the_model() {
     );
     let done = run(s, d).await;
     let seen = done.results(2);
-    assert!(
-        seen[0].contains("hi") && seen[0].contains("[hook echo] lint failed"),
-        "{}",
-        seen[0]
-    );
+    assert!(seen[0].contains("hi") && seen[0].contains("[hook echo] lint failed"), "{}", seen[0]);
     assert!(seen[1].contains("[hook cat] check the path"), "{}", seen[1]);
     let v: Value = serde_json::from_str(&done.file("failure.json")).unwrap();
     assert_eq!(v["hook_event_name"], "post_tool_use_failure");
@@ -327,38 +284,17 @@ async fn post_tool_use_stderr_and_failures_reach_the_model() {
 
 #[tokio::test]
 async fn a_hook_ask_prompts_once_even_when_the_executor_would_ask_too() {
-    let mut d = def(
-        "general",
-        &[("pre_tool_use", Some("bash"), r#"echo '{"decision":"ask"}'"#)],
-    );
+    let mut d = def("general", &[("pre_tool_use", Some("bash"), r#"echo '{"decision":"ask"}'"#)]);
     d.permission_mode = PermissionMode::Default;
     let (mut p, rx) = plan(
-        script(
-            call("bash", json!({"command": "echo asked"}))
-                .into_iter()
-                .chain([Step::Text("ok".into())]),
-        ),
+        script(call("bash", json!({"command": "echo asked"})).into_iter().chain([Step::Text("ok".into())])),
         d,
     );
     // A terminal is present, so the prompt waits for an answer.
-    let bash = Arc::new(Bash::new(
-        20,
-        vec![],
-        path_env(),
-        p.dir.path().to_path_buf(),
-        "s".into(),
-    ));
-    let gate = Gate {
-        tty: true,
-        ..Gate::default()
-    };
+    let bash = Arc::new(Bash::new(20, vec![], path_env(), p.dir.path().to_path_buf(), "s".into()));
+    let gate = Gate { tty: true, ..Gate::default() };
     p.deps.tools = Arc::new(ToolExecutor::with_gate(ToolRegistry::standard(bash), gate).unwrap());
-    let Plan {
-        cfg,
-        deps,
-        fake,
-        dir,
-    } = p;
+    let Plan { cfg, deps, fake, dir } = p;
     let mut rx = rx;
     let handle = spawn(cfg, deps);
     let mut msgs = Vec::new();
@@ -368,10 +304,7 @@ async fn a_hook_ask_prompts_once_even_when_the_executor_would_ask_too() {
             asked += 1;
             handle
                 .mailbox
-                .send(RunMail::Permission {
-                    id: request.id,
-                    decision: Decision::Allow,
-                })
+                .send(RunMail::Permission { id: request.id, decision: Decision::Allow })
                 .await
                 .unwrap();
         }
@@ -391,10 +324,7 @@ async fn a_hook_ask_prompts_once_even_when_the_executor_would_ask_too() {
 
 #[tokio::test]
 async fn the_prompt_hook_adds_context_and_a_block_denies_the_run() {
-    let d = def(
-        "lead",
-        &[("user_prompt_submit", None, "echo remember the milk")],
-    );
+    let d = def("lead", &[("user_prompt_submit", None, "echo remember the milk")]);
     let done = run(script([Step::Text("ok".into())]), d).await;
     let first = &done.fake.requests()[0].request.messages[0];
     let texts: Vec<String> = first
@@ -405,17 +335,10 @@ async fn the_prompt_hook_adds_context_and_a_block_denies_the_run() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        texts.last().unwrap(),
-        "map this repo",
-        "the task stays last"
-    );
+    assert_eq!(texts.last().unwrap(), "map this repo", "the task stays last");
     assert!(texts.iter().any(|t| t == "[hook echo]\nremember the milk"));
 
-    let d = def(
-        "lead",
-        &[("user_prompt_submit", None, "echo not today >&2; exit 2")],
-    );
+    let d = def("lead", &[("user_prompt_submit", None, "echo not today >&2; exit 2")]);
     let done = run(script([Step::Text("never".into())]), d).await;
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Denied);
@@ -428,28 +351,13 @@ async fn the_prompt_hook_adds_context_and_a_block_denies_the_run() {
 async fn session_start_text_goes_in_front_of_the_task_and_mailed_prompts_pass_the_hook() {
     let d = def(
         "lead",
-        &[(
-            "user_prompt_submit",
-            None,
-            "grep -q forbidden && { echo no >&2; exit 2; }; exit 0",
-        )],
+        &[("user_prompt_submit", None, "grep -q forbidden && { echo no >&2; exit 2; }; exit 0")],
     );
-    let (mut p, rx) = plan(
-        script(
-            call("ls", json!({}))
-                .into_iter()
-                .chain([Step::Text("ok".into())]),
-        ),
-        d,
-    );
+    let (mut p, rx) = plan(script(call("ls", json!({})).into_iter().chain([Step::Text("ok".into())])), d);
     p.cfg.context = vec!["[hook load-context.sh]\nbranch: main".into()];
     let done = collect(p, rx, |h| {
-        h.mailbox
-            .try_send(RunMail::UserMessage("forbidden thing".into()))
-            .unwrap();
-        h.mailbox
-            .try_send(RunMail::UserMessage("fine thing".into()))
-            .unwrap();
+        h.mailbox.try_send(RunMail::UserMessage("forbidden thing".into())).unwrap();
+        h.mailbox.try_send(RunMail::UserMessage("fine thing".into())).unwrap();
     })
     .await;
     let req = &done.fake.requests()[0].request;
@@ -463,11 +371,7 @@ async fn session_start_text_goes_in_front_of_the_task_and_mailed_prompts_pass_th
 async fn a_lead_stop_hook_that_exits_two_forces_another_turn() {
     let d = def(
         "lead",
-        &[(
-            "stop",
-            None,
-            "cat > stop.json; [ -f seen ] && exit 0; touch seen; echo keep going >&2; exit 2",
-        )],
+        &[("stop", None, "cat > stop.json; [ -f seen ] && exit 0; touch seen; echo keep going >&2; exit 2")],
     );
     let s = script([
         Step::Text("first".into()),
@@ -476,16 +380,8 @@ async fn a_lead_stop_hook_that_exits_two_forces_another_turn() {
     ]);
     let done = run(s, d).await;
     let r = done.finished();
-    assert_eq!(
-        (r.status, r.turns, r.summary.as_str()),
-        (RunStatus::Completed, 2, "second")
-    );
-    let last = done.fake.requests()[1]
-        .request
-        .messages
-        .last()
-        .unwrap()
-        .plain_text();
+    assert_eq!((r.status, r.turns, r.summary.as_str()), (RunStatus::Completed, 2, "second"));
+    let last = done.fake.requests()[1].request.messages.last().unwrap().plain_text();
     assert!(last.contains("keep going"), "{last}");
     let v: Value = serde_json::from_str(&done.file("stop.json")).unwrap();
     assert_eq!(v["hook_event_name"], "stop");
@@ -497,11 +393,7 @@ async fn a_workers_stop_hook_is_subagent_stop_and_exit_two_keeps_it_running() {
     let d = def(
         "general",
         &[
-            (
-                "stop",
-                None,
-                "[ -f seen ] && exit 0; touch seen; echo not yet >&2; exit 2",
-            ),
+            ("stop", None, "[ -f seen ] && exit 0; touch seen; echo not yet >&2; exit 2"),
             ("subagent_start", Some("general"), "cat > start.json"),
         ],
     );
@@ -530,14 +422,7 @@ async fn a_workers_stop_hook_is_subagent_stop_and_exit_two_keeps_it_running() {
 #[tokio::test]
 async fn hooks_do_not_run_when_the_runner_is_the_default_one() {
     let d = def("general", &[("pre_tool_use", None, "touch ran")]);
-    let (mut p, rx) = plan(
-        script(
-            call("ls", json!({}))
-                .into_iter()
-                .chain([Step::Text("ok".into())]),
-        ),
-        d,
-    );
+    let (mut p, rx) = plan(script(call("ls", json!({})).into_iter().chain([Step::Text("ok".into())])), d);
     p.deps.hooks = Arc::new(HookRunner::default());
     let done = collect(p, rx, |_| {}).await;
     assert_eq!(done.finished().status, RunStatus::Completed);
@@ -549,16 +434,11 @@ async fn hooks_do_not_run_when_the_runner_is_the_default_one() {
 
 /// Virtual time to within the millisecond tokio rounds each sleep up by.
 fn about(got: Duration, want: Duration) {
-    assert!(
-        got >= want && got < want + Duration::from_millis(50),
-        "{got:?} vs {want:?}"
-    );
+    assert!(got >= want && got < want + Duration::from_millis(50), "{got:?} vs {want:?}");
 }
 
 fn servers(n: usize) -> Vec<Step> {
-    (0..n)
-        .map(|_| err(ProviderErrorKind::Server, "upstream fell over"))
-        .collect()
+    (0..n).map(|_| err(ProviderErrorKind::Server, "upstream fell over")).collect()
 }
 
 #[tokio::test]
@@ -567,18 +447,13 @@ async fn five_retries_then_success_on_the_documented_backoff() {
     let s = script(servers(5).into_iter().chain([Step::Text("made it".into())]));
     let done = run(s, def("explore", &[])).await;
     let r = done.finished();
-    assert_eq!(
-        (r.status, r.summary.as_str()),
-        (RunStatus::Completed, "made it")
-    );
+    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Completed, "made it"));
     assert_eq!(done.fake.requests().len(), 6);
     // 500 ms, then 1, 2, 4 and 8 s.
     about(clock.elapsed(), Duration::from_millis(15_500));
     let waits = done.waiting();
     assert!(waits[0].starts_with("retrying in 1 s (1/5)"), "{waits:?}");
-    assert!(
-        waits.iter().filter(|w| !w.is_empty()).count() == 5 && waits.last().unwrap().is_empty()
-    );
+    assert!(waits.iter().filter(|w| !w.is_empty()).count() == 5 && waits.last().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -586,22 +461,14 @@ async fn retry_after_is_honoured_and_a_huge_one_is_capped() {
     let clock = FakeClock::new();
     let mut slow = ProviderError::new(ProviderErrorKind::RateLimit, "slow down");
     slow.retry_after = Some(Duration::from_secs(20));
-    let done = run(
-        script([Step::Error(slow), Step::Text("ok".into())]),
-        def("explore", &[]),
-    )
-    .await;
+    let done = run(script([Step::Error(slow), Step::Text("ok".into())]), def("explore", &[])).await;
     assert_eq!(done.finished().status, RunStatus::Completed);
     about(clock.elapsed(), Duration::from_secs(20));
 
     let before = clock.elapsed();
     let mut huge = ProviderError::new(ProviderErrorKind::RateLimit, "come back tomorrow");
     huge.retry_after = Some(Duration::from_secs(86_400));
-    let done = run(
-        script([Step::Error(huge), Step::Text("ok".into())]),
-        def("explore", &[]),
-    )
-    .await;
+    let done = run(script([Step::Error(huge), Step::Text("ok".into())]), def("explore", &[])).await;
     assert_eq!(done.finished().status, RunStatus::Completed);
     about(clock.elapsed() - before, Duration::from_secs(300));
 }
@@ -624,10 +491,7 @@ async fn the_sixth_failure_fails_the_run_as_a_provider_error() {
 async fn a_non_retryable_error_fails_at_once() {
     let clock = FakeClock::new();
     let done = run(
-        script([
-            err(ProviderErrorKind::InvalidRequest, "bad schema"),
-            Step::Text("never".into()),
-        ]),
+        script([err(ProviderErrorKind::InvalidRequest, "bad schema"), Step::Text("never".into())]),
         def("explore", &[]),
     )
     .await;
@@ -641,10 +505,7 @@ async fn auth_never_retries_and_commits_the_account_banner() {
     let clock = FakeClock::new();
     let banner = "account fake: 401, run aibus account test fake";
     let done = run(
-        script([
-            err(ProviderErrorKind::Auth, "401"),
-            Step::Text("never".into()),
-        ]),
+        script([err(ProviderErrorKind::Auth, "401"), Step::Text("never".into())]),
         def("explore", &[]),
     )
     .await;
@@ -665,10 +526,7 @@ async fn auth_never_retries_and_commits_the_account_banner() {
 async fn quota_never_retries_and_ends_with_a_banner_that_names_the_account() {
     let clock = FakeClock::new();
     let done = run(
-        script([
-            err(ProviderErrorKind::Quota, "insufficient_quota"),
-            Step::Text("never".into()),
-        ]),
+        script([err(ProviderErrorKind::Quota, "insufficient_quota"), Step::Text("never".into())]),
         def("explore", &[]),
     )
     .await;
@@ -679,17 +537,8 @@ async fn quota_never_retries_and_ends_with_a_banner_that_names_the_account() {
     let e = r.error.as_ref().unwrap();
     assert_eq!(e.kind, RunErrorKind::Quota);
     assert!(!e.retryable);
-    assert!(
-        e.message
-            .starts_with("account fake: quota or billing cap reached"),
-        "{}",
-        e.message
-    );
-    assert!(
-        e.message.contains("aibus account test fake"),
-        "{}",
-        e.message
-    );
+    assert!(e.message.starts_with("account fake: quota or billing cap reached"), "{}", e.message);
+    assert!(e.message.contains("aibus account test fake"), "{}", e.message);
     assert_eq!(done.count("RunFailed"), 1);
 }
 
@@ -697,10 +546,7 @@ async fn quota_never_retries_and_ends_with_a_banner_that_names_the_account() {
 async fn a_content_filter_never_retries_and_does_not_blame_the_account() {
     let clock = FakeClock::new();
     let done = run(
-        script([
-            err(ProviderErrorKind::ContentFilter, "blocked by policy"),
-            Step::Text("never".into()),
-        ]),
+        script([err(ProviderErrorKind::ContentFilter, "blocked by policy"), Step::Text("never".into())]),
         def("explore", &[]),
     )
     .await;
@@ -711,11 +557,7 @@ async fn a_content_filter_never_retries_and_does_not_blame_the_account() {
     let e = r.error.as_ref().unwrap();
     assert_eq!(e.kind, RunErrorKind::ContentFilter);
     assert!(!e.retryable);
-    assert!(
-        e.message.contains("content filter") && e.message.contains("blocked by policy"),
-        "{}",
-        e.message
-    );
+    assert!(e.message.contains("content filter") && e.message.contains("blocked by policy"), "{}", e.message);
     assert!(!e.message.contains("account"), "{}", e.message);
     assert_eq!(done.count("RunFailed"), 1);
 }
@@ -731,16 +573,8 @@ async fn a_run_with_text_keeps_it_when_the_provider_gives_up() {
     );
     let done = run(s, def("explore", &[])).await;
     let r = done.finished();
-    assert_eq!(
-        (r.status, r.summary.as_str()),
-        (RunStatus::Partial, "half an answer")
-    );
-    assert!(r
-        .error
-        .as_ref()
-        .unwrap()
-        .message
-        .starts_with("run ended early"));
+    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Partial, "half an answer"));
+    assert!(r.error.as_ref().unwrap().message.starts_with("run ended early"));
 }
 
 // ---- compaction -------------------------------------------------------------------------
@@ -771,10 +605,7 @@ async fn context_too_long_compacts_once_then_goes_on() {
     assert_eq!(done.count("Compacted"), 1);
 
     // A second one in a row is a failure: it compacts once per request.
-    let (mut p, rx) = plan(
-        script([long(), long(), Step::Text("never".into())]),
-        d.clone(),
-    );
+    let (mut p, rx) = plan(script([long(), long(), Step::Text("never".into())]), d.clone());
     let compactor = Arc::new(Counting(AtomicU32::new(0)));
     p.deps.compactor = Some(compactor.clone());
     let done = collect(p, rx, |_| {}).await;
@@ -790,10 +621,7 @@ async fn context_too_long_compacts_once_then_goes_on() {
 
 #[tokio::test]
 async fn compact_mail_fires_pre_compact_and_compacts_at_the_next_boundary() {
-    let d = def(
-        "explore",
-        &[("pre_compact", Some("manual"), "cat > precompact.json")],
-    );
+    let d = def("explore", &[("pre_compact", Some("manual"), "cat > precompact.json")]);
     let (mut p, rx) = plan(script([Step::Text("ok".into())]), d);
     let compactor = Arc::new(Counting(AtomicU32::new(0)));
     p.deps.compactor = Some(compactor.clone());
@@ -825,10 +653,7 @@ async fn max_tokens_total_ends_the_run_partial_before_the_next_tool_runs() {
     );
     let done = run(s, d).await;
     let r = done.finished();
-    assert_eq!(
-        (r.status, r.summary.as_str()),
-        (RunStatus::Partial, "looking")
-    );
+    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Partial, "looking"));
     let e = r.error.as_ref().unwrap();
     assert_eq!(e.kind, RunErrorKind::Budget);
     assert!(e.message.contains("max_tokens_total"), "{}", e.message);
@@ -882,10 +707,7 @@ async fn the_config_budgets_apply_when_the_definition_sets_none() {
     p.cfg.budgets.max_turns = 2;
     let done = collect(p, rx, |_| {}).await;
     let r = done.finished();
-    assert_eq!(
-        (r.status, r.turns, r.summary.as_str()),
-        (RunStatus::Partial, 2, "b")
-    );
+    assert_eq!((r.status, r.turns, r.summary.as_str()), (RunStatus::Partial, 2, "b"));
 }
 
 #[tokio::test]
@@ -1015,31 +837,31 @@ async fn a_grandparent_sees_only_what_the_parent_chose_to_say() {
     let grandchild = Arc::new(FakeProvider::new(script([Step::Text(
         "GRANDCHILD-WORDS found 4 modules".into(),
     )])));
-    let parent_tools = with_relay(Relay {
-        fake: grandchild,
-        def: def("explore", &[]),
-        tools: none(),
-        dir: dir.path().to_path_buf(),
-        depth: 2,
-    });
+    let parent_tools = with_relay(
+        Relay {
+            fake: grandchild,
+            def: def("explore", &[]),
+            tools: none(),
+            dir: dir.path().to_path_buf(),
+            depth: 2,
+        },
+    );
     let parent = Arc::new(FakeProvider::new(script(
-        call("delegate", json!({"prompt": "go"}))
-            .into_iter()
-            .chain([Step::Text("PARENT-WORDS the search is done".into())]),
+        call("delegate", json!({"prompt": "go"})).into_iter().chain([Step::Text(
+            "PARENT-WORDS the search is done".into(),
+        )]),
     )));
-    let lead_tools = with_relay(Relay {
-        fake: parent.clone(),
-        def: def("general", &[]),
-        tools: parent_tools,
-        dir: dir.path().to_path_buf(),
-        depth: 1,
-    });
+    let lead_tools = with_relay(
+        Relay {
+            fake: parent.clone(),
+            def: def("general", &[]),
+            tools: parent_tools,
+            dir: dir.path().to_path_buf(),
+            depth: 1,
+        },
+    );
     let (mut p, rx) = plan(
-        script(
-            call("delegate", json!({"prompt": "go"}))
-                .into_iter()
-                .chain([Step::Text("all done".into())]),
-        ),
+        script(call("delegate", json!({"prompt": "go"})).into_iter().chain([Step::Text("all done".into())])),
         def("general", &[]),
     );
     p.deps.tools = lead_tools;

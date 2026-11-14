@@ -10,14 +10,12 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use aibus_provider::AuthMethodKind;
 use aibus_provider::{
-    Api, ConfigError, Credential, ModelId, Provider, ProviderConfig, ProviderError,
-    ProviderErrorKind, ProviderFactory, ProviderId, Secret,
+    Api, ConfigError, Credential, ModelId, Provider, ProviderConfig, ProviderError, ProviderErrorKind,
+    ProviderFactory, ProviderId, Secret,
 };
-use aibus_provider_http::reqwest::header::{
-    HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE,
-};
+use aibus_provider::AuthMethodKind;
+use aibus_provider_http::reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use aibus_provider_http::reqwest::Url;
 use aibus_provider_http::sensitive;
 use async_trait::async_trait;
@@ -50,36 +48,20 @@ impl ProviderFactory for CloudFactory {
 
     fn build(&self, cfg: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
         let def = cfg.def.as_ref().ok_or_else(|| {
-            ConfigError::NotConfigured(
-                "anthropic-cloud".into(),
-                "built from a bedrock or vertex definition only".into(),
-            )
+            ConfigError::NotConfigured("anthropic-cloud".into(), "built from a bedrock or vertex definition only".into())
         })?;
         let region = need(def.region.as_deref(), &def.id, "region")?;
         match def.api {
-            Some(Api::AnthropicBedrock) => {
-                Ok(Arc::new(Anthropic::bedrock(cfg, region, SystemTime::now)?))
+            Some(Api::AnthropicBedrock) => Ok(Arc::new(Anthropic::bedrock(cfg, region, SystemTime::now)?)),
+            Some(Api::AnthropicVertex) => {
+                Ok(Arc::new(Anthropic::vertex(cfg, need(def.project.as_deref(), &def.id, "project")?, region, self.tokens.clone())?))
             }
-            Some(Api::AnthropicVertex) => Ok(Arc::new(Anthropic::vertex(
-                cfg,
-                need(def.project.as_deref(), &def.id, "project")?,
-                region,
-                self.tokens.clone(),
-            )?)),
-            other => Err(ConfigError::Invalid(
-                def.id.clone(),
-                format!("api {other:?} is not a cloud api"),
-            )),
+            other => Err(ConfigError::Invalid(def.id.clone(), format!("api {other:?} is not a cloud api"))),
         }
     }
 
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
-        &[
-            AuthMethodKind::ApiKey,
-            AuthMethodKind::Bearer,
-            AuthMethodKind::Env,
-            AuthMethodKind::None,
-        ]
+        &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env, AuthMethodKind::None]
     }
 
     fn apis(&self) -> &'static [&'static str] {
@@ -89,25 +71,13 @@ impl ProviderFactory for CloudFactory {
 
 /// A setting a cloud definition cannot do without, or the error that says where to put it.
 fn need<'a>(field: Option<&'a str>, id: &str, what: &str) -> Result<&'a str, ConfigError> {
-    field.ok_or_else(|| {
-        ConfigError::Invalid(
-            id.to_owned(),
-            format!("{what} is required: set it on the account or on the [[provider]]"),
-        )
-    })
+    field.ok_or_else(|| ConfigError::Invalid(id.to_owned(), format!("{what} is required: set it on the account or on the [[provider]]")))
 }
 
 pub(crate) enum Transport {
     Direct,
-    Bedrock {
-        region: String,
-        now: Box<dyn Fn() -> SystemTime + Send + Sync>,
-    },
-    Vertex {
-        project: String,
-        region: String,
-        tokens: Arc<dyn TokenSource>,
-    },
+    Bedrock { region: String, now: Box<dyn Fn() -> SystemTime + Send + Sync> },
+    Vertex { project: String, region: String, tokens: Arc<dyn TokenSource> },
 }
 
 fn invalid(what: &str) -> ConfigError {
@@ -116,15 +86,10 @@ fn invalid(what: &str) -> ConfigError {
 
 /// A region lands in a host name, so it is held to what a region looks like.
 fn region_ok(r: &str) -> Result<(), ConfigError> {
-    if !r.is_empty()
-        && r.bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-    {
+    if !r.is_empty() && r.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
         Ok(())
     } else {
-        Err(invalid(
-            "region must be lower-case letters, digits and dashes",
-        ))
+        Err(invalid("region must be lower-case letters, digits and dashes"))
     }
 }
 
@@ -142,19 +107,9 @@ impl Anthropic {
         Self::with_transport(
             cfg,
             format!("https://bedrock-runtime.{region}.amazonaws.com"),
-            Transport::Bedrock {
-                region: region.to_owned(),
-                now: Box::new(now),
-            },
+            Transport::Bedrock { region: region.to_owned(), now: Box::new(now) },
             // The bare Anthropic id, or an inference profile (`us.anthropic.claude-...`).
-            &[
-                "claude-",
-                "anthropic.",
-                "us.anthropic.",
-                "eu.anthropic.",
-                "apac.anthropic.",
-                "global.anthropic.",
-            ],
+            &["claude-", "anthropic.", "us.anthropic.", "eu.anthropic.", "apac.anthropic.", "global.anthropic."],
         )
     }
 
@@ -167,11 +122,7 @@ impl Anthropic {
         tokens: Arc<dyn TokenSource>,
     ) -> Result<Self, ConfigError> {
         region_ok(region)?;
-        if project.is_empty()
-            || !project
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
-        {
+        if project.is_empty() || !project.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':')) {
             return Err(invalid("project must be a Google Cloud project id"));
         }
         let host = if region == "global" {
@@ -182,11 +133,7 @@ impl Anthropic {
         Self::with_transport(
             cfg,
             format!("https://{host}"),
-            Transport::Vertex {
-                project: project.to_owned(),
-                region: region.to_owned(),
-                tokens,
-            },
+            Transport::Vertex { project: project.to_owned(), region: region.to_owned(), tokens },
             &["claude-"],
         )
     }
@@ -209,11 +156,7 @@ impl Anthropic {
                 if beta {
                     headers.insert("anthropic-beta", HeaderValue::from_static(EFFORT_BETA));
                 }
-                Ok((
-                    format!("{}/v1/messages", self.base),
-                    headers,
-                    body.to_string(),
-                ))
+                Ok((format!("{}/v1/messages", self.base), headers, body.to_string()))
             }
             Transport::Bedrock { region, now } => {
                 let obj = body.as_object_mut().expect("the body is an object");
@@ -229,10 +172,7 @@ impl Anthropic {
                 let model = uri_encode(&model.0);
                 let tail = "invoke-with-response-stream";
                 let url = format!("{}/model/{model}/{tail}", self.base);
-                headers.insert(
-                    ACCEPT,
-                    HeaderValue::from_static("application/vnd.amazon.eventstream"),
-                );
+                headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.amazon.eventstream"));
                 // A Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) has no colon; an access key pair
                 // always does. The key is a bearer token and nothing is signed.
                 if !creds.secret.expose().contains(':') {
@@ -244,23 +184,11 @@ impl Anthropic {
                 let canonical = format!("/model/{}/{tail}", uri_encode(&model));
                 let host = Url::parse(&url)
                     .ok()
-                    .and_then(|u| {
-                        u.host_str()
-                            .map(|h| u.port().map_or(h.to_owned(), |p| format!("{h}:{p}")))
-                    })
-                    .ok_or_else(|| {
-                        ProviderError::new(ProviderErrorKind::Unknown, "base_url has no host")
-                    })?;
+                    .and_then(|u| u.host_str().map(|h| u.port().map_or(h.to_owned(), |p| format!("{h}:{p}"))))
+                    .ok_or_else(|| ProviderError::new(ProviderErrorKind::Unknown, "base_url has no host"))?;
                 let stamp = amz_date(now());
-                let token = keys
-                    .session_token
-                    .as_ref()
-                    .map(|t| Zeroizing::new(t.to_string()));
-                let mut signed = vec![
-                    ("content-type", "application/json"),
-                    ("host", host.as_str()),
-                    ("x-amz-date", stamp.as_str()),
-                ];
+                let token = keys.session_token.as_ref().map(|t| Zeroizing::new(t.to_string()));
+                let mut signed = vec![("content-type", "application/json"), ("host", host.as_str()), ("x-amz-date", stamp.as_str())];
                 if let Some(t) = &token {
                     signed.push(("x-amz-security-token", t.as_str()));
                 }
@@ -279,11 +207,7 @@ impl Anthropic {
                 headers.insert(AUTHORIZATION, sensitive(&auth)?);
                 Ok((url, headers, body))
             }
-            Transport::Vertex {
-                project,
-                region,
-                tokens,
-            } => {
+            Transport::Vertex { project, region, tokens } => {
                 let obj = body.as_object_mut().expect("the body is an object");
                 obj.remove("model");
                 obj.insert("anthropic_version".into(), json!("vertex-2023-10-16"));

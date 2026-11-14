@@ -50,11 +50,7 @@ pub fn frame_of(buf: &Buffer) -> Frame {
                 "fg={} bg={}{}",
                 colour(cell.fg),
                 colour(cell.bg),
-                if mods == Modifier::empty() {
-                    String::new()
-                } else {
-                    format!(" {mods:?}")
-                }
+                if mods == Modifier::empty() { String::new() } else { format!(" {mods:?}") }
             );
             match &run {
                 Some((_, k)) if *k == key => {}
@@ -83,11 +79,7 @@ pub fn render<G: Graph>(app: &mut App<G>, size: (u16, u16), tick: u64) -> Frame 
 
 /// `render` in another theme.
 pub fn render_in<G: Graph>(app: &mut App<G>, size: (u16, u16), tick: u64, theme: Theme) -> Frame {
-    app.step(Msg::Resize {
-        cols: size.0,
-        rows: size.1,
-    })
-    .unwrap();
+    app.step(Msg::Resize { cols: size.0, rows: size.1 }).unwrap();
     while app.graph.read_key(TICK).and_then(as_i64).unwrap_or(0) < tick as i64 {
         app.step(Msg::Tick).unwrap();
     }
@@ -105,12 +97,8 @@ pub fn check_snapshot(dir: &str, name: &str, ext: &str, got: &str) {
         std::fs::write(&path, got).unwrap();
         return;
     }
-    let want = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!(
-            "no snapshot {}; run with AIBUS_UPDATE_SNAPSHOTS=1",
-            path.display()
-        )
-    });
+    let want = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("no snapshot {}; run with AIBUS_UPDATE_SNAPSHOTS=1", path.display()));
     assert!(
         want == got,
         "snapshot {} differs\n--- want\n{want}\n--- got\n{got}",
@@ -150,10 +138,7 @@ pub fn run_id(seq: u128) -> RunId {
 }
 
 pub fn poke<G: Graph>(app: &mut App<G>, key: &str, v: Value) {
-    let node = app
-        .graph
-        .node(key)
-        .unwrap_or_else(|| panic!("{key} not registered"));
+    let node = app.graph.node(key).unwrap_or_else(|| panic!("{key} not registered"));
     app.graph.commit("poke", &[(node, v)]).unwrap();
 }
 
@@ -174,11 +159,7 @@ pub fn start<G: Graph>(app: &mut App<G>, seq: u128, agent: &str, role: Role, mod
 pub fn answer<G: Graph>(app: &mut App<G>, fork: u64, kind: &str, p: f64, verdict: Verdict) {
     app.step(Msg::RouterAnswered {
         fork: ForkId(fork),
-        question: RouterQuestion {
-            kind: kind.into(),
-            context: String::new(),
-            choices: Vec::new(),
-        },
+        question: RouterQuestion { kind: kind.into(), context: String::new(), choices: Vec::new() },
         answer: RouterAnswer {
             choice: String::new(),
             p: p as f32,
@@ -196,16 +177,8 @@ pub fn replay_app() -> App<MiniGraph> {
     let mut app = App::new(MiniGraph::new(), || NOW);
     let keys = aibus_tui::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
-    app.set_session_view(
-        Some("--model sonnet"),
-        (Some("opus 5.5"), true),
-        (None, true),
-    )
-    .unwrap();
-    app.step(Msg::SubmitPrompt {
-        text: "edits + runs tests".into(),
-    })
-    .unwrap();
+    app.set_session_view(Some("--model sonnet"), (Some("opus 5.5"), true), (None, true)).unwrap();
+    app.step(Msg::SubmitPrompt { text: "edits + runs tests".into() }).unwrap();
     start(&mut app, 1, "lead", Role::Lead, "Sonnet 5.5");
     for (seq, agent, task) in [
         (2, "search", "maps the repo"),
@@ -226,17 +199,9 @@ pub fn replay_app() -> App<MiniGraph> {
         start(&mut app, seq, agent, Role::Worker, "Haiku 5.5");
     }
     for (seq, p) in [(2, 0.71), (3, 0.35), (4, 1.0)] {
-        poke(
-            &mut app,
-            &format!("model:run:{}:progress", run_id(seq)),
-            Value::F64(p),
-        );
+        poke(&mut app, &format!("model:run:{}:progress", run_id(seq)), Value::F64(p));
     }
-    poke(
-        &mut app,
-        &format!("model:run:{}:status", run_id(4)),
-        Value::Str("completed".into()),
-    );
+    poke(&mut app, &format!("model:run:{}:status", run_id(4)), Value::Str("completed".into()));
     answer(&mut app, 1312, "which_file", 0.94, Verdict::Sharp);
     answer(&mut app, 1313, "which_tool", 0.94, Verdict::Sharp);
     answer(&mut app, 1314, "retry_or_stop", 0.58, Verdict::Split);
@@ -250,11 +215,8 @@ pub fn replay_app() -> App<MiniGraph> {
     for _ in 0..40 {
         app.step(Msg::Tick).unwrap();
     }
-    app.step(Msg::CheckpointHit {
-        checkpoint: Checkpoint::BeforePlan,
-        detail: String::new(),
-    })
-    .unwrap();
+    app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforePlan, detail: String::new() })
+        .unwrap();
     app
 }
 
@@ -295,11 +257,7 @@ pub fn heavy_app() -> App<MiniGraph> {
         app.step(stream(seq, line(0).repeat(500))).unwrap();
     }
     for i in 0..2000 {
-        app.step(Msg::IoError {
-            context: format!("ctx {i}"),
-            error: "e".into(),
-        })
-        .unwrap();
+        app.step(Msg::IoError { context: format!("ctx {i}"), error: "e".into() }).unwrap();
     }
     app
 }

@@ -182,24 +182,13 @@ impl Effects {
                 },
             ));
         }
-        let pending = graph
-            .read_key(SESSION_ASSIST)
-            .and_then(|a| get(a, "pending"))
-            .map_or(&[][..], as_list);
+        let pending = graph.read_key(SESSION_ASSIST).and_then(|a| get(a, "pending")).map_or(&[][..], as_list);
         for p in pending {
-            let id = get(p, "id")
-                .and_then(as_i64)
-                .and_then(|i| u64::try_from(i).ok());
-            let target = get(p, "target")
-                .and_then(as_str)
-                .and_then(ModelTarget::parse);
+            let id = get(p, "id").and_then(as_i64).and_then(|i| u64::try_from(i).ok());
+            let target = get(p, "target").and_then(as_str).and_then(ModelTarget::parse);
             let model = get(p, "model").and_then(as_str);
             if let (Some(id), Some(target), Some(model)) = (id, target, model) {
-                let effect = Effect::SetModel {
-                    id,
-                    target,
-                    model: model.to_owned(),
-                };
+                let effect = Effect::SetModel { id, target, model: model.to_owned() };
                 found.push((format!("model:{id}").into(), effect));
             }
         }

@@ -34,10 +34,7 @@ pub fn canonical(name: &str) -> Result<&'static str, String> {
 /// A list line without its marker: `- [ ] write the test` is `write the test`.
 fn item(line: &str) -> &str {
     let t = line.trim();
-    let t = t
-        .strip_prefix("- ")
-        .or_else(|| t.strip_prefix("* "))
-        .unwrap_or(t);
+    let t = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")).unwrap_or(t);
     let t = t
         .strip_prefix("[ ] ")
         .or_else(|| t.strip_prefix("[x] "))
@@ -62,8 +59,7 @@ impl Ledger {
     pub fn parse(topic: &str, text: &str) -> Self {
         fn close(cur: &mut Option<(String, Vec<&str>)>, out: &mut Ledger) {
             if let Some((name, lines)) = cur.take() {
-                out.sections
-                    .push((name, lines.join("\n").trim().to_owned()));
+                out.sections.push((name, lines.join("\n").trim().to_owned()));
             }
         }
         let mut out = Self::new(topic, "");
@@ -129,13 +125,7 @@ impl Ledger {
 
     /// Replaces a section's text, or adds to it with `append`. In every section but `Goal` each
     /// line becomes a list item, so "the first item" always means something.
-    pub fn update(
-        &mut self,
-        section: &str,
-        text: &str,
-        append: bool,
-        date: &str,
-    ) -> Result<(), String> {
+    pub fn update(&mut self, section: &str, text: &str, append: bool, date: &str) -> Result<(), String> {
         let name = canonical(section)?;
         let body = if name == "Goal" {
             text.trim().to_owned()
@@ -173,11 +163,7 @@ pub fn newest_topic(dir: &Path) -> Option<String> {
     files_with(&dir.join("ledgers"), "md")
         .into_iter()
         .filter_map(|p| {
-            let name = p
-                .file_stem()?
-                .to_str()?
-                .strip_prefix("CONTINUITY_")?
-                .to_owned();
+            let name = p.file_stem()?.to_str()?.strip_prefix("CONTINUITY_")?.to_owned();
             Some((fs::metadata(&p).ok()?.modified().ok()?, name))
         })
         .max()
@@ -269,26 +255,14 @@ mod tests {
     #[test]
     fn update_replaces_or_appends_and_lists_get_markers() {
         let mut l = Ledger::new("auth", "2026-11-07");
-        l.update("goal", "Move auth to middleware", false, "2026-11-08")
-            .unwrap();
-        l.update(
-            "in_progress",
-            "write the test\n- run the migration",
-            false,
-            "2026-11-08",
-        )
-        .unwrap();
-        l.update("In Progress", "ship it", true, "2026-11-09")
-            .unwrap();
+        l.update("goal", "Move auth to middleware", false, "2026-11-08").unwrap();
+        l.update("in_progress", "write the test\n- run the migration", false, "2026-11-08").unwrap();
+        l.update("In Progress", "ship it", true, "2026-11-09").unwrap();
         assert_eq!(l.goal(), "Move auth to middleware");
-        assert_eq!(
-            l.section("In Progress"),
-            "- write the test\n- run the migration\n- ship it"
-        );
+        assert_eq!(l.section("In Progress"), "- write the test\n- run the migration\n- ship it");
         assert_eq!(l.in_progress(), Some("write the test"));
         assert_eq!(l.updated, "2026-11-09");
-        l.update("in progress", "only this", false, "2026-11-09")
-            .unwrap();
+        l.update("in progress", "only this", false, "2026-11-09").unwrap();
         assert_eq!(l.items("In Progress"), ["only this"]);
     }
 
@@ -313,10 +287,7 @@ mod tests {
         let got = update(&l, "blockers", "waiting on review", true, "2026-11-08").unwrap();
         assert_eq!(got.items("Blockers"), ["waiting on review"]);
         assert_eq!(read(&l).unwrap().unwrap(), got);
-        assert_eq!(
-            create(&l, "2026-11-08").unwrap_err().kind(),
-            io::ErrorKind::AlreadyExists
-        );
+        assert_eq!(create(&l, "2026-11-08").unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         assert!(update(&l, "nope", "x", false, "d").is_err());
         // The failed update left the file as it was.
         assert_eq!(read(&l).unwrap().unwrap(), got);

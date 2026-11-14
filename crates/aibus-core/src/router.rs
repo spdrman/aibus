@@ -35,11 +35,7 @@ pub async fn ask(
 ) -> Result<RouterAnswer, String> {
     let seat = &router.seat;
     let choices: String = q.choices.iter().map(|c| format!("\n- {c}")).collect();
-    let prompt = format!(
-        "question: {}\n{}\nchoices:{choices}",
-        q.kind.as_str(),
-        q.context
-    );
+    let prompt = format!("question: {}\n{}\nchoices:{choices}", q.kind.as_str(), q.context);
     let req = ChatRequest {
         model: seat.model.clone(),
         system: format!("{}\n\n{FORMAT}", router.system),
@@ -75,11 +71,7 @@ pub async fn ask(
     Ok(RouterAnswer {
         choice,
         p,
-        verdict: if p >= router.threshold {
-            Verdict::Sharp
-        } else {
-            Verdict::Split
-        },
+        verdict: if p >= router.threshold { Verdict::Sharp } else { Verdict::Split },
         latency,
         source,
     })
@@ -101,10 +93,7 @@ fn parse(text: &str, choices: &[String]) -> Option<(String, String, Option<f32>)
     let choice = if choices.is_empty() {
         raw.clone()
     } else {
-        choices
-            .iter()
-            .find(|c| c.eq_ignore_ascii_case(&raw))?
-            .clone()
+        choices.iter().find(|c| c.eq_ignore_ascii_case(&raw))?.clone()
     };
     let p = v.get("p").and_then(serde_json::Value::as_f64);
     Some((choice, raw, p.map(|p| p.clamp(0.0, 1.0) as f32)))
@@ -182,12 +171,7 @@ pub fn which_file_candidates(cwd: &Path, text: &str) -> Option<(String, Vec<Stri
     }
     let patterns: Vec<(String, Regex)> = symbols
         .into_iter()
-        .filter_map(|s| {
-            Some((
-                s.clone(),
-                Regex::new(&format!(r"\b{}\b", regex::escape(&s))).ok()?,
-            ))
-        })
+        .filter_map(|s| Some((s.clone(), Regex::new(&format!(r"\b{}\b", regex::escape(&s))).ok()?)))
         .collect();
     let mut found: Vec<Vec<String>> = vec![Vec::new(); patterns.len()];
     let walk = ignore::WalkBuilder::new(cwd).max_depth(Some(8)).build();
@@ -205,27 +189,20 @@ pub fn which_file_candidates(cwd: &Path, text: &str) -> Option<(String, Vec<Stri
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        let rel = path
-            .strip_prefix(cwd)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned();
+        let rel = path.strip_prefix(cwd).unwrap_or(path).to_string_lossy().into_owned();
         for ((_, re), files) in patterns.iter().zip(found.iter_mut()) {
             if re.is_match(&content) {
                 files.push(rel.clone());
             }
         }
     }
-    patterns
-        .into_iter()
-        .zip(found)
-        .find_map(|((symbol, _), mut files)| {
-            (files.len() > 1).then(|| {
-                files.sort();
-                files.truncate(MAX_CANDIDATES);
-                (symbol, files)
-            })
+    patterns.into_iter().zip(found).find_map(|((symbol, _), mut files)| {
+        (files.len() > 1).then(|| {
+            files.sort();
+            files.truncate(MAX_CANDIDATES);
+            (symbol, files)
         })
+    })
 }
 
 /// The head of a file under `cwd` (at most `max` bytes, cut at a character), for pre-reading.

@@ -58,11 +58,7 @@ pub struct ConfirmConfig {
 
 impl Default for ConfirmConfig {
     fn default() -> Self {
-        Self {
-            elicit: true,
-            run_cap_usd: None,
-            ttl: Duration::from_secs(600),
-        }
+        Self { elicit: true, run_cap_usd: None, ttl: Duration::from_secs(600) }
     }
 }
 
@@ -79,13 +75,8 @@ impl Confirm {
     /// do not open.
     pub(crate) fn new(config: ConfirmConfig) -> Self {
         let key = rand::random::<[u8; RequestStateCodec::MIN_KEY_LENGTH]>();
-        let codec =
-            RequestStateCodec::try_new(key.to_vec()).expect("32 bytes is the minimum key length");
-        Self {
-            config,
-            codec,
-            used: Mutex::new(HashMap::new()),
-        }
+        let codec = RequestStateCodec::try_new(key.to_vec()).expect("32 bytes is the minimum key length");
+        Self { config, codec, used: Mutex::new(HashMap::new()) }
     }
 }
 
@@ -95,8 +86,7 @@ fn binding(tool: &str, args: &Value, client: Option<&Implementation>) -> Vec<u8>
     fn sorted(v: &Value) -> Value {
         match v {
             Value::Object(m) => {
-                let sorted: BTreeMap<&String, Value> =
-                    m.iter().map(|(k, v)| (k, sorted(v))).collect();
+                let sorted: BTreeMap<&String, Value> = m.iter().map(|(k, v)| (k, sorted(v))).collect();
                 json!(sorted)
             }
             Value::Array(a) => Value::Array(a.iter().map(sorted).collect()),
@@ -104,11 +94,7 @@ fn binding(tool: &str, args: &Value, client: Option<&Implementation>) -> Vec<u8>
         }
     }
     let who = client.map_or(String::new(), |c| format!("{}\u{1}{}", c.name, c.version));
-    format!(
-        "aibus-mcp-confirm\u{0}{tool}\u{0}{}\u{0}{who}",
-        sorted(args)
-    )
-    .into_bytes()
+    format!("aibus-mcp-confirm\u{0}{tool}\u{0}{}\u{0}{who}", sorted(args)).into_bytes()
 }
 
 impl Server {
@@ -141,11 +127,7 @@ impl Server {
             },
         });
         let mut required = vec!["name"];
-        let cap = self
-            .confirm
-            .config
-            .run_cap_usd
-            .filter(|_| tool == "workflow_run");
+        let cap = self.confirm.config.run_cap_usd.filter(|_| tool == "workflow_run");
         if let Some(cap) = cap {
             properties["max_cost_usd"] = json!({
                 "type": "number",
@@ -165,27 +147,17 @@ impl Server {
         };
         Some(ElicitRequestParams::FormElicitationParams {
             meta: None,
-            message: self
-                .redactor
-                .redact(&format!("Confirm: {what} the workflow {name}."))
-                .into_owned(),
+            message: self.redactor.redact(&format!("Confirm: {what} the workflow {name}.")).into_owned(),
             requested_schema: schema,
         })
     }
 
     /// Whether the user's answer lets the call go on. `Err` is the sentence for the `isError`
     /// result and names the user's choice.
-    pub fn confirmation_check(
-        &self,
-        tool: &str,
-        args: &Value,
-        answer: &ElicitResult,
-    ) -> Result<(), String> {
+    pub fn confirmation_check(&self, tool: &str, args: &Value, answer: &ElicitResult) -> Result<(), String> {
         match answer.action {
             ElicitationAction::Accept => {}
-            ElicitationAction::Decline => {
-                return Err("the user declined, so nothing was written or started".into())
-            }
+            ElicitationAction::Decline => return Err("the user declined, so nothing was written or started".into()),
             _ => return Err("the user cancelled, so nothing was written or started".into()),
         }
         let content = answer.content.as_ref().and_then(Value::as_object);
@@ -193,15 +165,8 @@ impl Server {
         if typed.is_none() || typed != args.get("name").and_then(Value::as_str) {
             return Err("the name typed in the confirmation is not the workflow's name, so nothing was written or started".into());
         }
-        if let Some(cap) = self
-            .confirm
-            .config
-            .run_cap_usd
-            .filter(|_| tool == "workflow_run")
-        {
-            let cost = content
-                .and_then(|c| c.get("max_cost_usd"))
-                .and_then(Value::as_f64);
+        if let Some(cap) = self.confirm.config.run_cap_usd.filter(|_| tool == "workflow_run") {
+            let cost = content.and_then(|c| c.get("max_cost_usd")).and_then(Value::as_f64);
             if !cost.is_some_and(|c| c > 0.0 && c <= cap) {
                 return Err(format!(
                     "the confirmed cost cap is missing or not between 0 and {cap} USD, so nothing was started"
@@ -222,14 +187,9 @@ impl Server {
         let bound = binding(tool, args, client);
         let state = self.confirm.codec.seal_with(
             ulid::Ulid::new().to_string().as_bytes(),
-            &SealOptions::new()
-                .associated_data(&bound)
-                .ttl(self.confirm.config.ttl),
+            &SealOptions::new().associated_data(&bound).ttl(self.confirm.config.ttl),
         );
-        let asks = BTreeMap::from([(
-            "confirm".to_owned(),
-            InputRequest::Elicitation(ElicitRequest::new(form)),
-        )]);
+        let asks = BTreeMap::from([("confirm".to_owned(), InputRequest::Elicitation(ElicitRequest::new(form)))]);
         Some(InputRequiredResult::new(Some(asks), Some(state)))
     }
 
@@ -244,28 +204,20 @@ impl Server {
         state: &str,
         answers: Option<&InputResponses>,
     ) -> Result<(), String> {
-        let nonce = self
-            .confirm
-            .codec
-            .open_with(state, &binding(tool, args, client))
-            .map_err(|_| REFUSED.to_owned())?;
+        let nonce = self.confirm.codec.open_with(state, &binding(tool, args, client)).map_err(|_| REFUSED.to_owned())?;
         {
             let mut used = self.confirm.used.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();
             used.retain(|_, at| now.duration_since(*at) < self.confirm.config.ttl);
-            if used
-                .insert(String::from_utf8_lossy(&nonce).into_owned(), now)
-                .is_some()
-            {
+            if used.insert(String::from_utf8_lossy(&nonce).into_owned(), now).is_some() {
                 return Err(REFUSED.to_owned());
             }
         }
-        let answer = answers.and_then(|a| a.get("confirm")).ok_or(
-            "the retry carried no answer to the confirmation, so nothing was written or started",
-        )?;
-        let answer: ElicitResult = serde_json::from_value(answer.clone()).map_err(|_| {
-            "the answer to the confirmation is not an elicitation result".to_owned()
-        })?;
+        let answer = answers
+            .and_then(|a| a.get("confirm"))
+            .ok_or("the retry carried no answer to the confirmation, so nothing was written or started")?;
+        let answer: ElicitResult = serde_json::from_value(answer.clone())
+            .map_err(|_| "the answer to the confirmation is not an elicitation result".to_owned())?;
         self.confirmation_check(tool, args, &answer)
     }
 
@@ -282,10 +234,7 @@ impl Server {
         addr: Option<SocketAddr>,
     ) -> Option<CallToolResponse> {
         let tool = request.name.as_ref();
-        if !self.confirm.config.elicit
-            || !GATED.contains(&tool)
-            || !self.tools().iter().any(|t| t.name == tool)
-        {
+        if !self.confirm.config.elicit || !GATED.contains(&tool) || !self.tools().iter().any(|t| t.name == tool) {
             return None;
         }
         let declared = context.client_capabilities().and_then(|c| c.elicitation);
@@ -295,33 +244,18 @@ impl Server {
         let args = request.arguments.clone().map_or(Value::Null, Value::Object);
         let form = self.confirmation_form(tool, &args)?;
         let started = Instant::now();
-        let stateless = context
-            .protocol_version()
-            .is_some_and(|v| !v.has_initialize());
+        let stateless = context.protocol_version().is_some_and(|v| !v.has_initialize());
 
         let verdict = if stateless {
             match request.request_state.as_deref() {
                 None => {
                     let asked = self.confirmation_ask(tool, &args, client)?;
-                    self.audit.record(
-                        client,
-                        addr,
-                        "confirm/ask",
-                        Some(tool),
-                        None,
-                        &args,
-                        true,
-                        started.elapsed(),
-                    );
+                    self.audit.record(client, addr, "confirm/ask", Some(tool), None, &args, true, started.elapsed());
                     return Some(CallToolResponse::InputRequired(asked));
                 }
-                Some(state) => self.confirmation_resume(
-                    tool,
-                    &args,
-                    client,
-                    state,
-                    request.input_responses.as_ref(),
-                ),
+                Some(state) => {
+                    self.confirmation_resume(tool, &args, client, state, request.input_responses.as_ref())
+                }
             }
         } else {
             match context.peer.create_elicitation_with_timeout(form, Some(ASK_TIMEOUT)).await {
@@ -335,19 +269,8 @@ impl Server {
         match verdict {
             Ok(()) => None,
             Err(why) => {
-                self.audit.record(
-                    client,
-                    addr,
-                    "confirm/refused",
-                    Some(tool),
-                    None,
-                    &args,
-                    false,
-                    started.elapsed(),
-                );
-                Some(CallToolResponse::from(CallToolResult::error(vec![
-                    ContentBlock::text(why),
-                ])))
+                self.audit.record(client, addr, "confirm/refused", Some(tool), None, &args, false, started.elapsed());
+                Some(CallToolResponse::from(CallToolResult::error(vec![ContentBlock::text(why)])))
             }
         }
     }

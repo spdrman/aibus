@@ -41,18 +41,14 @@ pub fn ensure_local_ignored(project: &Path) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    let listed = text.lines().map(str::trim).any(|l| {
-        l.trim_start_matches('/') == LOCAL
-            || l.trim_start_matches('/') == LOCAL.trim_end_matches('/')
-    });
+    let listed = text
+        .lines()
+        .map(str::trim)
+        .any(|l| l.trim_start_matches('/') == LOCAL || l.trim_start_matches('/') == LOCAL.trim_end_matches('/'));
     if listed {
         return Ok(());
     }
-    let sep = if text.is_empty() || text.ends_with('\n') {
-        ""
-    } else {
-        "\n"
-    };
+    let sep = if text.is_empty() || text.ends_with('\n') { "" } else { "\n" };
     fs::write(&file, format!("{text}{sep}{LOCAL}\n"))
 }
 
@@ -72,11 +68,7 @@ pub fn confine(dir: &Path, rel: &str) -> Result<PathBuf, String> {
         match c {
             Component::Normal(n) => clean.push(n),
             Component::CurDir => {}
-            _ => {
-                return Err(format!(
-                    "{rel}: the path has to stay inside the memory directory"
-                ))
-            }
+            _ => return Err(format!("{rel}: the path has to stay inside the memory directory")),
         }
     }
     if clean.as_os_str().is_empty() {
@@ -91,7 +83,9 @@ pub fn confine(dir: &Path, rel: &str) -> Result<PathBuf, String> {
         .ancestors()
         .find(|a| a.symlink_metadata().is_ok())
         .unwrap_or(&root);
-    let real = existing.canonicalize().map_err(|e| format!("{rel}: {e}"))?;
+    let real = existing
+        .canonicalize()
+        .map_err(|e| format!("{rel}: {e}"))?;
     if real.starts_with(&root) {
         Ok(joined)
     } else {
@@ -106,14 +100,8 @@ mod tests {
     #[test]
     fn the_three_scopes_live_where_the_spec_says() {
         let (p, d) = (Path::new("/p"), Path::new("/d"));
-        assert_eq!(
-            scope_dir(MemoryScope::User, "lead", p, d),
-            Path::new("/d/agent-memory/lead")
-        );
-        assert_eq!(
-            scope_dir(MemoryScope::Project, "lead", p, d),
-            Path::new("/p/.aibus/agent-memory/lead")
-        );
+        assert_eq!(scope_dir(MemoryScope::User, "lead", p, d), Path::new("/d/agent-memory/lead"));
+        assert_eq!(scope_dir(MemoryScope::Project, "lead", p, d), Path::new("/p/.aibus/agent-memory/lead"));
         assert_eq!(
             scope_dir(MemoryScope::Local, "lead", p, d),
             Path::new("/p/.aibus/agent-memory-local/lead")
@@ -122,10 +110,7 @@ mod tests {
             local_project(&scope_dir(MemoryScope::Local, "lead", p, d)),
             Some(Path::new("/p"))
         );
-        assert_eq!(
-            local_project(&scope_dir(MemoryScope::Project, "lead", p, d)),
-            None
-        );
+        assert_eq!(local_project(&scope_dir(MemoryScope::Project, "lead", p, d)), None);
     }
 
     #[test]
@@ -141,11 +126,7 @@ mod tests {
             fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
             "target\n.aibus/agent-memory-local/\n"
         );
-        fs::write(
-            dir.path().join(".gitignore"),
-            "/.aibus/agent-memory-local\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join(".gitignore"), "/.aibus/agent-memory-local\n").unwrap();
         ensure_local_ignored(dir.path()).unwrap();
         assert_eq!(
             fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
@@ -159,10 +140,7 @@ mod tests {
         let mem = dir.path().join("mem");
         fs::create_dir_all(&mem).unwrap();
         let root = mem.canonicalize().unwrap();
-        assert_eq!(
-            confine(&mem, "notes/a.md").unwrap(),
-            root.join("notes/a.md")
-        );
+        assert_eq!(confine(&mem, "notes/a.md").unwrap(), root.join("notes/a.md"));
         assert_eq!(confine(&mem, "./a.md").unwrap(), root.join("a.md"));
         for bad in ["", "/etc/passwd", "../x", "a/../../x", "a/.."] {
             assert!(confine(&mem, bad).is_err(), "{bad:?}");

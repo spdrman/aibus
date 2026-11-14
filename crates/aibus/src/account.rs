@@ -16,8 +16,8 @@ use aibus_core::{
     StoreHealth,
 };
 use aibus_provider::{
-    AccountInfo, AccountName, AuthMethodKind, Credential, ProviderErrorKind, ProviderFactory,
-    ProviderRegistry, Secret,
+    AccountInfo, AccountName, AuthMethodKind, Credential, ProviderErrorKind,
+    ProviderFactory, ProviderRegistry, Secret,
 };
 use serde_json::{json, Value};
 use toml_edit::{value, ArrayOfTables, DocumentMut, InlineTable, Item, Table};
@@ -62,8 +62,7 @@ pub fn run(cmd: &AccountCmd, json: bool, io: &mut Io) -> Result<u8, AibusError> 
 
 fn store(io: &Io) -> CredentialStore {
     let env = io.env.clone();
-    let s =
-        CredentialStore::new(io.keychain.clone(), io.redactor.clone()).with_env(move |v| env(v));
+    let s = CredentialStore::new(io.keychain.clone(), io.redactor.clone()).with_env(move |v| env(v));
     match &io.oauth {
         Some(flow) => s.with_oauth(flow.clone()),
         None => s,
@@ -89,21 +88,17 @@ fn verify(
     account: &Account,
     cred: &Credential,
 ) -> Result<(AccountInfo, Duration), AibusError> {
-    let defs = config::load(&io.paths.config_file(), None)?
-        .config
-        .providers;
+    let defs = config::load(&io.paths.config_file(), None)?.config.providers;
     let configs = provider_configs(std::slice::from_ref(account), &defs, &io.paths)?;
     let provider = ProviderRegistry::new(&io.factories, &configs)?.get(&account.provider)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let t0 = Instant::now();
-    let info = rt
-        .block_on(provider.verify(cred))
-        .map_err(|e| match e.kind {
-            ProviderErrorKind::Auth => CredentialError::Rejected(account.account_name()).into(),
-            _ => AibusError::Provider(e),
-        })?;
+    let info = rt.block_on(provider.verify(cred)).map_err(|e| match e.kind {
+        ProviderErrorKind::Auth => CredentialError::Rejected(account.account_name()).into(),
+        _ => AibusError::Provider(e),
+    })?;
     let took = t0.elapsed();
     // The model cache is refreshed on `account test` (07 section 4). A failure only leaves the
     // list as it was.
@@ -133,10 +128,7 @@ fn read_key(from_stdin: bool, io: &mut Io) -> Result<Secret<String>, AibusError>
 
 fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
     if a.name.is_empty()
-        || !a
-            .name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        || !a.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         return Err(AibusError::Usage(
             "an account name is letters, digits, - and _".into(),
@@ -162,11 +154,11 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
 
     // `--env` and `--file` name where the key already is; nothing is stored for them.
     let cred = if a.oauth {
-        let offered = crate::oauth::definition(&account.provider, account.base_url.as_deref())
-            .is_some()
-            || io.factories.iter().any(|f| {
-                f.id().0 == account.provider && f.auth_methods().contains(&AuthMethodKind::OAuth)
-            });
+        let offered = crate::oauth::definition(&account.provider, account.base_url.as_deref()).is_some()
+            || io
+                .factories
+                .iter()
+                .any(|f| f.id().0 == account.provider && f.auth_methods().contains(&AuthMethodKind::OAuth));
         let Some(flow) = io.oauth.clone().filter(|_| offered) else {
             return Err(AibusError::Usage(format!(
                 "provider {} has no OAuth login; use a key (--key-stdin, --env or --file)",
@@ -184,9 +176,7 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         // The flow talks on its own tasks; its lines come back over a channel and are printed
         // here, as they arrive, because `io.out` is not `Send`.
         let (lines, mut shown) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         let cancel = io.cancel.clone().unwrap_or_default();
         let tokens = rt.block_on(async {
             let notify = move |line: &str| {
@@ -209,11 +199,7 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         let cred = Credential {
             account: name.clone(),
             secret: Secret::new(tokens.access.expose().clone()),
-            kind: if key_only {
-                AuthMethodKind::ApiKey
-            } else {
-                AuthMethodKind::OAuth
-            },
+            kind: if key_only { AuthMethodKind::ApiKey } else { AuthMethodKind::OAuth },
             resolved_at: Instant::now(),
         };
         if !key_only {
@@ -236,10 +222,7 @@ fn add(a: &AccountAdd, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         // A preset knows what the vendor's key is usually called: offer the environment as the
         // alternative to typing it in, since an env account keeps it out of the keychain.
         let defs = config::load(file, None)?.config.providers;
-        let def = resolve(
-            &account.provider,
-            defs.iter().find(|d| d.id == account.provider),
-        );
+        let def = resolve(&account.provider, defs.iter().find(|d| d.id == account.provider));
         if let (Ok(Some(def)), false) = (def, a.key_stdin) {
             if let Some(var) = def.env_vars.first() {
                 writeln!(
@@ -377,13 +360,7 @@ fn list(file: &Path, json: bool, names: bool, io: &mut Io) -> Result<(), AibusEr
             ]
         })
         .collect();
-    let width = |i: usize| {
-        cells
-            .iter()
-            .map(|r| r[i].chars().count())
-            .max()
-            .unwrap_or(0)
-    };
+    let width = |i: usize| cells.iter().map(|r| r[i].chars().count()).max().unwrap_or(0);
     for row in &cells {
         let line: Vec<String> = (0..6)
             .map(|i| format!("{:<w$}", row[i], w = if i == 5 { 0 } else { width(i) }))
@@ -431,11 +408,7 @@ fn test(name: &str, file: &Path, json: bool, io: &mut Io) -> Result<(), AibusErr
                 writeln!(io.out, "{v}")?;
             } else {
                 match info.cost_usd {
-                    Some(usd) => writeln!(
-                        io.out,
-                        "ok {} ({}) {ms}ms cost ${usd:.4}",
-                        a.name, info.label
-                    )?,
+                    Some(usd) => writeln!(io.out, "ok {} ({}) {ms}ms cost ${usd:.4}", a.name, info.label)?,
                     None => writeln!(io.out, "ok {} ({}) {ms}ms", a.name, info.label)?,
                 }
             }
@@ -452,11 +425,7 @@ fn test(name: &str, file: &Path, json: bool, io: &mut Io) -> Result<(), AibusErr
                     _ => "error",
                 };
                 let error = json!({ "kind": kind, "message": message });
-                writeln!(
-                    io.out,
-                    "{}",
-                    json!({ "name": a.name, "ok": false, "error": error })
-                )?;
+                writeln!(io.out, "{}", json!({ "name": a.name, "ok": false, "error": error }))?;
             }
             Err(e)
         }
@@ -494,11 +463,7 @@ fn set_enabled(name: &str, enabled: bool, file: &Path, io: &mut Io) -> Result<()
         }
         Ok(())
     })?;
-    writeln!(
-        io.out,
-        "{} {name}",
-        if enabled { "enabled" } else { "disabled" }
-    )?;
+    writeln!(io.out, "{} {name}", if enabled { "enabled" } else { "disabled" })?;
     Ok(())
 }
 
@@ -524,10 +489,7 @@ fn edit(
         .entry("account")
         .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()));
     let tables = item.as_array_of_tables_mut().ok_or_else(|| {
-        AibusError::Usage(format!(
-            "{}: write accounts as [[account]] tables",
-            file.display()
-        ))
+        AibusError::Usage(format!("{}: write accounts as [[account]] tables", file.display()))
     })?;
     change(tables)?;
     if tables.is_empty() {

@@ -25,11 +25,7 @@ pub fn server(write: bool) -> Result<McpServer, String> {
     if write {
         args.extend(["--allow".to_owned(), "write".to_owned()]);
     }
-    Ok(McpServer {
-        command: exe.to_string_lossy().into_owned(),
-        args,
-        ..McpServer::default()
-    })
+    Ok(McpServer { command: exe.to_string_lossy().into_owned(), args, ..McpServer::default() })
 }
 
 /// What the lead is asked to hand the author. `served` is the server's `author_workflow` prompt
@@ -67,20 +63,8 @@ pub struct Author {
 }
 
 impl Author {
-    pub fn new(
-        read: Option<Arc<Client>>,
-        launcher: Arc<ChildLauncher>,
-        cwd: PathBuf,
-        session: String,
-    ) -> Self {
-        Self {
-            read,
-            write: tokio::sync::Mutex::new(None),
-            launcher,
-            env: std::env::vars().collect(),
-            cwd,
-            session,
-        }
+    pub fn new(read: Option<Arc<Client>>, launcher: Arc<ChildLauncher>, cwd: PathBuf, session: String) -> Self {
+        Self { read, write: tokio::sync::Mutex::new(None), launcher, env: std::env::vars().collect(), cwd, session }
     }
 
     /// The write child, started the first time it is asked for, with its two write tools added
@@ -90,14 +74,8 @@ impl Author {
         if let Some(client) = slot.as_ref() {
             return Ok(client.clone());
         }
-        let (client, listed) = Client::connect(
-            mcp::WRITE_SERVER,
-            &server(true)?,
-            &self.env,
-            &self.cwd,
-            &self.session,
-        )
-        .await?;
+        let (client, listed) =
+            Client::connect(mcp::WRITE_SERVER, &server(true)?, &self.env, &self.cwd, &self.session).await?;
         for tool in mcp::tools_of(mcp::WRITE_SERVER, &client, listed) {
             self.launcher.tools.register_late(tool);
         }
@@ -108,28 +86,14 @@ impl Author {
     /// The `delegate` call for the lead to make. It also says, for the next author run only,
     /// whether that run may use the write child: every command sets it, so a plain
     /// `/workflow new` after a write one clears it.
-    pub async fn delegate(
-        &self,
-        goal: &str,
-        write: bool,
-        edit: Option<&str>,
-    ) -> Result<Value, String> {
-        let client = if write {
-            Some(self.writer().await?)
-        } else {
-            self.read.clone()
-        };
+    pub async fn delegate(&self, goal: &str, write: bool, edit: Option<&str>) -> Result<Value, String> {
+        let client = if write { Some(self.writer().await?) } else { self.read.clone() };
         let served = match &client {
-            Some(c) => c
-                .prompt("author_workflow", json!({"goal": goal}))
-                .await
-                .ok(),
+            Some(c) => c.prompt("author_workflow", json!({"goal": goal})).await.ok(),
             None => None,
         };
         self.launcher.author_write.store(write, Ordering::SeqCst);
-        Ok(
-            json!({"agent": "workflow-author", "prompt": task(goal, write, edit, served), "background": false}),
-        )
+        Ok(json!({"agent": "workflow-author", "prompt": task(goal, write, edit, served), "background": false}))
     }
 }
 
@@ -151,21 +115,13 @@ mod tests {
             for banned in ["gates", "run", "--allow-tool", "--no-provenance", "--http"] {
                 assert!(!args.iter().any(|a| a == banned), "{write}: {args:?}");
             }
-            assert_eq!(
-                args.iter().filter(|a| *a == "--allow").count(),
-                usize::from(write)
-            );
+            assert_eq!(args.iter().filter(|a| *a == "--allow").count(), usize::from(write));
         }
     }
 
     #[test]
     fn edit_reads_then_updates_with_the_revision() {
-        let t = task(
-            "add a test step",
-            true,
-            Some("review"),
-            Some("the server's prompt".into()),
-        );
+        let t = task("add a test step", true, Some("review"), Some("the server's prompt".into()));
         assert!(t.contains("workflow_get (name review)"), "{t}");
         assert!(t.contains("expected_revision"), "{t}");
         assert!(t.contains("conflict"), "{t}");
@@ -177,14 +133,8 @@ mod tests {
     fn a_new_draft_is_told_it_may_save_only_with_the_flag() {
         let read = task("review a PR", false, None, Some("SERVED".into()));
         assert_eq!(read, "SERVED");
-        assert_eq!(
-            task("review a PR", false, None, None),
-            "Draft a workflow for this goal: review a PR"
-        );
+        assert_eq!(task("review a PR", false, None, None), "Draft a workflow for this goal: review a PR");
         let write = task("review a PR", true, None, Some("SERVED".into()));
-        assert!(
-            write.starts_with("SERVED") && write.contains("workflow_create once"),
-            "{write}"
-        );
+        assert!(write.starts_with("SERVED") && write.contains("workflow_create once"), "{write}");
     }
 }

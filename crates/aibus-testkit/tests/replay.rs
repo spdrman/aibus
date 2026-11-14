@@ -37,11 +37,7 @@ fn every_recorded_line_decodes_and_every_view_is_a_view() {
             msg_from_json(&v).unwrap_or_else(|e| panic!("{}: {e}", fx.name));
         }
         assert!(!fx.views.is_empty(), "{}: no view: nodes recorded", fx.name);
-        assert!(
-            fx.views.keys().all(|k| k.starts_with("view:")),
-            "{}",
-            fx.name
-        );
+        assert!(fx.views.keys().all(|k| k.starts_with("view:")), "{}", fx.name);
     }
 }
 

@@ -217,10 +217,19 @@ plus one runner. Install them once per clone with `tools/release-gate/install.sh
 release is cut on a branch named `release-prep/v<version>`, and that branch is merged into `release`.
 That merge is what `release.yml` publishes from.
 
-**On a feature branch** (`pre-commit`): fast checks on the staged files only, `rustfmt --check` on
-`.rs` and `bash -n` on shell. Clippy, the tests and the e2e are not run here (they compile, and
+**On a feature branch** (`pre-commit`): fast checks on the staged files only, a `rustfmt --check` ratchet on
+`.rs` (below) and `bash -n` on shell. Clippy, the tests and the e2e are not run here (they compile, and
 compiles run in a container, see `docs/BUILD.md`), and a PR runs its own specific tests by hand. The hook
 does nothing while merging and on `release` itself.
+
+**The rustfmt ratchet.** The repo is not rustfmt-clean today (313 of 376 tracked `.rs` files fail
+`rustfmt --check --edition 2021`, and no `rustfmt.toml` fixes that), so the hook does not demand a clean
+file, it only stops the count from growing. Per staged `.rs` file, using the staged blob (not the working
+copy) on stdin with the same `rustfmt --check --edition 2021`: a new file must pass; a file that is clean at
+`HEAD` (at its old path, for a rename or copy) must still be clean; a file that was not clean at `HEAD` is
+skipped with one line, `<file> was not rustfmt-clean before this commit, format check skipped`. Deleted
+files are not looked at, and the hook never formats or writes anything. That is how new code stays clean
+without a mass reformat. Tests: `bash tests/pre-commit/run.sh` (a fake `rustfmt` on `PATH`, throwaway repos).
 
 **Merging into `release`** (`pre-merge-commit`): when the current branch is `release`, a merge that
 auto-commits runs the full e2e first and is aborted if it is red. The e2e is

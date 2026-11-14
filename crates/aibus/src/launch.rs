@@ -9,11 +9,10 @@ use std::time::{Instant, SystemTime};
 
 use aibus_core::config::{Config, Defaults};
 use aibus_core::{
-    expand, AccountCredential, AccountName, AccountRegistry, AccountView, AdvisorSeat, AgentDef,
-    AgentName, AibusError, Assist, Budgets, CredentialSource, CredentialStore, Fallback,
-    HookRunner, Isolation, Launcher, ModelCompactor, ModelDefaults, ModelId, ModelSwitch,
-    ModelTarget, Redactor, RouterSeat, RunConfig, RunDeps, RunId, Seat, SelectHints, SpawnSpec,
-    Start, ToolExecutor, ToolLimits, ToolPattern,
+    expand, AccountCredential, AccountName, AccountRegistry, AdvisorSeat, AgentDef, AgentName, Fallback,
+    AccountView, AibusError, Assist, Budgets, CredentialSource, CredentialStore, HookRunner, Isolation,
+    Launcher, ModelCompactor, ModelDefaults, ModelId, ModelSwitch, ModelTarget, Redactor, RouterSeat, RunConfig, RunDeps,
+    RunId, Seat, SelectHints, SpawnSpec, Start, ToolExecutor, ToolLimits, ToolPattern,
 };
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::{AuthMethodKind, Credential, ModelRef, Provider, Secret};
@@ -81,19 +80,13 @@ pub struct ChildLauncher {
 
 /// What was remembered for `run`.
 fn recall<T: Clone>(m: &Mutex<HashMap<RunId, T>>, run: RunId) -> Option<T> {
-    m.lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&run)
-        .cloned()
+    m.lock().unwrap_or_else(PoisonError::into_inner).get(&run).cloned()
 }
 
 impl ChildLauncher {
     /// The accounts and defaults as they are now, as one snapshot.
     pub(crate) fn live(&self) -> Live {
-        self.live
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.live.read().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     /// The accounts as they are now.
@@ -115,16 +108,9 @@ impl ChildLauncher {
         cfg: &Defaults,
     ) -> Result<(), String> {
         let mut live = self.live.write().unwrap_or_else(PoisonError::into_inner);
-        let mut next = Live {
-            registry: registry.clone(),
-            ..live.clone()
-        };
+        let mut next = Live { registry: registry.clone(), ..live.clone() };
         if live.builtin {
-            let first = views.iter().find_map(|v| {
-                v.default_model
-                    .clone()
-                    .or_else(|| v.models.first().map(|m| m.id.clone()))
-            });
+            let first = views.iter().find_map(|v| v.default_model.clone().or_else(|| v.models.first().map(|m| m.id.clone())));
             let default = cfg
                 .model
                 .as_deref()
@@ -179,12 +165,7 @@ impl ChildLauncher {
             return None;
         }
         let name = role.parse::<AgentName>().ok()?;
-        let def = self
-            .agents
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&name)
-            .cloned();
+        let def = self.agents.read().unwrap_or_else(PoisonError::into_inner).get(&name).cloned();
         let Some(def) = def else {
             return note("no definition of that name");
         };
@@ -204,15 +185,15 @@ impl ChildLauncher {
             Ok(p) => {
                 let fallback = self.fallback_for(&p.account, &target, def.fallback.as_deref());
                 Some((
-                    Seat {
-                        provider: p.provider,
-                        creds: p.creds,
-                        model: p.model,
-                        account: p.account,
-                        fallback,
-                    },
-                    def,
-                ))
+                Seat {
+                    provider: p.provider,
+                    creds: p.creds,
+                    model: p.model,
+                    account: p.account,
+                    fallback,
+                },
+                def,
+            ))
             }
             Err(e) => note(&e.to_string()),
         }
@@ -281,11 +262,9 @@ impl ChildLauncher {
                 resolved_at: Instant::now(),
             })
         } else {
-            let configured = live
-                .registry
-                .account(&account)
-                .cloned()
-                .ok_or_else(|| aibus_core::CredentialError::UnknownAccount(account.clone()))?;
+            let configured = live.registry.account(&account).cloned().ok_or_else(|| {
+                aibus_core::CredentialError::UnknownAccount(account.clone())
+            })?;
             Arc::new(AccountCredential {
                 store: self.store.clone(),
                 account: configured,
@@ -304,28 +283,15 @@ impl ChildLauncher {
     /// definition's `fallback` over the account's, each one picked for `model` like any other
     /// account, so a key that is missing or a model that does not resolve there leaves it out
     /// with a log line. `None` when nothing is left to move to.
-    pub fn fallback_for(
-        &self,
-        from: &AccountName,
-        model: &ModelRef,
-        pinned: Option<&[AccountName]>,
-    ) -> Option<Arc<Fallback>> {
+    pub fn fallback_for(&self, from: &AccountName, model: &ModelRef, pinned: Option<&[AccountName]>) -> Option<Arc<Fallback>> {
         let registry = self.registry();
         let chain: Vec<ModelSwitch> = registry
             .fallback_names(from, pinned)
             .into_iter()
             .filter_map(|name| {
-                let hints = SelectHints {
-                    explicit: Some(name.clone()),
-                    ..SelectHints::default()
-                };
+                let hints = SelectHints { explicit: Some(name.clone()), ..SelectHints::default() };
                 match self.pick(model, &hints) {
-                    Ok(p) => Some(ModelSwitch {
-                        provider: p.provider,
-                        creds: p.creds,
-                        model: p.model,
-                        account: p.account,
-                    }),
+                    Ok(p) => Some(ModelSwitch { provider: p.provider, creds: p.creds, model: p.model, account: p.account }),
                     Err(e) => {
                         tracing::info!("fallback account {name} skipped: {e}");
                         None
@@ -333,27 +299,16 @@ impl ChildLauncher {
                 }
             })
             .collect();
-        (!chain.is_empty()).then(|| {
-            Arc::new(Fallback {
-                chain,
-                on: registry.fallback_on().to_vec(),
-                accounts: registry,
-            })
-        })
+        (!chain.is_empty()).then(|| Arc::new(Fallback { chain, on: registry.fallback_on().to_vec(), accounts: registry }))
     }
 
     /// `/workflow <name> <input>` or `/<name> <input>` for a workflow that exists: the `workflow`
     /// call a lead opens with in place of its first request (01 section 8.4).
     pub fn slash_workflow(&self, prompt: &str) -> Option<(String, serde_json::Value)> {
-        let known: Vec<String> = aibus_core::workflow::list(&self.workflow_dirs)
-            .into_iter()
-            .map(|found| found.name)
-            .collect();
+        let known: Vec<String> =
+            aibus_core::workflow::list(&self.workflow_dirs).into_iter().map(|found| found.name).collect();
         let (name, input) = aibus_core::workflow::parse_slash(prompt, &known)?;
-        Some((
-            "workflow".to_owned(),
-            serde_json::json!({"name": name, "input": input}),
-        ))
+        Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": input})))
     }
 
     /// Swaps in reloaded definitions.
@@ -376,30 +331,17 @@ impl ChildLauncher {
 }
 
 impl Launcher for ChildLauncher {
-    fn switch_model(
-        &self,
-        target: &ModelTarget,
-        model: &str,
-    ) -> Result<Option<ModelSwitch>, String> {
+    fn switch_model(&self, target: &ModelTarget, model: &str) -> Result<Option<ModelSwitch>, String> {
         let role = match target {
             ModelTarget::Advisor => "advisor",
             ModelTarget::Router => "router",
             ModelTarget::Run(_) | ModelTarget::Lead => "",
         };
         let seat_assist = || {
-            let assist = self
-                .assist
-                .get()
-                .ok_or_else(|| format!("the {role} is off in this session"))?;
-            let configured = if *target == ModelTarget::Advisor {
-                assist.advisor.is_some()
-            } else {
-                assist.router.is_some()
-            };
+            let assist = self.assist.get().ok_or_else(|| format!("the {role} is off in this session"))?;
+            let configured = if *target == ModelTarget::Advisor { assist.advisor.is_some() } else { assist.router.is_some() };
             // A seat that started off has no definition to speak from.
-            configured
-                .then_some(assist)
-                .ok_or_else(|| format!("the {role} was off at startup"))
+            configured.then_some(assist).ok_or_else(|| format!("the {role} was off at startup"))
         };
         if model == "off" {
             seat_assist()?.switch(*target, None);
@@ -415,33 +357,18 @@ impl Launcher for ChildLauncher {
         };
         let reference = self.registry().model_ref(model);
         let def = match target {
-            ModelTarget::Run(run) => {
-                recall(&self.defs, *run).ok_or_else(|| format!("run {run} is not known"))?
-            }
+            ModelTarget::Run(run) => recall(&self.defs, *run).ok_or_else(|| format!("run {run} is not known"))?,
             ModelTarget::Advisor | ModelTarget::Router => {
                 seat_assist()?;
                 let name = role.parse::<AgentName>().map_err(|e| e.to_string())?;
                 let agents = self.agents.read().unwrap_or_else(PoisonError::into_inner);
-                agents
-                    .get(&name)
-                    .cloned()
-                    .ok_or_else(|| format!("no definition of the {role}"))?
+                agents.get(&name).cloned().ok_or_else(|| format!("no definition of the {role}"))?
             }
             ModelTarget::Lead => return Err("the lead is switched through its run".into()),
         };
-        let hints = SelectHints {
-            agent: def.account.clone(),
-            explicit: pinned,
-            logprobs: *target == ModelTarget::Router,
-            ..SelectHints::default()
-        };
+        let hints = SelectHints { agent: def.account.clone(), explicit: pinned, logprobs: *target == ModelTarget::Router, ..SelectHints::default() };
         let p = self.pick(&reference, &hints).map_err(|e| e.to_string())?;
-        let switch = ModelSwitch {
-            provider: p.provider,
-            creds: p.creds,
-            model: p.model,
-            account: p.account,
-        };
+        let switch = ModelSwitch { provider: p.provider, creds: p.creds, model: p.model, account: p.account };
         match target {
             ModelTarget::Run(run) => self.remember(*run, &switch.account, &switch.model, &def),
             _ => seat_assist()?.switch(
@@ -451,11 +378,7 @@ impl Launcher for ChildLauncher {
                     creds: switch.creds.clone(),
                     model: switch.model.clone(),
                     account: switch.account.clone(),
-                    fallback: self.fallback_for(
-                        &switch.account,
-                        &reference,
-                        def.fallback.as_deref(),
-                    ),
+                    fallback: self.fallback_for(&switch.account, &reference, def.fallback.as_deref()),
                 }),
             ),
         }
@@ -470,11 +393,7 @@ impl Launcher for ChildLauncher {
     ) -> Result<(RunConfig, RunDeps), String> {
         // A fork is its parent over again, a resume is the run again; anything else starts from
         // the definition by name.
-        let again = if spec.fork {
-            spec.parent
-        } else {
-            spec.resume.then_some(spec.run)
-        };
+        let again = if spec.fork { spec.parent } else { spec.resume.then_some(spec.run) };
         let mut def: AgentDef = match again.and_then(|r| recall(&self.defs, r)) {
             Some(def) => def,
             None => {
@@ -486,10 +405,7 @@ impl Launcher for ChildLauncher {
                     .cloned()
                     .ok_or_else(|| format!("no agent named {}", spec.agent))?;
                 def.tools.deny.extend(self.deny.iter().cloned());
-                let deny = |tool: &str| ToolPattern {
-                    tool: tool.into(),
-                    spec: None,
-                };
+                let deny = |tool: &str| ToolPattern { tool: tool.into(), spec: None };
                 if def.name.as_str() != "workflow-author" {
                     // The write child belongs to the author's one run, and the read-only child
                     // (when the binary started it) to the author alone.
@@ -552,19 +468,17 @@ impl Launcher for ChildLauncher {
 
         // `isolation: worktree` from the call or the definition (09 section 7). A resumed run
         // finds its kept checkout where it left it.
-        let (cwd, worktree) =
-            if spec.isolation == Isolation::Worktree || def.isolation == Isolation::Worktree {
-                let at = self.worktrees.join(spec.run.to_string());
-                let info = aibus_core::worktree::create(&self.cwd, &at)?;
-                (info.cwd.clone(), Some(info))
-            } else {
-                (self.cwd.clone(), None)
-            };
+        let (cwd, worktree) = if spec.isolation == Isolation::Worktree
+            || def.isolation == Isolation::Worktree
+        {
+            let at = self.worktrees.join(spec.run.to_string());
+            let info = aibus_core::worktree::create(&self.cwd, &at)?;
+            (info.cwd.clone(), Some(info))
+        } else {
+            (self.cwd.clone(), None)
+        };
         // The TUI starts its lead here, with whatever the first prompt was.
-        let forced = (def.role == aibus_core::Role::Lead
-            && spec.parent.is_none()
-            && !spec.fork
-            && !spec.resume)
+        let forced = (def.role == aibus_core::Role::Lead && spec.parent.is_none() && !spec.fork && !spec.resume)
             .then(|| self.slash_workflow(&prompt))
             .flatten();
         let compactor: Arc<dyn aibus_core::Compactor> = Arc::new(ModelCompactor {

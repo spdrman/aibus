@@ -25,15 +25,11 @@ fn usage(msg: impl Into<String>) -> AibusError {
 fn open(g: &Global) -> Result<(Layout, Config), AibusError> {
     let paths = g.paths()?;
     let cwd = g.project_dir()?;
-    let loaded = config::load(
-        &paths.config_file(),
-        Some(&project_dir(&cwd).join("settings.toml")),
-    )?;
+    let loaded = config::load(&paths.config_file(), Some(&project_dir(&cwd).join("settings.toml")))?;
     for w in &loaded.warnings {
         eprintln!("aibus: warning: {w}");
     }
-    let layout =
-        Layout::new(&cwd, &loaded.config, &paths.data, g.topic.as_deref()).map_err(usage)?;
+    let layout = Layout::new(&cwd, &loaded.config, &paths.data, g.topic.as_deref()).map_err(usage)?;
     Ok((layout, loaded.config))
 }
 
@@ -42,19 +38,13 @@ fn today() -> String {
 }
 
 fn print_json(v: &Value) -> Result<(), AibusError> {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(v).map_err(std::io::Error::other)?
-    );
+    println!("{}", serde_json::to_string_pretty(v).map_err(std::io::Error::other)?);
     Ok(())
 }
 
 fn ledger_json(l: &ledger::Ledger, path: &Path) -> Value {
-    let sections: serde_json::Map<String, Value> = l
-        .sections
-        .iter()
-        .map(|(n, b)| (n.clone(), b.clone().into()))
-        .collect();
+    let sections: serde_json::Map<String, Value> =
+        l.sections.iter().map(|(n, b)| (n.clone(), b.clone().into())).collect();
     json!({ "topic": l.topic, "path": path, "updated": l.updated, "sections": sections })
 }
 
@@ -86,18 +76,11 @@ pub fn ledger(cmd: &LedgerCmd, g: &Global) -> Result<u8, AibusError> {
                 println!("{}", layout.ledger().display());
             }
         }
-        LedgerCmd::Update {
-            section,
-            text,
-            append,
-        } => {
-            let l =
-                ledger::update(&layout, section, text, *append, &today()).map_err(|e| {
-                    match e.kind() {
-                        std::io::ErrorKind::InvalidInput => usage(e.to_string()),
-                        _ => e.into(),
-                    }
-                })?;
+        LedgerCmd::Update { section, text, append } => {
+            let l = ledger::update(&layout, section, text, *append, &today()).map_err(|e| match e.kind() {
+                std::io::ErrorKind::InvalidInput => usage(e.to_string()),
+                _ => e.into(),
+            })?;
             if g.json {
                 print_json(&ledger_json(&l, &layout.ledger()))?;
             } else {
@@ -110,15 +93,9 @@ pub fn ledger(cmd: &LedgerCmd, g: &Global) -> Result<u8, AibusError> {
 
 /// One handoff as `handoff list --json` shows it.
 fn summary(path: &Path) -> Value {
-    let topic = path
-        .parent()
-        .and_then(Path::file_name)
-        .map(|t| t.to_string_lossy().into_owned());
+    let topic = path.parent().and_then(Path::file_name).map(|t| t.to_string_lossy().into_owned());
     let mut v = json!({ "path": path, "topic": topic });
-    if let Some(h) = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| Handoff::parse(&t).ok())
-    {
+    if let Some(h) = std::fs::read_to_string(path).ok().and_then(|t| Handoff::parse(&t).ok()) {
         for k in ["session", "date", "status", "outcome"] {
             v[k] = h.text(k).map_or(Value::Null, Value::String);
         }
@@ -173,20 +150,12 @@ pub fn handoff(cmd: &HandoffCmd, g: &Global) -> Result<u8, AibusError> {
         HandoffCmd::List => {
             let found = handoff::list(&layout.handoffs(), topic);
             if g.json {
-                print_json(
-                    &json!({ "handoffs": found.iter().map(|p| summary(p)).collect::<Vec<_>>() }),
-                )?;
+                print_json(&json!({ "handoffs": found.iter().map(|p| summary(p)).collect::<Vec<_>>() }))?;
             } else {
                 for p in &found {
                     let s = summary(p);
                     let field = |k: &str| s[k].as_str().unwrap_or("-").to_owned();
-                    println!(
-                        "{}\t{}\t{}\t{}",
-                        p.display(),
-                        field("status"),
-                        field("outcome"),
-                        field("goal")
-                    );
+                    println!("{}\t{}\t{}\t{}", p.display(), field("status"), field("outcome"), field("goal"));
                 }
             }
         }
@@ -196,8 +165,7 @@ pub fn handoff(cmd: &HandoffCmd, g: &Global) -> Result<u8, AibusError> {
                 None => handoff::latest(&layout.handoffs(), topic)
                     .ok_or_else(|| usage("no handoff yet; `aibus handoff create` writes one"))?,
             };
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| usage(format!("{}: {e}", path.display())))?;
+            let text = std::fs::read_to_string(&path).map_err(|e| usage(format!("{}: {e}", path.display())))?;
             let h = Handoff::parse(&text).map_err(|e| usage(format!("{}: {e}", path.display())))?;
             if g.json {
                 print_json(&h.to_json())?;
@@ -228,18 +196,11 @@ pub fn memory(cmd: &MemoryCmd, g: &Global, redactor: &Redactor) -> Result<u8, Ai
         MemoryCmd::Add { text, kind, scope } => {
             let kind = kind.as_deref().unwrap_or("fact");
             if !learn::KINDS.contains(&kind) {
-                return Err(usage(format!(
-                    "--type {kind}: want {}",
-                    learn::KINDS.join(", ")
-                )));
+                return Err(usage(format!("--type {kind}: want {}", learn::KINDS.join(", "))));
             }
             let scope = match scope.as_deref() {
-                Some(s) => MemoryScope::parse(s)
-                    .ok_or_else(|| usage(format!("--scope {s}: want user, project or local")))?,
-                None => *layout
-                    .scopes
-                    .first()
-                    .ok_or_else(|| usage("memory.scopes is empty"))?,
+                Some(s) => MemoryScope::parse(s).ok_or_else(|| usage(format!("--scope {s}: want user, project or local")))?,
+                None => *layout.scopes.first().ok_or_else(|| usage("memory.scopes is empty"))?,
             };
             if text.trim().is_empty() {
                 return Err(usage("nothing to add"));
@@ -254,12 +215,7 @@ pub fn memory(cmd: &MemoryCmd, g: &Global, redactor: &Redactor) -> Result<u8, Ai
                 confidence: "high".into(),
                 content: text.split_whitespace().collect::<Vec<_>>().join(" "),
             };
-            learn::append(
-                &file,
-                &[entry],
-                &format!("{} added by hand", today()),
-                redactor,
-            )?;
+            learn::append(&file, &[entry], &format!("{} added by hand", today()), redactor)?;
             // Findable at once (when `memory.scopes` covers the scope).
             crate::continuity::reindex(&layout);
             if g.json {

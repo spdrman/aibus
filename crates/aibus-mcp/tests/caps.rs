@@ -21,14 +21,7 @@ fn the_tool_list_follows_the_flags_and_the_fixed_order() {
     let (plain, _home) = common::server(Caps::default(), Redactor::new());
     let reading: Vec<String> = plain.tools().iter().map(|t| t.name.to_string()).collect();
     assert_eq!(reading[0], "workflow_list");
-    assert!(!reading.iter().any(|n| [
-        "workflow_create",
-        "workflow_update",
-        "workflow_run",
-        "run_status",
-        "run_cancel"
-    ]
-    .contains(&n.as_str())));
+    assert!(!reading.iter().any(|n| ["workflow_create", "workflow_update", "workflow_run", "run_status", "run_cancel"].contains(&n.as_str())));
     for (write, gates, run) in [
         (false, false, false),
         (true, false, false),
@@ -36,10 +29,7 @@ fn the_tool_list_follows_the_flags_and_the_fixed_order() {
         (false, false, true),
         (true, true, true),
     ] {
-        let (server, _home) = common::server(
-            Caps::new(write, gates, run, vec![]).unwrap(),
-            Redactor::new(),
-        );
+        let (server, _home) = common::server(Caps::new(write, gates, run, vec![]).unwrap(), Redactor::new());
         let names: Vec<_> = server.tools().iter().map(|t| t.name.to_string()).collect();
         let mut want: Vec<&str> = reading.iter().map(String::as_str).collect();
         if write {
@@ -50,24 +40,11 @@ fn the_tool_list_follows_the_flags_and_the_fixed_order() {
         }
         assert_eq!(names, want, "write={write} gates={gates} run={run}");
         // What is not listed cannot be called, with or without the flag.
-        for off in [
-            "workflow_create",
-            "workflow_update",
-            "workflow_run",
-            "run_status",
-            "run_cancel",
-        ] {
+        for off in ["workflow_create", "workflow_update", "workflow_run", "run_status", "run_cancel"] {
             if names.iter().any(|n| n == off) {
                 continue;
             }
-            let e = server
-                .call(
-                    None,
-                    off,
-                    Some(json!({}).as_object().unwrap().clone()),
-                    Instant::now(),
-                )
-                .unwrap_err();
+            let e = server.call(None, off, Some(json!({}).as_object().unwrap().clone()), Instant::now()).unwrap_err();
             assert_eq!(e.code.0, -32602, "{off}");
         }
     }
@@ -79,16 +56,8 @@ fn every_listed_tool_says_what_it_does_to_the_world() {
     let (server, _home) = common::server(caps, Redactor::new());
     for t in server.tools() {
         let a = t.annotations.as_ref().expect("annotations");
-        assert!(
-            a.read_only_hint.is_some() && a.destructive_hint.is_some(),
-            "{}",
-            t.name
-        );
-        assert!(
-            a.idempotent_hint.is_some() && a.open_world_hint.is_some(),
-            "{}",
-            t.name
-        );
+        assert!(a.read_only_hint.is_some() && a.destructive_hint.is_some(), "{}", t.name);
+        assert!(a.idempotent_hint.is_some() && a.open_world_hint.is_some(), "{}", t.name);
         assert_eq!(t.input_schema["additionalProperties"], false, "{}", t.name);
         assert!(t.output_schema.is_some(), "{}", t.name);
     }
@@ -100,27 +69,12 @@ fn the_write_and_run_tools_say_what_they_do() {
     let (server, _home) = common::server(caps, Redactor::new());
     let hints = |name: &str| {
         let tools = server.tools();
-        let a = tools
-            .iter()
-            .find(|t| t.name == name)
-            .unwrap()
-            .annotations
-            .clone()
-            .unwrap();
+        let a = tools.iter().find(|t| t.name == name).unwrap().annotations.clone().unwrap();
         (a.read_only_hint, a.destructive_hint, a.idempotent_hint)
     };
-    assert_eq!(
-        hints("workflow_create"),
-        (Some(false), Some(false), Some(true))
-    );
-    assert_eq!(
-        hints("workflow_update"),
-        (Some(false), Some(true), Some(true))
-    );
-    assert_eq!(
-        hints("workflow_run"),
-        (Some(false), Some(false), Some(false))
-    );
+    assert_eq!(hints("workflow_create"), (Some(false), Some(false), Some(true)));
+    assert_eq!(hints("workflow_update"), (Some(false), Some(true), Some(true)));
+    assert_eq!(hints("workflow_run"), (Some(false), Some(false), Some(false)));
     assert_eq!(hints("run_status"), (Some(true), Some(false), Some(true)));
     assert_eq!(hints("run_cancel"), (Some(false), Some(true), Some(true)));
 }

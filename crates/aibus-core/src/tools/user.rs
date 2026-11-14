@@ -52,9 +52,7 @@ impl Tool for ReportArtifact {
         }
         if let Some(p) = i.progress {
             if !(0.0..=1.0).contains(&p) {
-                return Err(ToolError::Invalid(
-                    "`progress` must be between 0 and 1".into(),
-                ));
+                return Err(ToolError::Invalid("`progress` must be between 0 and 1".into()));
             }
         }
         let path = confine(&cx.cwd, &i.path)?;
@@ -196,8 +194,7 @@ impl Tool for ExitPlanMode {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "exit_plan_mode".into(),
-            description: "Leave plan mode and go back to the permission mode the run started with."
-                .into(),
+            description: "Leave plan mode and go back to the permission mode the run started with.".into(),
             schema: json!({"type":"object","additionalProperties":false,"properties":{}}),
         }
     }

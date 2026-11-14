@@ -19,8 +19,8 @@ use crate::error::AibusError;
 use crate::ids::{AccountName, AgentName, ModelId, RunId};
 use crate::msg::{Command, ModelTarget, Msg};
 use crate::run::{
-    result, ModelSwitch, RunConfig, RunDeps, RunError, RunErrorKind, RunMail, RunResult, RunStatus,
-    Start,
+    result, ModelSwitch, RunConfig, RunDeps, RunError, RunErrorKind, RunMail, RunResult,
+    RunStatus, Start,
 };
 use crate::state::store::Store;
 use crate::state::value::{as_i64, get, map, n};
@@ -105,7 +105,9 @@ impl Limits {
 /// does not start with a mention, or the name is not a valid agent name.
 pub fn parse_mention(text: &str) -> Option<(AgentName, &str)> {
     let body = text.trim_start().strip_prefix("@agent-")?;
-    let (name, rest) = body.split_once(char::is_whitespace).unwrap_or((body, ""));
+    let (name, rest) = body
+        .split_once(char::is_whitespace)
+        .unwrap_or((body, ""));
     Some((name.parse().ok()?, rest.trim_start()))
 }
 
@@ -167,11 +169,7 @@ pub trait Launcher: Send + Sync {
     /// the way a launch picks them. `target` is a seat or a run (the lead arrives as its run
     /// id). A seat is switched here as well, and `Ok(None)` means it is now off. `Err` is why
     /// nothing changed.
-    fn switch_model(
-        &self,
-        _target: &ModelTarget,
-        _model: &str,
-    ) -> Result<Option<ModelSwitch>, String> {
+    fn switch_model(&self, _target: &ModelTarget, _model: &str) -> Result<Option<ModelSwitch>, String> {
         Err("this session cannot change models".into())
     }
 }
@@ -266,10 +264,7 @@ impl Orchestrator {
     /// The session's first run, the lead, while it is going.
     pub fn lead(&self) -> Option<RunId> {
         let g = lock(&self.inner);
-        g.known
-            .first()
-            .map(|(r, _)| *r)
-            .filter(|r| g.live.contains_key(r))
+        g.known.first().map(|(r, _)| *r).filter(|r| g.live.contains_key(r))
     }
 
     /// Whether `run` is going (it holds a mailbox).
@@ -369,10 +364,7 @@ impl Orchestrator {
             ));
         }
         if again.is_none() && g.tally.total + pending >= l.max_runs_per_session {
-            return Err(format!(
-                "session run limit reached ({})",
-                l.max_runs_per_session
-            ));
+            return Err(format!("session run limit reached ({})", l.max_runs_per_session));
         }
         let id = again.unwrap_or_default();
         if again.is_none() {
@@ -398,13 +390,7 @@ impl Orchestrator {
     /// `/model`: asks `launcher` to pick `model` for `target`, hands a run its new model through
     /// its mailbox (it applies from the next request), and answers the reducer with
     /// `Msg::ModelSwitched` either way.
-    pub fn switch_model(
-        &self,
-        launcher: &Arc<dyn Launcher>,
-        id: u64,
-        target: ModelTarget,
-        model: &str,
-    ) {
+    pub fn switch_model(&self, launcher: &Arc<dyn Launcher>, id: u64, target: ModelTarget, model: &str) {
         let to = (|| {
             let run = match target {
                 ModelTarget::Lead => Some(self.lead().ok_or("no lead is running yet")?),
@@ -416,13 +402,9 @@ impl Orchestrator {
                 return Ok(picked.map(|p| (p.model, p.account)));
             };
             let picked = picked.ok_or("a run cannot be turned off")?;
-            let mailbox = self
-                .mailbox(run)
-                .ok_or_else(|| format!("run {run} is not running"))?;
+            let mailbox = self.mailbox(run).ok_or_else(|| format!("run {run} is not running"))?;
             let (m, a): (ModelId, AccountName) = (picked.model.clone(), picked.account.clone());
-            mailbox
-                .try_send(RunMail::Model(picked))
-                .map_err(|_| format!("run {run} did not take the switch"))?;
+            mailbox.try_send(RunMail::Model(picked)).map_err(|_| format!("run {run} did not take the switch"))?;
             Ok(Some((m, a)))
         })();
         self.send_later(Msg::ModelSwitched { id, target, to });
@@ -458,9 +440,7 @@ impl Orchestrator {
             let _ = w.send(Waited::Done(Box::new(r.clone())));
             return;
         }
-        let mailbox = parent
-            .and_then(|p| g.live.get(&p))
-            .map(|l| l.mailbox.clone());
+        let mailbox = parent.and_then(|p| g.live.get(&p)).map(|l| l.mailbox.clone());
         drop(g);
         if let Some(m) = mailbox {
             let _ = m.try_send(RunMail::ChildFinished(result::wrap(r)));
@@ -470,7 +450,12 @@ impl Orchestrator {
     /// Starts a queued run. Idempotent by id: a run that is live is left alone. A run whose parent
     /// is not live is cancelled instead of started. A fork first asks its parent for the
     /// conversation it starts from, so it is on its way once the parent reaches a turn boundary.
-    pub fn start(self: &Arc<Self>, launcher: &Arc<dyn Launcher>, store: &Store, spec: SpawnSpec) {
+    pub fn start(
+        self: &Arc<Self>,
+        launcher: &Arc<dyn Launcher>,
+        store: &Store,
+        spec: SpawnSpec,
+    ) {
         let (parent_gone, parent_mail) = {
             let g = lock(&self.inner);
             if g.live.contains_key(&spec.run) {
@@ -491,11 +476,7 @@ impl Orchestrator {
             Value::Handle(h) => store.text(h).map(|t| t.to_string()).unwrap_or_default(),
             _ => String::new(),
         };
-        let start = if spec.resume {
-            Start::Resume
-        } else {
-            Start::New
-        };
+        let start = if spec.resume { Start::Resume } else { Start::New };
         if !spec.fork {
             return self.launch(launcher, &spec, prompt, start);
         }

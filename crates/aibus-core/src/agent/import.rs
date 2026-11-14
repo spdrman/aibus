@@ -68,8 +68,7 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<Imported>, String> {
     let (files, _) = list_md(from);
     let mut out = Vec::new();
     for file in files {
-        let text =
-            std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
         let source = DefSource {
             path: Some(file.clone()),
             scope: Scope::Extra(from.to_path_buf()),
@@ -103,10 +102,7 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<Imported>, String> {
         } else {
             // The copy has to parse with no hooks left, or nothing is written.
             let copy = disable_hooks(&text);
-            let source = DefSource {
-                path: None,
-                scope: Scope::Project,
-            };
+            let source = DefSource { path: None, scope: Scope::Project };
             if parse(&copy, source).is_ok_and(|(d, _)| d.hooks.is_empty()) {
                 std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
                 std::fs::write(&dest, copy).map_err(|e| format!("{}: {e}", dest.display()))?;
@@ -115,11 +111,7 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<Imported>, String> {
                 Outcome::Skipped("its hooks could not be turned off".into())
             }
         };
-        out.push(Imported {
-            file,
-            outcome,
-            hooks,
-        });
+        out.push(Imported { file, outcome, hooks });
     }
     Ok(out)
 }
@@ -130,15 +122,11 @@ mod tests {
 
     #[test]
     fn only_the_frontmatter_key_is_renamed() {
-        let text =
-            "---\nname: a\nhooks:\n  pre_tool_use:\n    - command: x\n---\nhooks: not a key here\n";
+        let text = "---\nname: a\nhooks:\n  pre_tool_use:\n    - command: x\n---\nhooks: not a key here\n";
         assert_eq!(
             disable_hooks(text),
             "---\nname: a\ndisabled_hooks:\n  pre_tool_use:\n    - command: x\n---\nhooks: not a key here\n"
         );
-        assert_eq!(
-            disable_hooks("---\nname: a\n---\nbody"),
-            "---\nname: a\n---\nbody"
-        );
+        assert_eq!(disable_hooks("---\nname: a\n---\nbody"), "---\nname: a\n---\nbody");
     }
 }

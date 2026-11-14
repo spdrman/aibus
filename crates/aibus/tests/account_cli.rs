@@ -7,8 +7,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use aibus_testkit::xdg_temp;
 use common::{aibus, command, ndjson, stderr};
+use aibus_testkit::xdg_temp;
 
 const KEY: &str = "sk-cli-0123456789abcdef";
 
@@ -17,11 +17,7 @@ fn stdout(out: &std::process::Output) -> String {
 }
 
 fn with_key(home: &Path, args: &[&str]) -> std::process::Output {
-    command(home)
-        .env("WORK_KEY", KEY)
-        .args(args)
-        .output()
-        .unwrap()
+    command(home).env("WORK_KEY", KEY).args(args).output().unwrap()
 }
 
 fn any_file_holds(dir: &Path, needle: &str) -> bool {
@@ -42,17 +38,7 @@ fn add_list_show_test_disable_enable_remove_with_a_key_from_the_environment() {
 
     let out = with_key(
         h,
-        &[
-            "account",
-            "add",
-            "work",
-            "--provider",
-            "fake",
-            "--env",
-            "WORK_KEY",
-            "--label",
-            "Work",
-        ],
+        &["account", "add", "work", "--provider", "fake", "--env", "WORK_KEY", "--label", "Work"],
     );
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let config = fs::read_to_string(h.join(".config/aibus/config.toml")).unwrap();
@@ -65,11 +51,7 @@ fn add_list_show_test_disable_enable_remove_with_a_key_from_the_environment() {
     assert_eq!(rows[0]["status"], "ok");
     assert_eq!(rows[0]["key_ref"], "env:WORK_KEY");
     let bare = aibus(h, &["account", "list"]);
-    assert!(
-        stdout(&bare).contains("missing credential"),
-        "{}",
-        stdout(&bare)
-    );
+    assert!(stdout(&bare).contains("missing credential"), "{}", stdout(&bare));
 
     let show = with_key(h, &["account", "show", "work"]);
     assert!(stdout(&show).contains("label: Work"));
@@ -85,30 +67,14 @@ fn add_list_show_test_disable_enable_remove_with_a_key_from_the_environment() {
     assert!(!stdout(&shown).contains(KEY));
     assert!(!any_file_holds(h, KEY));
 
-    assert_eq!(
-        aibus(h, &["account", "disable", "work"]).status.code(),
-        Some(0)
-    );
+    assert_eq!(aibus(h, &["account", "disable", "work"]).status.code(), Some(0));
     let off = with_key(h, &["account", "list"]);
-    assert!(
-        stdout(&off).trim_end().ends_with("disabled"),
-        "{}",
-        stdout(&off)
-    );
-    assert_eq!(
-        aibus(h, &["account", "enable", "work"]).status.code(),
-        Some(0)
-    );
+    assert!(stdout(&off).trim_end().ends_with("disabled"), "{}", stdout(&off));
+    assert_eq!(aibus(h, &["account", "enable", "work"]).status.code(), Some(0));
 
-    assert_eq!(
-        aibus(h, &["account", "remove", "work"]).status.code(),
-        Some(0)
-    );
+    assert_eq!(aibus(h, &["account", "remove", "work"]).status.code(), Some(0));
     assert!(stdout(&with_key(h, &["account", "list"])).is_empty());
-    assert_eq!(
-        aibus(h, &["account", "show", "work"]).status.code(),
-        Some(4)
-    );
+    assert_eq!(aibus(h, &["account", "show", "work"]).status.code(), Some(4));
 }
 
 #[test]
@@ -117,23 +83,11 @@ fn a_key_file_that_others_can_read_exits_4_with_the_chmod_hint() {
     let key = home.path().join("key");
     fs::write(&key, format!("{KEY}\n")).unwrap();
     fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
-    let args = [
-        "account",
-        "add",
-        "work",
-        "--provider",
-        "fake",
-        "--file",
-        key.to_str().unwrap(),
-    ];
+    let args = ["account", "add", "work", "--provider", "fake", "--file", key.to_str().unwrap()];
 
     let out = aibus(home.path(), &args);
     assert_eq!(out.status.code(), Some(4));
-    assert!(
-        stderr(&out).contains(&format!("chmod 600 {}", key.display())),
-        "{}",
-        stderr(&out)
-    );
+    assert!(stderr(&out).contains(&format!("chmod 600 {}", key.display())), "{}", stderr(&out));
     assert!(!home.path().join(".config/aibus/config.toml").exists());
 
     fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
@@ -144,31 +98,9 @@ fn a_key_file_that_others_can_read_exits_4_with_the_chmod_hint() {
 fn an_unset_variable_is_exit_4_and_an_unknown_provider_exit_3() {
     let home = xdg_temp();
     let h = home.path();
-    let unset = aibus(
-        h,
-        &[
-            "account",
-            "add",
-            "w",
-            "--provider",
-            "fake",
-            "--env",
-            "NOT_SET_ANYWHERE",
-        ],
-    );
+    let unset = aibus(h, &["account", "add", "w", "--provider", "fake", "--env", "NOT_SET_ANYWHERE"]);
     assert_eq!(unset.status.code(), Some(4));
-    let unknown = with_key(
-        h,
-        &[
-            "account",
-            "add",
-            "w",
-            "--provider",
-            "nope",
-            "--env",
-            "WORK_KEY",
-        ],
-    );
+    let unknown = with_key(h, &["account", "add", "w", "--provider", "nope", "--env", "WORK_KEY"]);
     assert_eq!(unknown.status.code(), Some(3));
 }
 
@@ -184,18 +116,7 @@ fn run_uses_the_named_account_and_exits_4_when_its_key_is_missing() {
     )
     .unwrap();
 
-    let ok = with_key(
-        h,
-        &[
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--account",
-            "work",
-            "map this repo",
-        ],
-    );
+    let ok = with_key(h, &["run", "--json", "--agent", "explore", "--account", "work", "map this repo"]);
     assert_eq!(ok.status.code(), Some(0), "{}", stderr(&ok));
     assert_eq!(ndjson(&ok)[0]["account"], "work");
     assert!(!stdout(&ok).contains(KEY));
@@ -205,32 +126,10 @@ fn run_uses_the_named_account_and_exits_4_when_its_key_is_missing() {
     assert_eq!(none.status.code(), Some(0), "{}", stderr(&none));
     assert_eq!(ndjson(&none)[0]["account"], "work");
 
-    let missing = with_key(
-        h,
-        &[
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--account",
-            "other",
-            "x",
-        ],
-    );
+    let missing = with_key(h, &["run", "--json", "--agent", "explore", "--account", "other", "x"]);
     assert_eq!(missing.status.code(), Some(4));
     assert!(stderr(&missing).contains("no credential for account other"));
 
-    let unknown = with_key(
-        h,
-        &[
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--account",
-            "ghost",
-            "x",
-        ],
-    );
+    let unknown = with_key(h, &["run", "--json", "--agent", "explore", "--account", "ghost", "x"]);
     assert_eq!(unknown.status.code(), Some(4));
 }

@@ -27,10 +27,7 @@ fn answer(h: &RunHandle, m: &Msg, decision: Decision) {
 async fn permission_ask_pauses_the_run_decided_resumes_it_and_dont_ask_denies() {
     let _clock = FakeClock::new();
     let s = Solo::new();
-    let tty = || Gate {
-        tty: true,
-        ..Gate::default()
-    };
+    let tty = || Gate { tty: true, ..Gate::default() };
     let mut general = bypass("general");
     general.permission_mode = PermissionMode::Default;
 
@@ -38,58 +35,30 @@ async fn permission_ask_pauses_the_run_decided_resumes_it_and_dont_ask_denies() 
     let tools = s.tools(tty());
     let done = s
         .go_with(
-            script(
-                call("bash", json!({"command": "echo ran"}))
-                    .into_iter()
-                    .chain([Step::Text("ok".into())]),
-            ),
+            script(call("bash", json!({"command": "echo ran"})).into_iter().chain([Step::Text("ok".into())])),
             general.clone(),
             |_, d| d.tools = tools,
             |m, h| answer(h, m, Decision::Allow),
         )
         .await;
-    let names: Vec<_> = done
-        .msgs
-        .iter()
-        .map(Msg::name)
-        .filter(|n| !matches!(*n, "Stream" | "UsageUpdate"))
-        .collect();
+    let names: Vec<_> = done.msgs.iter().map(Msg::name).filter(|n| !matches!(*n, "Stream" | "UsageUpdate")).collect();
     assert_eq!(
         names,
-        [
-            "RunStarted",
-            "ToolCallRequested",
-            "PermissionNeeded",
-            "PermissionDecided",
-            "ToolCallFinished",
-            "RunFinished"
-        ]
+        ["RunStarted", "ToolCallRequested", "PermissionNeeded", "PermissionDecided", "ToolCallFinished", "RunFinished"]
     );
-    assert!(
-        done.results(1)[0].trim_end().ends_with("ran"),
-        "{:?}",
-        done.results(1)
-    );
+    assert!(done.results(1)[0].trim_end().ends_with("ran"), "{:?}", done.results(1));
 
     // A refusal comes back as an error result and the run carries on.
     let tools = s.tools(tty());
     let done = s
         .go_with(
-            script(
-                call("bash", json!({"command": "touch PWN"}))
-                    .into_iter()
-                    .chain([Step::Text("ok".into())]),
-            ),
+            script(call("bash", json!({"command": "touch PWN"})).into_iter().chain([Step::Text("ok".into())])),
             general.clone(),
             |_, d| d.tools = tools,
             |m, h| answer(h, m, Decision::Deny),
         )
         .await;
-    assert!(
-        done.results(1)[0].contains("permission denied"),
-        "{:?}",
-        done.results(1)
-    );
+    assert!(done.results(1)[0].contains("permission denied"), "{:?}", done.results(1));
     assert!(!s.dir.join("PWN").exists());
     assert_eq!(done.finished().status, RunStatus::Completed);
 
@@ -98,21 +67,13 @@ async fn permission_ask_pauses_the_run_decided_resumes_it_and_dont_ask_denies() 
     dont_ask.permission_mode = PermissionMode::DontAsk;
     let done = s
         .go(
-            script(
-                call("bash", json!({"command": "touch PWN"}))
-                    .into_iter()
-                    .chain([Step::Text("ok".into())]),
-            ),
+            script(call("bash", json!({"command": "touch PWN"})).into_iter().chain([Step::Text("ok".into())])),
             dont_ask,
             |_, _| {},
         )
         .await;
     assert_eq!(done.count("PermissionNeeded"), 0);
-    assert!(
-        done.results(1)[0].contains("dont_ask mode does not allow bash"),
-        "{:?}",
-        done.results(1)
-    );
+    assert!(done.results(1)[0].contains("dont_ask mode does not allow bash"), "{:?}", done.results(1));
     assert!(!s.dir.join("PWN").exists());
 }
 
@@ -120,23 +81,16 @@ async fn permission_ask_pauses_the_run_decided_resumes_it_and_dont_ask_denies() 
 async fn a_pre_tool_use_hook_that_exits_two_blocks_the_call_and_the_model_sees_the_stderr() {
     let s = Solo::new();
     let mut def = bypass("general");
-    def.hooks
-        .entry("pre_tool_use".into())
-        .or_default()
-        .push(HookSpec {
-            matcher: Some("bash".into()),
-            command: "echo psql is off limits >&2; exit 2".into(),
-            timeout_secs: None,
-            kind: HookKind::Command,
-        });
+    def.hooks.entry("pre_tool_use".into()).or_default().push(HookSpec {
+        matcher: Some("bash".into()),
+        command: "echo psql is off limits >&2; exit 2".into(),
+        timeout_secs: None,
+        kind: HookKind::Command,
+    });
     let hooks = s.hooks();
     let done = s
         .go(
-            script(
-                call("bash", json!({"command": "touch marker"}))
-                    .into_iter()
-                    .chain([Step::Text("ok".into())]),
-            ),
+            script(call("bash", json!({"command": "touch marker"})).into_iter().chain([Step::Text("ok".into())])),
             def,
             |_, d| d.hooks = hooks,
         )
@@ -161,50 +115,24 @@ async fn a_pre_tool_use_hook_that_exits_two_blocks_the_call_and_the_model_sees_t
 async fn a_retryable_error_retries_with_backoff_and_a_non_retryable_one_fails_the_run_as_exit_5() {
     let clock = FakeClock::new();
     let s = Solo::new();
-    let server = || {
-        Step::Error(ProviderError::new(
-            ProviderErrorKind::Server,
-            "upstream fell over",
-        ))
-    };
+    let server = || Step::Error(ProviderError::new(ProviderErrorKind::Server, "upstream fell over"));
 
     // Two failures, then success: 1 s and 2 s of virtual time (500 ms base, doubling, jittered
     // only upwards), and the run completes.
     let done = s
-        .go(
-            script([server(), server(), Step::Text("made it".into())]),
-            bypass("explore"),
-            |_, _| {},
-        )
+        .go(script([server(), server(), Step::Text("made it".into())]), bypass("explore"), |_, _| {})
         .await;
     let r = done.finished();
-    assert_eq!(
-        (r.status, r.summary.as_str()),
-        (RunStatus::Completed, "made it")
-    );
+    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Completed, "made it"));
     assert_eq!(done.fake.requests().len(), 3);
-    assert!(
-        clock.elapsed() >= Duration::from_millis(1500),
-        "{:?}",
-        clock.elapsed()
-    );
-    assert!(
-        clock.elapsed() < Duration::from_secs(10),
-        "{:?}",
-        clock.elapsed()
-    );
+    assert!(clock.elapsed() >= Duration::from_millis(1500), "{:?}", clock.elapsed());
+    assert!(clock.elapsed() < Duration::from_secs(10), "{:?}", clock.elapsed());
 
     // A request the provider rejects is not retried: the run fails once, as a provider error,
     // and a provider error is what the CLI maps to exit code 5.
     let done = s
         .go(
-            script([
-                Step::Error(ProviderError::new(
-                    ProviderErrorKind::InvalidRequest,
-                    "bad schema",
-                )),
-                Step::Text("never".into()),
-            ]),
+            script([Step::Error(ProviderError::new(ProviderErrorKind::InvalidRequest, "bad schema")), Step::Text("never".into())]),
             bypass("explore"),
             |_, _| {},
         )
@@ -214,11 +142,7 @@ async fn a_retryable_error_retries_with_backoff_and_a_non_retryable_one_fails_th
     assert_eq!(r.error.as_ref().unwrap().kind, RunErrorKind::Provider);
     assert_eq!(done.fake.requests().len(), 1);
     assert_eq!(done.count("RunFailed"), 1);
-    let exit = AibusError::from(ProviderError::new(
-        ProviderErrorKind::InvalidRequest,
-        "bad schema",
-    ))
-    .exit_code();
+    let exit = AibusError::from(ProviderError::new(ProviderErrorKind::InvalidRequest, "bad schema")).exit_code();
     assert_eq!(exit, 5);
 }
 
@@ -229,16 +153,10 @@ async fn max_cost_usd_stops_the_run_with_a_budget_error() {
     let mut def = bypass("explore");
     def.max_cost_usd = Some(0.5);
     // The fake prices input at $1 per million tokens.
-    let steps = [
-        Step::Text("pricey".into()),
-        Step::Usage {
-            input: 1_000_000,
-            output: 0,
-        },
-    ]
-    .into_iter()
-    .chain(call("ls", json!({})))
-    .chain([Step::Text("never".into())]);
+    let steps = [Step::Text("pricey".into()), Step::Usage { input: 1_000_000, output: 0 }]
+        .into_iter()
+        .chain(call("ls", json!({})))
+        .chain([Step::Text("never".into())]);
     let done = s.go(script(steps), def, |_, _| {}).await;
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Partial);

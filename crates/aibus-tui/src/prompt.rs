@@ -196,11 +196,7 @@ impl Prompt {
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         let trimmed = pasted.trim_end_matches('\n');
         let one_line = !trimmed.contains('\n');
-        let insert = if one_line && looks_like_path(trimmed) {
-            quote_path(trimmed)
-        } else {
-            trimmed.to_owned()
-        };
+        let insert = if one_line && looks_like_path(trimmed) { quote_path(trimmed) } else { trimmed.to_owned() };
         self.drop_selection();
         let at = char_at(&self.text, self.at());
         self.text.insert_str(at, &insert);
@@ -335,10 +331,7 @@ impl Prompt {
     /// The word before the cursor and where it starts.
     fn word(&self) -> (usize, String) {
         let before: Vec<char> = self.text.chars().take(self.at()).collect();
-        let start = before
-            .iter()
-            .rposition(|c| c.is_whitespace())
-            .map_or(0, |i| i + 1);
+        let start = before.iter().rposition(|c| c.is_whitespace()).map_or(0, |i| i + 1);
         (start, before[start..].iter().collect())
     }
 
@@ -373,13 +366,7 @@ impl Prompt {
         match items.len() {
             0 => {}
             1 => self.accept(from, &items[0]),
-            _ => {
-                self.popup = Some(Popup {
-                    items,
-                    sel: 0,
-                    from,
-                })
-            }
+            _ => self.popup = Some(Popup { items, sel: 0, from }),
         }
     }
 
@@ -399,9 +386,7 @@ impl Prompt {
 
     /// `Enter` while the popup is open takes the highlighted candidate.
     pub fn accept_popup(&mut self) -> bool {
-        let Some(p) = self.popup.take() else {
-            return false;
-        };
+        let Some(p) = self.popup.take() else { return false };
         if let Some(item) = p.items.get(p.sel) {
             self.accept(p.from, item);
         }
@@ -443,21 +428,14 @@ impl Prompt {
 fn looks_like_path(s: &str) -> bool {
     let s = s.trim();
     !s.is_empty()
-        && (s.starts_with('/')
-            || s.starts_with("~/")
-            || s.starts_with("./")
-            || s.starts_with("file://"))
+        && (s.starts_with('/') || s.starts_with("~/") || s.starts_with("./") || s.starts_with("file://"))
         && !s.contains(['|', ';', '&', '$', '`', '>', '<'])
 }
 
 /// A path as it goes in the line: `file://` dropped, escaped spaces undone, quoted if it still
 /// has a space.
 fn quote_path(s: &str) -> String {
-    let s = s
-        .trim()
-        .strip_prefix("file://")
-        .unwrap_or(s.trim())
-        .replace("\\ ", " ");
+    let s = s.trim().strip_prefix("file://").unwrap_or(s.trim()).replace("\\ ", " ");
     if s.contains(' ') {
         format!("'{s}'")
     } else {
@@ -577,10 +555,7 @@ mod tests {
         assert_eq!(p.text, "ask @agent-grep ");
         let mut p = Prompt::default().with_text("@");
         p.tab(&Env::bare(&agents, &[]));
-        assert_eq!(
-            p.popup.as_ref().unwrap().items,
-            ["@agent-search", "@agent-grep", "@agent-audit"]
-        );
+        assert_eq!(p.popup.as_ref().unwrap().items, ["@agent-search", "@agent-grep", "@agent-audit"]);
         // A slash in the middle of a sentence is not a command.
         let mut p = Prompt::default().with_text("see /com");
         p.tab(&Env::bare(&agents, &[]));
@@ -593,10 +568,7 @@ mod tests {
         p.tab(&Env::bare(&[], &[]));
         assert_eq!(p.text, "/fi");
         let wf = ["fix".to_owned()];
-        p.tab(&Env {
-            lead: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap()),
-            ..Env::bare(&[], &wf)
-        });
+        p.tab(&Env { lead: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap()), ..Env::bare(&[], &wf) });
         assert_eq!(p.text, "/fix ");
     }
 
@@ -610,10 +582,7 @@ mod tests {
         assert!(p.shows_placeholder(), "still nothing sent");
         typed(&mut p, "go");
         p.take();
-        assert!(
-            !p.shows_placeholder(),
-            "after the first submit the line is just empty"
-        );
+        assert!(!p.shows_placeholder(), "after the first submit the line is just empty");
         assert!(p.take().is_none(), "a blank line is not sent");
     }
 
@@ -627,11 +596,7 @@ mod tests {
     fn a_paste_keeps_its_line_breaks_whatever_newline_the_terminal_sent() {
         // Issue #197: xterm style terminals put a bare CR for each newline inside a bracketed
         // paste. LF and CRLF always worked; the CR was deleted and the lines ran together.
-        for (name, pasted) in [
-            ("LF", "one\ntwo\nthree"),
-            ("CRLF", "one\r\ntwo\r\nthree"),
-            ("CR", "one\rtwo\rthree"),
-        ] {
+        for (name, pasted) in [("LF", "one\ntwo\nthree"), ("CRLF", "one\r\ntwo\r\nthree"), ("CR", "one\rtwo\rthree")] {
             let mut p = Prompt::default();
             p.paste(pasted);
             assert_eq!(p.text, "one\ntwo\nthree", "{name} newlines");
@@ -650,10 +615,7 @@ mod tests {
         let mut p = Prompt::default();
         p.paste("ls /tmp\nrm -rf x");
         assert_eq!(p.text, "ls /tmp\nrm -rf x");
-        assert!(
-            p.take().is_some_and(|t| t.starts_with("ls")),
-            "nothing was submitted by the paste itself"
-        );
+        assert!(p.take().is_some_and(|t| t.starts_with("ls")), "nothing was submitted by the paste itself");
         // A path-looking command is not rewritten.
         let mut p = Prompt::default();
         p.paste("/bin/sh -c 'x'; y");

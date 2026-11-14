@@ -99,10 +99,7 @@ pub const ANIMATING: &str = "view:animating";
 /// Where the transcript screen puts its text for a terminal of this size: `(width, height)` of
 /// the body. The reducer scrolls by it and `aibus-tui` draws into it, so both must agree.
 pub fn transcript_body(cols: u16, rows: u16) -> (usize, usize) {
-    (
-        usize::from(cols).saturating_sub(5).max(1),
-        usize::from(rows).saturating_sub(5).max(1),
-    )
+    (usize::from(cols).saturating_sub(5).max(1), usize::from(rows).saturating_sub(5).max(1))
 }
 
 /// Current value of `eng:schema_version`.
@@ -194,14 +191,8 @@ pub fn register<G: Graph>(g: &mut G) -> Vec<NodeKey> {
         (
             SESSION_ASSIST,
             map([
-                (
-                    "advisor",
-                    map([("label", Value::Null), ("enabled", Value::Bool(true))]),
-                ),
-                (
-                    "router",
-                    map([("label", Value::Null), ("enabled", Value::Bool(true))]),
-                ),
+                ("advisor", map([("label", Value::Null), ("enabled", Value::Bool(true))])),
+                ("router", map([("label", Value::Null), ("enabled", Value::Bool(true))])),
             ]),
         ),
         (AGENTS_DEFS, list(vec![])),

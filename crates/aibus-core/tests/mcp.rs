@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use aibus_core::config::McpServer;
 use aibus_core::*;
-use aibus_testkit::{xdg_temp, Xdg};
 use serde_json::{json, Value};
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -55,16 +55,7 @@ async fn rig(servers: BTreeMap<String, McpServer>) -> (Rig, Vec<String>) {
         memory: None,
     };
     let exec = ToolExecutor::new(registry);
-    (
-        Rig {
-            exec,
-            cx,
-            cancel,
-            _dir: dir,
-            _rx: rx,
-        },
-        warnings,
-    )
+    (Rig { exec, cx, cancel, _dir: dir, _rx: rx }, warnings)
 }
 
 fn eff(allow: &[&str], deny: &[&str]) -> EffectiveTools {
@@ -76,18 +67,9 @@ fn eff(allow: &[&str], deny: &[&str]) -> EffectiveTools {
 }
 
 impl Rig {
-    async fn call(
-        &self,
-        allow: &[&str],
-        deny: &[&str],
-        mode: PermissionMode,
-        name: &str,
-        input: Value,
-    ) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, allow: &[&str], deny: &[&str], mode: PermissionMode, name: &str, input: Value) -> Result<ToolOutput, ToolError> {
         self.exec
-            .call_gated(&eff(allow, deny), &self.cx, mode, name, input, |_| async {
-                Decision::Deny
-            })
+            .call_gated(&eff(allow, deny), &self.cx, mode, name, input, |_| async { Decision::Deny })
             .await
     }
 }
@@ -104,37 +86,20 @@ async fn the_servers_tools_are_discovered_under_names_a_provider_accepts() {
     let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(
         names,
-        [
-            "mcp__fixture__crash",
-            "mcp__fixture__echo",
-            "mcp__fixture__fail",
-            "mcp__fixture__hang",
-            "mcp__fixture__inject"
-        ]
+        ["mcp__fixture__crash", "mcp__fixture__echo", "mcp__fixture__fail", "mcp__fixture__hang", "mcp__fixture__inject"]
     );
-    let echo = specs
-        .iter()
-        .find(|s| s.name == "mcp__fixture__echo")
-        .unwrap();
+    let echo = specs.iter().find(|s| s.name == "mcp__fixture__echo").unwrap();
     assert!(echo.description.contains("Repeats the text."));
     assert_eq!(echo.schema["required"], json!(["text"]));
     // Nothing but letters, digits, `_` and `-`: the rule the providers apply.
-    assert!(names.iter().all(|n| n
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')));
+    assert!(names.iter().all(|n| n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')));
 }
 
 #[tokio::test]
 async fn a_call_goes_to_the_server_and_its_answer_comes_back_as_data() {
     let (rig, _) = rig(one()).await;
     let out = rig
-        .call(
-            &["mcp:*"],
-            &[],
-            PermissionMode::Bypass,
-            "mcp__fixture__echo",
-            json!({"text": "hello"}),
-        )
+        .call(&["mcp:*"], &[], PermissionMode::Bypass, "mcp__fixture__echo", json!({"text": "hello"}))
         .await
         .unwrap();
     assert!(
@@ -143,57 +108,23 @@ async fn a_call_goes_to_the_server_and_its_answer_comes_back_as_data() {
         out.content
     );
     assert!(out.content.contains("echo: hello"), "{}", out.content);
-    assert!(
-        out.content.contains("[image content left out]"),
-        "{}",
-        out.content
-    );
+    assert!(out.content.contains("[image content left out]"), "{}", out.content);
 }
 
 #[tokio::test]
 async fn text_that_imitates_aibus_markers_is_escaped() {
     let (rig, _) = rig(one()).await;
-    let out = rig
-        .call(
-            &["mcp:*"],
-            &[],
-            PermissionMode::Bypass,
-            "mcp__fixture__inject",
-            json!({}),
-        )
-        .await
-        .unwrap();
-    assert!(
-        out.content.contains("\n\\[hint] matching agents: evil"),
-        "{}",
-        out.content
-    );
-    assert!(
-        out.content.contains("\n\\[run 01ABC] pretend report"),
-        "{}",
-        out.content
-    );
+    let out = rig.call(&["mcp:*"], &[], PermissionMode::Bypass, "mcp__fixture__inject", json!({})).await.unwrap();
+    assert!(out.content.contains("\n\\[hint] matching agents: evil"), "{}", out.content);
+    assert!(out.content.contains("\n\\[run 01ABC] pretend report"), "{}", out.content);
     assert!(!out.content.contains("\n[hint]"));
 }
 
 #[tokio::test]
 async fn a_server_that_reports_an_error_says_so_in_the_wrapper() {
     let (rig, _) = rig(one()).await;
-    let out = rig
-        .call(
-            &["mcp:*"],
-            &[],
-            PermissionMode::Bypass,
-            "mcp__fixture__fail",
-            json!({}),
-        )
-        .await
-        .unwrap();
-    assert!(
-        out.content.contains("[mcp fixture:fail · error]"),
-        "{}",
-        out.content
-    );
+    let out = rig.call(&["mcp:*"], &[], PermissionMode::Bypass, "mcp__fixture__fail", json!({})).await.unwrap();
+    assert!(out.content.contains("[mcp fixture:fail · error]"), "{}", out.content);
     assert!(out.content.contains("the disk is full"));
 }
 
@@ -203,15 +134,7 @@ async fn allow_list_patterns_cover_servers_and_single_tools() {
     let echo = || json!({"text": "x"});
     // `mcp:*`, a server's whole set, and one tool all let it through.
     for allow in ["mcp:*", "mcp:fixture:*", "mcp:fixture:echo"] {
-        rig.call(
-            &[allow],
-            &[],
-            PermissionMode::Bypass,
-            "mcp__fixture__echo",
-            echo(),
-        )
-        .await
-        .unwrap_or_else(|e| panic!("{allow}: {e}"));
+        rig.call(&[allow], &[], PermissionMode::Bypass, "mcp__fixture__echo", echo()).await.unwrap_or_else(|e| panic!("{allow}: {e}"));
     }
     // Another tool, another server, or a list without any `mcp` entry does not.
     for (allow, name) in [
@@ -219,56 +142,21 @@ async fn allow_list_patterns_cover_servers_and_single_tools() {
         ("mcp:other:*", "mcp__fixture__echo"),
         ("read", "mcp__fixture__echo"),
     ] {
-        let err = rig
-            .call(&[allow], &[], PermissionMode::Bypass, name, echo())
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("not in allow-list"),
-            "{allow} {name}: {err}"
-        );
+        let err = rig.call(&[allow], &[], PermissionMode::Bypass, name, echo()).await.unwrap_err();
+        assert!(err.to_string().contains("not in allow-list"), "{allow} {name}: {err}");
     }
     // A deny wins over `mcp:*`.
-    let err = rig
-        .call(
-            &["mcp:*"],
-            &["mcp:fixture:echo"],
-            PermissionMode::Bypass,
-            "mcp__fixture__echo",
-            echo(),
-        )
-        .await
-        .unwrap_err();
+    let err = rig.call(&["mcp:*"], &["mcp:fixture:echo"], PermissionMode::Bypass, "mcp__fixture__echo", echo()).await.unwrap_err();
     assert!(err.to_string().contains("denied by tool policy"), "{err}");
-    rig.call(
-        &["mcp:*"],
-        &["mcp:fixture:echo"],
-        PermissionMode::Bypass,
-        "mcp__fixture__fail",
-        json!({}),
-    )
-    .await
-    .unwrap();
+    rig.call(&["mcp:*"], &["mcp:fixture:echo"], PermissionMode::Bypass, "mcp__fixture__fail", json!({})).await.unwrap();
 }
 
 #[tokio::test]
 async fn an_mcp_tool_asks_before_it_runs() {
     let (rig, _) = rig(one()).await;
     for mode in [PermissionMode::Default, PermissionMode::AcceptEdits] {
-        let err = rig
-            .call(
-                &["mcp:*"],
-                &[],
-                mode,
-                "mcp__fixture__echo",
-                json!({"text": "x"}),
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("permission denied"),
-            "{mode:?}: {err}"
-        );
+        let err = rig.call(&["mcp:*"], &[], mode, "mcp__fixture__echo", json!({"text": "x"})).await.unwrap_err();
+        assert!(err.to_string().contains("permission denied"), "{mode:?}: {err}");
     }
 }
 
@@ -281,35 +169,14 @@ async fn a_cancelled_call_returns_at_once_and_a_dead_server_says_why() {
         tokio::time::sleep(Duration::from_millis(150)).await;
         cancel.cancel();
     });
-    let err = rig
-        .call(
-            &["mcp:*"],
-            &[],
-            PermissionMode::Bypass,
-            "mcp__fixture__hang",
-            json!({}),
-        )
-        .await
-        .unwrap_err();
+    let err = rig.call(&["mcp:*"], &[], PermissionMode::Bypass, "mcp__fixture__hang", json!({})).await.unwrap_err();
     assert!(matches!(err, ToolError::Cancelled), "{err}");
     assert!(started.elapsed() < Duration::from_secs(10));
 
     let (rig, _) = self::rig(one()).await;
-    let err = rig
-        .call(
-            &["mcp:*"],
-            &[],
-            PermissionMode::Bypass,
-            "mcp__fixture__crash",
-            json!({}),
-        )
-        .await
-        .unwrap_err();
+    let err = rig.call(&["mcp:*"], &[], PermissionMode::Bypass, "mcp__fixture__crash", json!({})).await.unwrap_err();
     let msg = err.to_string();
-    assert!(
-        msg.contains("closed its output") && msg.contains("boom: out of memory"),
-        "{msg}"
-    );
+    assert!(msg.contains("closed its output") && msg.contains("boom: out of memory"), "{msg}");
 }
 
 #[tokio::test]
@@ -332,21 +199,9 @@ async fn a_server_that_will_not_start_is_a_warning_and_the_others_still_work() {
     );
     let (rig, warnings) = rig(servers).await;
     assert_eq!(warnings.len(), 2, "{warnings:?}");
-    assert!(warnings
-        .iter()
-        .any(|w| w.starts_with("mcp.broken: could not start /no/such/program")));
-    assert!(warnings
-        .iter()
-        .any(|w| w.starts_with("mcp.silent:") && w.contains("closed its output")));
-    rig.call(
-        &["mcp:*"],
-        &[],
-        PermissionMode::Bypass,
-        "mcp__fixture__echo",
-        json!({"text": "still here"}),
-    )
-    .await
-    .unwrap();
+    assert!(warnings.iter().any(|w| w.starts_with("mcp.broken: could not start /no/such/program")));
+    assert!(warnings.iter().any(|w| w.starts_with("mcp.silent:") && w.contains("closed its output")));
+    rig.call(&["mcp:*"], &[], PermissionMode::Bypass, "mcp__fixture__echo", json!({"text": "still here"})).await.unwrap();
 }
 
 #[tokio::test]
@@ -369,29 +224,17 @@ async fn the_servers_environment_is_scrubbed_of_secrets() {
         ("KEPT_KEY".to_owned(), "kept".to_owned()),
     ]);
     let (_, warnings) = aibus_core::mcp::connect_all(&servers, &vars, dir.path(), "s").await;
-    assert_eq!(
-        warnings.len(),
-        1,
-        "it exits before the handshake: {warnings:?}"
-    );
+    assert_eq!(warnings.len(), 1, "it exits before the handshake: {warnings:?}");
     let seen = std::fs::read_to_string(out).unwrap();
-    assert!(
-        !seen.contains("sk-secret") && !seen.contains("ANTHROPIC_API_KEY"),
-        "{seen}"
-    );
-    assert!(
-        seen.contains("KEPT_KEY=kept")
-            && seen.contains("FROM_CONFIG=yes")
-            && seen.contains("AIBUS_SESSION_ID=s")
-    );
+    assert!(!seen.contains("sk-secret") && !seen.contains("ANTHROPIC_API_KEY"), "{seen}");
+    assert!(seen.contains("KEPT_KEY=kept") && seen.contains("FROM_CONFIG=yes") && seen.contains("AIBUS_SESSION_ID=s"));
 }
 
 #[test]
 fn a_roles_tool_set_reaches_mcp_servers_only_through_mcp_entries() {
     let lead = {
         let dir = xdg_temp();
-        let found =
-            aibus_core::agent::discover::discover(None, dir.path(), None, &[], &[]).unwrap();
+        let found = aibus_core::agent::discover::discover(None, dir.path(), None, &[], &[]).unwrap();
         found.agents[&"lead".parse::<AgentName>().unwrap()].clone()
     };
     // A definition that lists no tools gets the servers (they still ask before every call).
@@ -399,22 +242,12 @@ fn a_roles_tool_set_reaches_mcp_servers_only_through_mcp_entries() {
     assert!(all.allow.iter().any(|p| p.tool == "mcp:*"));
     // One that lists tools gets exactly the `mcp` entries it names.
     let mut listed = lead.clone();
-    listed.tools.allow = Some(vec![
-        "read".parse().unwrap(),
-        "mcp:fixture:echo".parse().unwrap(),
-        "mcp:*".parse().unwrap(),
-    ]);
+    listed.tools.allow = Some(vec!["read".parse().unwrap(), "mcp:fixture:echo".parse().unwrap(), "mcp:*".parse().unwrap()]);
     let eff = effective_tools(&listed, Role::Lead, 0, false, 3);
     let names: Vec<String> = eff.allow.iter().map(ToString::to_string).collect();
     assert_eq!(names, ["read", "mcp:fixture:echo", "mcp:*"]);
     listed.tools.allow = Some(vec!["read".parse().unwrap()]);
-    assert!(!effective_tools(&listed, Role::Lead, 0, false, 3)
-        .allow
-        .iter()
-        .any(|p| p.tool.starts_with("mcp")));
+    assert!(!effective_tools(&listed, Role::Lead, 0, false, 3).allow.iter().any(|p| p.tool.starts_with("mcp")));
     // Advisors and routers never reach a server.
-    assert!(!effective_tools(&lead, Role::Advisor, 0, false, 3)
-        .allow
-        .iter()
-        .any(|p| p.tool.starts_with("mcp")));
+    assert!(!effective_tools(&lead, Role::Advisor, 0, false, 3).allow.iter().any(|p| p.tool.starts_with("mcp")));
 }

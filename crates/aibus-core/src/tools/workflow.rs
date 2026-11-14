@@ -54,9 +54,7 @@ struct Host<'a> {
 impl StepHost for Host<'_> {
     async fn run(&self, agent: &AgentName, prompt: String) -> Result<StepOutcome, HostError> {
         let orch = &self.tool.orch;
-        let (run, wait) = orch
-            .reserve(self.parent, false)
-            .map_err(HostError::Failed)?;
+        let (run, wait) = orch.reserve(self.parent, false).map_err(HostError::Failed)?;
         let Some(wait) = wait else {
             return Err(HostError::Failed("no foreground wait".into()));
         };
@@ -106,10 +104,7 @@ impl StepHost for Host<'_> {
             "summary": call.outcome.summary,
         })
         .to_string();
-        self.tool
-            .hooks
-            .gate(command, stdin, Some(self.parent), self.cancel)
-            .await
+        self.tool.hooks.gate(command, stdin, Some(self.parent), self.cancel).await
     }
 }
 
@@ -128,12 +123,7 @@ impl Tool for RunWorkflow {
         for found in workflow::list(&self.dirs) {
             if let Ok(wf) = found.runnable() {
                 let agents: Vec<&str> = wf.steps.iter().map(|s| s.agent.as_str()).collect();
-                description.push_str(&format!(
-                    "- {}: {} ({})\n",
-                    found.name,
-                    wf.description,
-                    agents.join(" > ")
-                ));
+                description.push_str(&format!("- {}: {} ({})\n", found.name, wf.description, agents.join(" > ")));
             }
         }
         ToolSpec {
@@ -154,11 +144,7 @@ impl Tool for RunWorkflow {
         let i: WorkflowInput = input(v)?;
         let wf = workflow::load(&self.dirs, &i.name).map_err(ToolError::Invalid)?;
         let roster = self.orch.roster();
-        if let Some(step) = wf
-            .steps
-            .iter()
-            .find(|s| !roster.agents.iter().any(|(a, _)| *a == s.agent))
-        {
+        if let Some(step) = wf.steps.iter().find(|s| !roster.agents.iter().any(|(a, _)| *a == s.agent)) {
             return Err(ToolError::Invalid(format!(
                 "workflow {} names the agent {}, which is not defined (aibus agent list)",
                 wf.name, step.agent

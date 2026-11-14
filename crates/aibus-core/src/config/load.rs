@@ -63,9 +63,8 @@ pub fn parse_file(path: &Path, text: &str) -> Result<(Table, Vec<String>), Confi
                 path: path.to_owned(),
                 line,
                 // The spec's exact words (07 section 3).
-                message:
-                    "credentials do not go in config; run: aibus account add <name> --key-stdin"
-                        .to_owned(),
+                message: "credentials do not go in config; run: aibus account add <name> --key-stdin"
+                    .to_owned(),
             });
         }
         warnings.push(match line {
@@ -176,44 +175,29 @@ pub fn load(user: &Path, project: Option<&Path>) -> Result<Loaded, ConfigFileErr
             .rev()
             .find_map(|(p, text)| find_line(text, &key).map(|l| (p.clone(), l)));
         return Err(ConfigFileError {
-            path: found
-                .as_ref()
-                .map_or_else(|| user.to_owned(), |f| f.0.clone()),
+            path: found.as_ref().map_or_else(|| user.to_owned(), |f| f.0.clone()),
             line: found.map(|f| f.1),
             message: format!("{key}: {message}"),
         });
     }
     // A key sent over plain http to an address that is neither this machine nor a private
     // network can be read on the way. A warning, not an error: a lab VPN is a legitimate case.
-    let user_text = texts
-        .first()
-        .filter(|(p, _)| p == user)
-        .map(|(p, t)| (p.as_path(), t.as_str()));
+    let user_text = texts.first().filter(|(p, _)| p == user).map(|(p, t)| (p.as_path(), t.as_str()));
     let urls = config
         .providers
         .iter()
         .enumerate()
-        .filter_map(|(i, d)| {
-            Some((
-                format!("provider.{i}.base_url"),
-                d.id.as_str(),
-                d.base_url.as_deref()?,
-            ))
-        })
-        .chain(config.accounts.iter().enumerate().filter_map(|(i, a)| {
-            Some((
-                format!("account.{i}.base_url"),
-                a.name.as_str(),
-                a.base_url.as_deref()?,
-            ))
-        }));
+        .filter_map(|(i, d)| Some((format!("provider.{i}.base_url"), d.id.as_str(), d.base_url.as_deref()?)))
+        .chain(
+            config
+                .accounts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, a)| Some((format!("account.{i}.base_url"), a.name.as_str(), a.base_url.as_deref()?))),
+        );
     for (key, who, url) in urls.filter(|(_, _, url)| is_open_http(url)) {
         let at = user_text.map_or(String::new(), |(path, text)| {
-            format!(
-                "{}:{}: ",
-                path.display(),
-                find_line(text, &key).unwrap_or(1)
-            )
+            format!("{}:{}: ", path.display(), find_line(text, &key).unwrap_or(1))
         });
         warnings.push(format!(
             "{at}{who}: base_url {url} is plain http to an address that is not loopback or a private network, so a key sent there can be read on the way"
@@ -257,24 +241,15 @@ pub fn find_line(text: &str, dotted: &str) -> Option<usize> {
     // An index after an array of tables (`account.1.fallback`) picks that table's block, so the
     // line is the second `[[account]]`'s and not the first one that has the key.
     let segs: Vec<&str> = dotted.split('.').collect();
-    if let Some(at) = segs
-        .iter()
-        .position(|s| s.parse::<usize>().is_ok())
-        .filter(|at| *at > 0)
-    {
+    if let Some(at) = segs.iter().position(|s| s.parse::<usize>().is_ok()).filter(|at| *at > 0) {
         let (head, n) = (segs[..at].join("."), segs[at].parse::<usize>().unwrap_or(0));
         let header = format!("[[{head}]]");
         let lines: Vec<&str> = text.lines().collect();
-        let starts: Vec<usize> = (0..lines.len())
-            .filter(|i| lines[*i].trim() == header)
-            .collect();
+        let starts: Vec<usize> = (0..lines.len()).filter(|i| lines[*i].trim() == header).collect();
         if let Some(&from) = starts.get(n) {
             let to = starts.get(n + 1).copied().unwrap_or(lines.len());
             let block = lines[from..to].join("\n");
-            let rest = std::iter::once(head.as_str())
-                .chain(segs[at + 1..].iter().copied())
-                .collect::<Vec<_>>()
-                .join(".");
+            let rest = std::iter::once(head.as_str()).chain(segs[at + 1..].iter().copied()).collect::<Vec<_>>().join(".");
             return find_line_flat(&block, &rest).map(|l| from + l);
         }
     }
@@ -339,8 +314,7 @@ fn find_line_flat(text: &str, dotted: &str) -> Option<usize> {
 mod tests {
     use super::*;
 
-    const KEY_MSG: &str =
-        "credentials do not go in config; run: aibus account add <name> --key-stdin";
+    const KEY_MSG: &str = "credentials do not go in config; run: aibus account add <name> --key-stdin";
 
     fn p() -> &'static Path {
         Path::new("config.toml")
@@ -348,8 +322,7 @@ mod tests {
 
     #[test]
     fn a_key_under_auth_fails_with_the_spec_message_and_its_line() {
-        let text =
-            "[[account]]\nname = \"a\"\nprovider = \"anthropic\"\nauth = { key = \"sk-x\" }\n";
+        let text = "[[account]]\nname = \"a\"\nprovider = \"anthropic\"\nauth = { key = \"sk-x\" }\n";
         let e = parse_file(p(), text).unwrap_err();
         assert_eq!(e.message, KEY_MSG);
         assert_eq!(e.line, Some(4));
@@ -370,10 +343,7 @@ mod tests {
         let (_, warnings) = parse_file(p(), text).unwrap();
         assert_eq!(
             warnings,
-            [
-                "config.toml:3: unknown key limits.max_turn",
-                "config.toml:5: unknown key bogus"
-            ]
+            ["config.toml:3: unknown key limits.max_turn", "config.toml:5: unknown key bogus"]
         );
     }
 
@@ -431,10 +401,7 @@ mod tests {
         assert_eq!(c.accounts.len(), 1);
         assert_eq!(c.accounts[0].name, "u");
         let cmds = |e: &str| -> Vec<&str> {
-            c.hooks.events[e]
-                .iter()
-                .map(|h| h.command.as_str())
-                .collect()
+            c.hooks.events[e].iter().map(|h| h.command.as_str()).collect()
         };
         assert_eq!(c.hooks.pass_env, ["GH_TOKEN", "NPM_TOKEN"]);
         assert!(c.problems().is_empty());
@@ -489,9 +456,7 @@ mod tests {
 
     #[test]
     fn plain_http_to_a_public_address_warns_with_its_line_and_loopback_and_private_do_not() {
-        let provider = |url: &str| {
-            format!("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"{url}\"\n")
-        };
+        let provider = |url: &str| format!("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"{url}\"\n");
         for ok in [
             "https://api.example.com/v1",
             "http://127.0.0.1:11434/v1",
@@ -501,24 +466,12 @@ mod tests {
             "http://172.16.3.4/v1",
             "http://192.168.1.20:8080/v1",
         ] {
-            assert!(
-                load_text(&provider(ok)).unwrap().warnings.is_empty(),
-                "{ok}"
-            );
+            assert!(load_text(&provider(ok)).unwrap().warnings.is_empty(), "{ok}");
         }
-        for bad in [
-            "http://203.0.113.9/v1",
-            "http://api.example.com/v1",
-            "http://172.32.0.1/v1",
-            "http://user@8.8.8.8/v1",
-        ] {
+        for bad in ["http://203.0.113.9/v1", "http://api.example.com/v1", "http://172.32.0.1/v1", "http://user@8.8.8.8/v1"] {
             let w = load_text(&provider(bad)).unwrap().warnings;
             assert_eq!(w.len(), 1, "{bad}: {w:?}");
-            assert!(
-                w[0].contains(":4: p: base_url") && w[0].contains("plain http"),
-                "{}",
-                w[0]
-            );
+            assert!(w[0].contains(":4: p: base_url") && w[0].contains("plain http"), "{}", w[0]);
         }
         // The old account-level form is checked too.
         let w = load_text("[[account]]\nname = \"old\"\nprovider = \"openai-compatible\"\nbase_url = \"http://203.0.113.9/v1\"\n").unwrap().warnings;
@@ -543,9 +496,7 @@ mod tests {
         assert_eq!(c.accounts[0].fallback, ["b"]);
         assert!(c.accounts[1].fallback.is_empty());
         assert_eq!(c.defaults.fallback_on, [Quota, Auth, Overloaded]);
-        let c = load_text("[defaults]\nfallback_on = [\"quota\", \"rate_limit\"]\n")
-            .unwrap()
-            .config;
+        let c = load_text("[defaults]\nfallback_on = [\"quota\", \"rate_limit\"]\n").unwrap().config;
         assert_eq!(c.defaults.fallback_on, [Quota, RateLimit]);
     }
 
@@ -582,23 +533,15 @@ mod tests {
         let c: Config = Value::Table(table).try_into().unwrap();
         assert!(c.problems().is_empty(), "{:?}", c.problems());
         assert_eq!(c.providers.len(), 2);
-        let home = aibus_provider::presets::resolve("ollama-home", Some(&c.providers[0]))
-            .unwrap()
-            .unwrap();
+        let home = aibus_provider::presets::resolve("ollama-home", Some(&c.providers[0])).unwrap().unwrap();
         assert_eq!(home.headers["x-team"], "home");
-        let groq = aibus_provider::presets::resolve("groq", Some(&c.providers[1]))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            groq.base_url.as_deref(),
-            Some("https://gw.example/openai/v1")
-        );
+        let groq = aibus_provider::presets::resolve("groq", Some(&c.providers[1])).unwrap().unwrap();
+        assert_eq!(groq.base_url.as_deref(), Some("https://gw.example/openai/v1"));
         assert_eq!(groq.env_vars, ["GROQ_API_KEY"]);
     }
 
     #[test]
-    fn a_provider_table_is_rejected_for_an_unknown_api_a_bad_url_a_credential_header_and_a_repeat()
-    {
+    fn a_provider_table_is_rejected_for_an_unknown_api_a_bad_url_a_credential_header_and_a_repeat() {
         let problem = |text: &str| -> String {
             match parse_file(p(), text) {
                 Err(e) => e.message,
@@ -610,10 +553,7 @@ mod tests {
             }
         };
         assert!(problem("[[provider]]\nid = \"p\"\napi = \"grpc\"\n").contains("grpc"));
-        assert!(problem(
-            "[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"ftp://x\"\n"
-        )
-        .contains("base_url"));
+        assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nbase_url = \"ftp://x\"\n").contains("base_url"));
         assert!(problem("[[provider]]\nid = \"p\"\napi = \"openai-chat\"\nheaders = { Authorization = \"Bearer x\" }\n")
             .starts_with("provider.headers:"));
         assert!(problem("[[provider]]\nid = \"p\"\n").contains("no api"));
@@ -630,11 +570,7 @@ mod tests {
         std::fs::write(&project, "[[provider]]\nid = \"evil\"\napi = \"openai-chat\"\nbase_url = \"http://evil.example\"\n").unwrap();
         let l = load(&user, Some(&project)).unwrap();
         assert!(l.config.providers.is_empty());
-        assert!(
-            l.warnings[0].contains("[[provider]] is user-only"),
-            "{:?}",
-            l.warnings
-        );
+        assert!(l.warnings[0].contains("[[provider]] is user-only"), "{:?}", l.warnings);
     }
 
     fn load_text(text: &str) -> Result<Loaded, ConfigFileError> {
@@ -673,67 +609,27 @@ auth = { aws_profile = "work" }
 region = "us-west-2"
 "#;
         let c = load_text(text).unwrap().config;
-        let [b, v, e, p] = &c.accounts[..] else {
-            panic!("four accounts")
-        };
+        let [b, v, e, p] = &c.accounts[..] else { panic!("four accounts") };
         assert!(b.auth.sigv4 && b.region.as_deref() == Some("us-east-1"));
-        assert!(
-            v.auth.gcloud
-                && v.project.as_deref() == Some("my-project")
-                && v.region.as_deref() == Some("us-east5")
-        );
+        assert!(v.auth.gcloud && v.project.as_deref() == Some("my-project") && v.region.as_deref() == Some("us-east5"));
         assert!(e.auth.aws_env && p.auth.aws_profile.as_deref() == Some("work"));
     }
 
     #[test]
     fn the_wrong_auth_for_an_api_is_a_config_error_that_names_the_line() {
         let cases = [
-            (
-                "anthropic",
-                "auth = { sigv4 = true }",
-                "sigv4",
-                "anthropic-bedrock",
-            ),
-            (
-                "vertex",
-                "auth = { sigv4 = true }",
-                "sigv4",
-                "anthropic-bedrock",
-            ),
-            (
-                "bedrock",
-                "auth = { gcloud = true }",
-                "gcloud",
-                "anthropic-vertex",
-            ),
-            (
-                "openai",
-                "auth = { gcloud = true }",
-                "gcloud",
-                "anthropic-vertex",
-            ),
-            (
-                "vertex",
-                "auth = { aws_env = true }",
-                "aws_env",
-                "anthropic-bedrock",
-            ),
-            (
-                "anthropic",
-                "auth = { aws_profile = \"work\" }",
-                "aws_profile",
-                "anthropic-bedrock",
-            ),
+            ("anthropic", "auth = { sigv4 = true }", "sigv4", "anthropic-bedrock"),
+            ("vertex", "auth = { sigv4 = true }", "sigv4", "anthropic-bedrock"),
+            ("bedrock", "auth = { gcloud = true }", "gcloud", "anthropic-vertex"),
+            ("openai", "auth = { gcloud = true }", "gcloud", "anthropic-vertex"),
+            ("vertex", "auth = { aws_env = true }", "aws_env", "anthropic-bedrock"),
+            ("anthropic", "auth = { aws_profile = \"work\" }", "aws_profile", "anthropic-bedrock"),
         ];
         for (provider, auth, key, api) in cases {
             let text = format!("[[account]]\nname = \"x\"\nprovider = \"{provider}\"\n{auth}\n");
             let e = load_text(&text).unwrap_err();
             assert_eq!(e.line, Some(4), "{provider} {auth}: {e}");
-            assert!(
-                e.message.contains(key) && e.message.contains(api),
-                "{provider} {auth}: {}",
-                e.message
-            );
+            assert!(e.message.contains(key) && e.message.contains(api), "{provider} {auth}: {}", e.message);
         }
     }
 
@@ -769,8 +665,7 @@ region = "us-east-1"
 
     #[test]
     fn a_cloud_account_needs_its_region_and_vertex_its_project() {
-        let bedrock =
-            "[[account]]\nname = \"x\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\n";
+        let bedrock = "[[account]]\nname = \"x\"\nprovider = \"bedrock\"\nauth = { sigv4 = true }\n";
         assert!(load_text(bedrock).unwrap_err().message.contains("region"));
         let vertex = "[[account]]\nname = \"x\"\nprovider = \"vertex\"\nauth = { gcloud = true }\nregion = \"us-east5\"\n";
         assert!(load_text(vertex).unwrap_err().message.contains("project"));

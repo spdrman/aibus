@@ -10,8 +10,8 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use aibus_core::replay::replay_hash;
-use aibus_testkit::xdg_temp;
 use common::{aibus, command, ndjson, stderr};
+use aibus_testkit::xdg_temp;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 
@@ -27,15 +27,7 @@ fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
     let rec = home.path().join("rec");
     let out = aibus(
         home.path(),
-        &[
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--record",
-            rec.to_str().unwrap(),
-            "map this repo",
-        ],
+        &["run", "--json", "--agent", "explore", "--record", rec.to_str().unwrap(), "map this repo"],
     );
     assert!(out.status.success(), "{}", stderr(&out));
 
@@ -58,10 +50,7 @@ fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
     );
     // The run task executes its own tool call; nothing else may run it a second time.
     let count = |n: &str| lines.iter().filter(|l| l["type"] == n).count();
-    assert_eq!(
-        (count("ToolCallRequested"), count("ToolCallFinished")),
-        (1, 1)
-    );
+    assert_eq!((count("ToolCallRequested"), count("ToolCallFinished")), (1, 1));
 
     // Field names from 06 section 2.
     let started = &lines[0];
@@ -70,23 +59,15 @@ fn explore_prints_the_msg_sequence_and_records_a_replayable_fixture() {
     assert_eq!(started["account"], "fake");
     assert!(started["run"].as_str().unwrap().len() >= 26);
     assert!(started["t"].as_str().unwrap().ends_with('Z'));
-    let req = lines
-        .iter()
-        .find(|l| l["type"] == "ToolCallRequested")
-        .unwrap();
+    let req = lines.iter().find(|l| l["type"] == "ToolCallRequested").unwrap();
     assert_eq!(req["call"]["name"], "ls");
     assert_eq!(req["call"]["input"]["path"], ".");
-    let fin = lines
-        .iter()
-        .find(|l| l["type"] == "ToolCallFinished")
-        .unwrap();
+    let fin = lines.iter().find(|l| l["type"] == "ToolCallFinished").unwrap();
     assert_eq!(fin["call_id"], req["call"]["id"]);
     assert_eq!(fin["ok"], true);
     assert!(fin["bytes"].as_u64().unwrap() > 0);
     assert!(fin["ms"].is_u64());
-    assert!(lines
-        .iter()
-        .any(|l| l["type"] == "Stream" && l["text"].as_str().unwrap().contains("Rust workspace")));
+    assert!(lines.iter().any(|l| l["type"] == "Stream" && l["text"].as_str().unwrap().contains("Rust workspace")));
     let done = lines.iter().find(|l| l["type"] == "RunFinished").unwrap();
     assert_eq!(done["status"], "completed");
     assert_eq!(done["turns"], 2);
@@ -112,27 +93,12 @@ fn bad_usage_exits_2() {
     let home = xdg_temp();
     let h = home.path();
     assert_eq!(aibus(h, &["run"]).status.code(), Some(2));
-    assert_eq!(
-        aibus(h, &["run", "--json", "--agent", "nope", "hi"])
-            .status
-            .code(),
-        Some(3),
-        "an unknown agent is a config error"
-    );
+    assert_eq!(aibus(h, &["run", "--json", "--agent", "nope", "hi"]).status.code(), Some(3), "an unknown agent is a config error");
     // A model no account serves is exit 4 (04 section 4.1, step 7), not a usage error.
     let nobody = aibus(h, &["run", "--json", "--model", "gpt-9", "hi"]);
     assert_eq!(nobody.status.code(), Some(4));
-    assert!(
-        stderr(&nobody).contains("no account serves model gpt-9"),
-        "{}",
-        stderr(&nobody)
-    );
-    assert_eq!(
-        aibus(h, &["--permission-mode", "yolo", "run", "--json", "hi"])
-            .status
-            .code(),
-        Some(2)
-    );
+    assert!(stderr(&nobody).contains("no account serves model gpt-9"), "{}", stderr(&nobody));
+    assert_eq!(aibus(h, &["--permission-mode", "yolo", "run", "--json", "hi"]).status.code(), Some(2));
     let bypass = aibus(h, &["run", "--json", "--permission-mode", "bypass", "hi"]);
     assert_eq!(bypass.status.code(), Some(2));
     assert!(stderr(&bypass).contains("AIBUS_I_KNOW"));
@@ -142,22 +108,10 @@ fn bad_usage_exits_2() {
 fn a_failing_provider_exits_5_and_says_so_on_the_last_line() {
     let home = xdg_temp();
     let script = home.path().join("fail.ron");
-    fs::write(
-        &script,
-        r#"[Error((kind: Server, retryable: false, message: "down"))]"#,
-    )
-    .unwrap();
+    fs::write(&script, r#"[Error((kind: Server, retryable: false, message: "down"))]"#).unwrap();
     let out = aibus(
         home.path(),
-        &[
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--script",
-            script.to_str().unwrap(),
-            "hi",
-        ],
+        &["run", "--json", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"],
     );
     assert_eq!(out.status.code(), Some(5));
     let lines = ndjson(&out);
@@ -183,26 +137,17 @@ pre_tool_use = [{ matcher = "ls", command = "echo no ls today >&2; exit 2" }]
 session_end = [{ command = "touch ../ended" }]
 "#,
     );
-    let out = aibus(
-        home.path(),
-        &["run", "--json", "--agent", "explore", "map this repo"],
-    );
+    let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "map this repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
 
     let lines = ndjson(&out);
-    let fin = lines
-        .iter()
-        .find(|l| l["type"] == "ToolCallFinished")
-        .unwrap();
+    let fin = lines.iter().find(|l| l["type"] == "ToolCallFinished").unwrap();
     assert_eq!(fin["ok"], false, "the hook blocked the call");
     assert!(lines.iter().any(|l| l["type"] == "HookFired"), "{lines:?}");
     assert!(home.path().join("ended").exists(), "session_end ran");
     // Every run of a hook leaves a log under logs/hooks/<session>.
     let session = lines.last().unwrap()["session"].as_str().unwrap();
-    let logs = home
-        .path()
-        .join(".local/state/aibus/logs/hooks")
-        .join(session);
+    let logs = home.path().join(".local/state/aibus/logs/hooks").join(session);
     let mut names: Vec<String> = fs::read_dir(logs)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -210,9 +155,7 @@ session_end = [{ command = "touch ../ended" }]
     names.sort();
     let events: Vec<&str> = names.iter().map(|n| n.split('-').next().unwrap()).collect();
     assert!(
-        ["session_start", "pre_tool_use", "session_end"]
-            .iter()
-            .all(|e| events.contains(e)),
+        ["session_start", "pre_tool_use", "session_end"].iter().all(|e| events.contains(e)),
         "{names:?}"
     );
 }
@@ -220,20 +163,10 @@ session_end = [{ command = "touch ../ended" }]
 #[test]
 fn no_hooks_warns_and_nothing_runs() {
     let home = xdg_temp();
-    user_config(
-        home.path(),
-        "[hooks]\nsession_start = [{ command = \"touch ../hooked\" }]\n",
-    );
-    let out = aibus(
-        home.path(),
-        &["run", "--json", "--no-hooks", "--agent", "explore", "hi"],
-    );
+    user_config(home.path(), "[hooks]\nsession_start = [{ command = \"touch ../hooked\" }]\n");
+    let out = aibus(home.path(), &["run", "--json", "--no-hooks", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("--no-hooks: no hooks will run"),
-        "{}",
-        stderr(&out)
-    );
+    assert!(stderr(&out).contains("--no-hooks: no hooks will run"), "{}", stderr(&out));
     assert!(!home.path().join("hooked").exists());
 
     let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
@@ -244,10 +177,7 @@ fn no_hooks_warns_and_nothing_runs() {
 #[test]
 fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_is_gone() {
     let script = r#"[ToolCall(name: "bash", input: {"command": "printf %s \"$MY_TOKEN\" > passed.txt"}), Stop(ToolUse), Text("done")]"#;
-    for (config, want) in [
-        ("[hooks]\npass_env = [\"MY_TOKEN\"]\n", "hunter2-hunter2"),
-        ("", ""),
-    ] {
+    for (config, want) in [("[hooks]\npass_env = [\"MY_TOKEN\"]\n", "hunter2-hunter2"), ("", "")] {
         let home = xdg_temp();
         user_config(home.path(), config);
         let script_path = home.path().join("bash.ron");
@@ -255,33 +185,19 @@ fn pass_env_keeps_a_secret_looking_variable_in_bash_and_without_it_the_variable_
         let out = command(home.path())
             .env("AIBUS_I_KNOW", "1")
             .env("MY_TOKEN", "hunter2-hunter2")
-            .args([
-                "run",
-                "--json",
-                "--agent",
-                "general",
-                "--permission-mode",
-                "bypass",
-                "--script",
-            ])
+            .args(["run", "--json", "--agent", "general", "--permission-mode", "bypass", "--script"])
             .arg(&script_path)
             .arg("hi")
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
-        assert_eq!(
-            fs::read_to_string(home.path().join("proj/passed.txt")).unwrap(),
-            want
-        );
+        assert_eq!(fs::read_to_string(home.path().join("proj/passed.txt")).unwrap(), want);
     }
 }
 
 #[test]
 fn the_prompt_can_come_from_stdin() {
-    for args in [
-        vec!["run", "--json", "--agent", "explore"],
-        vec!["run", "--json", "--agent", "explore", "-"],
-    ] {
+    for args in [vec!["run", "--json", "--agent", "explore"], vec!["run", "--json", "--agent", "explore", "-"]] {
         let home = xdg_temp();
         let mut child = command(home.path())
             .args(&args)
@@ -290,12 +206,7 @@ fn the_prompt_can_come_from_stdin() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(b"summarise README.md\n")
-            .unwrap();
+        child.stdin.take().unwrap().write_all(b"summarise README.md\n").unwrap();
         let out = child.wait_with_output().unwrap();
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
         assert_eq!(ndjson(&out).last().unwrap()["exit_code"], 0);
@@ -307,10 +218,7 @@ fn sessions_land_under_the_xdg_state_dir_with_private_modes() {
     let home = xdg_temp();
     let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    let id = ndjson(&out).last().unwrap()["session"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let id = ndjson(&out).last().unwrap()["session"].as_str().unwrap().to_owned();
 
     let session = home.path().join(".local/state/aibus/sessions").join(&id);
     assert_eq!(mode(&session), 0o700);
@@ -339,12 +247,7 @@ fn every_xdg_variable_moves_its_directory() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(
-        fs::read_dir(x("state").join("aibus/sessions"))
-            .unwrap()
-            .count(),
-        1
-    );
+    assert_eq!(fs::read_dir(x("state").join("aibus/sessions")).unwrap().count(), 1);
     assert!(!home.path().join(".local").exists());
     assert!(x("state").join("aibus/logs/aibus.log").is_file());
 }
@@ -352,10 +255,7 @@ fn every_xdg_variable_moves_its_directory() {
 #[test]
 fn the_log_file_is_private_and_holds_no_credential() {
     let home = xdg_temp();
-    let out = aibus(
-        home.path(),
-        &["-vv", "run", "--json", "--agent", "explore", "hi"],
-    );
+    let out = aibus(home.path(), &["-vv", "run", "--json", "--agent", "explore", "hi"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let log = home.path().join(".local/state/aibus/logs/aibus.log");
     assert_eq!(mode(&log), 0o600);
@@ -379,11 +279,7 @@ fn user_scope_memory_comes_from_the_xdg_data_dir() {
     )
     .unwrap();
     fs::create_dir_all(data.join("aibus/agent-memory/mem")).unwrap();
-    fs::write(
-        data.join("aibus/agent-memory/mem/MEMORY.md"),
-        "remember-marker-42",
-    )
-    .unwrap();
+    fs::write(data.join("aibus/agent-memory/mem/MEMORY.md"), "remember-marker-42").unwrap();
     let script = home.path().join("s.ron");
     fs::write(
         &script,
@@ -393,22 +289,11 @@ fn user_scope_memory_comes_from_the_xdg_data_dir() {
     let out = command(home.path())
         .env("XDG_DATA_HOME", &data)
         .env("XDG_CONFIG_HOME", &config)
-        .args([
-            "run",
-            "--json",
-            "--agent",
-            "mem",
-            "--script",
-            script.to_str().unwrap(),
-            "go",
-        ])
+        .args(["run", "--json", "--agent", "mem", "--script", script.to_str().unwrap(), "go"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let done = ndjson(&out)
-        .into_iter()
-        .find(|l| l["type"] == "RunFinished")
-        .unwrap();
+    let done = ndjson(&out).into_iter().find(|l| l["type"] == "RunFinished").unwrap();
     assert_eq!(done["summary"], "found it");
 }
 
@@ -416,11 +301,7 @@ fn user_scope_memory_comes_from_the_xdg_data_dir() {
 fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
     let home = xdg_temp();
     let cfg = home.path().join("elsewhere.toml");
-    fs::write(
-        &cfg,
-        "[defaults]\nmodel = \"tiny\"\n[models]\ntiny = \"fake-small\"\n",
-    )
-    .unwrap();
+    fs::write(&cfg, "[defaults]\nmodel = \"tiny\"\n[models]\ntiny = \"fake-small\"\n").unwrap();
     let out = command(home.path())
         .env("AIBUS_CONFIG", &cfg)
         .args(["run", "--json", "--agent", "explore", "hi"])
@@ -434,15 +315,7 @@ fn config_aliases_pick_the_model_and_aibus_config_points_at_the_file() {
     fs::write(&other, "[defaults]\nmodel = \"nope\"\n").unwrap();
     let out = command(home.path())
         .env("AIBUS_CONFIG", &cfg)
-        .args([
-            "--config",
-            other.to_str().unwrap(),
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "hi",
-        ])
+        .args(["--config", other.to_str().unwrap(), "run", "--json", "--agent", "explore", "hi"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(4), "{}", stderr(&out));
@@ -469,11 +342,7 @@ fn a_bad_config_exits_3_with_the_line_and_unknown_keys_only_warn() {
         .output()
         .unwrap();
     assert!(out.status.success());
-    assert!(
-        stderr(&out).contains("c.toml:2: unknown key limits.max_turn"),
-        "{}",
-        stderr(&out)
-    );
+    assert!(stderr(&out).contains("c.toml:2: unknown key limits.max_turn"), "{}", stderr(&out));
 }
 
 /// Starts a run that sits in a 60 s provider delay and waits for its first event.
@@ -481,15 +350,7 @@ fn hanging_run(home: &Path) -> (std::process::Child, BufReader<std::process::Chi
     let script = home.join("slow.ron");
     fs::write(&script, "[Delay((secs: 60, nanos: 0)), Text(\"late\")]").unwrap();
     let mut child = command(home)
-        .args([
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--script",
-            script.to_str().unwrap(),
-            "hi",
-        ])
+        .args(["run", "--json", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -523,10 +384,7 @@ fn sigint_cancels_the_run_and_exits_7() {
     let last: serde_json::Value = serde_json::from_str(rest.lines().last().unwrap()).unwrap();
     assert_eq!(last["type"], "SessionEnd");
     assert_eq!(last["exit_code"], 7);
-    assert!(
-        began.elapsed() < Duration::from_secs(9),
-        "took the whole grace period"
-    );
+    assert!(began.elapsed() < Duration::from_secs(9), "took the whole grace period");
 }
 
 #[test]

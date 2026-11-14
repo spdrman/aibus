@@ -18,35 +18,18 @@ use common::*;
 fn base() -> aibus_core::App<aibus_graph::mini::MiniGraph> {
     let mut app = replay_app();
     // `replay_app` ends with the advisor reading `before_plan`; each frame sets its own.
-    app.step(Msg::AdvisorSpoke {
-        checkpoint: Checkpoint::BeforePlan,
-        advice: "split in 3 PRs".into(),
-        tokens_read: 91_000,
-    })
-    .unwrap();
+    app.step(Msg::AdvisorSpoke { checkpoint: Checkpoint::BeforePlan, advice: "split in 3 PRs".into(), tokens_read: 91_000 })
+        .unwrap();
     for _ in 0..40 {
         app.step(Msg::Tick).unwrap();
     }
     app
 }
 
-fn status(
-    app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>,
-    seq: u128,
-    st: &str,
-    p: Option<f64>,
-) {
-    poke(
-        app,
-        &format!("model:run:{}:status", run_id(seq)),
-        Value::Str(st.into()),
-    );
+fn status(app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>, seq: u128, st: &str, p: Option<f64>) {
+    poke(app, &format!("model:run:{}:status", run_id(seq)), Value::Str(st.into()));
     if let Some(p) = p {
-        poke(
-            app,
-            &format!("model:run:{}:progress", run_id(seq)),
-            Value::F64(p),
-        );
+        poke(app, &format!("model:run:{}:progress", run_id(seq)), Value::F64(p));
     }
 }
 
@@ -63,11 +46,7 @@ fn frame(name: &str, mut app: aibus_core::App<aibus_graph::mini::MiniGraph>, sty
 fn f01_before_plan_no_split() {
     let mut app = base();
     answer(&mut app, 1315, "retry_or_stop", 0.88, Verdict::Sharp);
-    app.step(Msg::CheckpointHit {
-        checkpoint: Checkpoint::BeforePlan,
-        detail: String::new(),
-    })
-    .unwrap();
+    app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforePlan, detail: String::new() }).unwrap();
     frame("c13_f01", app, false);
 }
 
@@ -75,11 +54,7 @@ fn f01_before_plan_no_split() {
 #[test]
 fn f02_split_row() {
     let mut app = base();
-    app.step(Msg::CheckpointHit {
-        checkpoint: Checkpoint::BeforePlan,
-        detail: String::new(),
-    })
-    .unwrap();
+    app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforePlan, detail: String::new() }).unwrap();
     frame("c13_f02", app, true);
 }
 
@@ -95,21 +70,9 @@ fn f03_search_done() {
 #[test]
 fn f04_same_error_twice_purple_search_card() {
     let mut app = base();
-    poke(
-        &mut app,
-        &format!("model:run:{}:error", run_id(2)),
-        map([
-            ("kind", s("provider")),
-            ("message", s("boom")),
-            ("retryable", Value::Bool(true)),
-        ]),
-    );
+    poke(&mut app, &format!("model:run:{}:error", run_id(2)), map([("kind", s("provider")), ("message", s("boom")), ("retryable", Value::Bool(true))]));
     status(&mut app, 2, "failed", None);
-    app.step(Msg::CheckpointHit {
-        checkpoint: Checkpoint::SameErrorX2,
-        detail: String::new(),
-    })
-    .unwrap();
+    app.step(Msg::CheckpointHit { checkpoint: Checkpoint::SameErrorX2, detail: String::new() }).unwrap();
     frame("c13_f04", app, true);
 }
 
@@ -120,11 +83,7 @@ fn f09_before_done_purple_return_box() {
     for seq in 2..=4 {
         status(&mut app, seq, "completed", Some(1.0));
     }
-    app.step(Msg::CheckpointHit {
-        checkpoint: Checkpoint::BeforeDone,
-        detail: String::new(),
-    })
-    .unwrap();
+    app.step(Msg::CheckpointHit { checkpoint: Checkpoint::BeforeDone, detail: String::new() }).unwrap();
     frame("c13_f09", app, false);
 }
 
@@ -137,24 +96,10 @@ fn f21_audit_done() {
 #[test]
 fn collapsed_rail_at_80x24_and_the_ledger_at_120x50() {
     let mut app = base();
-    assert_frame!(
-        render_in(&mut app, (80, 24), 0, Theme::recording()),
-        "c13_80x24_rail_collapsed"
-    );
-    app.step(Msg::Command(Command::LedgerUpdate {
-        section: "goal".into(),
-        text: "ship the auth fix".into(),
-    }))
-    .unwrap();
-    app.step(Msg::Command(Command::LedgerUpdate {
-        section: "now".into(),
-        text: "tests".into(),
-    }))
-    .unwrap();
-    assert_frame!(
-        render_in(&mut app, (120, 50), 0, Theme::recording()),
-        "c13_120x50_ledger"
-    );
+    assert_frame!(render_in(&mut app, (80, 24), 0, Theme::recording()), "c13_80x24_rail_collapsed");
+    app.step(Msg::Command(Command::LedgerUpdate { section: "goal".into(), text: "ship the auth fix".into() })).unwrap();
+    app.step(Msg::Command(Command::LedgerUpdate { section: "now".into(), text: "tests".into() })).unwrap();
+    assert_frame!(render_in(&mut app, (120, 50), 0, Theme::recording()), "c13_120x50_ledger");
 }
 
 #[test]
@@ -179,16 +124,9 @@ fn rig_with_tools(theme: Theme) -> Rig {
 fn transcript_collapsed_and_expanded() {
     let mut r = rig_with_tools(Theme::recording());
     let text = r.text();
-    assert!(
-        text.contains("▸ bash  cargo test  (1.2 s, 4 B)")
-            || text.contains("▸ bash  cargo test  (1.2 s,"),
-        "{text}"
-    );
+    assert!(text.contains("▸ bash  cargo test  (1.2 s, 4 B)") || text.contains("▸ bash  cargo test  (1.2 s,"), "{text}");
     assert!(text.contains("⌁ compacted at 167k"), "{text}");
-    assert!(
-        text.contains("lead · sonnet · acct"),
-        "the account is in the header: {text}"
-    );
+    assert!(text.contains("lead · sonnet · acct"), "the account is in the header: {text}");
     assert_frame!(r.frame(), "c13_transcript_collapsed");
     r.key(crossterm::event::KeyCode::Tab);
     r.key(crossterm::event::KeyCode::Enter);
@@ -210,13 +148,8 @@ fn permission_modal() {
 fn agents_screen() {
     let mut app = session();
     let defs = common::defs(&["search", "grep", "audit"]);
-    app.step(Msg::AgentsReloaded {
-        defs,
-        warnings: vec![],
-    })
-    .unwrap();
-    app.step(Msg::Command(Command::OpenScreen(Screen::Agents)))
-        .unwrap();
+    app.step(Msg::AgentsReloaded { defs, warnings: vec![] }).unwrap();
+    app.step(Msg::Command(Command::OpenScreen(Screen::Agents))).unwrap();
     let r = Rig::new(app, (98, 46), Theme::recording());
     assert_frame!(r.frame(), "c13_agents");
 }

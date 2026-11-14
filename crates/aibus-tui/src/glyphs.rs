@@ -102,17 +102,12 @@ mod tests {
         let set: String = GLYPHS.iter().map(|(u, _)| *u).collect();
         assert_eq!(set, "◆◇◐◓◑◒✓✗»→▮█▌●·▸▾◂◌");
         // The thirteen the spec spells out, in its order.
-        let spelled = [
-            "*", "o", "|", "/", "-", "\\", "ok", "x", ">>", "->", "#", "=", ".",
-        ];
+        let spelled = ["*", "o", "|", "/", "-", "\\", "ok", "x", ">>", "->", "#", "=", "."];
         let ours: Vec<&str> = GLYPHS.iter().map(|(_, a)| *a).collect();
         for want in spelled {
             assert!(ours.contains(&want), "{want}");
         }
-        assert!(GLYPHS
-            .iter()
-            .chain(DRAWING.iter())
-            .all(|(_, a)| a.is_ascii()));
+        assert!(GLYPHS.iter().chain(DRAWING.iter()).all(|(_, a)| a.is_ascii()));
     }
 
     #[test]
@@ -120,19 +115,12 @@ mod tests {
         let mut t = Theme::recording();
         assert_eq!(t.g("✓"), "✓");
         t.ascii = true;
-        assert_eq!(
-            (t.g("✓"), t.g("»"), t.g("→"), t.g("◆")),
-            ("ok", ">>", "->", "*")
-        );
+        assert_eq!((t.g("✓"), t.g("»"), t.g("→"), t.g("◆")), ("ok", ">>", "->", "*"));
     }
 
     #[test]
     fn the_sweep_leaves_nothing_but_ascii_behind() {
-        let all: String = GLYPHS
-            .iter()
-            .chain(DRAWING.iter())
-            .map(|(u, _)| *u)
-            .collect();
+        let all: String = GLYPHS.iter().chain(DRAWING.iter()).map(|(u, _)| *u).collect();
         let mut buf = Buffer::empty(Rect::new(0, 0, 60, 2));
         buf.set_string(0, 0, &all, ratatui::style::Style::new());
         buf.set_string(0, 1, "é ok", ratatui::style::Style::new());

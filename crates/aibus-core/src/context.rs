@@ -34,12 +34,7 @@ pub struct ContextInput<'a> {
 /// The branch and short status of the repository at `cwd`; `None` outside one or without `git`.
 pub fn gather_git(cwd: &Path) -> Option<Git> {
     let git = |args: &[&str]| {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(cwd)
-            .args(args)
-            .output()
-            .ok()?;
+        let out = Command::new("git").arg("-C").arg(cwd).args(args).output().ok()?;
         out.status
             .success()
             .then(|| String::from_utf8_lossy(&out.stdout).trim_end().to_owned())
@@ -105,6 +100,7 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
         Some(out)
     }
 
+
     let mut system = format!(
         "{}\n\n<environment>\ncwd: {}\nplatform: {}\ndate: {}\n",
         def.system_prompt.trim_end(),
@@ -151,8 +147,7 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
             }
         ));
     }
-    if let Some(memory) = memory_dir(def, root, input.data_home).and_then(|dir| memory_block(&dir))
-    {
+    if let Some(memory) = memory_dir(def, root, input.data_home).and_then(|dir| memory_block(&dir)) {
         blocks.push(memory);
     }
     blocks.push(input.prompt.to_owned());

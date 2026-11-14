@@ -11,8 +11,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{ConfigError, ProviderError, RateLimitInfo};
-use crate::presets::{CompatFlag, ProviderDef};
 use crate::secret::{AuthMethodKind, Credential};
+use crate::presets::{CompatFlag, ProviderDef};
 use crate::types::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -340,9 +340,7 @@ impl ProviderRegistry {
             let Some(def) = &cfg.def else { continue };
             let api = def
                 .api
-                .ok_or_else(|| {
-                    ConfigError::Invalid(id.clone(), "the definition has no api".into())
-                })?
+                .ok_or_else(|| ConfigError::Invalid(id.clone(), "the definition has no api".into()))?
                 .as_str();
             // No adapter for this api (a test registry of stand-ins): the factory of the same
             // id, if there is one, builds from the config as it did before definitions.
@@ -364,10 +362,7 @@ impl ProviderRegistry {
             if providers.contains_key(id) {
                 continue;
             }
-            let cfg = configs
-                .get(id)
-                .filter(|c| c.def.is_none() || unserved.contains(id))
-                .cloned();
+            let cfg = configs.get(id).filter(|c| c.def.is_none() || unserved.contains(id)).cloned();
             // A provider that needs settings (`openai-compatible` needs a base URL) is left out
             // while no account uses it, instead of failing everyone else's startup.
             let built = match f.build(&cfg.clone().unwrap_or_default()) {

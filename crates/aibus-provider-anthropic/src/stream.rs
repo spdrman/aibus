@@ -15,16 +15,9 @@ use ulid::Ulid;
 /// A content block that has started and not stopped.
 enum Open {
     Text(String),
-    Thinking {
-        text: String,
-        signature: Option<String>,
-    },
+    Thinking { text: String, signature: Option<String> },
     Redacted(String),
-    Tool {
-        id: ToolCallId,
-        name: SmolStr,
-        json: String,
-    },
+    Tool { id: ToolCallId, name: SmolStr, json: String },
 }
 
 pub struct Turn {
@@ -101,10 +94,7 @@ impl Turn {
         let v: Value = serde_json::from_str(&ev.data).map_err(|e| malformed(&e.to_string()))?;
         let index = v["index"].as_u64().unwrap_or(0);
         let mut out = Vec::new();
-        match v["type"]
-            .as_str()
-            .ok_or_else(|| malformed("event without a type"))?
-        {
+        match v["type"].as_str().ok_or_else(|| malformed("event without a type"))? {
             "message_start" => {
                 self.message_id = v["message"]["id"].as_str().map(str::to_owned);
                 self.take_usage(&v["message"]["usage"]);
@@ -119,28 +109,15 @@ impl Turn {
                         }
                         Open::Text(t.to_owned())
                     }
-                    Some("thinking") => Open::Thinking {
-                        text: String::new(),
-                        signature: None,
-                    },
+                    Some("thinking") => Open::Thinking { text: String::new(), signature: None },
                     Some("redacted_thinking") => {
                         Open::Redacted(b["data"].as_str().unwrap_or_default().to_owned())
                     }
                     Some("tool_use") => {
-                        let name: SmolStr = b["name"]
-                            .as_str()
-                            .ok_or_else(|| malformed("tool_use without a name"))?
-                            .into();
+                        let name: SmolStr = b["name"].as_str().ok_or_else(|| malformed("tool_use without a name"))?.into();
                         let id = ToolCallId(Ulid::new());
-                        out.push(StreamChunk::ToolUseStart {
-                            id,
-                            name: name.clone(),
-                        });
-                        Open::Tool {
-                            id,
-                            name,
-                            json: String::new(),
-                        }
+                        out.push(StreamChunk::ToolUseStart { id, name: name.clone() });
+                        Open::Tool { id, name, json: String::new() }
                     }
                     // Server-side tools and whatever comes next: not ours to show.
                     _ => return Ok(out),
@@ -164,17 +141,12 @@ impl Turn {
                         out.push(StreamChunk::ThinkingDelta(piece.to_owned()));
                     }
                     (Some("signature_delta"), Open::Thinking { signature, .. }) => {
-                        signature
-                            .get_or_insert_with(String::new)
-                            .push_str(d["signature"].as_str().unwrap_or_default());
+                        signature.get_or_insert_with(String::new).push_str(d["signature"].as_str().unwrap_or_default());
                     }
                     (Some("input_json_delta"), Open::Tool { id, json, .. }) => {
                         let piece = d["partial_json"].as_str().unwrap_or_default();
                         json.push_str(piece);
-                        out.push(StreamChunk::ToolUseInputDelta {
-                            id: *id,
-                            json_fragment: piece.to_owned(),
-                        });
+                        out.push(StreamChunk::ToolUseInputDelta { id: *id, json_fragment: piece.to_owned() });
                     }
                     _ => {}
                 }
@@ -182,33 +154,19 @@ impl Turn {
             "content_block_stop" => match self.open.remove(&index) {
                 Some(Open::Text(t)) => self.blocks.push(ContentBlock::Text(t)),
                 Some(Open::Thinking { text, signature }) => {
-                    self.blocks.push(ContentBlock::Thinking {
-                        text,
-                        redacted: false,
-                        signature,
-                    });
+                    self.blocks.push(ContentBlock::Thinking { text, redacted: false, signature });
                 }
                 Some(Open::Redacted(data)) => {
-                    self.blocks.push(ContentBlock::Thinking {
-                        text: data,
-                        redacted: true,
-                        signature: None,
-                    });
+                    self.blocks.push(ContentBlock::Thinking { text: data, redacted: true, signature: None });
                 }
                 Some(Open::Tool { id, name, json }) => {
                     // A tool with no arguments streams no JSON at all.
                     let input = if json.trim().is_empty() {
                         Value::Object(Default::default())
                     } else {
-                        serde_json::from_str(&json)
-                            .map_err(|e| malformed(&format!("tool input: {e}")))?
+                        serde_json::from_str(&json).map_err(|e| malformed(&format!("tool input: {e}")))?
                     };
-                    self.blocks.push(ContentBlock::ToolUse {
-                        id,
-                        name,
-                        input,
-                        signature: None,
-                    });
+                    self.blocks.push(ContentBlock::ToolUse { id, name, input, signature: None });
                     out.push(StreamChunk::ToolUseEnd { id });
                 }
                 None => {}
@@ -261,11 +219,7 @@ impl Turn {
             stop: self.stop.unwrap_or(StopReason::EndTurn),
             request_id: request_id.or(self.message_id),
             rate_limit: None,
-            message: Message {
-                role: MessageRole::Assistant,
-                blocks: self.blocks,
-                at: SystemTime::now(),
-            },
+            message: Message { role: MessageRole::Assistant, blocks: self.blocks, at: SystemTime::now() },
         })
     }
 }

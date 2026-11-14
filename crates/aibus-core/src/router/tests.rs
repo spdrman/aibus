@@ -49,13 +49,10 @@ fn no_logprobs() -> Capabilities {
 
 #[tokio::test]
 async fn a_logprob_capable_provider_gives_p_from_the_logprobs_at_16_tokens() {
-    let fake = Arc::new(FakeProvider::new(Script::new().then(Step::RouterAnswer {
-        choice: "retry once".into(),
-        p: 0.94,
-    })));
-    let a = ask(&seat(fake.clone()), &question(), &CancellationToken::new())
-        .await
-        .unwrap();
+    let fake = Arc::new(FakeProvider::new(
+        Script::new().then(Step::RouterAnswer { choice: "retry once".into(), p: 0.94 }),
+    ));
+    let a = ask(&seat(fake.clone()), &question(), &CancellationToken::new()).await.unwrap();
     assert_eq!(a.choice, "retry once");
     assert!((a.p - 0.94).abs() < 1e-3);
     assert_eq!(a.source, PSource::Logprob);
@@ -70,39 +67,26 @@ async fn without_logprobs_p_is_self_reported_and_the_threshold_decides_the_verdi
     let fake = Arc::new(
         FakeProvider::new(
             Script::new()
-                .then(Step::RouterAnswer {
-                    choice: "stop + ask".into(),
-                    p: 0.58,
-                })
+                .then(Step::RouterAnswer { choice: "stop + ask".into(), p: 0.58 })
                 .then(Step::Stop(aibus_provider::StopReason::EndTurn))
-                .then(Step::RouterAnswer {
-                    choice: "stop + ask".into(),
-                    p: 0.85,
-                }),
+                .then(Step::RouterAnswer { choice: "stop + ask".into(), p: 0.85 }),
         )
         .with_capabilities(no_logprobs()),
     );
     let s = seat(fake.clone());
-    let a = ask(&s, &question(), &CancellationToken::new())
-        .await
-        .unwrap();
+    let a = ask(&s, &question(), &CancellationToken::new()).await.unwrap();
     assert_eq!((a.source, a.verdict), (PSource::SelfReport, Verdict::Split));
     assert!(!fake.requests()[0].request.logprobs);
-    let b = ask(&s, &question(), &CancellationToken::new())
-        .await
-        .unwrap();
+    let b = ask(&s, &question(), &CancellationToken::new()).await.unwrap();
     assert_eq!(b.verdict, Verdict::Sharp, "the threshold itself is sharp");
 }
 
 #[tokio::test]
 async fn an_answer_outside_the_choices_is_no_answer() {
-    let fake = Arc::new(FakeProvider::new(Script::new().then(Step::RouterAnswer {
-        choice: "give up".into(),
-        p: 0.99,
-    })));
-    assert!(ask(&seat(fake), &question(), &CancellationToken::new())
-        .await
-        .is_err());
+    let fake = Arc::new(FakeProvider::new(
+        Script::new().then(Step::RouterAnswer { choice: "give up".into(), p: 0.99 }),
+    ));
+    assert!(ask(&seat(fake), &question(), &CancellationToken::new()).await.is_err());
 }
 
 #[test]
@@ -119,12 +103,7 @@ fn parse_takes_a_choice_case_insensitively_or_by_number() {
 #[test]
 fn joint_p_multiplies_the_tokens_that_spell_the_choice() {
     let lp = |t: &str, p: f32| (t.to_owned(), p.ln());
-    let tokens = [
-        lp("{\"choice\":\"", 0.99),
-        lp("retry", 0.9),
-        lp(" once", 0.5),
-        lp("\",\"p\":0.9}", 0.1),
-    ];
+    let tokens = [lp("{\"choice\":\"", 0.99), lp("retry", 0.9), lp(" once", 0.5), lp("\",\"p\":0.9}", 0.1)];
     let p = joint_p("retry once", &tokens).unwrap();
     assert!((p - 0.45).abs() < 1e-4, "{p}");
     assert!(joint_p("retry once", &[]).is_none());

@@ -34,23 +34,14 @@ fn the_launch_command_is_dim_until_the_first_submit() {
     r.ui.prompt.placeholder = "aibus --model sonnet".into();
     r.settle();
     assert!(r.text().contains("aibus --model sonnet"));
-    assert_eq!(
-        r.cell_of("aibus --model sonnet").fg,
-        Theme::recording().dim_text
-    );
+    assert_eq!(r.cell_of("aibus --model sonnet").fg, Theme::recording().dim_text);
     r.press('a');
     assert!(!r.text().contains("aibus --model sonnet"));
     r.key(K::Backspace);
-    assert!(
-        r.text().contains("aibus --model sonnet"),
-        "still nothing sent"
-    );
+    assert!(r.text().contains("aibus --model sonnet"), "still nothing sent");
     r.type_text("go");
     r.key(K::Enter);
-    assert!(
-        !r.text().contains("aibus --model sonnet"),
-        "gone for good after the first submit"
-    );
+    assert!(!r.text().contains("aibus --model sonnet"), "gone for good after the first submit");
 }
 
 #[test]
@@ -85,10 +76,7 @@ fn alt_enter_grows_the_prompt_to_five_rows() {
     // The frame still holds a dashboard under the taller prompt, and the last line is in view.
     assert!(r.text().contains("session log"));
     assert!(r.text().contains("line 6"));
-    assert!(r
-        .key_with(K::Enter, M::NONE)
-        .iter()
-        .any(|m| matches!(m, Msg::SubmitPrompt { text } if text.contains("line 0\nline 1"))));
+    assert!(r.key_with(K::Enter, M::NONE).iter().any(|m| matches!(m, Msg::SubmitPrompt { text } if text.contains("line 0\nline 1"))));
     assert_eq!(r.ui.drawn.areas.prompt.height, 1);
 }
 
@@ -117,32 +105,17 @@ fn tab_opens_a_completion_popup_for_commands_and_agents() {
     r.press('/');
     r.key(K::Tab);
     let text = r.text();
-    for c in [
-        "/fork",
-        "/delegate",
-        "/compact",
-        "/clear",
-        "/handoff",
-        "/ledger",
-        "/model",
-        "/advisor",
-    ] {
+    for c in ["/fork", "/delegate", "/compact", "/clear", "/handoff", "/ledger", "/model", "/advisor"] {
         assert!(text.contains(c), "the popup lacks {c}");
     }
     // The popup shows eight rows and follows the selection, so walk to /help and then to the end.
     let items = r.ui.prompt.popup.as_ref().unwrap().items.clone();
-    let help = items
-        .iter()
-        .position(|i| i.starts_with("/help"))
-        .expect("/help is offered");
+    let help = items.iter().position(|i| i.starts_with("/help")).expect("/help is offered");
     for _ in 0..help {
         r.key(K::Tab);
     }
     for c in ["/workflow", "/agents", "/accounts", "/help"] {
-        assert!(
-            r.text().contains(c),
-            "the popup lacks {c} after walking down"
-        );
+        assert!(r.text().contains(c), "the popup lacks {c} after walking down");
     }
     for _ in help..items.len() - 1 {
         r.key(K::Tab);
@@ -182,14 +155,8 @@ fn every_slash_command_becomes_a_command() {
     assert!(run("/delegate search map it").contains("Delegate"));
     assert_eq!(run("/handoff"), "Command(CreateHandoff { outcome: None })");
     assert!(run("/ledger now ship").contains("LedgerUpdate"));
-    assert_eq!(
-        run("/model opus"),
-        "Command(SetModel { target: Lead, model: \"opus\" })"
-    );
-    assert_eq!(
-        run("/advisor opus"),
-        "Command(SetModel { target: Advisor, model: \"opus\" })"
-    );
+    assert_eq!(run("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
+    assert_eq!(run("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
     assert!(run("/workflow review the diff").contains("Workflow"));
     assert_eq!(run("/agents"), "Command(OpenScreen(Agents))");
     assert_eq!(modal(&r).as_deref(), Some("agents"));
@@ -272,48 +239,24 @@ fn a_permission_request_opens_the_modal_and_y_n_a_answer_it() {
     assert_eq!(modal(&r).as_deref(), Some("permission"));
     let text = r.text();
     assert!(text.contains("permission · lead (run "), "{text}");
-    assert!(
-        text.contains("cargo test")
-            && text.contains("Allow once")
-            && text.contains("Allow always")
-            && text.contains("Deny"),
-        "{text}"
-    );
-    assert_eq!(
-        r.cell_of("permission").fg,
-        Theme::recording().warn,
-        "the border is yellow"
-    );
+    assert!(text.contains("cargo test") && text.contains("Allow once") && text.contains("Allow always") && text.contains("Deny"), "{text}");
+    assert_eq!(r.cell_of("permission").fg, Theme::recording().warn, "the border is yellow");
     for (key, want) in [('y', "Allow"), ('n', "Deny"), ('a', "AllowSession")] {
         let mut app = session();
         ask(&mut app, 1, "lead", 7, "bash: cargo test");
         let mut r = rig_with(app);
         let msgs = names(&r.press(key));
         assert_eq!(msgs.len(), 1);
-        assert!(
-            msgs[0].contains(&format!("decision: {want}")),
-            "{key}: {msgs:?}"
-        );
+        assert!(msgs[0].contains(&format!("decision: {want}")), "{key}: {msgs:?}");
         // The answer reaches the reducer through the graph in the real loop; here it is stepped.
-        assert_eq!(
-            modal(&r),
-            None,
-            "{key}: the queue is empty, the modal is gone"
-        );
+        assert_eq!(modal(&r), None, "{key}: the queue is empty, the modal is gone");
     }
 }
 
 #[test]
 fn several_prompts_queue_and_a_background_run_is_named() {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "grep",
-        "finds call sites",
-        Some(0.3),
-        "running",
-    );
+    worker(&mut app, 2, "grep", "finds call sites", Some(0.3), "running");
     ask(&mut app, 2, "grep", 8, "bash: rg foo");
     ask(&mut app, 1, "lead", 9, "bash: ls");
     let mut r = rig_with(app);
@@ -322,10 +265,7 @@ fn several_prompts_queue_and_a_background_run_is_named() {
     assert!(text.contains("background run grep"), "{text}");
     assert!(r.text().contains("! 2 permission waiting (p)"));
     r.press('y');
-    assert!(
-        r.text().contains("permission · lead"),
-        "the next prompt is up"
-    );
+    assert!(r.text().contains("permission · lead"), "the next prompt is up");
     assert_eq!(modal(&r).as_deref(), Some("permission"));
 }
 
@@ -336,10 +276,7 @@ fn esc_hides_the_modal_and_p_or_the_alert_brings_it_back() {
     let mut r = rig_with(app);
     r.key(K::Esc);
     assert_eq!(modal(&r), None);
-    assert!(
-        r.text().contains("! 1 permission waiting (p)"),
-        "the alert stays until the queue is empty"
-    );
+    assert!(r.text().contains("! 1 permission waiting (p)"), "the alert stays until the queue is empty");
     // `p` is global but the prompt has the keys: focus the cards first.
     r.app.step(Msg::Ui(UiIntent::Focus(Pane::Cards))).unwrap();
     r.settle();
@@ -372,21 +309,11 @@ fn buttons_do_what_the_keys_do_and_an_outside_click_never_denies() {
     let msgs = r.down(0, 0);
     r.up(0, 0);
     assert!(msgs.is_empty());
-    assert_eq!(
-        modal(&r).as_deref(),
-        Some("permission"),
-        "an outside click leaves the modal alone"
-    );
+    assert_eq!(modal(&r).as_deref(), Some("permission"), "an outside click leaves the modal alone");
     // Cancel hides it without an answer, like Esc.
     r.click(HitId::Button("cancel"));
     assert_eq!(modal(&r), None);
-    assert_eq!(
-        r.app
-            .graph
-            .read_key("model:permissions:open")
-            .map(as_list_len),
-        Some(1)
-    );
+    assert_eq!(r.app.graph.read_key("model:permissions:open").map(as_list_len), Some(1));
 }
 
 /// The random ids of a permission prompt, blanked so two sessions compare equal.
@@ -412,16 +339,8 @@ fn e_edits_the_input_first() {
     assert!(r.text().contains("run instead: cargo test"), "{}", r.text());
     r.type_text(" -p core");
     let msgs = names(&r.key(K::Enter));
-    assert!(
-        msgs.iter()
-            .any(|m| m.contains("Permission") && m.contains("Deny")),
-        "{msgs:?}"
-    );
-    assert!(
-        msgs.iter()
-            .any(|m| m.contains("Run this instead: cargo test -p core")),
-        "{msgs:?}"
-    );
+    assert!(msgs.iter().any(|m| m.contains("Permission") && m.contains("Deny")), "{msgs:?}");
+    assert!(msgs.iter().any(|m| m.contains("Run this instead: cargo test -p core")), "{msgs:?}");
 }
 
 // ---- the transcript -------------------------------------------------------------------------
@@ -434,20 +353,14 @@ fn tr_rig() -> Rig {
 fn a_collapsed_call_is_one_line_and_enter_expands_it() {
     let mut r = tr_rig();
     let text = r.text();
-    assert!(
-        text.contains("▸ bash  cargo test  (1.2 s, 4 KiB)"),
-        "{text}"
-    );
+    assert!(text.contains("▸ bash  cargo test  (1.2 s, 4 KiB)"), "{text}");
     assert!(text.contains("⌁ compacted at 167k"), "{text}");
     assert!(text.contains("lead · sonnet · acct"), "{text}");
     r.key(K::Tab);
     r.key(K::Enter);
     let text = r.text();
     assert!(text.contains("▾ bash  cargo test"), "{text}");
-    assert!(
-        text.contains("\"command\": \"cargo test\""),
-        "the input is shown when open: {text}"
-    );
+    assert!(text.contains("\"command\": \"cargo test\""), "the input is shown when open: {text}");
     // The same by clicking the row.
     let mut r = tr_rig();
     let (x, y) = r.find("▸ bash").unwrap();
@@ -460,10 +373,7 @@ fn a_collapsed_call_is_one_line_and_enter_expands_it() {
 fn r_x_m_c_and_capital_r_follow_the_state_of_the_run() {
     // A running lead: x stops it, m writes to it, c compacts it; r and R do nothing.
     let mut r = tr_rig();
-    assert!(
-        r.press('r').is_empty(),
-        "r only shows on a retryable failure"
-    );
+    assert!(r.press('r').is_empty(), "r only shows on a retryable failure");
     assert!(has(&r.press('x'), "Cancel"));
     assert!(has(&r.press('c'), "Compact"));
     assert!(r.press('R').is_empty());
@@ -476,11 +386,7 @@ fn r_x_m_c_and_capital_r_follow_the_state_of_the_run() {
         let mut app = tool_app();
         fail(&mut app, 1, retryable);
         let mut r = rig_with(app);
-        assert_eq!(
-            r.text().contains("Retry"),
-            want,
-            "the button only shows when it applies"
-        );
+        assert_eq!(r.text().contains("Retry"), want, "the button only shows when it applies");
         assert_eq!(has(&r.press('r'), "Retry"), want, "retryable = {retryable}");
     }
     // A partial run: R resumes it with a message you can change.
@@ -498,10 +404,7 @@ fn square_brackets_step_the_view_through_graph_time() {
     let mut r = tr_rig();
     assert!(r.text().contains("Done."));
     r.press('[');
-    assert!(
-        !r.text().contains("Done."),
-        "one change back, the last words are not there yet"
-    );
+    assert!(!r.text().contains("Done."), "one change back, the last words are not there yet");
     assert!(r.text().contains("stepped back to t="));
     r.press(']');
     assert!(r.text().contains("Done.") && !r.text().contains("stepped back"));
@@ -520,14 +423,7 @@ fn square_brackets_step_the_view_through_graph_time() {
 fn a_finished_runs_transcript_streams_back_from_disk() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "grep",
-        "finds call sites",
-        Some(1.0),
-        "running",
-    );
+    worker(&mut app, 2, "grep", "finds call sites", Some(1.0), "running");
     text_stream(&mut app, 2, "in memory");
     finish(&mut app, 2, RunStatus::Completed);
     let run = run_id(2);
@@ -540,22 +436,13 @@ fn a_finished_runs_transcript_streams_back_from_disk() {
     let path = dir.path().join(run.to_string());
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(path.join("transcript.jsonl"), lines.join("\n")).unwrap();
-    app.step(Msg::Command(Command::OpenTranscript(run)))
-        .unwrap();
-    assert!(
-        aibus_tui::app::evicted_open(&app.graph, &app.store).is_some(),
-        "the content went when the run finished"
-    );
+    app.step(Msg::Command(Command::OpenTranscript(run))).unwrap();
+    assert!(aibus_tui::app::evicted_open(&app.graph, &app.store).is_some(), "the content went when the run finished");
     let n = aibus_tui::app::reload_open(&mut app, dir.path()).unwrap();
     assert_eq!(n, 4);
     let r = rig_with(app);
     let text = r.text();
-    for want in [
-        "finds call sites",
-        "Searching.",
-        "▸ grep  fn main  (0 ms, 2 KiB)",
-        "Found one call site.",
-    ] {
+    for want in ["finds call sites", "Searching.", "▸ grep  fn main  (0 ms, 2 KiB)", "Found one call site."] {
         assert!(text.contains(want), "{want}: {text}");
     }
 }
@@ -564,12 +451,7 @@ fn a_finished_runs_transcript_streams_back_from_disk() {
 fn the_lines_of_the_open_transcript_are_a_store_handle_that_moves_with_the_text() {
     let mut r = tr_rig();
     let key = format!("view:transcript:{}:lines", run_id(1));
-    let handle = |r: &Rig| match r
-        .app
-        .graph
-        .read_key(&key)
-        .and_then(|v| aibus_core::state::value::get(v, "lines"))
-    {
+    let handle = |r: &Rig| match r.app.graph.read_key(&key).and_then(|v| aibus_core::state::value::get(v, "lines")) {
         Some(Value::Handle(h)) => h.clone(),
         other => panic!("not a handle: {other:?}"),
     };
@@ -577,25 +459,15 @@ fn the_lines_of_the_open_transcript_are_a_store_handle_that_moves_with_the_text(
     text_stream(&mut r.app, 1, " more");
     assert_ne!(handle(&r).version, before.version);
     assert_eq!(handle(&r).store, "lines");
-    assert!(
-        r.app
-            .graph
-            .read_key(&format!("view:transcript:{}:lines", run_id(2)))
-            .is_none(),
-        "only the open run has one"
-    );
+    assert!(r.app.graph.read_key(&format!("view:transcript:{}:lines", run_id(2))).is_none(), "only the open run has one");
 }
 
 #[test]
 fn a_stream_commit_wraps_only_the_tail_of_a_100k_line_transcript() {
     let mut app = aibus_testkit::tui::heavy_app();
-    app.step(Msg::Command(Command::OpenTranscript(run_id(1))))
-        .unwrap();
+    app.step(Msg::Command(Command::OpenTranscript(run_id(1)))).unwrap();
     let mut r = rig_with(app);
-    assert!(
-        r.text().contains("line 099999"),
-        "the newest line is at the bottom"
-    );
+    assert!(r.text().contains("line 099999"), "the newest line is at the bottom");
     let before = r.app.store.wrap_calls();
     for i in 0..5 {
         text_stream(&mut r.app, 1, &format!("one more token {i}"));
@@ -609,8 +481,7 @@ fn a_stream_commit_wraps_only_the_tail_of_a_100k_line_transcript() {
 #[test]
 fn scrolling_away_pauses_following_and_a_button_jumps_back() {
     let mut app = aibus_testkit::tui::heavy_app();
-    app.step(Msg::Command(Command::OpenTranscript(run_id(1))))
-        .unwrap();
+    app.step(Msg::Command(Command::OpenTranscript(run_id(1)))).unwrap();
     let mut r = rig_with(app);
     assert!(!r.text().contains("jump to latest"));
     let (x, y) = (10, 10);
@@ -628,13 +499,7 @@ fn scrolling_away_pauses_following_and_a_button_jumps_back() {
     // The keyboard does the same.
     r.mouse(Mk::ScrollUp, x, y);
     let by_key = r.press('f');
-    assert_eq!(
-        names(&by_mouse),
-        names(&by_key)
-            .iter()
-            .map(|s| s.replace("Live", "Bottom"))
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(names(&by_mouse), names(&by_key).iter().map(|s| s.replace("Live", "Bottom")).collect::<Vec<_>>());
     assert!(!r.text().contains("jump to latest"));
 }
 
@@ -689,12 +554,7 @@ fn ctrl_c_with_nothing_selected_still_cancels_on_the_dashboard() {
 
 #[test]
 fn transcript_buttons_do_what_their_keys_do() {
-    let table = [
-        ("close", K::Esc),
-        ("older", K::Char('[')),
-        ("stop", K::Char('x')),
-        ("compact", K::Char('c')),
-    ];
+    let table = [("close", K::Esc), ("older", K::Char('[')), ("stop", K::Char('x')), ("compact", K::Char('c'))];
     for (button, key) in table {
         let mut by_key = tr_rig();
         let mut by_mouse = tr_rig();
@@ -719,10 +579,7 @@ fn the_palette_is_fuzzy_over_commands_agents_and_runs() {
     }
     r.type_text("aud");
     let text = r.text();
-    assert!(
-        text.contains("delegate to audit") && !text.contains("agents screen"),
-        "{text}"
-    );
+    assert!(text.contains("delegate to audit") && !text.contains("agents screen"), "{text}");
     let msgs = names(&r.key(K::Enter));
     assert!(msgs.iter().any(|m| m.contains("CloseModal")));
     assert_eq!(r.ui.prompt.text, "@agent-audit ");
@@ -738,12 +595,7 @@ fn the_palette_is_fuzzy_over_commands_agents_and_runs() {
     r.key(K::Esc);
     open(&mut r);
     r.type_text("accounts");
-    assert!(
-        r.click(HitId::ListRow(0))
-            .iter()
-            .all(|m| matches!(m, Msg::Ui(UiIntent::Pick(_)))),
-        "a click only selects the row"
-    );
+    assert!(r.click(HitId::ListRow(0)).iter().all(|m| matches!(m, Msg::Ui(UiIntent::Pick(_)))), "a click only selects the row");
     assert!(by_key.iter().any(|m| m.contains("OpenScreen(Accounts)")));
     r.click(HitId::Button("run"));
     assert_eq!(modal(&r).as_deref(), Some("accounts"));
@@ -758,24 +610,14 @@ fn the_palette_is_fuzzy_over_commands_agents_and_runs() {
 fn the_agents_screen_has_n_e_v_d() {
     let mut app = session();
     with_agents(&mut app, &["search", "grep"]);
-    app.step(Msg::Command(Command::OpenScreen(Screen::Agents)))
-        .unwrap();
+    app.step(Msg::Command(Command::OpenScreen(Screen::Agents))).unwrap();
     let mut r = rig_with(app);
     let text = r.text();
-    for want in [
-        "search",
-        "project",
-        "haiku",
-        "read, grep",
-        "You are search.",
-    ] {
+    for want in ["search", "project", "haiku", "read, grep", "You are search."] {
         assert!(text.contains(want), "{want}: {text}");
     }
     r.press('j');
-    assert!(
-        r.text().contains("You are grep."),
-        "the preview follows the selection"
-    );
+    assert!(r.text().contains("You are grep."), "the preview follows the selection");
     r.press('k');
     r.press('e');
     assert_eq!(r.jobs, [Job::EditFile("/p/.aibus/agents/search.md".into())]);
@@ -795,8 +637,7 @@ fn the_agents_screen_has_n_e_v_d() {
     // The buttons are the same actions.
     let mut app = session();
     with_agents(&mut app, &["search", "grep"]);
-    app.step(Msg::Command(Command::OpenScreen(Screen::Agents)))
-        .unwrap();
+    app.step(Msg::Command(Command::OpenScreen(Screen::Agents))).unwrap();
     let mut r = rig_with(app);
     r.click(HitId::ListRow(1));
     r.click(HitId::Button("edit"));
@@ -808,38 +649,13 @@ fn new_agents_are_written_from_a_template_and_a_bad_name_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let (mut validate, mut account) = (None, None);
     let mut note = String::new();
-    let opened = aibus_tui::app::run_job(
-        Job::NewAgent("planner".into()),
-        Some(dir.path()),
-        &mut validate,
-        &mut account,
-        &mut note,
-        &tokio::sync::mpsc::channel(1).0,
-    );
+    let opened = aibus_tui::app::run_job(Job::NewAgent("planner".into()), Some(dir.path()), &mut validate, &mut account, &mut note, &tokio::sync::mpsc::channel(1).0);
     let path = dir.path().join("planner.md");
     assert_eq!(opened.as_deref(), Some(path.as_path()));
     let body = std::fs::read_to_string(&path).unwrap();
     assert!(body.starts_with("---\nname: planner\n"), "{body}");
-    assert!(
-        aibus_core::agent::def::parse(
-            &body,
-            DefSource {
-                path: Some(path.clone()),
-                scope: Scope::User
-            }
-        )
-        .is_ok(),
-        "the template is a valid definition"
-    );
-    assert!(aibus_tui::app::run_job(
-        Job::NewAgent("../x".into()),
-        Some(dir.path()),
-        &mut validate,
-        &mut account,
-        &mut note,
-        &tokio::sync::mpsc::channel(1).0
-    )
-    .is_none());
+    assert!(aibus_core::agent::def::parse(&body, DefSource { path: Some(path.clone()), scope: Scope::User }).is_ok(), "the template is a valid definition");
+    assert!(aibus_tui::app::run_job(Job::NewAgent("../x".into()), Some(dir.path()), &mut validate, &mut account, &mut note, &tokio::sync::mpsc::channel(1).0).is_none());
     assert!(note.contains("is not a name"));
     assert_eq!(aibus_tui::app::editor(None, Some("nano -w")), "nano -w");
     assert_eq!(aibus_tui::app::editor(Some("code"), Some("nano")), "code");
@@ -851,36 +667,15 @@ fn the_accounts_screen_has_t_a_d_and_a_key_never_shows() {
     let mut app = session();
     app.step(Msg::AccountsReloaded {
         accounts: vec![
-            AccountView {
-                name: AccountName("work".into()),
-                provider: "anthropic".into(),
-                label: "work".into(),
-                default_model: None,
-                key_ref: "keyring:aibus/work".into(),
-                models: vec![],
-            },
-            AccountView {
-                name: AccountName("spare".into()),
-                provider: "openai".into(),
-                label: "spare".into(),
-                default_model: None,
-                key_ref: "none".into(),
-                models: vec![],
-            },
+            AccountView { name: AccountName("work".into()), provider: "anthropic".into(), label: "work".into(), default_model: None, key_ref: "keyring:aibus/work".into(), models: vec![] },
+            AccountView { name: AccountName("spare".into()), provider: "openai".into(), label: "spare".into(), default_model: None, key_ref: "none".into(), models: vec![] },
         ],
     })
     .unwrap();
-    app.step(Msg::Command(Command::OpenScreen(Screen::Accounts)))
-        .unwrap();
+    app.step(Msg::Command(Command::OpenScreen(Screen::Accounts))).unwrap();
     let mut r = rig_with(app);
     let text = r.text();
-    assert!(
-        text.contains("work")
-            && text.contains("anthropic")
-            && text.contains("ready")
-            && text.contains("no key"),
-        "{text}"
-    );
+    assert!(text.contains("work") && text.contains("anthropic") && text.contains("ready") && text.contains("no key"), "{text}");
     r.press('t');
     assert_eq!(r.jobs, [Job::Account(AccountOp::Test("work".into()))]);
     r.jobs.clear();
@@ -900,52 +695,25 @@ fn the_accounts_screen_has_t_a_d_and_a_key_never_shows() {
     r.key(K::Enter);
     r.type_text("sk-secret-123");
     let shown = r.text();
-    assert!(
-        !shown.contains("sk-secret-123") && shown.contains("•••••••••••••"),
-        "the key is masked: {shown}"
-    );
+    assert!(!shown.contains("sk-secret-123") && shown.contains("•••••••••••••"), "the key is masked: {shown}");
     r.key(K::Enter);
-    let [Job::Account(AccountOp::Add {
-        name,
-        provider,
-        key,
-    })] = &r.jobs[..]
-    else {
-        panic!("{:?}", r.jobs)
-    };
+    let [Job::Account(AccountOp::Add { name, provider, key })] = &r.jobs[..] else { panic!("{:?}", r.jobs) };
     assert!(name == "third" && provider == "anthropic" && key.expose() == "sk-secret-123");
-    assert!(
-        !format!("{:?}", r.jobs).contains("sk-secret-123"),
-        "Debug hides the key"
-    );
+    assert!(!format!("{:?}", r.jobs).contains("sk-secret-123"), "Debug hides the key");
     // The job runs through the hook the binary gives it, which answers with a line of text at once.
     let mut note = String::new();
     let mut validate = None;
-    let mut account: Option<aibus_tui::app::AccountHook> =
-        Some(Box::new(|op, _| format!("did {op:?}")));
+    let mut account: Option<aibus_tui::app::AccountHook> = Some(Box::new(|op, _| format!("did {op:?}")));
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    aibus_tui::app::run_job(
-        r.jobs.remove(0),
-        None,
-        &mut validate,
-        &mut account,
-        &mut note,
-        &tx,
-    );
-    assert!(
-        note.starts_with("did Add") && !note.contains("sk-secret"),
-        "{note}"
-    );
+    aibus_tui::app::run_job(r.jobs.remove(0), None, &mut validate, &mut account, &mut note, &tx);
+    assert!(note.starts_with("did Add") && !note.contains("sk-secret"), "{note}");
 }
 
 /// The index of the provider in the list the `a` key opened.
 fn provider_row(r: &Rig, id: &str) -> usize {
     use aibus_core::state::value::{as_list, get};
     let v = r.app.graph.read_key("view:providers").unwrap();
-    as_list(get(v, "rows").unwrap())
-        .iter()
-        .position(|row| get(row, "id").and_then(as_str) == Some(id))
-        .unwrap()
+    as_list(get(v, "rows").unwrap()).iter().position(|row| get(row, "id").and_then(as_str) == Some(id)).unwrap()
 }
 
 #[test]
@@ -970,12 +738,7 @@ fn quitting_asks_how_it_went_unless_nothing_finished() {
     assert_eq!(modal(&r).as_deref(), Some("outcome"));
     assert!(r.text().contains("how did this session go?"));
     assert!(!r.app.should_quit());
-    for (key, button, outcome) in [
-        ('1', "outcome:1", "Succeeded"),
-        ('2', "outcome:2", "PartialPlus"),
-        ('3', "outcome:3", "PartialMinus"),
-        ('4', "outcome:4", "Failed"),
-    ] {
+    for (key, button, outcome) in [('1', "outcome:1", "Succeeded"), ('2', "outcome:2", "PartialPlus"), ('3', "outcome:3", "PartialMinus"), ('4', "outcome:4", "Failed")] {
         let mut a = mk();
         let mut b = mk();
         let k = names(&a.press(key));

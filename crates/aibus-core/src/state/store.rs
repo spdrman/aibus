@@ -47,13 +47,8 @@ pub enum Ev {
     User(String),
     Tool(Tool),
     /// The conversation was compacted away at this many tokens.
-    Compact {
-        pre_tokens: u64,
-    },
-    Note {
-        error: bool,
-        text: String,
-    },
+    Compact { pre_tokens: u64 },
+    Note { error: bool, text: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,14 +72,8 @@ pub struct Done {
 
 enum Chunk {
     /// A sealed run of text; `start` is the number of text bytes before it.
-    Text {
-        block: Arc<Block>,
-        start: usize,
-    },
-    Ev {
-        ev: Ev,
-        ver: u32,
-    },
+    Text { block: Arc<Block>, start: usize },
+    Ev { ev: Ev, ver: u32 },
 }
 
 /// One row of the transcript view.
@@ -93,17 +82,10 @@ pub enum Row {
     Text(String),
     User(String),
     /// A tool call; `ordinal` counts the calls of the run from 0.
-    Tool {
-        ordinal: usize,
-        tool: Tool,
-        expanded: bool,
-    },
+    Tool { ordinal: usize, tool: Tool, expanded: bool },
     Detail(String),
     Compact(u64),
-    Note {
-        error: bool,
-        text: String,
-    },
+    Note { error: bool, text: String },
 }
 
 /// A window of the rows of a transcript at one width.
@@ -207,19 +189,11 @@ fn count_rows(text: &str, width: usize) -> usize {
 /// The rows below a call that is expanded: its input, then its result, each wrapped.
 fn detail(tool: &Tool, width: usize) -> Vec<String> {
     let w = width.saturating_sub(4).max(1);
-    let mut out: Vec<String> = wrap_text(&tool.input, w)
-        .into_iter()
-        .map(|l| format!("  {l}"))
-        .collect();
+    let mut out: Vec<String> = wrap_text(&tool.input, w).into_iter().map(|l| format!("  {l}")).collect();
     if let Some(d) = &tool.done {
         let lines = wrap_text(&d.output, w);
         let more = lines.len().saturating_sub(DETAIL_ROWS);
-        out.extend(
-            lines
-                .into_iter()
-                .take(DETAIL_ROWS)
-                .map(|l| format!("  {l}")),
-        );
+        out.extend(lines.into_iter().take(DETAIL_ROWS).map(|l| format!("  {l}")));
         if more > 0 || d.bytes > d.output.len() {
             out.push(format!("  … {more} more rows, {} bytes in all", d.bytes));
         }
@@ -235,40 +209,21 @@ fn event_rows(ev: &Ev, expanded: &[String], width: usize) -> usize {
     }
 }
 
-fn event_window(
-    ev: &Ev,
-    ordinal: usize,
-    expanded: &[String],
-    width: usize,
-    range: std::ops::Range<usize>,
-) -> Vec<Row> {
+fn event_window(ev: &Ev, ordinal: usize, expanded: &[String], width: usize, range: std::ops::Range<usize>) -> Vec<Row> {
     let all: Vec<Row> = match ev {
-        Ev::User(t) => wrap_text(t, width.saturating_sub(2).max(1))
-            .into_iter()
-            .map(Row::User)
-            .collect(),
+        Ev::User(t) => wrap_text(t, width.saturating_sub(2).max(1)).into_iter().map(Row::User).collect(),
         Ev::Tool(t) => {
             let open = expanded.contains(&t.call);
-            let mut rows = vec![Row::Tool {
-                ordinal,
-                tool: t.clone(),
-                expanded: open,
-            }];
+            let mut rows = vec![Row::Tool { ordinal, tool: t.clone(), expanded: open }];
             if open {
                 rows.extend(detail(t, width).into_iter().map(Row::Detail));
             }
             rows
         }
         Ev::Compact { pre_tokens } => vec![Row::Compact(*pre_tokens)],
-        Ev::Note { error, text } => vec![Row::Note {
-            error: *error,
-            text: text.clone(),
-        }],
+        Ev::Note { error, text } => vec![Row::Note { error: *error, text: text.clone() }],
     };
-    all.into_iter()
-        .skip(range.start)
-        .take(range.len())
-        .collect()
+    all.into_iter().skip(range.start).take(range.len()).collect()
 }
 
 impl Store {
@@ -364,30 +319,20 @@ impl Store {
         if !t.tail.is_empty() {
             *next_id += 1;
             let text = std::mem::take(&mut t.tail);
-            t.seal(Arc::new(Block {
-                id: *next_id,
-                text: text.into(),
-            }));
+            t.seal(Arc::new(Block { id: *next_id, text: text.into() }));
         }
         t.tail_version = t.tail_version.wrapping_add(1);
         t.blocks_version = t.blocks_version.wrapping_add(1);
         t.marks.push((t.tail_version, t.sealed_bytes));
-        t.chunks.push(Chunk::Ev {
-            ev,
-            ver: t.tail_version,
-        });
+        t.chunks.push(Chunk::Ev { ev, ver: t.tail_version });
     }
 
     /// Fills in the result of the call `call`. Both handles move.
     pub fn finish_tool(&self, id: u64, call: &str, done: Done) {
         let mut g = self.lock();
-        let Some(t) = g.transcripts.get_mut(&id) else {
-            return;
-        };
+        let Some(t) = g.transcripts.get_mut(&id) else { return };
         let found = t.chunks.iter_mut().rev().find_map(|c| match c {
-            Chunk::Ev {
-                ev: Ev::Tool(tool), ..
-            } if tool.call == call => Some(tool),
+            Chunk::Ev { ev: Ev::Tool(tool), .. } if tool.call == call => Some(tool),
             _ => None,
         });
         if let Some(tool) = found {
@@ -405,9 +350,7 @@ impl Store {
             .chunks
             .iter()
             .filter_map(|c| match c {
-                Chunk::Ev {
-                    ev: Ev::Tool(t), ..
-                } => Some(t.call.clone()),
+                Chunk::Ev { ev: Ev::Tool(t), .. } => Some(t.call.clone()),
                 _ => None,
             })
             .nth(ordinal)
@@ -628,9 +571,7 @@ impl Store {
         window: (Option<usize>, usize),
     ) -> Rows {
         let mut g = self.lock();
-        let Some(t) = g.transcripts.get(&id) else {
-            return Rows::default();
-        };
+        let Some(t) = g.transcripts.get(&id) else { return Rows::default() };
         let limit = upto.map(|v| {
             t.marks
                 .iter()
@@ -650,9 +591,7 @@ impl Store {
                 Chunk::Text { block, start } => match limit {
                     Some(l) if l <= *start => {}
                     Some(l) if l < start + block.text.len() => {
-                        pieces.push(Piece::Cut(
-                            block.text[..boundary(&block.text, l - start)].to_owned(),
-                        ));
+                        pieces.push(Piece::Cut(block.text[..boundary(&block.text, l - start)].to_owned()));
                     }
                     _ => pieces.push(Piece::Block(block.clone())),
                 },
@@ -665,9 +604,7 @@ impl Store {
         }
         let tail = match limit {
             Some(l) if l <= t.sealed_bytes => String::new(),
-            Some(l) => {
-                t.tail[..boundary(&t.tail, (l - t.sealed_bytes).min(t.tail.len()))].to_owned()
-            }
+            Some(l) => t.tail[..boundary(&t.tail, (l - t.sealed_bytes).min(t.tail.len()))].to_owned(),
             None => t.tail.clone(),
         };
         if !tail.is_empty() {
@@ -711,23 +648,14 @@ impl Store {
             let (lo, hi) = (first.max(at), end.min(at + n));
             if lo < hi {
                 match (p, &text_rows[i]) {
-                    (_, Some(lines)) => {
-                        rows.extend(lines[lo - at..hi - at].iter().cloned().map(Row::Text))
-                    }
-                    (Piece::Ev(ev), None) => {
-                        rows.extend(event_window(ev, this, expanded, width, lo - at..hi - at))
-                    }
+                    (_, Some(lines)) => rows.extend(lines[lo - at..hi - at].iter().cloned().map(Row::Text)),
+                    (Piece::Ev(ev), None) => rows.extend(event_window(ev, this, expanded, width, lo - at..hi - at)),
                     _ => {}
                 }
             }
             at += n;
         }
-        Rows {
-            total,
-            first,
-            rows,
-            tools,
-        }
+        Rows { total, first, rows, tools }
     }
 
     /// Bytes of content held (blocks, tails, heads, texts, log rows excluded).

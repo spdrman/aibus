@@ -207,12 +207,7 @@ impl ProviderDef {
     /// What is wrong with this definition on its own, as `(field, message)`.
     pub fn problems(&self) -> Vec<(&'static str, String)> {
         let mut out = Vec::new();
-        if self.id.is_empty()
-            || !self
-                .id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
+        if self.id.is_empty() || !self.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             out.push(("id", "an id is letters, digits, `-` and `_`".to_owned()));
         }
         if let Some(url) = &self.base_url {
@@ -222,18 +217,7 @@ impl ProviderDef {
         }
         for name in self.headers.keys().chain(self.query.keys()) {
             let lower = name.to_ascii_lowercase();
-            if [
-                "auth",
-                "key",
-                "token",
-                "secret",
-                "password",
-                "cookie",
-                "credential",
-            ]
-            .iter()
-            .any(|w| lower.contains(w))
-            {
+            if ["auth", "key", "token", "secret", "password", "cookie", "credential"].iter().any(|w| lower.contains(w)) {
                 out.push((
                     "headers",
                     format!("{name} looks like a credential; credentials do not go in config, run: aibus account add <name> --key-stdin"),
@@ -243,32 +227,18 @@ impl ProviderDef {
         // A region lands in a host name and a project in a path, so each is held to what one
         // looks like.
         if let Some(r) = &self.region {
-            if r.is_empty()
-                || !r
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            {
-                out.push((
-                    "region",
-                    "must be lower-case letters, digits and dashes".to_owned(),
-                ));
+            if r.is_empty() || !r.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+                out.push(("region", "must be lower-case letters, digits and dashes".to_owned()));
             }
         }
         if let Some(p) = &self.project {
-            if p.is_empty()
-                || !p
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
-            {
+            if p.is_empty() || !p.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':')) {
                 out.push(("project", "must be a Google Cloud project id".to_owned()));
             }
         }
         for m in &self.auth_methods {
             if !["api_key", "bearer", "env", "none"].contains(&m.as_str()) {
-                out.push((
-                    "auth_methods",
-                    format!("{m}: expected api_key, bearer, env or none"),
-                ));
+                out.push(("auth_methods", format!("{m}: expected api_key, bearer, env or none")));
             }
         }
         out
@@ -338,35 +308,20 @@ mod tests {
         for p in all {
             assert!(p.api.is_some() && p.model_table.is_some(), "{}", p.id);
             assert!(p.problems().is_empty(), "{}: {:?}", p.id, p.problems());
-            let local = p
-                .base_url
-                .as_deref()
-                .is_some_and(|u| u.starts_with("http://127.0.0.1"));
+            let local = p.base_url.as_deref().is_some_and(|u| u.starts_with("http://127.0.0.1"));
             // A cloud vendor ships a table with something in it; only a local server may be empty.
             if let Some(ModelTableSpec::Inline(v)) = &p.model_table {
-                assert!(
-                    !v["models"].as_array().unwrap().is_empty() || local,
-                    "{}",
-                    p.id
-                );
+                assert!(!v["models"].as_array().unwrap().is_empty() || local, "{}", p.id);
             }
         }
     }
 
     #[test]
     fn a_user_entry_overrides_the_preset_field_by_field() {
-        let user = ProviderDef {
-            id: "groq".into(),
-            base_url: Some("http://gw.example/v1".into()),
-            ..ProviderDef::default()
-        };
+        let user = ProviderDef { id: "groq".into(), base_url: Some("http://gw.example/v1".into()), ..ProviderDef::default() };
         let def = resolve("groq", Some(&user)).unwrap().unwrap();
         assert_eq!(def.base_url.as_deref(), Some("http://gw.example/v1"));
-        assert_eq!(
-            def.env_vars,
-            ["GROQ_API_KEY"],
-            "what the user left out stays the preset's"
-        );
+        assert_eq!(def.env_vars, ["GROQ_API_KEY"], "what the user left out stays the preset's");
         assert_eq!(def.api, Some(Api::OpenaiChat));
     }
 
@@ -382,50 +337,28 @@ mod tests {
         assert!(def.open_aliases == Some(true) && def.default_capabilities.logprobs == Some(true));
         assert_eq!(def.id, "ollama-home");
         assert!(resolve("fake", None).unwrap().is_none());
-        let bare = ProviderDef {
-            id: "x".into(),
-            ..ProviderDef::default()
-        };
+        let bare = ProviderDef { id: "x".into(), ..ProviderDef::default() };
         assert!(resolve("x", Some(&bare)).unwrap_err().contains("no api"));
     }
 
     #[test]
     fn a_credential_looking_header_is_refused() {
-        for name in [
-            "Authorization",
-            "x-api-key",
-            "api-key",
-            "X-Auth-Token",
-            "cookie",
-        ] {
+        for name in ["Authorization", "x-api-key", "api-key", "X-Auth-Token", "cookie"] {
             let user = ProviderDef {
                 id: "p".into(),
                 api: Some(Api::OpenaiChat),
                 headers: [(name.to_owned(), "v".to_owned())].into(),
                 ..ProviderDef::default()
             };
-            assert!(
-                resolve("p", Some(&user))
-                    .unwrap_err()
-                    .contains("credential"),
-                "{name}"
-            );
+            assert!(resolve("p", Some(&user)).unwrap_err().contains("credential"), "{name}");
         }
-        let ok = ProviderDef {
-            id: "p".into(),
-            api: Some(Api::OpenaiChat),
-            headers: [("x-team".to_owned(), "home".to_owned())].into(),
-            ..ProviderDef::default()
-        };
+        let ok = ProviderDef { id: "p".into(), api: Some(Api::OpenaiChat), headers: [("x-team".to_owned(), "home".to_owned())].into(), ..ProviderDef::default() };
         assert!(resolve("p", Some(&ok)).is_ok());
     }
 
     #[test]
     fn static_id_hands_out_one_str_per_id() {
-        let a = ProviderDef {
-            id: "same".into(),
-            ..ProviderDef::default()
-        };
+        let a = ProviderDef { id: "same".into(), ..ProviderDef::default() };
         assert!(std::ptr::eq(a.static_id(), a.clone().static_id()));
     }
 
@@ -439,15 +372,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(flags.len(), 12);
-        assert!(flags.contains(&CompatFlag::MaxTokensField(
-            MaxTokensField::MaxCompletionTokens
-        )));
+        assert!(flags.contains(&CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)));
         assert!(flags.contains(&CompatFlag::ReasoningField(ReasoningField::Reasoning)));
         // A name outside the set is an error, not a silently ignored string.
         assert!(serde_json::from_str::<Vec<CompatFlag>>(r#"["no_such_quirk"]"#).is_err());
-        assert!(
-            serde_json::from_str::<Vec<CompatFlag>>(r#"[{"max_tokens_field": "tokens"}]"#).is_err()
-        );
+        assert!(serde_json::from_str::<Vec<CompatFlag>>(r#"[{"max_tokens_field": "tokens"}]"#).is_err());
     }
 
     #[test]
@@ -455,42 +384,21 @@ mod tests {
         let user = ProviderDef {
             id: "openai".into(),
             compat: Some(vec![CompatFlag::NoStore]),
-            default_capabilities: CapabilityOverrides {
-                images: Some(false),
-                ..CapabilityOverrides::default()
-            },
+            default_capabilities: CapabilityOverrides { images: Some(false), ..CapabilityOverrides::default() },
             ..ProviderDef::default()
         };
         let def = resolve("openai", Some(&user)).unwrap().unwrap();
         assert_eq!(def.compat, Some(vec![CompatFlag::NoStore]));
         assert_eq!(def.default_capabilities.images, Some(false));
-        assert_eq!(
-            def.default_capabilities.logprobs,
-            Some(true),
-            "what the user left out stays the preset's"
-        );
+        assert_eq!(def.default_capabilities.logprobs, Some(true), "what the user left out stays the preset's");
     }
 
     #[test]
     fn the_presets_carry_the_flags_the_old_compat_booleans_did() {
         let openai = preset("openai").unwrap();
-        assert!(openai
-            .compat
-            .as_deref()
-            .unwrap()
-            .contains(&CompatFlag::MaxTokensField(
-                MaxTokensField::MaxCompletionTokens
-            )));
-        assert!(preset("kimi")
-            .unwrap()
-            .compat
-            .as_deref()
-            .unwrap()
-            .contains(&CompatFlag::ReasoningContentReplay));
-        assert_eq!(
-            preset("azure-openai").unwrap().auth_header.as_deref(),
-            Some("api-key")
-        );
+        assert!(openai.compat.as_deref().unwrap().contains(&CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)));
+        assert!(preset("kimi").unwrap().compat.as_deref().unwrap().contains(&CompatFlag::ReasoningContentReplay));
+        assert_eq!(preset("azure-openai").unwrap().auth_header.as_deref(), Some("api-key"));
     }
 
     #[test]
@@ -498,17 +406,11 @@ mod tests {
         assert_eq!(Api::AnthropicBedrock.as_str(), "anthropic-bedrock");
         assert_eq!(Api::AnthropicVertex.as_str(), "anthropic-vertex");
         let (b, v) = (preset("bedrock").unwrap(), preset("vertex").unwrap());
-        assert_eq!(
-            (b.api, v.api),
-            (Some(Api::AnthropicBedrock), Some(Api::AnthropicVertex))
-        );
+        assert_eq!((b.api, v.api), (Some(Api::AnthropicBedrock), Some(Api::AnthropicVertex)));
         assert!(b.env_vars.contains(&"AWS_BEARER_TOKEN_BEDROCK".to_owned()));
         // The host depends on the region, so a preset has no base_url of its own.
         assert!(b.base_url.is_none() && v.base_url.is_none());
-        assert!(
-            b.prefixes.iter().any(|p| p == "us.anthropic.")
-                && v.prefixes.iter().any(|p| p == "claude-")
-        );
+        assert!(b.prefixes.iter().any(|p| p == "us.anthropic.") && v.prefixes.iter().any(|p| p == "claude-"));
     }
 
     #[test]
@@ -523,37 +425,21 @@ mod tests {
         assert_eq!(def.region.as_deref(), Some("eu-west-1"));
         assert!(def.prefixes.iter().any(|p| p == "eu.anthropic."));
 
-        let over = ProviderDef {
-            id: "vertex".into(),
-            project: Some("my-project".into()),
-            region: Some("us-east5".into()),
-            ..ProviderDef::default()
-        };
+        let over = ProviderDef { id: "vertex".into(), project: Some("my-project".into()), region: Some("us-east5".into()), ..ProviderDef::default() };
         let def = resolve("vertex", Some(&over)).unwrap().unwrap();
-        assert_eq!(
-            (def.project.as_deref(), def.region.as_deref()),
-            (Some("my-project"), Some("us-east5"))
-        );
+        assert_eq!((def.project.as_deref(), def.region.as_deref()), (Some("my-project"), Some("us-east5")));
     }
 
     #[test]
     fn a_region_or_project_that_cannot_land_in_a_host_or_a_path_is_refused() {
-        for (region, project) in [
-            ("us-east-1.evil.example", None),
-            ("US East", None),
-            ("", None),
-            ("us-east5", Some("p/../x")),
-        ] {
+        for (region, project) in [("us-east-1.evil.example", None), ("US East", None), ("", None), ("us-east5", Some("p/../x"))] {
             let user = ProviderDef {
                 id: "vertex".into(),
                 region: Some(region.into()),
                 project: project.map(Into::into),
                 ..ProviderDef::default()
             };
-            assert!(
-                resolve("vertex", Some(&user)).is_err(),
-                "{region} {project:?}"
-            );
+            assert!(resolve("vertex", Some(&user)).is_err(), "{region} {project:?}");
         }
     }
 }

@@ -4,8 +4,8 @@ mod common;
 
 use std::fs;
 
-use aibus_testkit::xdg_temp;
 use common::{aibus, command, stderr};
+use aibus_testkit::xdg_temp;
 
 const KEY_MSG: &str = "credentials do not go in config; run: aibus account add <name> --key-stdin";
 
@@ -21,10 +21,7 @@ fn version_prints_and_exits_0() {
     // `aibus <version> (commit <sha>)`, with `tag <tag>, ` before the commit on a tagged build.
     let text = stdout(&out);
     let prefix = format!("aibus {} (", env!("CARGO_PKG_VERSION"));
-    assert!(
-        text.starts_with(&prefix) && text.contains("commit ") && text.ends_with(")\n"),
-        "{text}"
-    );
+    assert!(text.starts_with(&prefix) && text.contains("commit ") && text.ends_with(")\n"), "{text}");
     let json: serde_json::Value =
         serde_json::from_str(&stdout(&aibus(home.path(), &["version", "--json"]))).unwrap();
     assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
@@ -38,21 +35,8 @@ fn help_lists_every_top_level_command() {
     assert_eq!(out.status.code(), Some(0));
     let text = stdout(&out);
     for c in [
-        "run",
-        "agent",
-        "account",
-        "session",
-        "handoff",
-        "ledger",
-        "memory",
-        "workflow",
-        "config",
-        "init",
-        "doctor",
-        "completions",
-        "version",
-        "--permission-mode",
-        "--trace",
+        "run", "agent", "account", "session", "handoff", "ledger", "memory", "workflow",
+        "config", "init", "doctor", "completions", "version", "--permission-mode", "--trace",
     ] {
         assert!(text.contains(c), "--help does not mention {c}");
     }
@@ -61,16 +45,8 @@ fn help_lists_every_top_level_command() {
 #[test]
 fn an_unknown_subcommand_or_flag_is_a_usage_error() {
     let home = xdg_temp();
-    assert_eq!(
-        aibus(home.path(), &["frobnicate", "--x"]).status.code(),
-        Some(2)
-    );
-    assert_eq!(
-        aibus(home.path(), &["--no-such-flag", "version"])
-            .status
-            .code(),
-        Some(2)
-    );
+    assert_eq!(aibus(home.path(), &["frobnicate", "--x"]).status.code(), Some(2));
+    assert_eq!(aibus(home.path(), &["--no-such-flag", "version"]).status.code(), Some(2));
 }
 
 #[test]
@@ -87,10 +63,7 @@ fn config_path_shows_both_files_and_honours_the_overrides() {
         .args(["config", "path", "--cwd", "/some/where"])
         .output()
         .unwrap();
-    assert_eq!(
-        stdout(&out),
-        "user\t/xdg/c/aibus/config.toml\nproject\t/some/where/.aibus/settings.toml\n"
-    );
+    assert_eq!(stdout(&out), "user\t/xdg/c/aibus/config.toml\nproject\t/some/where/.aibus/settings.toml\n");
     let out = command(home.path())
         .env("AIBUS_CONFIG", "/etc/a.toml")
         .args(["config", "path"])
@@ -176,9 +149,5 @@ fn validate_exits_3_with_path_and_line_and_the_exact_key_message() {
     fs::write(&file, "[router]\nthreshold = 7.0\n").unwrap();
     let out = aibus(h, &["config", "validate"]);
     assert_eq!(out.status.code(), Some(3));
-    assert!(
-        stderr(&out).contains("config.toml:2: router.threshold"),
-        "{}",
-        stderr(&out)
-    );
+    assert!(stderr(&out).contains("config.toml:2: router.threshold"), "{}", stderr(&out));
 }

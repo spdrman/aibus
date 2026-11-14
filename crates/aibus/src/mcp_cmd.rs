@@ -16,74 +16,44 @@ use crate::mcp_http;
 
 pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusError> {
     let has = |cap: &str| args.allow.iter().any(|a| a == cap);
-    let mut caps = Caps::new(
-        has("write"),
-        has("gates"),
-        has("run"),
-        args.allow_tool.clone(),
-    )
-    .map_err(AibusError::Usage)?;
+    let mut caps = Caps::new(has("write"), has("gates"), has("run"), args.allow_tool.clone())
+        .map_err(AibusError::Usage)?;
     caps.no_provenance = args.no_provenance;
-    let capped = args.max_runs.is_some()
-        || args.max_concurrent_runs.is_some()
-        || args.max_cost_usd.is_some();
+    let capped = args.max_runs.is_some() || args.max_concurrent_runs.is_some() || args.max_cost_usd.is_some();
     if capped && !caps.run {
         return Err(AibusError::Usage(
             "--max-runs, --max-concurrent-runs and --max-cost-usd need --allow run".into(),
         ));
     }
     if args.max_runs == Some(0) || args.max_concurrent_runs == Some(0) {
-        return Err(AibusError::Usage(
-            "--max-runs and --max-concurrent-runs are at least 1".into(),
-        ));
+        return Err(AibusError::Usage("--max-runs and --max-concurrent-runs are at least 1".into()));
     }
-    if args
-        .max_cost_usd
-        .is_some_and(|c| !c.is_finite() || c <= 0.0)
-    {
-        return Err(AibusError::Usage(
-            "--max-cost-usd is a positive number".into(),
-        ));
+    if args.max_cost_usd.is_some_and(|c| !c.is_finite() || c <= 0.0) {
+        return Err(AibusError::Usage("--max-cost-usd is a positive number".into()));
     }
 
     // The address and the token are settled before anything is created: a refused address leaves
     // no audit file and no socket behind.
-    let http = args
-        .http
-        .as_deref()
-        .map(|text| http_setup(text, redactor))
-        .transpose()?;
+    let http = args.http.as_deref().map(|text| http_setup(text, redactor)).transpose()?;
 
-    let directives = std::env::var("AIBUS_LOG")
-        .or_else(|_| std::env::var("RUST_LOG"))
-        .ok();
+    let directives = std::env::var("AIBUS_LOG").or_else(|_| std::env::var("RUST_LOG")).ok();
     let (targets, bad) = logging::filter(g, directives.as_deref());
-    let _ =
-        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(
-            aibus_core::redact::layer(redactor.clone(), std::io::stderr).with_filter(targets),
-        ));
+    let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(
+        aibus_core::redact::layer(redactor.clone(), std::io::stderr).with_filter(targets),
+    ));
     for d in bad {
         tracing::warn!("log directive {d:?} ignored");
     }
 
-    tracing::info!(
-        write = caps.write,
-        gates = caps.gates,
-        run = caps.run,
-        "aibus mcp starting"
-    );
+    tracing::info!(write = caps.write, gates = caps.gates, run = caps.run, "aibus mcp starting");
     let (project, paths) = (g.project_dir()?, g.paths()?);
     // `--max-cost-usd` defaults to the configured per-run limit. Reading the config reads no
     // credential; the first run's own process does that, when it starts.
     let runs = if caps.run {
-        let loaded = config::load(
-            &paths.config_file(),
-            Some(&project_dir(&project).join("settings.toml")),
-        )?;
+        let loaded = config::load(&paths.config_file(), Some(&project_dir(&project).join("settings.toml")))?;
         let mut runs = RunConfig::new(
             std::env::current_exe()?,
-            args.max_cost_usd
-                .unwrap_or(loaded.config.limits.max_cost_usd),
+            args.max_cost_usd.unwrap_or(loaded.config.limits.max_cost_usd),
         );
         runs.max_runs = args.max_runs.unwrap_or(runs.max_runs);
         runs.max_concurrent = args.max_concurrent_runs.unwrap_or(runs.max_concurrent);
@@ -119,14 +89,9 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
 /// to allow it) and the bearer token. The token is `AIBUS_MCP_TOKEN`, or 32 random bytes printed
 /// once to stderr with the header line to paste; it is never written anywhere else, and it is
 /// registered with the redactor so a log line that quoted it would be scrubbed.
-fn http_setup(
-    text: &str,
-    redactor: &Redactor,
-) -> Result<(std::net::SocketAddr, Secret<String>), AibusError> {
+fn http_setup(text: &str, redactor: &Redactor) -> Result<(std::net::SocketAddr, Secret<String>), AibusError> {
     let bind: std::net::SocketAddr = text.parse().map_err(|_| {
-        AibusError::Usage(format!(
-            "--http wants <ip>:<port> such as 127.0.0.1:7777, not {text:?}"
-        ))
+        AibusError::Usage(format!("--http wants <ip>:<port> such as 127.0.0.1:7777, not {text:?}"))
     })?;
     if !bind.ip().is_loopback() {
         return Err(AibusError::Usage(format!(
@@ -144,10 +109,7 @@ fn http_setup(
             ))
         }
         Err(_) => {
-            let t: String = rand::random::<[u8; 32]>()
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect();
+            let t: String = rand::random::<[u8; 32]>().iter().map(|b| format!("{b:02x}")).collect();
             eprintln!(
                 "aibus mcp: AIBUS_MCP_TOKEN is not set, so this run made a token. It is shown once and not stored.\n\
                  Authorization: Bearer {t}"

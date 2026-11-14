@@ -107,45 +107,25 @@ impl Server {
         args: &Value,
         now: Instant,
     ) -> Result<CallToolResult, ErrorData> {
-        let tool = if update {
-            "workflow_update"
-        } else {
-            "workflow_create"
-        };
+        let tool = if update { "workflow_update" } else { "workflow_create" };
         let required: &[&str] = if update {
             &["name", "scope", "toml", "expected_revision"]
         } else {
             &["name", "scope", "toml"]
         };
         let map = arguments(tool, args, required, &[])?;
-        let (name, scope, body) = (
-            text(tool, map, "name")?,
-            text(tool, map, "scope")?,
-            text(tool, map, "toml")?,
-        );
+        let (name, scope, body) = (text(tool, map, "name")?, text(tool, map, "scope")?, text(tool, map, "toml")?);
         if !matches!(scope, "project" | "user") {
-            return Err(ErrorData::invalid_params(
-                format!("{tool}: scope is project or user"),
-                None,
-            ));
+            return Err(ErrorData::invalid_params(format!("{tool}: scope is project or user"), None));
         }
-        let expected = if update {
-            Some(text(tool, map, "expected_revision")?)
-        } else {
-            None
-        };
+        let expected = if update { Some(text(tool, map, "expected_revision")?) } else { None };
 
         // Everything up to the directory is decided from the arguments alone.
         if !workflow::valid_name(name) {
-            return Ok(
-                self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$ (a name, not a path)")
-            );
+            return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$ (a name, not a path)"));
         }
         if body.len() > MAX_BYTES {
-            return Ok(self.fail(format!(
-                "the workflow is {} bytes, the most is {MAX_BYTES}",
-                body.len()
-            )));
+            return Ok(self.fail(format!("the workflow is {} bytes, the most is {MAX_BYTES}", body.len())));
         }
         if self.redactor.redact(body) != body {
             return Ok(self.fail("the workflow text contains something that looks like a credential; nothing was written"));
@@ -161,32 +141,18 @@ impl Server {
                 .iter()
                 .map(|p| {
                     let step = p.step.map_or(String::new(), |n| format!("step {n}: "));
-                    let field = p
-                        .field
-                        .as_deref()
-                        .map_or(String::new(), |f| format!("{f}: "));
+                    let field = p.field.as_deref().map_or(String::new(), |f| format!("{f}: "));
                     format!("{step}{field}{}", p.message)
                 })
                 .collect();
-            return Ok(self.fail(format!(
-                "the workflow does not validate, nothing was written:\n{}",
-                lines.join("\n")
-            )));
+            return Ok(self.fail(format!("the workflow does not validate, nothing was written:\n{}", lines.join("\n"))));
         }
         let parsed = Workflow::parse(name, body).expect("validate said ok, so parse does too");
         if parsed.steps.len() > MAX_STEPS {
-            return Ok(self.fail(format!(
-                "the workflow has {} steps, the most is {MAX_STEPS}",
-                parsed.steps.len()
-            )));
+            return Ok(self.fail(format!("the workflow has {} steps, the most is {MAX_STEPS}", parsed.steps.len())));
         }
         if !self.caps.gates {
-            if let Some((i, step)) = parsed
-                .steps
-                .iter()
-                .enumerate()
-                .find(|(_, s)| s.gate.is_some())
-            {
+            if let Some((i, step)) = parsed.steps.iter().enumerate().find(|(_, s)| s.gate.is_some()) {
                 return Ok(self.fail(format!(
                     "step {} has a gate, a shell command aibus runs as the user; start the server with --allow gates to write one ({})",
                     i + 1,
@@ -197,11 +163,7 @@ impl Server {
 
         // A call the arguments alone refuse never reaches the disk, so it costs no token; the
         // per-call limit still counts it.
-        let limited = self
-            .write_limiter
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take(now);
+        let limited = self.write_limiter.lock().unwrap_or_else(|e| e.into_inner()).take(now);
         if let Err(secs) = limited {
             return Ok(self.fail(format!(
                 "rate limit: at most {WRITES_PER_MINUTE} writes a minute, try again in {secs} s"
@@ -217,9 +179,7 @@ impl Server {
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
             Err(e) => return Ok(self.fail(format!("{name}: {e}"))),
             Ok(md) if md.file_type().is_symlink() || !md.is_file() => {
-                return Ok(self.fail(format!(
-                    "{name}.toml is not a plain file; refusing to write through it"
-                )))
+                return Ok(self.fail(format!("{name}.toml is not a plain file; refusing to write through it")))
             }
             Ok(_) => match fs::read(&target) {
                 Ok(bytes) => Some(bytes),
@@ -246,9 +206,7 @@ impl Server {
 
         // The provenance line is added once: a copy in the submitted text is dropped, and an
         // update keeps the line the file already had.
-        let submitted = body
-            .strip_prefix(PROVENANCE)
-            .map_or(body, |rest| rest.split_once('\n').map_or("", |(_, r)| r));
+        let submitted = body.strip_prefix(PROVENANCE).map_or(body, |rest| rest.split_once('\n').map_or("", |(_, r)| r));
         let bytes = if self.caps.no_provenance {
             body.to_owned()
         } else {
@@ -257,10 +215,7 @@ impl Server {
                 .and_then(|old| std::str::from_utf8(old).ok())
                 .and_then(|old| old.lines().next())
                 .filter(|l| l.starts_with(PROVENANCE));
-            let line = kept.map_or_else(
-                || format!("{PROVENANCE}{}", rfc3339(std::time::SystemTime::now())),
-                str::to_owned,
-            );
+            let line = kept.map_or_else(|| format!("{PROVENANCE}{}", rfc3339(std::time::SystemTime::now())), str::to_owned);
             format!("{line}\n{submitted}")
         };
         if let Err(e) = write_atomic(&target, &bytes) {
@@ -289,31 +244,23 @@ impl Server {
             .into_iter()
             .nth(usize::from(user))
             .ok_or("no user directory for workflows")?;
-        let base = if user {
-            self.config.clone()
-        } else {
-            project_dir(&self.project)
-        };
+        let base = if user { self.config.clone() } else { project_dir(&self.project) };
         let missing = |p: &Path| matches!(fs::symlink_metadata(p), Err(e) if e.kind() == io::ErrorKind::NotFound);
         if !user && !base.is_dir() {
             return Err("this project has no .aibus directory; set it up with aibus before writing workflows into it".into());
         }
         if user && missing(&base) {
-            create_private_dir(&base)
-                .map_err(|e| format!("could not make the user config directory: {e}"))?;
+            create_private_dir(&base).map_err(|e| format!("could not make the user config directory: {e}"))?;
         }
         if missing(&dir) {
-            create_private_dir(&dir)
-                .map_err(|e| format!("could not make the workflows directory: {e}"))?;
+            create_private_dir(&dir).map_err(|e| format!("could not make the workflows directory: {e}"))?;
         }
         let real_base = fs::canonicalize(&base).map_err(|e| e.to_string())?;
         let real_dir = fs::canonicalize(&dir).map_err(|e| e.to_string())?;
         if !user {
             let real_project = fs::canonicalize(&self.project).map_err(|e| e.to_string())?;
             if real_base != real_project.join(".aibus") {
-                return Err(
-                    ".aibus resolves outside the project; refusing to write through it".into(),
-                );
+                return Err(".aibus resolves outside the project; refusing to write through it".into());
             }
         }
         if real_dir != real_base.join("workflows") {

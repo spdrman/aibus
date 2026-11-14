@@ -23,21 +23,14 @@ fn run() -> Result<(), String> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--snapshot" => snapshot = args.next().map(PathBuf::from),
-            "--catalog" => {
-                dir = args
-                    .next()
-                    .map(PathBuf::from)
-                    .ok_or("--catalog needs a directory")?
-            }
+            "--catalog" => dir = args.next().map(PathBuf::from).ok_or("--catalog needs a directory")?,
             "--add-new" => add_new = true,
             "--allow-price-removal" => allow = true,
             "--write" => write = true,
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    let snapshot = snapshot.ok_or(
-        "--snapshot FILE is required (save models.dev/api.json yourself; this tool never fetches)",
-    )?;
+    let snapshot = snapshot.ok_or("--snapshot FILE is required (save models.dev/api.json yourself; this tool never fetches)")?;
     let bytes = std::fs::read(&snapshot).map_err(|e| format!("{}: {e}", snapshot.display()))?;
     let bytes = if snapshot.extension().is_some_and(|e| e == "zst") {
         zstd::decode_all(&bytes[..]).map_err(|e| format!("{}: {e}", snapshot.display()))?
@@ -51,10 +44,7 @@ fn run() -> Result<(), String> {
         let path = entry.map_err(|e| e.to_string())?.path();
         if path.extension().is_some_and(|e| e == "json") {
             let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-            catalog.insert(
-                stem,
-                std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
-            );
+            catalog.insert(stem, std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?);
         }
     }
     let (files, notes) = plan(&snapshot, &catalog, add_new, allow)?;
@@ -63,11 +53,7 @@ fn run() -> Result<(), String> {
         if write {
             std::fs::write(dir.join(format!("{name}.json")), text).map_err(|e| e.to_string())?;
         }
-        println!(
-            "{}{}",
-            if write { "wrote " } else { "would write " },
-            dir.join(format!("{name}.json")).display()
-        );
+        println!("{}{}", if write { "wrote " } else { "would write " }, dir.join(format!("{name}.json")).display());
     }
     if !write {
         println!("dry run: nothing written (--write to apply, then read the diff)");

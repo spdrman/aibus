@@ -10,10 +10,7 @@ pub const BUDGET_TOKENS: u64 = 15_000;
 /// One `- name: description` line per definition that is not a built-in, in the order given.
 pub fn text<'a>(defs: impl IntoIterator<Item = &'a AgentDef>) -> String {
     let mut out = String::new();
-    for d in defs
-        .into_iter()
-        .filter(|d| d.source.scope != Scope::Builtin)
-    {
+    for d in defs.into_iter().filter(|d| d.source.scope != Scope::Builtin) {
         out.push_str(&format!("- {}: {}\n", d.name, d.description.trim()));
     }
     out

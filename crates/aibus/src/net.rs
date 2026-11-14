@@ -55,11 +55,7 @@ impl Net {
 }
 
 /// The body of `resp` up to `max` bytes.
-async fn read(
-    mut resp: Response,
-    max: usize,
-    cancel: &CancellationToken,
-) -> Result<Vec<u8>, String> {
+async fn read(mut resp: Response, max: usize, cancel: &CancellationToken) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
     while body.len() < max {
         let chunk = tokio::select! {
@@ -86,11 +82,7 @@ impl WebFetcher for Net {
             r = request.send() => r.map_err(|e| e.without_url().to_string())?,
         };
         let status = resp.status().as_u16();
-        let content_type = resp
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
+        let content_type = resp.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_owned);
         let final_url = resp.url().to_string();
         let body = read(resp, PAGE_BYTES, cancel).await?;
         Ok(Fetched {
@@ -104,16 +96,8 @@ impl WebFetcher for Net {
 
 #[async_trait::async_trait]
 impl HookTransport for Net {
-    async fn ask(
-        &self,
-        system: &str,
-        user: &str,
-        cancel: &CancellationToken,
-    ) -> Result<String, String> {
-        let seat = self
-            .seat
-            .get()
-            .ok_or("no model is set up to answer a prompt hook")?;
+    async fn ask(&self, system: &str, user: &str, cancel: &CancellationToken) -> Result<String, String> {
+        let seat = self.seat.get().ok_or("no model is set up to answer a prompt hook")?;
         let req = ChatRequest {
             model: seat.model.clone(),
             system: system.into(),
@@ -140,12 +124,7 @@ impl HookTransport for Net {
             .collect())
     }
 
-    async fn post(
-        &self,
-        url: &str,
-        body: &str,
-        cancel: &CancellationToken,
-    ) -> Result<(u16, String), String> {
+    async fn post(&self, url: &str, body: &str, cancel: &CancellationToken) -> Result<(u16, String), String> {
         let request = self
             .client()?
             .post(url)

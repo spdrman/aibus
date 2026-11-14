@@ -2,6 +2,7 @@
 //! sandbox, worktrees that were kept, the index and the XDG directories. Exit 11 if any check
 //! failed. `--session <id>` adds the live memory numbers of that session.
 
+
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -49,11 +50,7 @@ fn config_check(g: &Global, paths: &Paths) -> (Check, Option<Config>) {
                 n => format!(", {n} warning(s): {}", l.warnings.join("; ")),
             };
             (
-                check(
-                    "config",
-                    true,
-                    format!("{}{note}", paths.config_file().display()),
-                ),
+                check("config", true, format!("{}{note}", paths.config_file().display())),
                 Some(l.config),
             )
         }
@@ -68,24 +65,13 @@ fn sandbox_check(cfg: Option<&Config>) -> Check {
     let Some(tools) = tools.filter(|t| t.sandbox != config::SandboxKind::None) else {
         return check("shell sandbox", true, "none");
     };
-    let sandbox = Sandbox {
-        kind: tools.sandbox,
-        network: tools.sandbox_network,
-    };
+    let sandbox = Sandbox { kind: tools.sandbox, network: tools.sandbox_network };
     let name = tools.sandbox.as_str();
     let path = std::env::var("PATH").unwrap_or_default();
     if !sandbox.available(&path) {
-        return check(
-            "shell sandbox",
-            false,
-            format!("{name} is configured but not on PATH"),
-        );
+        return check("shell sandbox", false, format!("{name} is configured but not on PATH"));
     }
-    let net = if tools.sandbox_network {
-        ""
-    } else {
-        ", network off"
-    };
+    let net = if tools.sandbox_network { "" } else { ", network off" };
     check("shell sandbox", true, format!("{name}{net}"))
 }
 
@@ -94,18 +80,10 @@ fn sandbox_check(cfg: Option<&Config>) -> Check {
 /// program's own path does not resolve, since the author could not start it.
 fn author_check(cfg: Option<&Config>) -> Check {
     if let Some(own) = cfg.and_then(|c| c.mcp.get("aibus")) {
-        return check(
-            "workflow author",
-            true,
-            format!("your [mcp.aibus]: {} {}", own.command, own.args.join(" ")),
-        );
+        return check("workflow author", true, format!("your [mcp.aibus]: {} {}", own.command, own.args.join(" ")));
     }
     match crate::author::server(false) {
-        Ok(own) => check(
-            "workflow author",
-            true,
-            format!("{} mcp (read-only, over stdio)", own.command),
-        ),
+        Ok(own) => check("workflow author", true, format!("{} mcp (read-only, over stdio)", own.command)),
         Err(e) => check("workflow author", false, e),
     }
 }
@@ -144,11 +122,7 @@ fn worktree_check(paths: &Paths) -> Check {
     let root = paths.cache.join("worktrees");
     let mut kept = Vec::new();
     for session in std::fs::read_dir(&root).into_iter().flatten().flatten() {
-        for run in std::fs::read_dir(session.path())
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
+        for run in std::fs::read_dir(session.path()).into_iter().flatten().flatten() {
             let dirty = std::process::Command::new("git")
                 .arg("-C")
                 .arg(run.path())
@@ -173,11 +147,7 @@ fn worktree_check(paths: &Paths) -> Check {
 fn index_check(paths: &Paths) -> Check {
     match std::fs::metadata(paths.data.join("index.sqlite")) {
         Ok(m) => check("index", true, format!("{} bytes", m.len())),
-        Err(_) => check(
-            "index",
-            true,
-            "not built yet (aibus memory index creates it)",
-        ),
+        Err(_) => check("index", true, "not built yet (aibus memory index creates it)"),
     }
 }
 
@@ -190,9 +160,7 @@ fn dirs_check(paths: &Paths) -> Check {
         ("state", &paths.state),
         ("cache", &paths.cache),
     ] {
-        let Ok(meta) = std::fs::metadata(dir) else {
-            continue;
-        };
+        let Ok(meta) = std::fs::metadata(dir) else { continue };
         if !meta.is_dir() {
             problems.push(format!("{name} {} is not a directory", dir.display()));
             continue;
@@ -242,11 +210,7 @@ fn session_check(paths: &Paths, id: &str) -> Check {
     }
     match std::fs::read_to_string(dir.join("memory.json")) {
         Ok(text) => check("session memory", true, text.trim()),
-        Err(_) => check(
-            "session memory",
-            true,
-            "no live numbers recorded for this session",
-        ),
+        Err(_) => check("session memory", true, "no live numbers recorded for this session"),
     }
 }
 
@@ -279,18 +243,10 @@ fn providers_check(cfg: Option<&Config>, cache: &Path, now: SystemTime) -> Vec<C
     let Some(cfg) = cfg else {
         return vec![check("provider", true, "no config")];
     };
-    let used: std::collections::BTreeSet<&str> = cfg
-        .accounts
-        .iter()
-        .filter(|a| a.enabled)
-        .map(|a| a.provider.as_str())
-        .filter(|id| *id != "fake")
-        .collect();
-    let ids: std::collections::BTreeSet<&str> = used
-        .iter()
-        .copied()
-        .chain(cfg.providers.iter().map(|d| d.id.as_str()))
-        .collect();
+    let used: std::collections::BTreeSet<&str> =
+        cfg.accounts.iter().filter(|a| a.enabled).map(|a| a.provider.as_str()).filter(|id| *id != "fake").collect();
+    let ids: std::collections::BTreeSet<&str> =
+        used.iter().copied().chain(cfg.providers.iter().map(|d| d.id.as_str())).collect();
     let mut out = Vec::new();
     for id in ids {
         let user = cfg.providers.iter().find(|d| d.id == id);
@@ -310,25 +266,17 @@ fn providers_check(cfg: Option<&Config>, cache: &Path, now: SystemTime) -> Vec<C
             (true, true) => format!("preset {id} + [[provider]]"),
             (false, _) => "custom [[provider]]".to_owned(),
         };
-        let accounts: Vec<&config::Account> = cfg
-            .accounts
-            .iter()
-            .filter(|a| a.enabled && a.provider == id)
-            .collect();
+        let accounts: Vec<&config::Account> = cfg.accounts.iter().filter(|a| a.enabled && a.provider == id).collect();
         let legacy = accounts.iter().find(|a| a.base_url.is_some());
-        let url = legacy
-            .and_then(|a| a.base_url.as_deref())
-            .or(def.base_url.as_deref());
+        let url = legacy.and_then(|a| a.base_url.as_deref()).or(def.base_url.as_deref());
         let api = def.api.map_or("?", Api::as_str);
         let cloud = matches!(def.api, Some(Api::AnthropicBedrock | Api::AnthropicVertex));
         let mut kinds: Vec<&str> = accounts.iter().map(|a| auth_kind(&a.auth)).collect();
         kinds.dedup();
         let rows = match &def.model_table {
-            Some(aibus_provider::presets::ModelTableSpec::Named(n)) => {
-                aibus_provider::catalog::table(n)
-                    .and_then(|t| serde_json::from_str::<Value>(t).ok())
-                    .and_then(|v| v["models"].as_array().map(Vec::len))
-            }
+            Some(aibus_provider::presets::ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
+                .and_then(|t| serde_json::from_str::<Value>(t).ok())
+                .and_then(|v| v["models"].as_array().map(Vec::len)),
             _ => None,
         };
         let age = match aibus_provider::models::cache_age(&cache.join("models"), id, now) {
@@ -338,22 +286,14 @@ fn providers_check(cfg: Option<&Config>, cache: &Path, now: SystemTime) -> Vec<C
         let mut row = format!(
             "{id}: {api}, {}, {from}, auth {}, {} catalog rows, {age}",
             url.unwrap_or(if cloud { "default host" } else { "no base_url" }),
-            if kinds.is_empty() {
-                "no account".to_owned()
-            } else {
-                kinds.join(" + ")
-            },
+            if kinds.is_empty() { "no account".to_owned() } else { kinds.join(" + ") },
             rows.unwrap_or(0),
         );
         if cloud {
             // The account's own region and project win over the provider's.
             let account = accounts.first();
-            let region = account
-                .and_then(|a| a.region.clone())
-                .or(def.region.clone());
-            let project = account
-                .and_then(|a| a.project.clone())
-                .or(def.project.clone());
+            let region = account.and_then(|a| a.region.clone()).or(def.region.clone());
+            let project = account.and_then(|a| a.project.clone()).or(def.project.clone());
             for (what, value) in [("project", project), ("region", region)] {
                 if let Some(v) = value {
                     row.push_str(&format!(", {what} {v}"));
@@ -370,11 +310,7 @@ fn providers_check(cfg: Option<&Config>, cache: &Path, now: SystemTime) -> Vec<C
         }
         out.push(check("provider", true, row));
         if user.is_some() && !used.contains(id) {
-            out.push(check(
-                "provider",
-                true,
-                format!("warning: [[provider]] {id} is used by no enabled account"),
-            ));
+            out.push(check("provider", true, format!("warning: [[provider]] {id} is used by no enabled account")));
         }
     }
     if out.is_empty() {
@@ -462,32 +398,21 @@ mod tests {
             name: name.into(),
             provider: provider.into(),
             base_url: url.map(Into::into),
-            auth: config::Auth {
-                keyring: true,
-                ..Default::default()
-            },
+            auth: config::Auth { keyring: true, ..Default::default() },
             ..Default::default()
         }
     }
 
     #[test]
-    fn each_provider_gets_a_row_with_wire_url_source_auth_catalog_and_cache_and_an_old_compatible_account_gets_a_hint(
-    ) {
+    fn each_provider_gets_a_row_with_wire_url_source_auth_catalog_and_cache_and_an_old_compatible_account_gets_a_hint() {
         let mut cfg = Config::default();
         cfg.accounts.push(account("g", "groq", None));
-        cfg.accounts.push(account(
-            "home",
-            "openai-compatible",
-            Some("http://10.0.0.5:11434/v1"),
-        ));
+        cfg.accounts.push(account("home", "openai-compatible", Some("http://10.0.0.5:11434/v1")));
         cfg.accounts.push(account("f", "fake", None));
         let cache = tempfile::tempdir().unwrap();
         let rows = providers_check(Some(&cfg), cache.path(), SystemTime::UNIX_EPOCH);
         let details: Vec<&str> = rows.iter().map(|c| c.detail.as_str()).collect();
-        assert!(
-            rows.iter().all(|c| c.ok && c.name == "provider"),
-            "{details:?}"
-        );
+        assert!(rows.iter().all(|c| c.ok && c.name == "provider"), "{details:?}");
         let groq = cfg_rows("groq");
         assert!(details.iter().any(|d| d == &format!("groq: openai-chat, https://api.groq.com/openai/v1, preset groq, auth keyring, {groq} catalog rows, no cache")), "{details:?}");
         assert!(details.iter().any(|d| d.starts_with("openai-compatible: openai-chat, http://10.0.0.5:11434/v1, preset openai-compatible, auth keyring, 0 catalog rows, no cache; account home could use [[provider]] id = \"home\"")), "{details:?}");
@@ -501,8 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_provider_no_account_uses_is_a_warning_row_and_a_used_one_shows_its_auth_and_cache_age(
-    ) {
+    fn a_custom_provider_no_account_uses_is_a_warning_row_and_a_used_one_shows_its_auth_and_cache_age() {
         let mut cfg = Config::default();
         cfg.providers.push(aibus_provider::ProviderDef {
             id: "lab".into(),
@@ -517,18 +441,11 @@ mod tests {
             ..Default::default()
         });
         let mut a = account("k", "kept", None);
-        a.auth = config::Auth {
-            none: true,
-            ..Default::default()
-        };
+        a.auth = config::Auth { none: true, ..Default::default() };
         cfg.accounts.push(a);
         let cache = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(cache.path().join("models")).unwrap();
-        std::fs::write(
-            cache.path().join("models/kept.json"),
-            r#"{"fetched_at": 1000, "models": []}"#,
-        )
-        .unwrap();
+        std::fs::write(cache.path().join("models/kept.json"), r#"{"fetched_at": 1000, "models": []}"#).unwrap();
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000 + 3 * 86_400 + 5);
         let rows = providers_check(Some(&cfg), cache.path(), now);
         let details: Vec<&str> = rows.iter().map(|c| c.detail.as_str()).collect();
@@ -540,10 +457,7 @@ mod tests {
                 "warning: [[provider]] lab is used by no enabled account",
             ]
         );
-        assert!(
-            rows.iter().all(|c| c.ok),
-            "a warning does not fail the check"
-        );
+        assert!(rows.iter().all(|c| c.ok), "a warning does not fail the check");
     }
 
     #[test]
@@ -567,11 +481,7 @@ mod tests {
         assert!(dirs_check(&paths).ok);
         std::fs::write(p("d"), "").unwrap();
         let c = dirs_check(&paths);
-        assert!(
-            !c.ok && c.detail.contains("not a directory"),
-            "{}",
-            c.detail
-        );
+        assert!(!c.ok && c.detail.contains("not a directory"), "{}", c.detail);
         std::fs::remove_file(p("d")).unwrap();
         std::fs::create_dir(p("s")).unwrap();
         #[cfg(unix)]
@@ -617,9 +527,7 @@ mod tests {
         let dir = paths.state.join("sessions").join(&id);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("session.json"), "{}").unwrap();
-        assert!(session_check(&paths, &id)
-            .detail
-            .contains("no live numbers"));
+        assert!(session_check(&paths, &id).detail.contains("no live numbers"));
         std::fs::write(dir.join("memory.json"), r#"{"rss_mb":12}"#).unwrap();
         assert_eq!(session_check(&paths, &id).detail, r#"{"rss_mb":12}"#);
     }

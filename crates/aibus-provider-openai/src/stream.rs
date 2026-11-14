@@ -4,8 +4,8 @@
 use std::time::SystemTime;
 
 use aibus_provider::{
-    ChatResponse, ContentBlock, CostSource, Message, MessageRole, Price, ProviderError,
-    ProviderErrorKind, StopReason, StreamChunk, ToolCallId, Usage,
+    ChatResponse, ContentBlock, Message, MessageRole, Price, ProviderError, ProviderErrorKind,
+    CostSource, StopReason, StreamChunk, ToolCallId, Usage,
 };
 use serde_json::Value;
 use smol_str::SmolStr;
@@ -52,21 +52,12 @@ fn status_of(code: &str) -> u16 {
 }
 
 fn stream_error(e: &Value) -> ProviderError {
-    let code = e["code"]
-        .as_str()
-        .or_else(|| e["type"].as_str())
-        .unwrap_or_default();
+    let code = e["code"].as_str().or_else(|| e["type"].as_str()).unwrap_or_default();
     let status = match status_of(code) {
         0 => status_of(e["type"].as_str().unwrap_or_default()),
         s => s,
     };
-    ProviderError::from_http(
-        status,
-        e["message"].as_str().unwrap_or(code),
-        None,
-        None,
-        code,
-    )
+    ProviderError::from_http(status, e["message"].as_str().unwrap_or(code), None, None, code)
 }
 
 impl Turn {
@@ -89,25 +80,18 @@ impl Turn {
             return;
         }
         let n = |v: &Value| v.as_u64();
-        let prompt = n(&u["prompt_tokens"])
-            .or(n(&u["input_tokens"]))
-            .unwrap_or(0);
+        let prompt = n(&u["prompt_tokens"]).or(n(&u["input_tokens"])).unwrap_or(0);
         let cached = n(&u["prompt_tokens_details"]["cached_tokens"])
             .or(n(&u["input_tokens_details"]["cached_tokens"]))
             .or(n(&u["cached_tokens"]))
             .unwrap_or(0);
         self.usage.input_tokens = prompt.saturating_sub(cached);
         self.usage.cache_read = cached;
-        self.usage.output_tokens = n(&u["completion_tokens"])
-            .or(n(&u["output_tokens"]))
-            .unwrap_or(0);
+        self.usage.output_tokens = n(&u["completion_tokens"]).or(n(&u["output_tokens"])).unwrap_or(0);
         // Chat says `completion_tokens_details`, Responses says `output_tokens_details`.
         self.usage.reasoning_tokens = n(&u["completion_tokens_details"]["reasoning_tokens"])
             .or(n(&u["output_tokens_details"]["reasoning_tokens"]));
-        if let (true, Some(c)) = (
-            self.reported_cost,
-            u["cost"].as_f64().filter(|c| c.is_finite() && *c >= 0.0),
-        ) {
+        if let (true, Some(c)) = (self.reported_cost, u["cost"].as_f64().filter(|c| c.is_finite() && *c >= 0.0)) {
             self.usage.cost_usd = c;
             self.usage.cost_source = CostSource::Provider;
         }
@@ -116,17 +100,8 @@ impl Turn {
     fn start_tool(&mut self, key: String, name: &str, out: &mut Vec<StreamChunk>) -> ToolCallId {
         let id = ToolCallId(Ulid::new());
         let name: SmolStr = name.into();
-        out.push(StreamChunk::ToolUseStart {
-            id,
-            name: name.clone(),
-        });
-        self.tools.push(Tool {
-            key,
-            id,
-            name,
-            json: String::new(),
-            ended: false,
-        });
+        out.push(StreamChunk::ToolUseStart { id, name: name.clone() });
+        self.tools.push(Tool { key, id, name, json: String::new(), ended: false });
         id
     }
 
@@ -137,10 +112,7 @@ impl Turn {
     fn arguments(&mut self, key: &str, fragment: &str, out: &mut Vec<StreamChunk>) {
         if let (Some(t), false) = (self.tool_mut(key), fragment.is_empty()) {
             t.json.push_str(fragment);
-            out.push(StreamChunk::ToolUseInputDelta {
-                id: t.id,
-                json_fragment: fragment.to_owned(),
-            });
+            out.push(StreamChunk::ToolUseInputDelta { id: t.id, json_fragment: fragment.to_owned() });
         }
     }
 
@@ -175,34 +147,18 @@ impl Turn {
             self.thinking.push_str(t);
             out.push(StreamChunk::ThinkingDelta(t.to_owned()));
         }
-        for (pos, call) in delta["tool_calls"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .enumerate()
-        {
+        for (pos, call) in delta["tool_calls"].as_array().into_iter().flatten().enumerate() {
             // Some local servers leave the index out; the position then stands in for it.
             let key = call["index"].as_u64().unwrap_or(pos as u64).to_string();
             let f = &call["function"];
             if self.tool_mut(&key).is_none() {
-                self.start_tool(
-                    key.clone(),
-                    f["name"].as_str().unwrap_or_default(),
-                    &mut out,
-                );
+                self.start_tool(key.clone(), f["name"].as_str().unwrap_or_default(), &mut out);
             }
             self.arguments(&key, f["arguments"].as_str().unwrap_or_default(), &mut out);
         }
-        for lp in choice["logprobs"]["content"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
+        for lp in choice["logprobs"]["content"].as_array().into_iter().flatten() {
             if let (Some(token), Some(logprob)) = (lp["token"].as_str(), lp["logprob"].as_f64()) {
-                out.push(StreamChunk::Logprob {
-                    token: token.to_owned(),
-                    logprob: logprob as f32,
-                });
+                out.push(StreamChunk::Logprob { token: token.to_owned(), logprob: logprob as f32 });
             }
         }
         if let Some(reason) = choice["finish_reason"].as_str() {
@@ -224,13 +180,8 @@ impl Turn {
         let mut out = Vec::new();
         let item = &v["item"];
         let key = v["item_id"].as_str().unwrap_or_default().to_owned();
-        match v["type"]
-            .as_str()
-            .ok_or_else(|| malformed("event without a type"))?
-        {
-            "response.created" => {
-                self.response_id = v["response"]["id"].as_str().map(str::to_owned)
-            }
+        match v["type"].as_str().ok_or_else(|| malformed("event without a type"))? {
+            "response.created" => self.response_id = v["response"]["id"].as_str().map(str::to_owned),
             "response.output_item.added" if item["type"] == "function_call" => {
                 let key = item["id"].as_str().unwrap_or_default().to_owned();
                 self.start_tool(key, item["name"].as_str().unwrap_or_default(), &mut out);
@@ -241,13 +192,8 @@ impl Turn {
                     out.push(StreamChunk::TextDelta(t.to_owned()));
                 }
                 for lp in v["logprobs"].as_array().into_iter().flatten() {
-                    if let (Some(token), Some(logprob)) =
-                        (lp["token"].as_str(), lp["logprob"].as_f64())
-                    {
-                        out.push(StreamChunk::Logprob {
-                            token: token.to_owned(),
-                            logprob: logprob as f32,
-                        });
+                    if let (Some(token), Some(logprob)) = (lp["token"].as_str(), lp["logprob"].as_f64()) {
+                        out.push(StreamChunk::Logprob { token: token.to_owned(), logprob: logprob as f32 });
                     }
                 }
             }
@@ -264,11 +210,7 @@ impl Turn {
                 let key = item["id"].as_str().unwrap_or_default().to_owned();
                 // The finished item carries the whole arguments, for a server that sent no deltas.
                 if self.tool_mut(&key).is_some_and(|t| t.json.is_empty()) {
-                    self.arguments(
-                        &key,
-                        item["arguments"].as_str().unwrap_or_default(),
-                        &mut out,
-                    );
+                    self.arguments(&key, item["arguments"].as_str().unwrap_or_default(), &mut out);
                 }
                 if let Some(t) = self.tool_mut(&key).filter(|t| !t.ended) {
                     t.ended = true;
@@ -278,15 +220,13 @@ impl Turn {
             "response.completed" | "response.incomplete" => {
                 self.complete = true;
                 self.take_usage(&v["response"]["usage"]);
-                self.stop = Some(
-                    match v["response"]["incomplete_details"]["reason"].as_str() {
-                        Some("max_output_tokens") => StopReason::MaxTokens,
-                        Some("content_filter") => StopReason::ContentFilter,
-                        Some(other) => StopReason::Other(other.into()),
-                        None if self.tools.is_empty() => StopReason::EndTurn,
-                        None => StopReason::ToolUse,
-                    },
-                );
+                self.stop = Some(match v["response"]["incomplete_details"]["reason"].as_str() {
+                    Some("max_output_tokens") => StopReason::MaxTokens,
+                    Some("content_filter") => StopReason::ContentFilter,
+                    Some(other) => StopReason::Other(other.into()),
+                    None if self.tools.is_empty() => StopReason::EndTurn,
+                    None => StopReason::ToolUse,
+                });
             }
             "response.failed" => return Err(stream_error(&v["response"]["error"])),
             "error" => return Err(stream_error(&v)),
@@ -311,17 +251,10 @@ impl Turn {
         }
         let stop = self.stop.clone().unwrap_or(StopReason::EndTurn);
         // Some servers say "stop" for a reply that called tools.
-        let stop = if stop == StopReason::EndTurn && !self.tools.is_empty() {
-            StopReason::ToolUse
-        } else {
-            stop
-        };
+        let stop = if stop == StopReason::EndTurn && !self.tools.is_empty() { StopReason::ToolUse } else { stop };
         self.stop = Some(stop.clone());
         if self.usage.cost_source != CostSource::Provider {
-            self.usage.cost_usd = self
-                .price
-                .and_then(|p| p.cost_usd(&self.usage))
-                .unwrap_or(0.0);
+            self.usage.cost_usd = self.price.and_then(|p| p.cost_usd(&self.usage)).unwrap_or(0.0);
         }
         out.push(StreamChunk::Usage(self.usage));
         out.push(StreamChunk::Done(stop));
@@ -332,11 +265,7 @@ impl Turn {
     pub fn into_response(self, request_id: Option<String>) -> Result<ChatResponse, ProviderError> {
         let mut blocks = Vec::new();
         if !self.thinking.is_empty() {
-            blocks.push(ContentBlock::Thinking {
-                text: self.thinking,
-                redacted: false,
-                signature: None,
-            });
+            blocks.push(ContentBlock::Thinking { text: self.thinking, redacted: false, signature: None });
         }
         if !self.text.is_empty() {
             blocks.push(ContentBlock::Text(self.text));
@@ -345,22 +274,12 @@ impl Turn {
             let input = if t.json.trim().is_empty() {
                 Value::Object(Default::default())
             } else {
-                serde_json::from_str(&t.json)
-                    .map_err(|e| malformed(&format!("tool input for {}: {e}", t.name)))?
+                serde_json::from_str(&t.json).map_err(|e| malformed(&format!("tool input for {}: {e}", t.name)))?
             };
-            blocks.push(ContentBlock::ToolUse {
-                id: t.id,
-                name: t.name,
-                input,
-                signature: None,
-            });
+            blocks.push(ContentBlock::ToolUse { id: t.id, name: t.name, input, signature: None });
         }
         Ok(ChatResponse {
-            message: Message {
-                role: MessageRole::Assistant,
-                blocks,
-                at: SystemTime::now(),
-            },
+            message: Message { role: MessageRole::Assistant, blocks, at: SystemTime::now() },
             usage: self.usage,
             stop: self.stop.unwrap_or(StopReason::EndTurn),
             request_id: request_id.or(self.response_id),
@@ -380,10 +299,7 @@ mod tests {
             "prompt_tokens": 10, "completion_tokens": 50,
             "completion_tokens_details": {"reasoning_tokens": 32}
         }));
-        assert_eq!(
-            (t.usage.output_tokens, t.usage.reasoning_tokens),
-            (50, Some(32))
-        );
+        assert_eq!((t.usage.output_tokens, t.usage.reasoning_tokens), (50, Some(32)));
 
         let mut t = Turn::new(None, false);
         t.take_usage(&serde_json::json!({
@@ -399,51 +315,24 @@ mod tests {
 
     #[test]
     fn a_reported_cost_replaces_the_estimate_and_says_so() {
-        let price = Price {
-            input_per_mtok: 1.0,
-            output_per_mtok: 1.0,
-            cache_read_per_mtok: None,
-            cache_write_per_mtok: None,
-        };
+        let price = Price { input_per_mtok: 1.0, output_per_mtok: 1.0, cache_read_per_mtok: None, cache_write_per_mtok: None };
         let chunk = r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1000,"cost":0.0123}}"#;
         let usage = |t: &mut Turn| {
-            t.chat_event(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}"#)
-                .unwrap();
+            t.chat_event(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}"#).unwrap();
             t.chat_event(chunk).unwrap();
             t.chat_event("[DONE]").unwrap();
             let out = t.close().unwrap();
-            out.into_iter()
-                .find_map(|c| {
-                    if let StreamChunk::Usage(u) = c {
-                        Some(u)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap()
+            out.into_iter().find_map(|c| if let StreamChunk::Usage(u) = c { Some(u) } else { None }).unwrap()
         };
         let u = usage(&mut Turn::new(Some(price), true));
         assert_eq!((u.cost_usd, u.cost_source), (0.0123, CostSource::Provider));
 
         // Without `usage.cost` in the response the table's estimate stands.
         let mut t = Turn::new(Some(price), true);
-        t.chat_event(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}"#)
-            .unwrap();
-        t.chat_event(r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1000}}"#)
-            .unwrap();
+        t.chat_event(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}"#).unwrap();
+        t.chat_event(r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1000}}"#).unwrap();
         t.chat_event("[DONE]").unwrap();
-        let u = t
-            .close()
-            .unwrap()
-            .into_iter()
-            .find_map(|c| {
-                if let StreamChunk::Usage(u) = c {
-                    Some(u)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
+        let u = t.close().unwrap().into_iter().find_map(|c| if let StreamChunk::Usage(u) = c { Some(u) } else { None }).unwrap();
         assert_eq!((u.cost_usd, u.cost_source), (0.002, CostSource::Table));
 
         // A server that is not a reporting gateway is not trusted for a cost.
@@ -453,8 +342,7 @@ mod tests {
 
     #[test]
     fn a_mid_stream_quota_error_is_quota_and_the_responses_filter_is_a_stop_reason() {
-        let e =
-            stream_error(&serde_json::json!({"code": "insufficient_quota", "message": "spent"}));
+        let e = stream_error(&serde_json::json!({"code": "insufficient_quota", "message": "spent"}));
         assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Quota, false));
 
         let mut t = Turn::new(None, false);

@@ -8,8 +8,8 @@ use std::time::Duration;
 use aibus_core::config::{Hook, Hooks};
 use aibus_core::*;
 use aibus_testkit::FakeClock;
-use aibus_testkit::{xdg_temp, Xdg};
 use serde_json::{json, Map, Value};
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio_util::sync::CancellationToken;
 
 fn path_env() -> Vec<(String, String)> {
@@ -93,10 +93,7 @@ fn spec(matcher: Option<&str>, command: &str) -> HookSpec {
 #[tokio::test]
 async fn stdin_carries_every_common_field_and_the_event_extras() {
     let dir = xdg_temp();
-    let r = runner(
-        &dir,
-        &config(&[("pre_tool_use", vec![hook(None, "cat > stdin.json", None)])]),
-    );
+    let r = runner(&dir, &config(&[("pre_tool_use", vec![hook(None, "cat > stdin.json", None)])]));
     let i = input(
         HookEvent::PreToolUse,
         Some("bash"),
@@ -139,23 +136,14 @@ async fn all_eleven_events_fire_with_their_own_name() {
             HookEvent::UserPromptSubmit | HookEvent::Stop => None,
             _ => Some("x"),
         };
-        let fired = fire(
-            &r,
-            &input(event, matcher, dir.path(), Role::Lead, Map::new()),
-        )
-        .await;
+        let fired = fire(&r, &input(event, matcher, dir.path(), Role::Lead, Map::new())).await;
         assert_eq!(fired.ran.len(), 1, "{}", event.as_str());
     }
     let seen = std::fs::read_to_string(dir.path().join("seen.jsonl")).unwrap();
     let names: Vec<String> = seen
         .lines()
         .filter(|l| !l.is_empty())
-        .map(|l| {
-            serde_json::from_str::<Value>(l).unwrap()["hook_event_name"]
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
+        .map(|l| serde_json::from_str::<Value>(l).unwrap()["hook_event_name"].as_str().unwrap().to_owned())
         .collect();
     let want: Vec<&str> = HookEvent::ALL.iter().map(|e| e.as_str()).collect();
     assert_eq!(names, want);
@@ -170,13 +158,7 @@ async fn only_blocking_events_can_block() {
         .collect();
     assert_eq!(
         can,
-        [
-            "user_prompt_submit",
-            "pre_tool_use",
-            "subagent_stop",
-            "stop",
-            "checkpoint"
-        ]
+        ["user_prompt_submit", "pre_tool_use", "subagent_stop", "stop", "checkpoint"]
     );
 }
 
@@ -195,41 +177,19 @@ async fn a_matcher_picks_the_tools_it_names() {
         )]),
     );
     for tool in ["bash", "write", "read"] {
-        fire(
-            &r,
-            &input(
-                HookEvent::PreToolUse,
-                Some(tool),
-                dir.path(),
-                Role::Lead,
-                Map::new(),
-            ),
-        )
-        .await;
+        fire(&r, &input(HookEvent::PreToolUse, Some(tool), dir.path(), Role::Lead, Map::new()))
+            .await;
     }
     let hits = std::fs::read_to_string(dir.path().join("hit.txt")).unwrap();
-    assert_eq!(
-        hits.lines().collect::<Vec<_>>(),
-        ["b", "any", "w", "any", "any"]
-    );
+    assert_eq!(hits.lines().collect::<Vec<_>>(), ["b", "any", "w", "any", "any"]);
 }
 
 #[tokio::test]
 async fn exit_zero_json_gives_the_verdict_and_the_updated_input() {
     let dir = xdg_temp();
     let cases: [(&str, bool, bool, Option<&str>); 4] = [
-        (
-            r#"echo '{"decision":"deny","reason":"no psql"}'"#,
-            true,
-            false,
-            None,
-        ),
-        (
-            r#"echo '{"decision":"ask","reason":"hm"}'"#,
-            false,
-            true,
-            None,
-        ),
+        (r#"echo '{"decision":"deny","reason":"no psql"}'"#, true, false, None),
+        (r#"echo '{"decision":"ask","reason":"hm"}'"#, false, true, None),
         (r#"echo '{"decision":"allow"}'"#, false, false, None),
         (
             r#"echo '{"decision":"allow","updated_input":{"command":"ls"}}'"#,
@@ -239,17 +199,8 @@ async fn exit_zero_json_gives_the_verdict_and_the_updated_input() {
         ),
     ];
     for (cmd, blocks, asks, updated) in cases {
-        let r = runner(
-            &dir,
-            &config(&[("pre_tool_use", vec![hook(None, cmd, None)])]),
-        );
-        let i = input(
-            HookEvent::PreToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            tool_extra("x"),
-        );
+        let r = runner(&dir, &config(&[("pre_tool_use", vec![hook(None, cmd, None)])]));
+        let i = input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, tool_extra("x"));
         let f = fire(&r, &i).await;
         assert_eq!(f.block.is_some(), blocks, "{cmd}");
         assert_eq!(f.ask, asks, "{cmd}");
@@ -265,22 +216,9 @@ async fn exit_zero_json_gives_the_verdict_and_the_updated_input() {
     // A verdict on an event that cannot block is not one.
     let r = runner(
         &dir,
-        &config(&[(
-            "post_tool_use",
-            vec![hook(None, r#"echo '{"decision":"deny"}'"#, None)],
-        )]),
+        &config(&[("post_tool_use", vec![hook(None, r#"echo '{"decision":"deny"}'"#, None)])]),
     );
-    let f = fire(
-        &r,
-        &input(
-            HookEvent::PostToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let f = fire(&r, &input(HookEvent::PostToolUse, Some("bash"), dir.path(), Role::Lead, Map::new())).await;
     assert!(f.block.is_none());
 }
 
@@ -292,22 +230,12 @@ async fn updated_input_reaches_the_next_hook_of_the_event() {
         &config(&[(
             "pre_tool_use",
             vec![
-                hook(
-                    None,
-                    r#"echo '{"updated_input":{"command":"second"}}'"#,
-                    None,
-                ),
+                hook(None, r#"echo '{"updated_input":{"command":"second"}}'"#, None),
                 hook(None, "cat > seen.json", None),
             ],
         )]),
     );
-    let i = input(
-        HookEvent::PreToolUse,
-        Some("bash"),
-        dir.path(),
-        Role::Lead,
-        tool_extra("first"),
-    );
+    let i = input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, tool_extra("first"));
     let f = fire(&r, &i).await;
     assert_eq!(f.updated_input.unwrap()["command"], "second");
     let seen: Value =
@@ -325,28 +253,9 @@ async fn plain_stdout_is_context_only_on_user_prompt_submit_and_session_start() 
         (HookEvent::PreToolUse, false),
         (HookEvent::SubagentStart, false),
     ] {
-        let r = runner(
-            &dir,
-            &config(&[(
-                event.as_str(),
-                vec![hook(None, "echo today is tuesday", None)],
-            )]),
-        );
-        let f = fire(
-            &r,
-            &input(event, Some("x"), dir.path(), Role::Lead, Map::new()),
-        )
-        .await;
-        assert_eq!(
-            f.context,
-            if kept {
-                vec!["[hook echo]\ntoday is tuesday".to_owned()]
-            } else {
-                vec![]
-            },
-            "{}",
-            event.as_str()
-        );
+        let r = runner(&dir, &config(&[(event.as_str(), vec![hook(None, "echo today is tuesday", None)])]));
+        let f = fire(&r, &input(event, Some("x"), dir.path(), Role::Lead, Map::new())).await;
+        assert_eq!(f.context, if kept { vec!["[hook echo]\ntoday is tuesday".to_owned()] } else { vec![] }, "{}", event.as_str());
         assert!(f.block.is_none());
     }
 }
@@ -357,47 +266,18 @@ async fn exit_two_blocks_with_stderr_where_it_can_and_is_a_note_where_it_cannot(
     let r = runner(
         &dir,
         &config(&[
-            (
-                "pre_tool_use",
-                vec![
-                    hook(None, "echo no psql here >&2; exit 2", None),
-                    hook(None, "echo never > second.txt", None),
-                ],
-            ),
-            (
-                "post_tool_use",
-                vec![hook(None, "echo lint failed >&2; exit 2", None)],
-            ),
+            ("pre_tool_use", vec![hook(None, "echo no psql here >&2; exit 2", None), hook(None, "echo never > second.txt", None)]),
+            ("post_tool_use", vec![hook(None, "echo lint failed >&2; exit 2", None)]),
         ]),
     );
-    let f = fire(
-        &r,
-        &input(
-            HookEvent::PreToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let f = fire(&r, &input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, Map::new())).await;
     let b = f.block.unwrap();
     assert_eq!(b.reason, "no psql here");
     assert_eq!(b.hook, "echo");
     assert_eq!(f.ran.len(), 1, "a block ends the chain");
     assert!(!dir.path().join("second.txt").exists());
 
-    let f = fire(
-        &r,
-        &input(
-            HookEvent::PostToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let f = fire(&r, &input(HookEvent::PostToolUse, Some("bash"), dir.path(), Role::Lead, Map::new())).await;
     assert!(f.block.is_none());
     assert_eq!(f.notes, ["[hook echo] lint failed"]);
 }
@@ -405,27 +285,11 @@ async fn exit_two_blocks_with_stderr_where_it_can_and_is_a_note_where_it_cannot(
 #[tokio::test]
 async fn any_other_exit_code_is_a_hook_error_and_the_action_goes_on() {
     let dir = xdg_temp();
-    let r = runner(
-        &dir,
-        &config(&[("pre_tool_use", vec![hook(None, "false", None)])]),
-    );
-    let f = fire(
-        &r,
-        &input(
-            HookEvent::PreToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let r = runner(&dir, &config(&[("pre_tool_use", vec![hook(None, "false", None)])]));
+    let f = fire(&r, &input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, Map::new())).await;
     assert!(f.block.is_none());
     assert_eq!(f.ran[0].outcome.exit_code, 1);
-    assert_eq!(
-        f.ran[0].outcome.message.as_deref(),
-        Some("hook error: false")
-    );
+    assert_eq!(f.ran[0].outcome.message.as_deref(), Some("hook error: false"));
 }
 
 #[tokio::test]
@@ -442,34 +306,11 @@ async fn a_hook_that_cannot_start_blocks_a_blocking_event_and_only_warns_otherwi
         None,
     );
     let cwd = Path::new("/");
-    let f = fire(
-        &gone,
-        &input(
-            HookEvent::PreToolUse,
-            Some("bash"),
-            cwd,
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let f = fire(&gone, &input(HookEvent::PreToolUse, Some("bash"), cwd, Role::Lead, Map::new())).await;
     assert!(f.block.unwrap().reason.contains("could not start"));
-    let f = fire(
-        &gone,
-        &input(
-            HookEvent::PostToolUse,
-            Some("bash"),
-            cwd,
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let f = fire(&gone, &input(HookEvent::PostToolUse, Some("bash"), cwd, Role::Lead, Map::new())).await;
     assert!(f.block.is_none());
-    assert_eq!(
-        f.ran[0].outcome.message.as_deref(),
-        Some("hook error: true")
-    );
+    assert_eq!(f.ran[0].outcome.message.as_deref(), Some("hook error: true"));
 }
 
 // ---- timeouts, on a paused clock --------------------------------------------------------
@@ -511,32 +352,15 @@ async fn a_timeout_blocks_a_blocking_event_and_is_an_error_for_the_rest() {
             ("post_tool_use", vec![hook(None, "sleep 100", Some(2))]),
         ]),
     );
-    let i = input(
-        HookEvent::PreToolUse,
-        Some("bash"),
-        dir.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let i = input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, Map::new());
     let f = given_up_at(&clock, &r, &i, 5).await;
     assert_eq!(f.block.unwrap().reason, "hook sleep timed out after 5 s");
     assert_eq!(f.ran[0].outcome.exit_code, 124);
 
-    let i = input(
-        HookEvent::PostToolUse,
-        Some("bash"),
-        dir.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let i = input(HookEvent::PostToolUse, Some("bash"), dir.path(), Role::Lead, Map::new());
     let f = given_up_at(&clock, &r, &i, 2).await;
     assert!(f.block.is_none());
-    assert!(f.ran[0]
-        .outcome
-        .message
-        .as_deref()
-        .unwrap()
-        .starts_with("hook error: sleep"));
+    assert!(f.ran[0].outcome.message.as_deref().unwrap().starts_with("hook error: sleep"));
 }
 
 #[tokio::test]
@@ -547,27 +371,12 @@ async fn the_default_is_sixty_seconds_and_user_prompt_submit_is_capped_at_ten() 
         &dir,
         &config(&[
             ("pre_tool_use", vec![hook(None, "sleep 1000", None)]),
-            (
-                "user_prompt_submit",
-                vec![hook(None, "sleep 1000", Some(60))],
-            ),
+            ("user_prompt_submit", vec![hook(None, "sleep 1000", Some(60))]),
         ]),
     );
-    let i = input(
-        HookEvent::UserPromptSubmit,
-        None,
-        dir.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let i = input(HookEvent::UserPromptSubmit, None, dir.path(), Role::Lead, Map::new());
     assert!(given_up_at(&clock, &r, &i, 10).await.block.is_some());
-    let i = input(
-        HookEvent::PreToolUse,
-        Some("bash"),
-        dir.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let i = input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, Map::new());
     assert!(given_up_at(&clock, &r, &i, 60).await.block.is_some());
 }
 
@@ -590,23 +399,10 @@ async fn hooks_run_in_the_project_root_with_a_scrubbed_environment() {
             vec![hook(None, "pwd > pwd.txt; env > env.txt", None)],
         )]),
     };
-    let r = HookRunner::new(
-        &hooks,
-        env,
-        dir.path().to_path_buf(),
-        "01SESSION".into(),
-        None,
-        None,
-    );
+    let r = HookRunner::new(&hooks, env, dir.path().to_path_buf(), "01SESSION".into(), None, None);
     // The run's own directory (a worktree, say) is not where hooks start.
     let elsewhere = xdg_temp();
-    let i = input(
-        HookEvent::PreToolUse,
-        Some("bash"),
-        elsewhere.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let i = input(HookEvent::PreToolUse, Some("bash"), elsewhere.path(), Role::Lead, Map::new());
     fire(&r, &i).await;
 
     let pwd = std::fs::read_to_string(dir.path().join("pwd.txt")).unwrap();
@@ -628,22 +424,9 @@ async fn output_is_capped_at_one_mebibyte_and_logged_under_logs_hooks() {
     let dir = xdg_temp();
     let r = runner(
         &dir,
-        &config(&[(
-            "post_tool_use",
-            vec![hook(None, "head -c 3145728 /dev/zero | tr '\\0' a", None)],
-        )]),
+        &config(&[("post_tool_use", vec![hook(None, "head -c 3145728 /dev/zero | tr '\\0' a", None)])]),
     );
-    let f = fire(
-        &r,
-        &input(
-            HookEvent::PostToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            Map::new(),
-        ),
-    )
-    .await;
+    let f = fire(&r, &input(HookEvent::PostToolUse, Some("bash"), dir.path(), Role::Lead, Map::new())).await;
     assert_eq!(f.ran[0].outcome.exit_code, 0);
 
     let logs: Vec<_> = std::fs::read_dir(dir.path().join("logs/hooks/01SESSION"))
@@ -651,21 +434,12 @@ async fn output_is_capped_at_one_mebibyte_and_logged_under_logs_hooks() {
         .map(|e| e.unwrap().path())
         .collect();
     assert_eq!(logs.len(), 1);
-    assert!(logs[0]
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .starts_with("post_tool_use-"));
+    assert!(logs[0].file_name().unwrap().to_str().unwrap().starts_with("post_tool_use-"));
     let text = std::fs::read_to_string(&logs[0]).unwrap();
     assert!(text.starts_with("$ head -c 3145728"));
     assert!(text.contains("exit 0"));
     assert!(text.contains("bytes truncated"));
-    assert!(
-        text.len() > 1_000_000 && text.len() < 1_100_000,
-        "{}",
-        text.len()
-    );
+    assert!(text.len() > 1_000_000 && text.len() < 1_100_000, "{}", text.len());
 }
 
 #[tokio::test]
@@ -675,10 +449,7 @@ async fn secrets_are_masked_in_the_log_and_in_what_goes_back_to_the_model() {
     let secret = "sk-ant-0123456789abcdefSECRET";
     redactor.register(&AccountName("work".into()), secret);
     let r = HookRunner::new(
-        &config(&[(
-            "pre_tool_use",
-            vec![hook(None, &format!("echo {secret} >&2; exit 2"), None)],
-        )]),
+        &config(&[("pre_tool_use", vec![hook(None, &format!("echo {secret} >&2; exit 2"), None)])]),
         path_env(),
         dir.path().to_path_buf(),
         "01SESSION".into(),
@@ -686,21 +457,8 @@ async fn secrets_are_masked_in_the_log_and_in_what_goes_back_to_the_model() {
         Some(redactor),
     );
     let mut extra = tool_extra("curl");
-    extra.insert(
-        "tool_input".into(),
-        json!({"command": format!("curl -H 'x: {secret}'")}),
-    );
-    let f = fire(
-        &r,
-        &input(
-            HookEvent::PreToolUse,
-            Some("bash"),
-            dir.path(),
-            Role::Lead,
-            extra,
-        ),
-    )
-    .await;
+    extra.insert("tool_input".into(), json!({"command": format!("curl -H 'x: {secret}'")}));
+    let f = fire(&r, &input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, extra)).await;
     assert!(!f.block.unwrap().reason.contains(secret));
     for entry in std::fs::read_dir(dir.path().join("logs")).unwrap() {
         let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
@@ -716,17 +474,8 @@ async fn a_definitions_hooks_run_only_when_the_call_brings_them() {
     let dir = xdg_temp();
     let r = runner(&dir, &Hooks::default());
     let mut scoped = HookSet::new();
-    scoped.insert(
-        "pre_tool_use".into(),
-        vec![spec(Some("bash"), "echo mine > scoped.txt")],
-    );
-    let i = input(
-        HookEvent::PreToolUse,
-        Some("bash"),
-        dir.path(),
-        Role::Worker,
-        Map::new(),
-    );
+    scoped.insert("pre_tool_use".into(), vec![spec(Some("bash"), "echo mine > scoped.txt")]);
+    let i = input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Worker, Map::new());
 
     let none = r.fire(&i, &HookSet::new(), &CancellationToken::new()).await;
     assert!(none.ran.is_empty() && !dir.path().join("scoped.txt").exists());
@@ -743,24 +492,9 @@ async fn a_workers_stop_is_delivered_as_subagent_stop_and_a_leads_is_not() {
     scoped.insert("stop".into(), vec![spec(None, "echo halt >&2; exit 2")]);
     let token = CancellationToken::new();
 
-    let worker = input(
-        HookEvent::SubagentStop,
-        Some("code-reviewer"),
-        dir.path(),
-        Role::Worker,
-        Map::new(),
-    );
-    assert_eq!(
-        r.fire(&worker, &scoped, &token).await.block.unwrap().reason,
-        "halt"
-    );
-    let lead = input(
-        HookEvent::SubagentStop,
-        Some("code-reviewer"),
-        dir.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let worker = input(HookEvent::SubagentStop, Some("code-reviewer"), dir.path(), Role::Worker, Map::new());
+    assert_eq!(r.fire(&worker, &scoped, &token).await.block.unwrap().reason, "halt");
+    let lead = input(HookEvent::SubagentStop, Some("code-reviewer"), dir.path(), Role::Lead, Map::new());
     assert!(r.fire(&lead, &scoped, &token).await.ran.is_empty());
     let lead_stop = input(HookEvent::Stop, None, dir.path(), Role::Lead, Map::new());
     assert!(r.fire(&lead_stop, &scoped, &token).await.block.is_some());
@@ -772,13 +506,7 @@ async fn the_default_runner_runs_nothing_which_is_what_no_hooks_gives() {
     let r = HookRunner::default();
     let mut scoped = HookSet::new();
     scoped.insert("pre_tool_use".into(), vec![spec(None, "echo x > ran.txt")]);
-    let i = input(
-        HookEvent::PreToolUse,
-        Some("bash"),
-        dir.path(),
-        Role::Lead,
-        Map::new(),
-    );
+    let i = input(HookEvent::PreToolUse, Some("bash"), dir.path(), Role::Lead, Map::new());
     let f = r.fire(&i, &scoped, &CancellationToken::new()).await;
     assert!(f.ran.is_empty());
     assert!(!dir.path().join("ran.txt").exists());

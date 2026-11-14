@@ -199,10 +199,7 @@ mod tests {
         assert_eq!(rfc3339(t), "2026-11-08T23:48:05.012Z");
         assert_eq!(date(UNIX_EPOCH), "1970-01-01");
         // A leap day.
-        assert_eq!(
-            date(UNIX_EPOCH + std::time::Duration::from_secs(1_709_164_800)),
-            "2024-02-29"
-        );
+        assert_eq!(date(UNIX_EPOCH + std::time::Duration::from_secs(1_709_164_800)), "2024-02-29");
     }
 
     fn stream(text: &str) -> Msg {
@@ -221,9 +218,7 @@ mod tests {
         assert!(lines.len() > 1);
         let joined: String = lines.iter().map(|l| l["text"].as_str().unwrap()).collect();
         assert_eq!(joined, text);
-        assert!(lines
-            .iter()
-            .all(|l| l["text"].as_str().unwrap().len() <= 10));
+        assert!(lines.iter().all(|l| l["text"].as_str().unwrap().len() <= 10));
         // A stream with no text (thinking only) prints nothing.
         let quiet = Msg::Stream {
             run: RunId::new(),

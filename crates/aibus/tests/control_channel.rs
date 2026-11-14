@@ -8,9 +8,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 
-use aibus_testkit::xdg_temp;
 use common::{command, schema};
 use serde_json::{json, Value};
+use aibus_testkit::xdg_temp;
 
 /// A tool call that needs permission under `default` mode, then an answer that depends on what
 /// the conversation holds.
@@ -97,26 +97,17 @@ fn a_permission_allow_and_a_message_drive_the_session() {
     s.send(&json!({"type": "Permission", "id": needed["id"], "decision": "allow"}));
 
     let (rest, code) = s.rest();
-    let decided = rest
-        .iter()
-        .find(|e| e["type"] == "PermissionDecided")
-        .unwrap();
+    let decided = rest.iter().find(|e| e["type"] == "PermissionDecided").unwrap();
     assert_eq!(decided["decision"], "allowed");
     assert_eq!(decided["id"], needed["id"]);
     assert!(decided["reason"].is_null());
-    let fin = rest
-        .iter()
-        .find(|e| e["type"] == "ToolCallFinished")
-        .unwrap();
+    let fin = rest.iter().find(|e| e["type"] == "ToolCallFinished").unwrap();
     assert_eq!(fin["ok"], true);
     let done = rest.iter().find(|e| e["type"] == "RunFinished").unwrap();
     assert_eq!(done["status"], "completed");
     assert_eq!(done["summary"], "got the message");
     assert_eq!(code, 0);
-    assert_eq!(
-        fs::read_to_string(home.path().join("proj/ran.txt")).unwrap(),
-        "ran\n"
-    );
+    assert_eq!(fs::read_to_string(home.path().join("proj/ran.txt")).unwrap(), "ran\n");
 }
 
 #[test]
@@ -126,10 +117,7 @@ fn a_permission_deny_keeps_the_tool_from_running() {
     let needed = s.until("PermissionNeeded");
     s.send(&json!({"type": "Permission", "id": needed["id"], "decision": "deny"}));
     let (rest, _) = s.rest();
-    let decided = rest
-        .iter()
-        .find(|e| e["type"] == "PermissionDecided")
-        .unwrap();
+    let decided = rest.iter().find(|e| e["type"] == "PermissionDecided").unwrap();
     assert_eq!(decided["decision"], "denied");
     assert!(!home.path().join("proj/ran.txt").exists());
 }
@@ -162,12 +150,7 @@ fn bad_lines_are_reported_on_stderr_and_do_not_stop_the_session() {
     }
     writeln!(stdin, "this is not json").unwrap();
     writeln!(stdin, r#"{{"type":"Quit"}}"#).unwrap();
-    writeln!(
-        stdin,
-        r#"{{"type":"Permission","id":{},"decision":"allow"}}"#,
-        needed["id"]
-    )
-    .unwrap();
+    writeln!(stdin, r#"{{"type":"Permission","id":{},"decision":"allow"}}"#, needed["id"]).unwrap();
     drop(stdin);
     let result = child.wait_with_output().unwrap();
     let err = String::from_utf8_lossy(&result.stderr);
@@ -184,10 +167,7 @@ fn a_closed_stdin_refuses_what_would_ask_so_the_run_cannot_hang() {
     // Nobody is left to answer.
     drop(s.stdin.take());
     let (rest, code) = s.rest();
-    let decided = rest
-        .iter()
-        .find(|e| e["type"] == "PermissionDecided")
-        .unwrap();
+    let decided = rest.iter().find(|e| e["type"] == "PermissionDecided").unwrap();
     assert_eq!(decided["decision"], "denied");
     assert_eq!(decided["reason"], "no tty");
     assert_eq!(decided["id"], needed["id"]);

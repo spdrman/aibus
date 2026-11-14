@@ -10,9 +10,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 fn row(buf: &Buffer, y: u16, width: u16) -> String {
-    (0..width)
-        .map(|x| buf[(x, y)].symbol().to_owned())
-        .collect()
+    (0..width).map(|x| buf[(x, y)].symbol().to_owned()).collect()
 }
 
 fn lead(flag: &str) -> Value {
@@ -29,22 +27,11 @@ fn lead(flag: &str) -> Value {
 fn a_long_model_flag_leaves_the_effort_word_intact_and_a_gap() {
     let area = Rect::new(0, 0, 40, 4);
     let mut buf = Buffer::empty(area);
-    lead_box(
-        &mut buf,
-        area,
-        &lead("defaults.model sonnet"),
-        &Theme::recording(),
-    );
+    lead_box(&mut buf, area, &lead("defaults.model sonnet"), &Theme::recording());
     let line = row(&buf, 2, 40);
-    assert!(
-        line.contains("effort ▮▮▮▮ high "),
-        "the effort word was overwritten: {line:?}"
-    );
+    assert!(line.contains("effort ▮▮▮▮ high "), "the effort word was overwritten: {line:?}");
     assert!(!line.contains("higdefaults"), "{line:?}");
-    assert!(
-        line.trim_end_matches(['│', ' ']).ends_with(['n', '…']),
-        "{line:?}"
-    );
+    assert!(line.trim_end_matches(['│', ' ']).ends_with(['n', '…']), "{line:?}");
 }
 
 #[test]

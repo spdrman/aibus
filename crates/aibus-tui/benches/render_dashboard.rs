@@ -49,11 +49,7 @@ fn measure(gate: &mut gate::Gate, name: &str, mut app: App<MiniGraph>, size: (u1
     let resize = gate::Gate::best_of(ROUNDS, || {
         (0..SAMPLES)
             .map(|i| {
-                let (w, h) = if i % 2 == 0 {
-                    (size.0 - 1, size.1)
-                } else {
-                    size
-                };
+                let (w, h) = if i % 2 == 0 { (size.0 - 1, size.1) } else { size };
                 term.backend_mut().resize(w, h);
                 let start = Instant::now();
                 let drew = ui.draw(&mut term, &app.graph).unwrap();
@@ -63,16 +59,8 @@ fn measure(gate: &mut gate::Gate, name: &str, mut app: App<MiniGraph>, size: (u1
             })
             .collect()
     });
-    gate.judge(
-        &format!("render_dashboard-{name}-render"),
-        &render,
-        RENDER_BUDGET_US,
-    );
-    gate.judge(
-        &format!("render_dashboard-{name}-resize"),
-        &resize,
-        RESIZE_BUDGET_US,
-    );
+    gate.judge(&format!("render_dashboard-{name}-render"), &render, RENDER_BUDGET_US);
+    gate.judge(&format!("render_dashboard-{name}-resize"), &resize, RESIZE_BUDGET_US);
 }
 
 fn main() {

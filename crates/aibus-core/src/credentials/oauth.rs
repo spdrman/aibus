@@ -86,9 +86,7 @@ pub trait OAuthFlow: Send + Sync {
 }
 
 pub(super) fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// A scripted flow for tests: no browser, no network. Each login or refresh hands out
@@ -149,10 +147,7 @@ impl OAuthFlow for FakeOAuth {
         refresh_token: &str,
         cancel: &CancellationToken,
     ) -> Result<OAuthTokens, String> {
-        self.refreshes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(refresh_token.to_owned());
+        self.refreshes.lock().unwrap_or_else(|e| e.into_inner()).push(refresh_token.to_owned());
         tokio::select! {
             () = cancel.cancelled() => return Err("cancelled".into()),
             () = tokio::time::sleep(self.refresh_delay) => {}
@@ -204,29 +199,11 @@ mod tests {
         let account = config::Account {
             name: "work".into(),
             provider: "fake".into(),
-            auth: config::Auth {
-                oauth: true,
-                ..Default::default()
-            },
+            auth: config::Auth { oauth: true, ..Default::default() },
             ..Default::default()
         };
-        let r = Rig {
-            kc,
-            store,
-            flow,
-            clock,
-            redactor,
-            account,
-        };
-        r.store
-            .store_oauth(
-                &r.account.account_name(),
-                &r.flow
-                    .authorize(&|_| {}, &CancellationToken::new())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+        let r = Rig { kc, store, flow, clock, redactor, account };
+        r.store.store_oauth(&r.account.account_name(), &r.flow.authorize(&|_| {}, &CancellationToken::new()).await.unwrap()).unwrap();
         r
     }
 
@@ -234,15 +211,9 @@ mod tests {
     async fn a_fresh_token_is_used_as_it_is_and_marked_oauth() {
         let r = rig(FakeOAuth::new(1_000, 3_600)).await;
         let c = r.store.resolve(&r.account).unwrap();
-        assert_eq!(
-            (c.secret.expose().as_str(), c.kind),
-            ("oauth-access-1-abcdef", AuthMethodKind::OAuth)
-        );
+        assert_eq!((c.secret.expose().as_str(), c.kind), ("oauth-access-1-abcdef", AuthMethodKind::OAuth));
         assert!(r.flow.refreshes.lock().unwrap().is_empty());
-        assert_eq!(
-            r.account.key_ref().unwrap().to_string(),
-            "keyring:aibus/work"
-        );
+        assert_eq!(r.account.key_ref().unwrap().to_string(), "keyring:aibus/work");
     }
 
     #[tokio::test]
@@ -250,17 +221,11 @@ mod tests {
         let r = rig(FakeOAuth::new(1_000, 3_600)).await;
         // 61 seconds left: still fine. 60 left: refreshed.
         r.clock.store(1_000 + 3_600 - 61, Ordering::SeqCst);
-        assert_eq!(
-            r.store.resolve(&r.account).unwrap().secret.expose(),
-            "oauth-access-1-abcdef"
-        );
+        assert_eq!(r.store.resolve(&r.account).unwrap().secret.expose(), "oauth-access-1-abcdef");
         r.clock.store(1_000 + 3_600 - 60, Ordering::SeqCst);
         let c = r.store.resolve(&r.account).unwrap();
         assert_eq!(c.secret.expose(), "oauth-access-2-abcdef");
-        assert_eq!(
-            *r.flow.refreshes.lock().unwrap(),
-            ["oauth-refresh-1-abcdef"]
-        );
+        assert_eq!(*r.flow.refreshes.lock().unwrap(), ["oauth-refresh-1-abcdef"]);
         let kept = r.kc.get(KEYCHAIN_SERVICE, "account:work").unwrap().unwrap();
         assert!(kept.expose().contains("oauth-access-2-abcdef"));
     }
@@ -283,10 +248,7 @@ mod tests {
         let r = rig(flow).await;
         r.clock.store(10_000, Ordering::SeqCst);
         let e = r.store.resolve(&r.account).unwrap_err();
-        assert!(
-            matches!(&e, CredentialError::OAuth(m) if m.contains("invalid_grant")),
-            "{e}"
-        );
+        assert!(matches!(&e, CredentialError::OAuth(m) if m.contains("invalid_grant")), "{e}");
         assert_eq!(crate::AibusError::from(e).exit_code(), 4);
         let kept = r.kc.get(KEYCHAIN_SERVICE, "account:work").unwrap().unwrap();
         assert!(kept.expose().contains("oauth-access-1-abcdef"));
@@ -294,11 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_expired_token_with_no_flow_or_no_refresh_token_asks_for_a_login() {
-        let mut account = config::Account {
-            name: "w".into(),
-            provider: "fake".into(),
-            ..Default::default()
-        };
+        let mut account = config::Account { name: "w".into(), provider: "fake".into(), ..Default::default() };
         account.auth.oauth = true;
         let store = CredentialStore::new(Arc::new(MemoryKeychain::default()), Redactor::new())
             .with_wall_clock(|| 10_000);
@@ -308,20 +266,11 @@ mod tests {
             refresh: refresh.map(|r| Secret::new(r.into())),
             expires_at: Some(5),
         };
-        store
-            .store_oauth(&name, &expired(Some("some-refresh")))
-            .unwrap();
+        store.store_oauth(&name, &expired(Some("some-refresh"))).unwrap();
         let e = store.resolve(&account).unwrap_err().to_string();
-        assert!(
-            e.contains("no OAuth flow") && e.contains("aibus account add w --oauth"),
-            "{e}"
-        );
+        assert!(e.contains("no OAuth flow") && e.contains("aibus account add w --oauth"), "{e}");
         store.store_oauth(&name, &expired(None)).unwrap();
-        assert!(store
-            .resolve(&account)
-            .unwrap_err()
-            .to_string()
-            .contains("no refresh token"));
+        assert!(store.resolve(&account).unwrap_err().to_string().contains("no refresh token"));
     }
 
     #[tokio::test]
@@ -331,15 +280,9 @@ mod tests {
         assert!(!text.contains("oauth-access"), "{text}");
         let t = OAuthTokens::decode(r#"{"access":"oauth-access-9-abcdef","refresh":"oauth-refresh-9-abcdef","expires_at":1}"#).unwrap();
         assert!(!format!("{t:?}").contains("oauth-"));
-        let out = r
-            .redactor
-            .redact("a oauth-access-1-abcdef r oauth-refresh-1-abcdef")
-            .into_owned();
+        let out = r.redactor.redact("a oauth-access-1-abcdef r oauth-refresh-1-abcdef").into_owned();
         assert!(!out.contains("oauth-"), "{out}");
         r.store.remove(&AccountName("work".into())).unwrap();
-        assert_eq!(
-            r.redactor.redact("oauth-refresh-1-abcdef"),
-            "oauth-refresh-1-abcdef"
-        );
+        assert_eq!(r.redactor.redact("oauth-refresh-1-abcdef"), "oauth-refresh-1-abcdef");
     }
 }

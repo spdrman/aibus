@@ -505,11 +505,32 @@ pub const REGISTRY: &[Spec] = &[
         hint: "q",
         scope: Scope::Global,
         needs: 0,
-        surfaces: at(0, 10, 0),
-        run: |_, out| {
-            out.msgs.extend([Msg::Command(Command::CloseModal), Msg::Command(Command::Quit { force: false })]);
-            Ok(())
-        },
+        surfaces: at(28, 10, 0),
+        run: quit,
+    },
+    Spec {
+        name: "exit",
+        args: "",
+        help: "quit (same as /quit)",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(29, 0, 0),
+        run: quit,
+    },
+    Spec {
+        name: "q",
+        args: "",
+        help: "quit (same as /quit)",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(30, 0, 0),
+        run: quit,
     },
     Spec {
         name: "open",
@@ -747,6 +768,15 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
         "run" => run(rest, out),
         _ => run(c.args, out),
     }
+}
+
+/// `/quit`, `/exit` and `/q` share this: the same messages as the palette row, and no arguments.
+fn quit(c: &Call, out: &mut Out) -> Result<(), String> {
+    if !c.args.is_empty() {
+        return Err(format!("/{} takes no arguments", c.name));
+    }
+    out.msgs.extend([Msg::Command(Command::CloseModal), Msg::Command(Command::Quit { force: false })]);
+    Ok(())
 }
 
 /// `/fix <input>` and the other three are `/workflow <name> <input>`.
@@ -1248,7 +1278,7 @@ mod tests {
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().all(|(n, _)| n != "/fix"), "a workflow command needs a lead as well");
         assert!(slash_offered(&Env { lead: Some(lead_run()), ..Env::bare(&[], &wf) }).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 15);
+        assert_eq!(slash_offered(&env).len(), 18);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
     }

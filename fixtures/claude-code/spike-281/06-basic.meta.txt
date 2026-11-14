@@ -1,0 +1,9 @@
+exe=/opt/homebrew/Caskroom/claude-code/2.1.311/claude
+cwd=/spike/work/basic
+argv=["-p", "Reply with exactly the word: ready", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "haiku", "--max-budget-usd", "0.05", "--no-session-persistence", "--setting-sources", "project", "--strict-mcp-config", "--tools", ""]
+extra_env_keys=[]
+started_unix_ms=1794691045047
+wall_ms=2244
+stdout_lines=11
+timed_out=false
+exit=Some(0)

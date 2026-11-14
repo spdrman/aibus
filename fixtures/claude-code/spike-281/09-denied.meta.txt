@@ -1,0 +1,9 @@
+exe=/opt/homebrew/Caskroom/claude-code/2.1.311/claude
+cwd=/spike/work/deleg
+argv=["-p", "Use the Write tool once to create a file named out.txt containing the word hello. Do not retry if it fails. Then reply with one line saying whether the write succeeded.", "--output-format", "stream-json", "--verbose", "--include-hook-events", "--model", "haiku", "--max-budget-usd", "0.10", "--no-session-persistence", "--setting-sources", "project", "--strict-mcp-config", "--permission-prompts", "none", "--tools", "Read,Write", "--allowedTools", "Read"]
+extra_env_keys=[]
+started_unix_ms=1794691146613
+wall_ms=2445
+stdout_lines=15
+timed_out=false
+exit=Some(0)

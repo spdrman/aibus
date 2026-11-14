@@ -15,6 +15,8 @@ use crate::persist::fs::{create_private_dir, write_atomic};
 use crate::persist::time::rfc3339;
 use crate::run::RunStatus;
 
+pub mod bundle;
+
 /// The four chains shipped as examples (`examples/workflows/`), installed by `aibus init`.
 pub const EXAMPLES: [(&str, &str); 4] = [
     ("fix", include_str!("../../../examples/workflows/fix.toml")),
@@ -47,7 +49,7 @@ pub struct Step {
     pub retries: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum WorkflowError {
     #[error("not valid TOML: {0}")]
     Toml(String),
@@ -55,6 +57,8 @@ pub enum WorkflowError {
     NoSteps,
     #[error("step {step}: {why}")]
     Step { step: usize, why: String },
+    #[error("bundle refused: {0}")]
+    Bundle(String),
 }
 
 #[derive(Deserialize)]
@@ -312,40 +316,169 @@ pub fn dirs(project: &Path, config: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// One workflow file: its name, and what reading it gave.
-pub type Found = (String, PathBuf, Result<Workflow, WorkflowError>);
+/// Largest workflow file a remote author may write, and the most any file in a bundle may be.
+pub const MAX_BYTES: usize = 64 * 1024;
 
-/// Every `*.toml` in `dirs`, by name; the first directory to have a name wins.
+/// Most steps in a workflow a remote author writes or a bundle carries.
+pub const MAX_STEPS: usize = 32;
+
+/// One workflow as `list` found it: where it came from and what reading it gave.
+#[derive(Clone, Debug)]
+pub struct Found {
+    pub name: String,
+    /// `project` or `user`.
+    pub scope: &'static str,
+    /// The loose `.toml` file, or the bundle the workflow is in.
+    pub path: PathBuf,
+    /// The bundle's file name (`kit.aibus`) when the workflow came from one.
+    pub bundle: Option<String>,
+    /// The file's exact text, when it could be read.
+    pub text: Option<String>,
+    pub parsed: Result<Workflow, WorkflowError>,
+}
+
+impl Found {
+    /// Where it came from, for a person: `project`, `user`, or `project bundle kit.aibus`.
+    pub fn source(&self) -> String {
+        match &self.bundle {
+            None => self.scope.to_owned(),
+            Some(b) => format!("{} bundle {b}", self.scope),
+        }
+    }
+
+    /// The workflow, if it may run. A workflow from a bundle with a `gate` is listed but does not
+    /// run: the gate is a shell command from someone else, and it runs only once the user has
+    /// trusted it by installing the bundle with `--allow gates`.
+    pub fn runnable(&self) -> Result<&Workflow, String> {
+        let w = self
+            .parsed
+            .as_ref()
+            .map_err(|e| format!("{}: {e}", self.path.display()))?;
+        if let Some(b) = &self.bundle {
+            if let Some(i) = w.steps.iter().position(|s| s.gate.is_some()) {
+                return Err(format!(
+                    "{} comes from the bundle {b} and step {} has a gate, a shell command that runs as you; \
+                     it does not run from a bundle until you trust it: aibus workflow install {} --allow gates",
+                    self.name,
+                    i + 1,
+                    self.path.display()
+                ));
+            }
+        }
+        Ok(w)
+    }
+}
+
+/// The scope of `dirs[i]`: the first directory is the project's.
+fn scope_of(i: usize) -> &'static str {
+    if i == 0 {
+        "project"
+    } else {
+        "user"
+    }
+}
+
+/// Every workflow of one directory: the loose `*.toml` files, then the workflows of each
+/// `*.aibus` bundle in file name order. A loose file hides a bundled workflow of the same name, and
+/// an earlier bundle a later one. A bundle that is refused is one entry named after its file
+/// (`kit.aibus`, which no workflow name can be) with the reason, and none of its workflows.
+pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = read.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    let mut out: Vec<Found> = Vec::new();
+    for path in paths
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+    {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let text = std::fs::read_to_string(path);
+        let parsed = match &text {
+            Ok(t) => Workflow::parse(stem, t),
+            Err(e) => Err(WorkflowError::Toml(e.to_string())),
+        };
+        out.push(Found {
+            name: stem.to_owned(),
+            scope,
+            path: path.clone(),
+            bundle: None,
+            text: text.ok(),
+            parsed,
+        });
+    }
+    let redactor = bundle_redactor();
+    for path in paths
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == bundle::EXTENSION))
+    {
+        let Some(file) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // A hidden file is not a bundle (a bare `.aibus` is the project directory's name).
+        if path
+            .file_stem()
+            .is_none_or(|s| s.is_empty() || s.to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
+        match bundle::read_file(path, redactor) {
+            Ok(b) => {
+                for (name, text) in b.workflows {
+                    if out.iter().any(|f| f.name == name) {
+                        continue;
+                    }
+                    out.push(Found {
+                        parsed: Workflow::parse(&name, &text),
+                        name,
+                        scope,
+                        path: path.clone(),
+                        bundle: Some(file.to_owned()),
+                        text: Some(text),
+                    });
+                }
+            }
+            Err(e) => out.push(Found {
+                name: file.to_owned(),
+                scope,
+                path: path.clone(),
+                bundle: Some(file.to_owned()),
+                text: None,
+                parsed: Err(WorkflowError::Bundle(e.to_string())),
+            }),
+        }
+    }
+    out
+}
+
+/// The redactor a listing checks bundles with: the built-in patterns. A session's registered
+/// keys are checked again when the bundle is installed, with the session's own redactor.
+fn bundle_redactor() -> &'static crate::Redactor {
+    static R: std::sync::OnceLock<crate::Redactor> = std::sync::OnceLock::new();
+    R.get_or_init(crate::Redactor::new)
+}
+
+/// Every workflow in `dirs` (loose files and bundles), by name; the first directory to have a
+/// name wins, so the project's hides the user's. Read again on every call, so a file copied in
+/// shows up the next time anything lists.
 pub fn list(dirs: &[PathBuf]) -> Vec<Found> {
     let mut by_name: BTreeMap<String, Found> = BTreeMap::new();
-    for dir in dirs {
-        let Ok(read) = std::fs::read_dir(dir) else { continue };
-        for entry in read.flatten() {
-            let path = entry.path();
-            let Some(stem) = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .filter(|_| path.extension().is_some_and(|x| x == "toml"))
-            else {
-                continue;
-            };
-            by_name.entry(stem.to_owned()).or_insert_with(|| {
-                let parsed = std::fs::read_to_string(&path)
-                    .map_err(|e| WorkflowError::Toml(e.to_string()))
-                    .and_then(|t| Workflow::parse(stem, &t));
-                (stem.to_owned(), path.clone(), parsed)
-            });
+    for (i, dir) in dirs.iter().enumerate() {
+        for found in list_in(dir, scope_of(i)) {
+            by_name.entry(found.name.clone()).or_insert(found);
         }
     }
     by_name.into_values().collect()
 }
 
-/// The workflow called `name`. `Err` is what to tell the user.
+/// The workflow called `name`, if it may run (`Found::runnable`). `Err` is what to tell the user.
 pub fn load(dirs: &[PathBuf], name: &str) -> Result<Workflow, String> {
-    match list(dirs).into_iter().find(|(n, _, _)| n == name) {
+    match list(dirs).into_iter().find(|f| f.name == name) {
         None => Err(format!("no workflow named {name} (aibus workflow list)")),
-        Some((_, path, Err(e))) => Err(format!("{}: {e}", path.display())),
-        Some((_, _, Ok(w))) => Ok(w),
+        Some(found) => found.runnable().cloned(),
     }
 }
 
@@ -375,21 +508,35 @@ pub struct WorkflowRow {
     pub description: String,
     /// The agent of each step, in order. Empty for a file that does not parse.
     pub agents: Vec<String>,
-    /// Why the file does not parse.
+    /// Why the file does not parse, or why it does not run (a gate in a bundle).
     pub error: Option<String>,
+    /// The bundle's file name when it came from one.
+    pub bundle: Option<String>,
 }
+
+
 
 /// The rows of `dirs` (as `list` finds them); the first directory is the project's.
 pub fn rows(dirs: &[PathBuf]) -> Vec<WorkflowRow> {
     list(dirs)
         .into_iter()
-        .map(|(name, path, parsed)| {
-            let scope = if dirs.first().is_some_and(|d| path.starts_with(d)) { "project" } else { "user" };
-            let (description, agents, error) = match parsed {
-                Ok(w) => (w.description, w.steps.iter().map(|s| s.agent.to_string()).collect(), None),
+        .map(|found| {
+            let (description, agents, error) = match &found.parsed {
+                Ok(w) => (
+                    w.description.clone(),
+                    w.steps.iter().map(|s| s.agent.to_string()).collect(),
+                    found.runnable().err(),
+                ),
                 Err(e) => (String::new(), Vec::new(), Some(e.to_string())),
             };
-            WorkflowRow { name, scope: scope.into(), description, agents, error }
+            WorkflowRow {
+                name: found.name,
+                scope: found.scope.into(),
+                description,
+                agents,
+                error,
+                bundle: found.bundle,
+            }
         })
         .collect()
 }

@@ -120,10 +120,10 @@ impl Tool for RunWorkflow {
              ones before it said. You get every step's report back and can decide what to do next. \
              Available:\n",
         );
-        for (name, _, parsed) in workflow::list(&self.dirs) {
-            if let Ok(wf) = parsed {
+        for found in workflow::list(&self.dirs) {
+            if let Ok(wf) = found.runnable() {
                 let agents: Vec<&str> = wf.steps.iter().map(|s| s.agent.as_str()).collect();
-                description.push_str(&format!("- {name}: {} ({})\n", wf.description, agents.join(" > ")));
+                description.push_str(&format!("- {}: {} ({})\n", found.name, wf.description, agents.join(" > ")));
             }
         }
         ToolSpec {

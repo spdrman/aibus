@@ -45,14 +45,14 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 
 | Tool | What it does |
 |---|---|
-| `workflow_list` | every workflow of the project and of the user, with the parse error of a broken file |
+| `workflow_list` | every workflow of the project and of the user, loose files and `.aibus` bundles, with the parse error of a broken file; `bundle` names the bundle a workflow came from, and `runnable` is false for a broken file and for a bundled workflow with a gate (its `error` says how to trust it) |
 | `workflow_get {name, scope?}` | the file text, its SHA-256 `revision` and the parsed steps |
 | `workflow_explain {name, scope?}` | one paragraph per step (which agent, what it reads, what blocks it, how often it retries) and the data flow between steps; an edge `from: 0` is the workflow input |
 | `workflow_validate {name?, scope?, toml?}` | an existing workflow or a draft `toml`, checked against the real roster (built-in, project, user); same shape as `aibus workflow validate --json`, so a draft that names an unknown agent is `ok: false` with the step number |
 | `workflow_dry_run {name, scope?, input}` | each prompt rendered with the input (a later step's summary shows as `<summary of step N (agent)>`), the gates as text, the agent each step resolves to, and the budgets |
 | `agent_list` | the agents a step can name, as `aibus agent list --json` |
 
-`scope` is `project` or `user`; left out, the project's file wins. Budgets in `workflow_dry_run` are the built-in defaults, because the server does not read `config.toml`. Likewise, `agents.extra_dirs` is not on the roster.
+`scope` is `project` or `user`; left out, the project's file wins. The read tools see the workflows inside `*.aibus` bundles in both directories, read in memory through every bundle check (`docs/spec/06-cli.md` section 9); inside one directory a loose file wins over a bundled one of the same name, and `path` is the bundle's. Budgets in `workflow_dry_run` are the built-in defaults, because the server does not read `config.toml`. Likewise, `agents.extra_dirs` is not on the roster.
 
 ## Write tools (`--allow write`)
 
@@ -69,6 +69,8 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 * The directory is the scope's `workflows` directory, resolved through symlinks, and it has to land exactly where it should: a symlink out of it is refused, and so is a workflow file that is itself a link. The user directory is created when missing; the project scope needs `.aibus/` to exist already.
 * The file is written with the atomic write (temp file, fsync, rename), mode 0600, and starts with `# written through aibus mcp, <time>`. An update keeps the line the file already had instead of adding another.
 
+`workflow_create` and `workflow_update` write single loose files, never a bundle. The project scope is the directory the server was started in (`--cwd`, or its working directory), and aibus does not walk up from it: a session started in another directory, a subdirectory included, does not see a project workflow written here. That is why a workflow written through MCP could be missing from `/workflow list`. `workflow_list` and `aibus workflow list` say where each workflow came from; use `scope: "user"` for a workflow every session should see.
+
 At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.toml` or `config.toml`: the name rule and the directory check leave no path to them.
 
 ## Run tools (`--allow run`)
@@ -80,6 +82,8 @@ At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.
 | `run_cancel {run}` | cancels and answers with the final status; on a finished run it changes nothing |
 
 A run is a child `aibus run --workflow <name> --json` of the server process, started with the permission mode `dont-ask` on its command line, `AIBUS_I_KNOW` removed from its environment and `--allow-tool` as its only pre-approvals. The input of a run is not on that command line: the server starts the child as `aibus run --workflow <name> -- -`, writes the input to the child's stdin and closes it, so nothing can answer a prompt through it either. A command line is readable by every local user with `ps` for as long as the process lives, and the input may hold a key. No file is written for it, and every trailing newline and carriage return of the input is dropped (`aibus run` does that to any prompt it reads from stdin). The argument form of `aibus run` (`aibus run --workflow <name> <input>`) still works for people typing it, and it is visible to every local user in `ps` and in shell history; the server never uses it (`docs/spec/06-cli.md` says the same). A tool call that would ask is therefore denied, never queued, and `bypass` cannot be reached through the server whatever its own environment says. Each run has its own session directory with the commit log and the redacted transcript, and nothing starts until the first `workflow_run`, so a client that only reads never causes a credential lookup. The one file `--allow run` makes the server read is `config.toml`, for the default of `--max-cost-usd`.
+
+`workflow_run` does not start a workflow from an `.aibus` bundle that has a `gate`: a bundle is someone else's file and the gate is a shell command that would run as you, so it waits until the user installs the bundle with `aibus workflow install <file> --allow gates` (which writes it as a loose file of theirs). Nothing a model can call trusts a bundle.
 
 `status` is the lead's final status in `snake_case` once the process has ended (`completed`, `partial`, `failed`, `cancelled`, `denied`), `starting` and `running` before that. `exit_code` is the exit code of `aibus run` (06 section 3, so 8 for a budget and 7 for an interrupt). What the server redacts of a child's events: the strings of an attempt (its name, status and failure), the run id and the session are redacted whole, as the child sent them, before they are stored (the failure before its 300 byte cut). The text for the tail and the log (the stream, a summary, a failure of no attempt, stdout and stderr lines) is stored raw, about 28 to 36 KiB more than what is shown, and is redacted when it is read: the whole buffer goes through the redactor first and is cut to the last 4 KiB (the tail) or the last 256 KiB (the log) after. So a key the child sent in pieces over several stream events, a private key block sent a line at a time and a token of any length are whole when the redactor sees them, and a cut falls in text that is already replaced. The result goes through the redactor once more on the way out. What this does not cover:
 

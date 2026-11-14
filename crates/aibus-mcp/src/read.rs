@@ -387,7 +387,19 @@ impl Server {
         for scope in scopes {
             let dir = &dirs[usize::from(*scope == "user")];
             let path = dir.join(format!("{name}.toml"));
-            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                // No loose file: a bundle in the same directory may carry it (read in memory,
+                // through every check of a bundle). The path shown is the bundle's.
+                let bundled = workflow::list_in(dir, scope)
+                    .into_iter()
+                    .find(|f| f.name == name && f.bundle.is_some() && f.parsed.is_ok());
+                if let Some(found) = bundled {
+                    if let Some(text) = found.text {
+                        return Ok(Some((scope, found.path, text)));
+                    }
+                }
+                continue;
+            };
             if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
                 return Err(ErrorData::invalid_params("that is not a plain workflow file of a sane size", None));
             }

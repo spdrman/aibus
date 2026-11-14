@@ -1508,6 +1508,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     ("description", s(&w.description)),
                     ("agents", list(w.agents.iter().map(|a| s(a)).collect())),
                     ("error", w.error.as_deref().map_or(Value::Null, s)),
+                    ("bundle", w.bundle.as_deref().map_or(Value::Null, s)),
                 ])
             };
             r.put(WORKFLOWS, list(rows.iter().map(row).collect()));

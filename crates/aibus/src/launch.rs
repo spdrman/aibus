@@ -306,7 +306,7 @@ impl ChildLauncher {
     /// call a lead opens with in place of its first request (01 section 8.4).
     pub fn slash_workflow(&self, prompt: &str) -> Option<(String, serde_json::Value)> {
         let known: Vec<String> =
-            aibus_core::workflow::list(&self.workflow_dirs).into_iter().map(|(name, _, _)| name).collect();
+            aibus_core::workflow::list(&self.workflow_dirs).into_iter().map(|found| found.name).collect();
         let (name, input) = aibus_core::workflow::parse_slash(prompt, &known)?;
         Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": input})))
     }

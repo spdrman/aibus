@@ -347,7 +347,7 @@ impl ChildLauncher {
     pub fn slash_workflow(&self, prompt: &str) -> Option<(String, serde_json::Value)> {
         let known: Vec<String> = aibus_core::workflow::list(&self.workflow_dirs)
             .into_iter()
-            .map(|(name, _, _)| name)
+            .map(|found| found.name)
             .collect();
         let (name, input) = aibus_core::workflow::parse_slash(prompt, &known)?;
         Some((

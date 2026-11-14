@@ -804,31 +804,27 @@ impl Server {
         // The run resolves the name project first, so the file the caller asked for has to be
         // the one that wins; otherwise it would run a different workflow than it validated.
         let dirs = workflow::dirs(&self.project, Some(&self.config));
-        let Some((_, path, _)) = workflow::list(&dirs)
-            .into_iter()
-            .find(|(n, _, _)| n == name)
-        else {
+        let Some(winner) = workflow::list(&dirs).into_iter().find(|f| f.name == name) else {
             return Ok(self.fail(format!(
                 "no workflow named {name} (workflow_list shows what there is)"
             )));
         };
-        let wins = if path.starts_with(&dirs[0]) {
-            "project"
-        } else {
-            "user"
-        };
+        let wins = winner.scope;
         if wins != scope {
             return Ok(self.fail(format!(
                 "{name} is not in the {scope} scope; the one a run would start is in the {wins} scope"
             )));
         }
+        // A gate from a bundle runs only once the user has installed it with --allow gates.
+        if let Err(why) = winner.runnable() {
+            return Ok(self.fail(format!("no run was started: {why}")));
+        }
         let roster = match self.roster() {
             Ok(r) => r,
             Err(e) => return Ok(self.fail(e)),
         };
-        let file = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(e) => return Ok(self.fail(format!("{name}: {e}"))),
+        let Some(file) = winner.text else {
+            return Ok(self.fail(format!("{name}: the file could not be read")));
         };
         let found = workflow::validate(&file, name, &roster);
         let parsed = workflow::Workflow::parse(name, &file);

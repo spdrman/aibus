@@ -449,6 +449,38 @@ pub enum WorkflowCmd {
     },
     /// Print a workflow: its steps, prompts, gates and retries
     Show { name: String },
+    /// Put workflows into one .aibus bundle file (a plain tar) to share
+    Pack {
+        /// The workflows to put in, by name
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// The bundle to write: <name>.aibus
+        #[arg(short = 'o', long = "output", value_name = "FILE")]
+        output: PathBuf,
+        /// A line saying what the bundle is for (the manifest's description)
+        #[arg(long, value_name = "TEXT", default_value = "")]
+        description: String,
+        /// Also put in the project or user definitions of the agents the workflows name
+        #[arg(long)]
+        with_agents: bool,
+        /// Replace the output file if it exists
+        #[arg(long)]
+        force: bool,
+    },
+    /// Unpack a .aibus bundle into the project's workflows (or the user's with --user)
+    Install {
+        /// The bundle file
+        file: PathBuf,
+        /// Into the user's workflows directory instead of the project's
+        #[arg(long)]
+        user: bool,
+        /// Replace workflow or agent files that are already there
+        #[arg(long)]
+        force: bool,
+        /// `gates`: trust the bundle's gates and agent hooks (shell commands that run as you)
+        #[arg(long, value_name = "WHAT", value_parser = ["gates"])]
+        allow: Vec<String>,
+    },
     Run {
         name: String,
         input: String,

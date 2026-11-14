@@ -213,3 +213,35 @@ fn run_is_the_existing_workflow_command() {
         .iter()
         .any(|m| m.contains("Workflow { name: \"review\", input: \"the diff\" }")));
 }
+
+/// #271: the list is read again on every `/workflow list`, so a bundle copied in mid-session
+/// shows up without a restart, with the bundle it came from on its row and in `show`.
+#[test]
+fn a_bundle_copied_in_mid_session_shows_on_the_next_list_with_its_source() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut r, files) = rig_in(root.path());
+    line(&mut r, &files, "/workflow list");
+    assert!(!r.text().contains("kit.aibus"));
+    r.key(K::Esc);
+    let user = root.path().join("config/workflows");
+    std::fs::create_dir_all(&user).unwrap();
+    let bytes = workflow::bundle::pack(
+        "kit",
+        "",
+        &[("review".to_owned(), REVIEW.to_owned())],
+        &[],
+        None,
+        &Redactor::default(),
+    )
+    .unwrap();
+    std::fs::write(user.join("kit.aibus"), bytes).unwrap();
+    line(&mut r, &files, "/workflow list");
+    assert_eq!(modal(&r).as_deref(), Some("workflows"));
+    let text = r.text();
+    assert!(text.contains("review"), "{text}");
+    assert!(text.contains("kit.aibus"), "{text}");
+    r.key(K::Esc);
+    r.ui.prompt.set("");
+    line(&mut r, &files, "/workflow show review");
+    assert!(r.text().contains("user bundle kit.aibus"), "{}", r.text());
+}

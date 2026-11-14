@@ -58,34 +58,35 @@ pub fn workflow_list(g: &Global, names: bool) -> Result<u8, AibusError> {
     let dirs = aibus_core::workflow::dirs(&g.project_dir()?, Some(&g.paths()?.config));
     let found = aibus_core::workflow::list(&dirs);
     if names {
-        for (name, _, _) in &found {
-            println!("{name}");
+        for f in &found {
+            println!("{}", f.name);
         }
         return Ok(0);
     }
     if g.json {
         let rows: Vec<_> = found
             .iter()
-            .map(|(name, path, parsed)| match parsed {
+            .map(|f| match &f.parsed {
                 Ok(w) => json!({
-                    "name": name,
-                    "path": path,
+                    "name": f.name,
+                    "path": f.path,
                     "description": w.description,
                     "steps": w.steps.iter().map(|s| s.agent.as_str()).collect::<Vec<_>>(),
                 }),
-                Err(e) => json!({"name": name, "path": path, "error": e.to_string()}),
+                Err(e) => json!({"name": f.name, "path": f.path, "error": e.to_string()}),
             })
             .collect();
         println!("{}", json!(rows));
         return Ok(0);
     }
-    for (name, path, parsed) in &found {
-        match parsed {
+    for f in &found {
+        let name = &f.name;
+        match &f.parsed {
             Ok(w) => {
                 let agents: Vec<&str> = w.steps.iter().map(|s| s.agent.as_str()).collect();
                 println!("{name}\t{}\t{}", w.description, agents.join(" > "));
             }
-            Err(e) => println!("{name}\t(invalid: {e})\t{}", path.display()),
+            Err(e) => println!("{name}\t(invalid: {e})\t{}", f.path.display()),
         }
     }
     Ok(0)
@@ -223,9 +224,10 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
         }
         Some(name) => {
             let found = aibus_core::workflow::list(&dirs);
-            let (_, path, _) = found
+            let path = found
                 .into_iter()
-                .find(|(n, _, _)| n == name)
+                .find(|f| f.name == name)
+                .map(|f| f.path)
                 .ok_or_else(|| {
                     AibusError::Usage(format!("no workflow named {name} (aibus workflow list)"))
                 })?;
@@ -294,9 +296,9 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
 /// `workflow show <name>`: the workflow as it will run, from whichever directory wins the name.
 pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
     let dirs = aibus_core::workflow::dirs(&g.project_dir()?, Some(&g.paths()?.config));
-    let (_, path, parsed) = aibus_core::workflow::list(&dirs)
+    let aibus_core::workflow::Found { path, parsed, .. } = aibus_core::workflow::list(&dirs)
         .into_iter()
-        .find(|(n, _, _)| n == name)
+        .find(|f| f.name == name)
         .ok_or_else(|| {
             AibusError::Usage(format!("no workflow named {name} (aibus workflow list)"))
         })?;
@@ -340,4 +342,32 @@ pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
         }
     }
     Ok(0)
+}
+
+/// `workflow pack <name>... -o <file>.aibus`: the named workflows (whichever source wins each
+/// name), byte for byte, in one bundle.
+pub fn workflow_pack(
+    g: &Global,
+    names: &[String],
+    output: &std::path::Path,
+    description: &str,
+    with_agents: bool,
+    force: bool,
+    redactor: &Redactor,
+) -> Result<u8, AibusError> {
+    let _ = (g, names, output, description, with_agents, force, redactor);
+    Err(AibusError::Usage("workflow pack: not yet".into()))
+}
+
+/// `workflow install <file>.aibus [--user] [--force] [--allow gates]`.
+pub fn workflow_install(
+    g: &Global,
+    file: &std::path::Path,
+    user: bool,
+    force: bool,
+    allow_gates: bool,
+    redactor: &Redactor,
+) -> Result<u8, AibusError> {
+    let _ = (g, file, user, force, allow_gates, redactor);
+    Err(AibusError::Usage("workflow install: not yet".into()))
 }

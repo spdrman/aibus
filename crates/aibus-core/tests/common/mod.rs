@@ -704,6 +704,7 @@ pub fn cases() -> Vec<Case> {
                     description: t.clone(),
                     agents: vec!["explore".into()],
                     error: None,
+                    bundle: None,
                 }],
                 shown: Some(WorkflowShown {
                     name: "review".into(),

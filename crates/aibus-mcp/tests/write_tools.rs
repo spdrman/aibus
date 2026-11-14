@@ -191,7 +191,7 @@ fn create_writes_atomically_and_the_file_parses() {
     let dirs = workflow::dirs(&home.path().join("proj"), Some(&home.paths.config));
     assert!(workflow::list(&dirs)
         .iter()
-        .any(|(n, _, parsed)| n == "ship" && parsed.is_ok()));
+        .any(|f| f.name == "ship" && f.parsed.is_ok()));
     let listed = call(&server, "workflow_list", json!({}), Instant::now());
     assert_eq!(
         listed["structuredContent"]["workflows"][0]["ok"], true,

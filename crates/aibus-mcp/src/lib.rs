@@ -200,6 +200,8 @@ impl Server {
                 "path": { "type": "string" },
                 "description": { "type": "string" },
                 "ok": { "type": "boolean" },
+                "runnable": { "type": "boolean" },
+                "bundle": { "type": "string" },
                 "error": { "type": "string" },
             },
             "required": ["name", "scope", "path", "description", "ok"],
@@ -374,29 +376,33 @@ impl Server {
         }
     }
 
-    /// `{workflows:[{name, scope, path, description, ok, error?}]}`, paths relative to the
-    /// project or to `~`.
+    /// `{workflows:[{name, scope, path, description, ok, runnable, bundle?, error?}]}`, paths
+    /// relative to the project or to `~`. `bundle` is the `.aibus` file a workflow came from;
+    /// `runnable` is false for a broken file and for a bundled workflow with a gate.
     fn list_workflows(&self) -> Value {
         let dirs = workflow::dirs(&self.project, Some(&self.config));
         let shorten = |text: &str| self.shorten(text);
         let rows: Vec<Value> = workflow::list(&dirs)
             .into_iter()
-            .map(|(name, path, parsed)| {
-                let scope = if path.starts_with(&dirs[0]) {
-                    "project"
-                } else {
-                    "user"
-                };
+            .map(|found| {
                 let mut row = json!({
-                    "name": name,
-                    "scope": scope,
-                    "path": shorten(&path.to_string_lossy().replace('\\', "/")),
+                    "name": found.name,
+                    "scope": found.scope,
+                    "path": shorten(&found.path.to_string_lossy().replace('\\', "/")),
                     "description": "",
-                    "ok": parsed.is_ok(),
+                    "ok": found.parsed.is_ok(),
+                    "runnable": found.runnable().is_ok(),
                 });
-                match parsed {
-                    Ok(w) => row["description"] = json!(w.description),
-                    Err(e) => row["error"] = json!(shorten(&e.to_string())),
+                if let Some(b) = &found.bundle {
+                    row["bundle"] = json!(b);
+                }
+                match (&found.parsed, found.runnable()) {
+                    (Ok(w), Ok(_)) => row["description"] = json!(w.description),
+                    (Ok(w), Err(why)) => {
+                        row["description"] = json!(w.description);
+                        row["error"] = json!(shorten(&why));
+                    }
+                    (Err(e), _) => row["error"] = json!(shorten(&e.to_string())),
                 }
                 row
             })

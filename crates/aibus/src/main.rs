@@ -102,6 +102,34 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Workflow(WorkflowCmd::Show { name })) => {
             commands::workflow_show(&cli.global, &name)
         }
+        Some(Command::Workflow(WorkflowCmd::Pack {
+            names,
+            output,
+            description,
+            with_agents,
+            force,
+        })) => commands::workflow_pack(
+            &cli.global,
+            &names,
+            &output,
+            &description,
+            with_agents,
+            force,
+            redactor,
+        ),
+        Some(Command::Workflow(WorkflowCmd::Install {
+            file,
+            user,
+            force,
+            allow,
+        })) => commands::workflow_install(
+            &cli.global,
+            &file,
+            user,
+            force,
+            allow.iter().any(|a| a == "gates"),
+            redactor,
+        ),
         Some(Command::Workflow(WorkflowCmd::Run {
             name,
             input,

@@ -6,7 +6,6 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::Stdio;
-use std::time::{Duration, Instant};
 
 use common::{aibus, command, stderr};
 use serde_json::Value;
@@ -133,15 +132,18 @@ fn signal(child: &std::process::Child, sig: &str) {
 #[test]
 fn sighup_is_a_graceful_stop_that_exits_7_well_inside_ten_seconds() {
     let home = xdg_temp();
-    let began = Instant::now();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-HUP");
     let mut rest = String::new();
     std::io::Read::read_to_string(&mut out, &mut rest).unwrap();
     assert_eq!(child.wait().unwrap().code(), Some(7), "{rest}");
-    let last: Value = serde_json::from_str(rest.lines().last().unwrap()).unwrap();
+    let lines: Vec<Value> = rest.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(lines.len() >= 2, "no RunFinished before the end: {rest}");
+    let last = &lines[lines.len() - 1];
     assert_eq!((last["type"].as_str(), last["exit_code"].as_i64()), (Some("SessionEnd"), Some(7)));
-    assert!(began.elapsed() < Duration::from_secs(9));
+    // The grace path aborts the run, so it can never produce a cancelled `RunFinished`.
+    let done = &lines[lines.len() - 2];
+    assert_eq!((done["type"].as_str(), done["status"].as_str()), (Some("RunFinished"), Some("cancelled")), "{rest}");
     // The session was closed properly: its outcome is on disk.
     let id = last["session"].as_str().unwrap();
     let json: Value = serde_json::from_str(

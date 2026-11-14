@@ -266,6 +266,43 @@ fn login_with_a_key_stays_refused_and_login_without_one_is_for_the_keyboard() {
 }
 
 #[test]
+fn a_client_can_never_end_the_session() {
+    for line in ["/quit", "/exit", "/q", "  /quit  ", "\t/q"] {
+        let mut r = rig();
+        // A modal is open: a quit would close it first, and it has to stay.
+        let id = ask(&mut r.app, 1, "lead", 1, "cargo test");
+        r.settle();
+        let why = call(&mut r, command(line), false).unwrap_err();
+        let word = line.trim();
+        assert!(
+            why.contains(word) && why.contains("keyboard"),
+            "{line:?}: {why}"
+        );
+        assert!(!why.contains('\n'), "one line: {why}");
+        assert!(!r.app.should_quit(), "{line:?}: the session ended");
+        assert_eq!(
+            modal(&r).as_deref(),
+            Some("permission"),
+            "{line:?}: the open modal was closed"
+        );
+        let open = as_list(r.app.graph.read_key(PERMISSIONS_OPEN).unwrap()).len();
+        assert_eq!(open, 1, "{line:?}");
+        let refused: Vec<String> = tagged_rows(&r)
+            .into_iter()
+            .filter(|t| t.contains("refused"))
+            .collect();
+        assert!(
+            refused.iter().any(|t| t.contains(word)),
+            "{line:?}: {refused:?}"
+        );
+        // And the session still takes the next line.
+        call(&mut r, send("still here"), false).unwrap();
+        assert!(!r.app.should_quit());
+        let _ = id;
+    }
+}
+
+#[test]
 fn send_takes_no_slash_line_and_command_takes_only_one() {
     let mut r = rig();
     let why = call(&mut r, send("/model haiku"), false).unwrap_err();

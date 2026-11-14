@@ -63,27 +63,39 @@ pub fn workflow_list(g: &Global, names: bool) -> Result<u8, AibusError> {
     if g.json {
         let rows: Vec<_> = found
             .iter()
-            .map(|f| match &f.parsed {
-                Ok(w) => json!({
-                    "name": f.name,
-                    "path": f.path,
-                    "description": w.description,
-                    "steps": w.steps.iter().map(|s| s.agent.as_str()).collect::<Vec<_>>(),
-                }),
-                Err(e) => json!({"name": f.name, "path": f.path, "error": e.to_string()}),
+            .map(|f| {
+                let mut row = match &f.parsed {
+                    Ok(w) => json!({
+                        "name": f.name,
+                        "path": f.path,
+                        "description": w.description,
+                        "steps": w.steps.iter().map(|s| s.agent.as_str()).collect::<Vec<_>>(),
+                    }),
+                    Err(e) => json!({"name": f.name, "path": f.path, "error": e.to_string()}),
+                };
+                row["scope"] = json!(f.scope);
+                row["bundle"] = json!(f.bundle);
+                row["source"] = json!(f.source());
+                row["runnable"] = json!(f.runnable().is_ok());
+                if let (Ok(_), Err(why)) = (&f.parsed, f.runnable()) {
+                    row["not_runnable"] = json!(why);
+                }
+                row
             })
             .collect();
         println!("{}", json!(rows));
         return Ok(0);
     }
+    // name, description, steps, source; a broken file or a gate from a bundle says so instead.
     for f in &found {
-        let (name, path) = (&f.name, &f.path);
-        match &f.parsed {
-            Ok(w) => {
+        let (name, source) = (&f.name, f.source());
+        match (&f.parsed, f.runnable()) {
+            (Ok(w), Ok(_)) => {
                 let agents: Vec<&str> = w.steps.iter().map(|s| s.agent.as_str()).collect();
-                println!("{name}\t{}\t{}", w.description, agents.join(" > "));
+                println!("{name}\t{}\t{}\t{source}", w.description, agents.join(" > "));
             }
-            Err(e) => println!("{name}\t(invalid: {e})\t{}", path.display()),
+            (Ok(_), Err(why)) => println!("{name}\t(not runnable: {why})\t\t{source}"),
+            (Err(e), _) => println!("{name}\t(invalid: {e})\t{}\t{source}", f.path.display()),
         }
     }
     Ok(0)
@@ -208,44 +220,82 @@ pub fn config(cmd: &ConfigCmd, g: &Global) -> Result<u8, AibusError> {
 /// both workflow directories is checked, hidden names included. Exit 12 on errors, as
 /// `agent validate` does; warnings leave it at 0.
 pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusError> {
+    use aibus_core::workflow::{self, bundle, Problem};
     let cwd = g.project_dir()?;
-    let dirs = aibus_core::workflow::dirs(&cwd, Some(&g.paths()?.config));
-    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let dirs = workflow::dirs(&cwd, Some(&g.paths()?.config));
+    // What to check: (the path to report, the name, the text, the bundle it came from). A bundle
+    // that is refused is an error on its own path.
+    let mut units: Vec<(std::path::PathBuf, String, String, Option<String>)> = Vec::new();
+    let mut errors: Vec<(std::path::PathBuf, Problem)> = Vec::new();
+    let problem = |message: String| Problem { step: None, field: None, message };
+    let add_bundle = |path: std::path::PathBuf, units: &mut Vec<_>, errors: &mut Vec<_>| {
+        let file = path.file_name().map(|f| f.to_string_lossy().into_owned());
+        match bundle::read_file(&path, &Redactor::new()) {
+            Ok(b) => units.extend(b.workflows.into_iter().map(|(n, t)| (path.clone(), n, t, file.clone()))),
+            Err(e) => errors.push((path, problem(format!("bundle refused: {e}")))),
+        }
+    };
     match target {
+        Some(t) if t.ends_with(&format!(".{}", bundle::EXTENSION)) => add_bundle(cwd.join(t), &mut units, &mut errors),
         Some(t) if t.ends_with(".toml") || t.contains(std::path::MAIN_SEPARATOR) || cwd.join(t).is_file() => {
-            files.push(cwd.join(t));
+            let path = cwd.join(t);
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned();
+            let text = std::fs::read_to_string(&path).map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
+            units.push((path, stem, text, None));
         }
         Some(name) => {
-            let found = aibus_core::workflow::list(&dirs);
-            let path = found
+            let found = workflow::list(&dirs)
                 .into_iter()
                 .find(|f| f.name == name)
-                .map(|f| f.path)
                 .ok_or_else(|| AibusError::Usage(format!("no workflow named {name} (aibus workflow list)")))?;
-            files.push(path);
+            let text = found.text.clone().ok_or_else(|| {
+                let why = found.parsed.as_ref().err().map(ToString::to_string).unwrap_or_default();
+                AibusError::Usage(format!("{}: {why}", found.path.display()))
+            })?;
+            units.push((found.path, found.name, text, found.bundle));
         }
         None => {
             for dir in &dirs {
                 let Ok(read) = std::fs::read_dir(dir) else { continue };
                 let mut here: Vec<_> = read.flatten().map(|e| e.path()).collect();
                 here.sort();
-                files.extend(here.into_iter().filter(|p| p.extension().is_some_and(|x| x == "toml")));
+                for path in here {
+                    if path.extension().is_some_and(|x| x == "toml") {
+                        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned();
+                        let text = std::fs::read_to_string(&path)
+                            .map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
+                        units.push((path, stem, text, None));
+                    } else if path.extension().is_some_and(|x| x == bundle::EXTENSION) {
+                        add_bundle(path, &mut units, &mut errors);
+                    }
+                }
             }
         }
     }
     let env = crate::agent_cmd::Env::load(g)?;
     let roster: Vec<_> = env.discover(g)?.agents.into_keys().collect();
-    let (mut errors, mut warnings) = (Vec::new(), Vec::new());
-    for path in &files {
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
-        let v = aibus_core::workflow::validate(&text, stem, &roster);
-        let tag = |list: Vec<aibus_core::workflow::Problem>| {
-            list.into_iter().map(|p| (path.clone(), p)).collect::<Vec<_>>()
-        };
+    let mut warnings = Vec::new();
+    for (path, stem, text, from) in &units {
+        let v = workflow::validate(text, stem, &roster);
+        let tag = |list: Vec<Problem>| list.into_iter().map(|p| (path.clone(), p)).collect::<Vec<_>>();
         errors.extend(tag(v.errors));
         warnings.extend(tag(v.warnings));
+        // A gate from a bundle is someone else's shell command: listed, never run, until trusted.
+        if let (Some(b), Ok(w)) = (from, workflow::Workflow::parse(stem, text)) {
+            if let Some(i) = w.steps.iter().position(|s| s.gate.is_some()) {
+                warnings.push((
+                    path.clone(),
+                    Problem {
+                        step: Some(i + 1),
+                        field: Some("gate".into()),
+                        message: format!(
+                            "{stem} comes from the bundle {b} and has a gate, so it does not run until you trust it: aibus workflow install {} --allow gates",
+                            path.display()
+                        ),
+                    },
+                ));
+            }
+        }
     }
     let row = |(path, p): &(std::path::PathBuf, aibus_core::workflow::Problem)| {
         json!({"path": path, "step": p.step, "field": p.field, "message": p.message})
@@ -276,11 +326,13 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
 /// `workflow show <name>`: the workflow as it will run, from whichever directory wins the name.
 pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
     let dirs = aibus_core::workflow::dirs(&g.project_dir()?, Some(&g.paths()?.config));
-    let aibus_core::workflow::Found { path, parsed, .. } = aibus_core::workflow::list(&dirs)
+    let found = aibus_core::workflow::list(&dirs)
         .into_iter()
         .find(|f| f.name == name)
         .ok_or_else(|| AibusError::Usage(format!("no workflow named {name} (aibus workflow list)")))?;
-    let w = parsed.map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
+    let (path, source) = (found.path.clone(), found.source());
+    let not_runnable = found.runnable().err();
+    let w = found.parsed.map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
     let on_fail = |retries: u32| (retries > 0).then(|| format!("retry:{retries}"));
     if g.json {
         let steps: Vec<_> = w
@@ -297,10 +349,17 @@ pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
                 step
             })
             .collect();
-        println!("{}", json!({"name": w.name, "path": path, "description": w.description, "steps": steps}));
+        let mut shown = json!({"name": w.name, "path": path, "description": w.description, "steps": steps, "source": source});
+        if let Some(why) = &not_runnable {
+            shown["not_runnable"] = json!(why);
+        }
+        println!("{shown}");
         return Ok(0);
     }
-    println!("{}  ({})", w.name, path.display());
+    println!("{}  ({}, {source})", w.name, path.display());
+    if let Some(why) = &not_runnable {
+        println!("not runnable: {why}");
+    }
     if !w.description.is_empty() {
         println!("{}", w.description);
     }
@@ -320,7 +379,8 @@ pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
 }
 
 /// `workflow pack <name>... -o <file>.aibus`: the named workflows (whichever source wins each
-/// name), byte for byte, in one bundle.
+/// name), byte for byte, in one bundle named after the file. `--with-agents` adds the project or
+/// user definition of each agent the steps name (built-ins need nothing).
 pub fn workflow_pack(
     g: &Global,
     names: &[String],
@@ -330,11 +390,77 @@ pub fn workflow_pack(
     force: bool,
     redactor: &Redactor,
 ) -> Result<u8, AibusError> {
-    let _ = (g, names, output, description, with_agents, force, redactor);
-    Err(AibusError::Usage("workflow pack: not yet".into()))
+    use aibus_core::agent::Scope;
+    use aibus_core::workflow::{self, bundle};
+    let usage = |m: String| AibusError::Usage(format!("workflow pack: {m}"));
+    let stem = output
+        .file_name()
+        .and_then(|f| f.to_str())
+        .and_then(|f| f.strip_suffix(&format!(".{}", bundle::EXTENSION)))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| usage(format!("{} is not a <name>.{} file", output.display(), bundle::EXTENSION)))?;
+    if !workflow::valid_name(stem) {
+        return Err(usage(format!(
+            "`{stem}` is the bundle's name and is not a name: lowercase letters, digits, - and _, starting with a letter or digit"
+        )));
+    }
+    let dirs = workflow::dirs(&g.project_dir()?, Some(&g.paths()?.config));
+    let found = workflow::list(&dirs);
+    let mut flows: Vec<(String, String)> = Vec::new();
+    let mut named: Vec<aibus_core::AgentName> = Vec::new();
+    for name in names {
+        if flows.iter().any(|(n, _)| n == name) {
+            continue;
+        }
+        let f = found
+            .iter()
+            .find(|f| f.name == *name)
+            .ok_or_else(|| usage(format!("no workflow named {name} (aibus workflow list)")))?;
+        let (Ok(w), Some(text)) = (&f.parsed, &f.text) else {
+            let why = f.parsed.as_ref().err().map(ToString::to_string).unwrap_or_default();
+            return Err(usage(format!("{name} does not parse: {why}")));
+        };
+        named.extend(w.steps.iter().map(|s| s.agent.clone()).filter(|a| !named.contains(a)).collect::<Vec<_>>());
+        flows.push((name.clone(), text.clone()));
+    }
+    let mut agents: Vec<(String, String)> = Vec::new();
+    if with_agents {
+        let found = crate::agent_cmd::Env::load(g)?.discover(g)?;
+        for a in &named {
+            let Some(def) = found.agents.get(a) else { continue };
+            if let (Scope::Project | Scope::User, Some(path)) = (&def.source.scope, &def.source.path) {
+                let text = std::fs::read_to_string(path).map_err(|e| usage(format!("{}: {e}", path.display())))?;
+                agents.push((a.to_string(), text));
+            }
+        }
+    }
+    let bytes = bundle::pack(stem, description, &flows, &agents, None, redactor).map_err(|e| usage(e.to_string()))?;
+    match std::fs::symlink_metadata(output) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(usage(format!("{}: {e}", output.display()))),
+        Ok(md) if md.file_type().is_symlink() || !md.is_file() => {
+            return Err(usage(format!("{} is not a plain file, refusing to write through it", output.display())))
+        }
+        Ok(_) if !force => return Err(usage(format!("{} exists, pack again with --force to replace it", output.display()))),
+        Ok(_) => {}
+    }
+    aibus_core::persist::fs::write_atomic(output, &bytes).map_err(|e| usage(format!("{}: {e}", output.display())))?;
+    if g.json {
+        println!("{}", json!({"path": output, "name": stem, "workflows": names_of(&flows), "agents": names_of(&agents)}));
+    } else {
+        println!("wrote {} ({} workflow(s), {} agent(s))", output.display(), flows.len(), agents.len());
+    }
+    Ok(0)
 }
 
-/// `workflow install <file>.aibus [--user] [--force] [--allow gates]`.
+fn names_of(list: &[(String, String)]) -> Vec<&str> {
+    list.iter().map(|(n, _)| n.as_str()).collect()
+}
+
+/// `workflow install <file>.aibus [--user] [--force] [--allow gates]`: the bundle's workflows (and
+/// agents) as loose files in the project's `.aibus/` or the user's config directory, through the
+/// same checks as `workflow_create`. A gate (or an agent's hooks) needs `--allow gates`: that is
+/// how a bundled gate gets trusted.
 pub fn workflow_install(
     g: &Global,
     file: &std::path::Path,
@@ -343,6 +469,30 @@ pub fn workflow_install(
     allow_gates: bool,
     redactor: &Redactor,
 ) -> Result<u8, AibusError> {
-    let _ = (g, file, user, force, allow_gates, redactor);
-    Err(AibusError::Usage("workflow install: not yet".into()))
+    use aibus_core::workflow::bundle::{self, Install};
+    let usage = |m: String| AibusError::Usage(format!("workflow install: {m}"));
+    let md = std::fs::metadata(file).map_err(|e| usage(format!("{}: {e}", file.display())))?;
+    if !md.is_file() || md.len() > bundle::MAX_BUNDLE_BYTES as u64 {
+        return Err(usage(format!("{} is not a bundle file of at most {} bytes", file.display(), bundle::MAX_BUNDLE_BYTES)));
+    }
+    let bytes = std::fs::read(file).map_err(|e| usage(format!("{}: {e}", file.display())))?;
+    let paths = g.paths()?;
+    let base = if user { paths.config.clone() } else { project_dir(&g.project_dir()?) };
+    let roster: Vec<_> = crate::agent_cmd::Env::load(g)?.discover(g)?.agents.into_keys().collect();
+    let to = Install {
+        workflows_dir: base.join("workflows"),
+        agents_dir: base.join("agents"),
+        roster: &roster,
+        force,
+        allow_gates,
+    };
+    let wrote = bundle::install(&bytes, &to, redactor).map_err(|e| usage(e.to_string()))?;
+    if g.json {
+        println!("{}", json!({ "wrote": wrote }));
+    } else {
+        for p in &wrote {
+            println!("wrote {}", p.display());
+        }
+    }
+    Ok(0)
 }

@@ -418,7 +418,7 @@ pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
         let Some(file) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        // `.aibus` itself is the project directory, not a bundle.
+        // A hidden file is not a bundle (a bare `.aibus` is the project directory's name).
         if path
             .file_stem()
             .is_none_or(|s| s.is_empty() || s.to_string_lossy().starts_with('.'))

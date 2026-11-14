@@ -96,8 +96,14 @@ fn roster() -> Vec<AgentName> {
 }
 
 /// `read` refuses it, and `install` into an empty place writes nothing at all.
+/// One redactor for every check here: building one compiles its patterns.
+fn redactor() -> &'static Redactor {
+    static R: std::sync::OnceLock<Redactor> = std::sync::OnceLock::new();
+    R.get_or_init(Redactor::new)
+}
+
 fn refused(bytes: &[u8]) -> BundleError {
-    let err = bundle::read(bytes, &Redactor::new()).expect_err("a hostile bundle is refused");
+    let err = bundle::read(bytes, redactor()).expect_err("a hostile bundle is refused");
     let root = tempfile::tempdir().unwrap();
     let roster = roster();
     let to = Install {
@@ -108,7 +114,7 @@ fn refused(bytes: &[u8]) -> BundleError {
         allow_gates: true,
     };
     assert!(
-        bundle::install(bytes, &to, &Redactor::new()).is_err(),
+        bundle::install(bytes, &to, redactor()).is_err(),
         "install refuses it too"
     );
     assert!(
@@ -408,10 +414,10 @@ fn a_tar_bomb_of_huge_or_sparse_declared_sizes_is_refused_without_reading() {
         )),
         BundleError::BadHeader(_)
     ));
-    // A GNU sparse entry that claims a huge real size.
+    // A GNU sparse entry that claims an 8 GiB size.
     assert!(matches!(
         refused(&with(
-            header(b"workflows/x.toml", b'S', 1 << 33, "", None).to_vec()
+            header(b"workflows/x.toml", b'S', (1 << 33) - 1, "", None).to_vec()
         )),
         BundleError::BadHeader(_) | BundleError::EntryTooBig(_, _)
     ));

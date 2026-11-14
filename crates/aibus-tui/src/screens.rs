@@ -742,12 +742,16 @@ pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
         column(buf, r, 0, 18, text(row, "name"), fg);
         column(buf, r, 19, 8, text(row, "scope"), dim);
         let rest = inner.width.saturating_sub(28);
+        // #271: a workflow from a bundle says which; one that parses but has an error is a
+        // bundled gate that is not trusted yet.
+        let from = get(row, "bundle").and_then(|b| b.as_text()).map_or(String::new(), |b| format!("[{b}] "));
+        let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
         match get(row, "error").and_then(|e| e.as_text()) {
-            Some(why) => column(buf, r, 28, rest, &format!("broken: {why}"), Style::new().fg(th.error)),
-            None => {
-                let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
-                column(buf, r, 28, rest, &format!("{}  {}", agents.join(" > "), text(row, "description")), fg);
+            Some(why) => {
+                let what = if agents.is_empty() { "broken" } else { "not runnable" };
+                column(buf, r, 28, rest, &format!("{from}{what}: {why}"), Style::new().fg(th.error));
             }
+            None => column(buf, r, 28, rest, &format!("{from}{}  {}", agents.join(" > "), text(row, "description")), fg),
         }
         hits.push((hit, r));
     }

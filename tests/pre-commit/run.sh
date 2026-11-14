@@ -22,6 +22,10 @@ case "$*" in "--check --edition 2021") ;; *) echo "unexpected rustfmt arguments:
 # real rustfmt exits 0 on stdin even with --check and says so only in its output
 in=$(cat)
 case $in in *RUSTFMTERR*) echo "error: 'rustfmt' is not installed for the toolchain 'fake'" >&2; exit 1 ;; esac
+case $in in *WARNONLY*) echo "Warning: can't set \`imports_granularity = Crate\`, unstable features are only available in nightly channel." >&2 ;; esac
+case $in in *STDOUTONLY*) echo "fn echoed_source() {}" ;; esac
+case $in in *EXIT7*) exit 7 ;; esac
+case $in in *KILLED*) kill -9 $$ ;; esac
 case $in in *UNFORMATTED*) echo "Diff in <stdin>:1:" ;; esac
 exit 0
 FAKE
@@ -133,6 +137,28 @@ mkrepo "$r"; printf 'fn n() {}\n' >"$r/$nl.rs"; git -C "$r" add -A; git -C "$r" 
 refuse "a .rs with a newline in its name, clean at HEAD, made unformatted: refused" hook "$r"
 mkrepo "$r"; printf 'UNFORMATTED\n' >"$r/$nl.rs"; git -C "$r" add -A; git -C "$r" commit -q --no-verify -m nl; printf 'UNFORMATTED\nmore\n' >"$r/$nl.rs"; git -C "$r" add -A
 expect "a .rs with a newline in its name, unformatted at HEAD, edited: passes" hook "$r"
+
+# only stdout is judged: stdout noise without a Diff line, and stderr warnings, do not change a verdict
+mkrepo "$r"; printf 'STDOUTONLY\n' >"$r/new.rs"; git -C "$r" add new.rs
+expect "exit 0 with stdout but no Diff line (a new #![rustfmt::skip] file): passes" hook "$r"
+mkrepo "$r"; printf 'STDOUTONLY\n' >"$r/clean.rs"; git -C "$r" commit -q --no-verify -am noisy; printf 'STDOUTONLY\nUNFORMATTED\n' >"$r/clean.rs"; git -C "$r" add clean.rs
+refuse "stdout noise at HEAD, then made unformatted: refused, not skipped" hook "$r"
+mkrepo "$r"; printf 'WARNONLY\n' >"$r/new.rs"; git -C "$r" add new.rs
+expect "only a stderr warning, new formatted file: passes" hook "$r"
+mkrepo "$r"; printf 'WARNONLY\n' >"$r/clean.rs"; git -C "$r" commit -q --no-verify -am warn; printf 'WARNONLY\nUNFORMATTED\n' >"$r/clean.rs"; git -C "$r" add clean.rs
+refuse "only a stderr warning at HEAD, then made unformatted: refused" hook "$r"
+out=$(hook "$r" 2>&1); expect "only a stderr warning at HEAD, then made unformatted: no skip line" bash -c '! printf "%s\n" "$1" | grep -q "format check skipped"' _ "$out"
+mkrepo "$r"; printf 'WARNONLY\n' >"$r/clean.rs"; git -C "$r" commit -q --no-verify -am warn; printf 'WARNONLY\nfn x() {}\n' >"$r/clean.rs"; git -C "$r" add clean.rs
+expect "warning on both sides, still clean: passes" hook "$r"
+out=$(hook "$r" 2>&1); expect "the warning still reaches the user on stderr" bash -c 'printf "%s\n" "$1" | grep -q "imports_granularity"' _ "$out"
+
+# a failed rustfmt always gives a reason
+mkrepo "$r"; printf 'KILLED\n' >"$r/new.rs"; git -C "$r" add new.rs
+refuse "rustfmt killed by SIGKILL: refused" hook "$r"
+out=$(hook "$r" 2>&1); expect "rustfmt killed by SIGKILL: the reason says killed by signal 9" bash -c 'printf "%s\n" "$1" | grep -q "rustfmt failed on new.rs, cannot check it: killed by signal 9"' _ "$out"
+mkrepo "$r"; printf 'EXIT7\n' >"$r/new.rs"; git -C "$r" add new.rs
+refuse "rustfmt exits 7 with no output: refused" hook "$r"
+out=$(hook "$r" 2>&1); expect "rustfmt exits 7 with no output: the reason says rustfmt exited 7" bash -c 'printf "%s\n" "$1" | grep -q "cannot check it: rustfmt exited 7$"' _ "$out"
 
 echo "$n tests, $fails failed"
 [ $fails = 0 ]

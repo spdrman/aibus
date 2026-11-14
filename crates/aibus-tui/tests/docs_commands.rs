@@ -107,3 +107,14 @@ fn help_spec_and_readme_share_one_help_line_per_command() {
         assert_eq!(rows.len(), slash.len(), "{rel}: a row for a command the registry does not have");
     }
 }
+
+/// #270: `/quit`, `/exit` and `/q` are rows of the slash table in the spec and the README.
+#[test]
+fn quit_exit_and_q_are_documented() {
+    for rel in ["README.md", "docs/spec/05-ui.md"] {
+        let rows = rows_of(rel);
+        for name in ["quit", "exit", "q"] {
+            assert!(rows.contains_key(name), "{rel}: no row for /{name}");
+        }
+    }
+}

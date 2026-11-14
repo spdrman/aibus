@@ -19,7 +19,8 @@ cat >"$t/bin/rustfmt" <<'FAKE'
 #!/bin/sh
 echo "$*" >>"$FAKE_RUSTFMT_LOG"
 case "$*" in "--check --edition 2021") ;; *) echo "unexpected rustfmt arguments: $*" >&2; exit 3 ;; esac
-if grep -q '^UNFORMATTED' ; then echo "Diff in <stdin>" ; exit 1; fi
+# real rustfmt exits 0 on stdin even with --check and says so only in its output
+if grep -q '^UNFORMATTED' ; then echo "Diff in <stdin>:1:" ; fi
 exit 0
 FAKE
 chmod +x "$t/bin/rustfmt"

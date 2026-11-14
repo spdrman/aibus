@@ -10,16 +10,25 @@ set -eu
 # the working copy, and nothing is formatted or written here.
 if command -v rustfmt >/dev/null 2>&1; then
   fmt_bad=0 fmt_state=status
-  # rustfmt on stdin exits 0 even with --check; a difference shows only as output. Returns 0 clean, 1 not
-  # clean, 2 when rustfmt itself failed (non-zero exit and no "Diff in" line: a missing component, a syntax
-  # error), which must never read as "not clean" and get a file skipped.
+  # rustfmt on stdin exits 0 even with --check; a difference shows only as a "Diff in" line on stdout. Only
+  # stdout is judged: stderr (a warning from the user's own rustfmt.toml, say) is replayed to the user and
+  # never changes a verdict. Returns 0 clean, 1 not clean, 2 when rustfmt itself failed (non-zero exit and
+  # no "Diff in" line: a missing component, a syntax error, a signal), which must never read as "not clean".
+  fmt_err=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/pre-commit-rustfmt.XXXXXX") || exit 1
+  trap 'rm -f "$fmt_err"' EXIT
   fmt_clean() {
-    fmt_rc=0; fmt_out=$(git cat-file blob "$1" | rustfmt --check --edition 2021 2>&1) || fmt_rc=$?
-    case $fmt_out in *"Diff in "*) return 1 ;; esac
-    [ "$fmt_rc" = 0 ] || return 2
-    [ -z "$fmt_out" ]
+    fmt_xrc=0; fmt_out=$(git cat-file blob "$1" | rustfmt --check --edition 2021 2>"$fmt_err") || fmt_xrc=$?
+    [ ! -s "$fmt_err" ] || cat "$fmt_err" >&2
+    if printf '%s\n' "$fmt_out" | grep -q '^Diff in '; then return 1; fi
+    [ "$fmt_xrc" = 0 ] || return 2
   }
-  fmt_fail() { echo "pre-commit: rustfmt failed on $1, cannot check it: $(printf '%s\n' "$fmt_out" | head -1)" >&2; }
+  fmt_fail() {
+    fmt_why=$(head -1 "$fmt_err")
+    if [ -z "$fmt_why" ]; then
+      if [ "$fmt_xrc" -gt 128 ]; then fmt_why="killed by signal $((fmt_xrc - 128))"; else fmt_why="rustfmt exited $fmt_xrc"; fi
+    fi
+    echo "pre-commit: rustfmt failed on $1, cannot check it: $fmt_why" >&2
+  }
   git diff --cached --name-status -z -M --diff-filter=ACMR | {
     while IFS= read -r -d '' tok; do
       case $fmt_state in

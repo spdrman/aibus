@@ -10,18 +10,29 @@ pty_run() { # secs cmd args... : stdin stays open for secs+2, so a prompt would 
   # loaded host (#278). If PTY_PROMPT is also set, it is an extended regular expression (grep -E): the input is
   # typed once the terminal output matches it (polled every 0.1s), however long that takes. secs is then only
   # the overall budget that guards a hang: when the prompt never shows, nothing is typed and timeout exits 124.
+  # PTY_PROMPT is checked first: an invalid expression or an empty one (which would match the first byte of
+  # output) is an error, exit 2 with a message, not a silent 124 after the whole budget. Without PTY_INPUT,
+  # PTY_PROMPT is ignored. TERM, INT and HUP stop the child, script and the feeder and remove the temp files
+  # (the traps are reset on return, so a caller's own traps on those signals do not survive a pty_run call).
   local secs=$1; shift
   pty_available || { echo "pty_run: script(1) or timeout is missing" >&2; return 127; }
-  local out rc
+  if [ -n "${PTY_INPUT+x}" ] && [ -n "${PTY_PROMPT+x}" ]; then
+    [ -n "$PTY_PROMPT" ] || { echo "pty_run: PTY_PROMPT is empty (unset it to type after the fixed delay)" >&2; return 2; }
+    printf '' | grep -E -- "$PTY_PROMPT" >/dev/null 2>&1
+    [ $? != 2 ] || { echo "pty_run: PTY_PROMPT is not a valid extended regular expression: $PTY_PROMPT" >&2; return 2; }
+  fi
+  local out rc tpid=
   out=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/pty-out.XXXXXX") || return 127
   # The child's output goes to a file the feeder can poll; it is copied to our stdout once the child has ended.
+  trap '_pty_stop; exit 143' TERM; trap '_pty_stop; exit 130' INT; trap '_pty_stop; exit 129' HUP
+  _pty_stop() { kill "$tpid" 2>/dev/null; wait "$tpid" 2>/dev/null; rm -f "$out"; }   # the feeder ends when $out is gone
   case $(uname -s) in
-    Linux) SHELL=$(command -v bash) timeout "$secs" script -qec "$(printf '%q ' "$@")" /dev/null >"$out" < <(_pty_feed "$secs" "$out") ;;
-    Darwin|*BSD) timeout "$secs" script -q /dev/null "$@" >"$out" < <(_pty_feed "$secs" "$out") ;;
-    *) rm -f "$out"; echo "pty_run: no known script(1) syntax for $(uname -s)" >&2; return 127 ;;
+    Linux) SHELL=$(command -v bash) timeout "$secs" script -qec "$(printf '%q ' "$@")" /dev/null >"$out" < <(_pty_feed "$secs" "$out" 2>/dev/null) & tpid=$! ;;
+    Darwin|*BSD) timeout "$secs" script -q /dev/null "$@" >"$out" < <(_pty_feed "$secs" "$out" 2>/dev/null) & tpid=$! ;;
+    *) _pty_stop; trap - TERM INT HUP; echo "pty_run: no known script(1) syntax for $(uname -s)" >&2; return 127 ;;
   esac
-  rc=$?
-  cat "$out"; rm -f "$out"   # the feeder stops when the file is gone
+  wait "$tpid"; rc=$?
+  cat "$out"; _pty_stop; trap - TERM INT HUP
   return $rc
 }
 _pty_feed() { # secs outfile : what pty_run types, then holds stdin open until the child has ended (outfile is gone) or secs+2

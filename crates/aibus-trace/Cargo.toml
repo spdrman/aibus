@@ -1,0 +1,22 @@
+[package]
+name = "aibus-trace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# The normalized evidence trace of EPIC A (#282): the versioned event envelope, the append-only
+# local store and the offline replay projection. No process, no network and no provider here, so
+# the inspector (#284) and durable state (#289) can read a trace without anything that runs a CLI.
+[dependencies]
+aibus-core.workspace = true
+fs4 = { version = "0.12", features = ["sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v7", "v8", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"

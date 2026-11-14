@@ -1,0 +1,28 @@
+[package]
+name = "aibus-supervisor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# The CLI supervisor of EPIC A (#282): it finds and probes an official, unmodified vendor CLI,
+# launches it with an argv vector and a bounded environment, reads its stream under limits, turns
+# each line into trace events and ends the attempt when the process ends. The reference CLI is
+# Claude Code. It never reads, copies or stores the CLI's credentials.
+[dependencies]
+aibus-core.workspace = true
+aibus-trace = { path = "../aibus-trace" }
+regex = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "process", "io-util", "time", "sync"] }
+tokio-util = "0.7"
+uuid = { version = "1", features = ["v7"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }

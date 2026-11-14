@@ -231,6 +231,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-supervisor"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-trace",
+ "regex",
+ "rustix 1.1.6",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "aibus-testkit"
 version = "0.2.1"
 dependencies = [
@@ -253,6 +268,19 @@ dependencies = [
  "ulid",
  "wiremock",
  "zstd",
+]
+
+[[package]]
+name = "aibus-trace"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "fs4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -4202,6 +4230,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -4540,6 +4569,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

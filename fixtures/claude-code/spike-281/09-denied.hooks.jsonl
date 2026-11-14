@@ -1,0 +1,10 @@
+{"session_id":"726b6f0a-871f-44ff-8d00-4afe98248832","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-deleg/726b6f0a-871f-44ff-8d00-4afe98248832.jsonl","cwd":"/spike/work/deleg","hook_event_name":"SessionStart","source":"startup"}
+
+{"session_id":"726b6f0a-871f-44ff-8d00-4afe98248832","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-deleg/726b6f0a-871f-44ff-8d00-4afe98248832.jsonl","cwd":"/spike/work/deleg","prompt_id":"df2eb8cc-969a-42db-8b79-6b547e4ef6a0","permission_mode":"default","hook_event_name":"UserPromptSubmit","prompt":"Use the Write tool once to create a file named out.txt containing the word hello. Do not retry if it fails. Then reply with one line saying whether the write succeeded."}
+
+{"session_id":"726b6f0a-871f-44ff-8d00-4afe98248832","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-deleg/726b6f0a-871f-44ff-8d00-4afe98248832.jsonl","cwd":"/spike/work/deleg","prompt_id":"df2eb8cc-969a-42db-8b79-6b547e4ef6a0","permission_mode":"default","effort":{"level":"medium"},"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/spike/work/deleg/out.txt","content":"hello"},"tool_use_id":"toolu_01J5mV9auXr7GVpP55nLgTC7"}
+
+{"session_id":"726b6f0a-871f-44ff-8d00-4afe98248832","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-deleg/726b6f0a-871f-44ff-8d00-4afe98248832.jsonl","cwd":"/spike/work/deleg","prompt_id":"df2eb8cc-969a-42db-8b79-6b547e4ef6a0","permission_mode":"default","effort":{"level":"medium"},"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"The write did not succeed: the Write call to out.txt was denied permission, and the session has no way to approve it, so I did not retry.","background_tasks":[],"session_crons":[]}
+
+{"session_id":"726b6f0a-871f-44ff-8d00-4afe98248832","transcript_path":"/Users/owner/.claude-b/projects/-spike-work-deleg/726b6f0a-871f-44ff-8d00-4afe98248832.jsonl","cwd":"/spike/work/deleg","prompt_id":"df2eb8cc-969a-42db-8b79-6b547e4ef6a0","hook_event_name":"SessionEnd","reason":"other"}
+

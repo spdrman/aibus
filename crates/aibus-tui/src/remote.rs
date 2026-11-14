@@ -1,9 +1,10 @@
 //! A client of `aibus mcp` driving this session (#274). Whatever it sends becomes the messages
 //! the keyboard would have produced for the same line, through the same parser (`commands::send`),
 //! and is stepped through the same `step` a key's messages take, wrapped in `Msg::Via` so the log,
-//! the run's meta and the transcript say who sent it. Two things stay the keyboard's: a
-//! permission prompt (unless the session was started with `--control-permission`) and `/login`,
-//! which opens a masked key entry and with a key on the line is refused anyway.
+//! the run's meta and the transcript say who sent it. Three things stay the keyboard's: a
+//! permission prompt (unless the session was started with `--control-permission`), `/login`,
+//! which opens a masked key entry and with a key on the line is refused anyway, and ending the
+//! session (`/quit`, `/exit`, `/q`).
 
 use aibus_core::remote::{Ask, Remote};
 use aibus_core::state::value::{as_list, as_str, get};
@@ -97,7 +98,19 @@ pub fn msgs(ask: &Ask, cx: &Context, permission: bool) -> Result<Vec<Msg>, Strin
             if !line.starts_with('/') {
                 return Err("a command is a slash line such as /model haiku; a prompt goes through session_send".into());
             }
-            sent(commands::send(line, &env))
+            let msgs = sent(commands::send(line, &env))?;
+            // Ending the session is the keyboard's alone: whatever command does it (`/quit`, its
+            // aliases, any later one), it is told by what it would do, not by its name.
+            if msgs
+                .iter()
+                .any(|m| matches!(m, Msg::Command(aibus_core::Command::Quit { .. })))
+            {
+                let word = line.split_whitespace().next().unwrap_or(line);
+                return Err(format!(
+                    "{word} would end the session, and only the keyboard can do that"
+                ));
+            }
+            Ok(msgs)
         }
         // As typed: `/cancel` on the lead opens the confirmation at the keyboard.
         Ask::Cancel { run } => sent(commands::send(

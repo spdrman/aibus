@@ -545,7 +545,7 @@ mod tests {
         let mut p = Prompt::default().with_text("/");
         p.tab(&Env::bare(&agents, &[]));
         let popup = p.popup.clone().unwrap();
-        assert_eq!(popup.items.len(), 15);
+        assert_eq!(popup.items.len(), 18);
         p.tab(&Env::bare(&agents, &[]));
         assert_eq!(p.popup.as_ref().unwrap().sel, 1);
         assert!(p.accept_popup());

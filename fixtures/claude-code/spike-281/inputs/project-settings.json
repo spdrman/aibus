@@ -1,0 +1,86 @@
+{
+ "hooks": {
+  "SessionStart": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "UserPromptSubmit": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "PreToolUse": [
+   {
+    "matcher": "*",
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "PostToolUse": [
+   {
+    "matcher": "*",
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "SubagentStart": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "SubagentStop": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "Stop": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ],
+  "SessionEnd": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "cat >> /spike/work/deleg/hooks.log.jsonl; echo >> /spike/work/deleg/hooks.log.jsonl"
+     }
+    ]
+   }
+  ]
+ }
+}

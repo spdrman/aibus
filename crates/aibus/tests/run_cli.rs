@@ -380,6 +380,7 @@ fn sigint_cancels_the_run_and_exits_7() {
     let status = child.wait().unwrap();
     assert_eq!(status.code(), Some(7), "{rest}");
     let lines: Vec<serde_json::Value> = rest.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(lines.len() >= 2, "no RunFinished before the end: {rest}");
     let last = &lines[lines.len() - 1];
     assert_eq!(last["type"], "SessionEnd");
     assert_eq!(last["exit_code"], 7);

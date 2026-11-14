@@ -232,13 +232,18 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
         }
     }
     let env = crate::agent_cmd::Env::load(g)?;
-    let roster: Vec<_> = env.discover(g)?.agents.into_keys().collect();
+    let agents = env.discover(g)?.agents;
+    let roster: Vec<_> = agents.keys().cloned().collect();
     let (mut errors, mut warnings) = (Vec::new(), Vec::new());
     for path in &files {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
         let text = std::fs::read_to_string(path)
             .map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
-        let v = aibus_core::workflow::validate(&text, stem, &roster);
+        let mut v = aibus_core::workflow::validate(&text, stem, &roster);
+        // A step that requires what its agent can't do (#283) is an error too.
+        if let Ok(wf) = aibus_core::workflow::Workflow::parse(stem, &text) {
+            v.errors.extend(aibus_core::workflow::compile::capability_problems(&wf, &agents));
+        }
         let tag = |list: Vec<aibus_core::workflow::Problem>| {
             list.into_iter().map(|p| (path.clone(), p)).collect::<Vec<_>>()
         };

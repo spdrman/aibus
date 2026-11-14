@@ -32,6 +32,7 @@ mod startup;
 mod term;
 mod trace;
 mod tui;
+mod workflow_plan;
 
 use std::io::IsTerminal;
 
@@ -100,6 +101,16 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             commands::workflow_validate(&cli.global, target.as_deref())
         }
         Some(Command::Workflow(WorkflowCmd::Show { name })) => commands::workflow_show(&cli.global, &name),
+        Some(Command::Workflow(WorkflowCmd::Plan { target, dry_run, locked })) => {
+            workflow_plan::plan(&cli.global, &target, dry_run, locked.as_deref(), redactor)
+        }
+        Some(Command::Workflow(WorkflowCmd::Diff { a, b })) => workflow_plan::diff_cmd(&cli.global, &a, &b, redactor),
+        Some(Command::Workflow(WorkflowCmd::Manifest { target, input })) => {
+            workflow_plan::manifest(&cli.global, &target, input.as_deref(), redactor)
+        }
+        Some(Command::Workflow(WorkflowCmd::Export { target, dir, apply })) => {
+            workflow_plan::export(&cli.global, &target, dir.as_deref(), apply.as_deref(), redactor)
+        }
         Some(Command::Workflow(WorkflowCmd::Run { name, input, script })) => {
             // The same session as `aibus run --workflow <name> <input>`.
             let args = RunArgs {

@@ -839,6 +839,10 @@ impl Server {
                 why.join("; ")
             )));
         };
+        // A workflow only the scheduler (#288) can run starts nothing, here or in the child.
+        if let Some(why) = parsed.plan_only() {
+            return Ok(self.fail(why));
+        }
         let steps = parsed.steps.iter().map(|s| s.agent.to_string()).collect();
 
         // Only a start that would spawn a child costs a token: a typo in a name or a workflow

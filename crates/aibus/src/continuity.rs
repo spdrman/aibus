@@ -80,11 +80,7 @@ impl Continuity {
         match ledger::read(l) {
             Ok(Some(ledger)) => {
                 tell_status_bar(app, &ledger);
-                shown.push(format!(
-                    "[ledger] {}\n\n{}",
-                    l.topic,
-                    ledger.render().trim_end()
-                ));
+                shown.push(format!("[ledger] {}\n\n{}", l.topic, ledger.render().trim_end()));
             }
             Ok(None) => {}
             Err(e) => warn("reading the ledger", e),
@@ -95,14 +91,8 @@ impl Continuity {
 }
 
 /// `model:ledger`, which the status bar shows: the goal and the first thing in progress.
-pub fn tell_status_bar(
-    app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>,
-    l: &ledger::Ledger,
-) {
-    for (section, text) in [
-        ("goal", l.goal()),
-        ("in_progress", l.in_progress().unwrap_or("")),
-    ] {
+pub fn tell_status_bar(app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>, l: &ledger::Ledger) {
+    for (section, text) in [("goal", l.goal()), ("in_progress", l.in_progress().unwrap_or(""))] {
         let _ = app.step(Msg::Command(Command::LedgerUpdate {
             section: section.into(),
             text: text.into(),
@@ -125,14 +115,8 @@ pub fn end(ctx: &mut Ctx) {
     };
     let lead = ctx.finished.as_ref().map(|r| r.run_id);
     let conv = lead.and_then(|run| {
-        let file = session
-            .dir
-            .join("runs")
-            .join(run.to_string())
-            .join("conversation.jsonl");
-        aibus_core::run::transcript::load(&file)
-            .ok()
-            .map(|l| l.conv)
+        let file = session.dir.join("runs").join(run.to_string()).join("conversation.jsonl");
+        aibus_core::run::transcript::load(&file).ok().map(|l| l.conv)
     });
 
     if cfg.continuity.handoff_on_end {
@@ -150,18 +134,11 @@ pub fn end(ctx: &mut Ctx) {
         }
     }
 
-    let completed = read_runs(&session.dir)
-        .iter()
-        .any(|r| r.status == RunStatus::Completed.as_value());
+    let completed = read_runs(&session.dir).iter().any(|r| r.status == RunStatus::Completed.as_value());
     let wanted = cfg.memory.extract_on_end && cfg.continuity.extract_learnings;
-    if let (true, true, false, Some(conv), Some(rt), Some(extractor)) = (
-        wanted,
-        completed,
-        ctx.interrupted,
-        &conv,
-        ctx.rt.as_ref(),
-        &c.extractor,
-    ) {
+    if let (true, true, false, Some(conv), Some(rt), Some(extractor)) =
+        (wanted, completed, ctx.interrupted, &conv, ctx.rt.as_ref(), &c.extractor)
+    {
         let cancel = tokio_util::sync::CancellationToken::new();
         let asked = rt.block_on(async {
             tokio::time::timeout(EXTRACT_WITHIN, extractor.extract(conv, &cancel)).await
@@ -169,9 +146,8 @@ pub fn end(ctx: &mut Ctx) {
         match asked {
             Ok(Ok(found)) if !found.is_empty() => {
                 let now = SystemTime::now();
-                let file =
-                    memory::scope_dir(MemoryScope::User, "lead", &c.layout.project, &c.layout.data)
-                        .join("LEARNINGS.md");
+                let file = memory::scope_dir(MemoryScope::User, "lead", &c.layout.project, &c.layout.data)
+                    .join("LEARNINGS.md");
                 let heading = format!("{} session {}", date(now), session.id);
                 if let Err(e) = learn::append(&file, &found, &heading, &ctx.redactor) {
                     warn("writing LEARNINGS.md", e);
@@ -197,10 +173,7 @@ fn write_handoff(
     let mut body = serde_json::Value::Object(handoff::summarise(ledger.as_ref(), conv));
     ctx.redactor.redact_json(&mut body);
     let now = SystemTime::now();
-    let status = ctx
-        .finished
-        .as_ref()
-        .map_or("partial", |r| handoff::status_of(r.status));
+    let status = ctx.finished.as_ref().map_or("partial", |r| handoff::status_of(r.status));
     let front = Front {
         session: &layout.topic,
         date: &date(now),

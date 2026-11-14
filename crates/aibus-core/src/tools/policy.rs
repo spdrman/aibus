@@ -80,10 +80,7 @@ pub(crate) fn resolve_for_write(cwd: &Path, p: &str) -> io::Result<(PathBuf, boo
             Ok(c) => break c,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let name = probe.file_name().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "path has a `..` past what exists",
-                    )
+                    io::Error::new(io::ErrorKind::InvalidInput, "path has a `..` past what exists")
                 })?;
                 tail.push(name.to_owned());
                 probe = probe.parent().ok_or_else(|| {

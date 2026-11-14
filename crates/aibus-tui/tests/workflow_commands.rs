@@ -35,23 +35,14 @@ fn rig_in(root: &Path) -> (Rig, WorkflowFiles) {
 }
 
 fn draft(r: &mut Rig, toml: &str) {
-    poke(
-        &mut r.app,
-        WORKFLOW_DRAFT,
-        map([("toml", s(toml)), ("summary", s("valid"))]),
-    );
+    poke(&mut r.app, WORKFLOW_DRAFT, map([("toml", s(toml)), ("summary", s("valid"))]));
 }
 
 /// What the loop does with the messages a key press produced.
 fn answer(r: &mut Rig, files: &WorkflowFiles, msgs: &[Msg]) {
     for m in msgs {
         if let Msg::Command(Command::WorkflowFile(op)) = m {
-            for a in apply(
-                op,
-                &r.app,
-                files,
-                SystemTime::UNIX_EPOCH + Duration::from_secs(AT),
-            ) {
+            for a in apply(op, &r.app, files, SystemTime::UNIX_EPOCH + Duration::from_secs(AT)) {
                 r.app.step(a).unwrap();
             }
         }
@@ -79,29 +70,15 @@ fn save_writes_a_valid_file_with_the_two_header_lines() {
     let saved = std::fs::read_to_string(&path).unwrap();
     let mut lines = saved.lines();
     assert_eq!(lines.next(), Some("# schema: aibus://schema/workflow v1"));
-    assert_eq!(
-        lines.next(),
-        Some("# written through aibus, 2023-11-14T22:13:20.000Z")
-    );
+    assert_eq!(lines.next(), Some("# written through aibus, 2023-11-14T22:13:20.000Z"));
     assert!(workflow::Workflow::parse("review", &saved).is_ok());
     // The list the prompt's shorthands read now has it, so `/review` is a command.
-    let rows = r
-        .app
-        .graph
-        .read_key("model:workflows")
-        .map(as_list)
-        .unwrap_or(&[])
-        .to_vec();
+    let rows = r.app.graph.read_key("model:workflows").map(as_list).unwrap_or(&[]).to_vec();
     assert_eq!(rows.len(), 1);
     assert_eq!(get(&rows[0], "name").and_then(as_str), Some("review"));
     r.type_text("/review the diff");
     let sent = r.key(K::Enter);
-    assert!(
-        names(&sent)
-            .iter()
-            .any(|m| m.contains("Workflow { name: \"review\"")),
-        "{sent:?}"
-    );
+    assert!(names(&sent).iter().any(|m| m.contains("Workflow { name: \"review\"")), "{sent:?}");
     // `--user` goes to the user's directory.
     line(&mut r, &files, "/workflow save mine --user");
     assert!(root.path().join("config/workflows/mine.toml").exists());
@@ -116,10 +93,7 @@ fn save_refuses_errors_and_existing_names_and_bad_names_before_touching_disk() {
     assert!(!root.path().join("project").exists());
     assert!(log_has(&r, "no drafted workflow"));
     // A draft naming an agent that does not exist is shown with its step, and not written.
-    draft(
-        &mut r,
-        &REVIEW.replace("agent = \"plan\"", "agent = \"ghost\""),
-    );
+    draft(&mut r, &REVIEW.replace("agent = \"plan\"", "agent = \"ghost\""));
     line(&mut r, &files, "/workflow save review");
     assert!(!root.path().join("project").exists());
     assert_eq!(modal(&r).as_deref(), Some("workflow_show"));
@@ -132,33 +106,16 @@ fn save_refuses_errors_and_existing_names_and_bad_names_before_touching_disk() {
     let path = root.path().join("project/.aibus/workflows/review.toml");
     std::fs::write(&path, "# mine\nname = \"review\"\n").unwrap();
     line(&mut r, &files, "/workflow save review");
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "# mine\nname = \"review\"\n"
-    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "# mine\nname = \"review\"\n");
     line(&mut r, &files, "/workflow save review --force");
-    assert!(std::fs::read_to_string(&path)
-        .unwrap()
-        .starts_with("# schema: aibus://schema/workflow v1\n"));
+    assert!(std::fs::read_to_string(&path).unwrap().starts_with("# schema: aibus://schema/workflow v1\n"));
     // A bad name is a notice on the prompt and never reaches the loop.
     let before = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
     r.type_text("/workflow save ../escape");
     let msgs = r.key(K::Enter);
-    assert!(
-        msgs.iter()
-            .all(|m| !matches!(m, Msg::Command(Command::WorkflowFile(_)))),
-        "{msgs:?}"
-    );
-    assert!(r
-        .ui
-        .prompt
-        .notice
-        .as_deref()
-        .is_some_and(|n| n.contains("not a workflow name")));
-    assert_eq!(
-        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
-        before
-    );
+    assert!(msgs.iter().all(|m| !matches!(m, Msg::Command(Command::WorkflowFile(_)))), "{msgs:?}");
+    assert!(r.ui.prompt.notice.as_deref().is_some_and(|n| n.contains("not a workflow name")));
+    assert_eq!(std::fs::read_dir(path.parent().unwrap()).unwrap().count(), before);
     assert!(!root.path().join("project/.aibus/escape.toml").exists());
 }
 
@@ -209,7 +166,5 @@ fn run_is_the_existing_workflow_command() {
     r.type_text("/workflow review the diff");
     let b = names(&r.key(K::Enter));
     assert_eq!(a, b);
-    assert!(a
-        .iter()
-        .any(|m| m.contains("Workflow { name: \"review\", input: \"the diff\" }")));
+    assert!(a.iter().any(|m| m.contains("Workflow { name: \"review\", input: \"the diff\" }")));
 }

@@ -13,24 +13,24 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_core::agent::discover::{discover, scope_dirs, Discovered};
-use aibus_core::assist::Seat;
 use aibus_core::config::{self, Loaded};
-use aibus_core::continuity::{handoff, Layout};
-use aibus_core::permission::bypass_allowed;
 use aibus_core::persist::fs::create_private_dir;
 use aibus_core::persist::index::Index;
 use aibus_core::persist::paths::{project_dir, Paths};
 use aibus_core::persist::retention::prune_if_due;
 use aibus_core::persist::session::{read_runs, SessionMeta, SessionWriter};
+use aibus_core::permission::bypass_allowed;
 use aibus_core::{
     expand, parse_mention, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
     AutoHandoff, Bash, Budgets, Compactor, CreateHandoff, CredentialStore, Delegate, Effects, Fork,
     Gate, HookEvent, HookInput, HookRunner, LedgerUpdate, Limits, MemoryAppend, MemoryRead,
-    MemoryWrite, ModelCompactor, ModelDefaults, ModelId, Msg, Orchestrator, PermissionMode, Recall,
-    Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, RunWorkflow, Sandbox,
-    SelectHints, SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern,
-    ToolRegistry, Triggers, WebFetch, MSG_CAPACITY,
+    MemoryWrite, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode, Recall,
+    Redactor, ResumeRun, Roster, RunConfig, RunDeps, RunHandle, RunResult, RunWorkflow, SelectHints,
+    Sandbox, SendMessage, SessionId, Start, ToolExecutor, ToolLimits, ToolPattern, ToolRegistry, Triggers,
+    WebFetch, MSG_CAPACITY,
 };
+use aibus_core::assist::Seat;
+use aibus_core::continuity::{handoff, Layout};
 use aibus_graph::mini::MiniGraph;
 use aibus_provider::fake::{FakeProvider, Script};
 use aibus_provider::{
@@ -43,8 +43,8 @@ use tokio::sync::mpsc;
 
 use crate::agent_watch::{self, AgentWatch};
 use crate::cli::{Global, RunArgs};
-use crate::continuity::{self, Continuity};
 use crate::control::{self, Line};
+use crate::continuity::{self, Continuity};
 use crate::events;
 use crate::keychain::OsKeychain;
 use crate::launch::ChildLauncher;
@@ -199,7 +199,10 @@ pub fn interactive_steps() -> Vec<Box<dyn Step>> {
 
 /// Starts the steps in order. On a failure the steps already started are stopped in reverse and
 /// the error is returned; on success the started steps come back for `stop`.
-pub fn start(steps: Vec<Box<dyn Step>>, ctx: &mut Ctx) -> Result<Vec<Box<dyn Step>>, AibusError> {
+pub fn start(
+    steps: Vec<Box<dyn Step>>,
+    ctx: &mut Ctx,
+) -> Result<Vec<Box<dyn Step>>, AibusError> {
     let mut started: Vec<Box<dyn Step>> = Vec::new();
     for mut step in steps {
         ctx.trace.push(format!("start {}", step.name()));
@@ -329,11 +332,7 @@ impl Step for OpenSession {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
-        let cfg = &ctx
-            .loaded
-            .as_ref()
-            .ok_or_else(|| not_ready("config"))?
-            .config;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
         // Sessions past their retention go first, at most once a day (07 section 4).
         let days = u64::from(cfg.persist.session_retention_days);
         if let Err(e) = prune_if_due(paths, SystemTime::now(), Duration::from_secs(days * 86_400)) {
@@ -408,11 +407,7 @@ impl Step for BuildGraph {
     /// turns into an approved `Effect::Tool`; a sink that executed it would run every tool twice.
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let session = ctx.session.as_ref().ok_or_else(|| not_ready("session"))?;
-        let cfg = &ctx
-            .loaded
-            .as_ref()
-            .ok_or_else(|| not_ready("config"))?
-            .config;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
         let mut app = App::new(MiniGraph::new(), now_ms);
         app.record_commits();
         ctx.writer = Some(SessionWriter::open(
@@ -437,11 +432,7 @@ impl Step for DiscoverAgents {
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
-        let cfg = &ctx
-            .loaded
-            .as_ref()
-            .ok_or_else(|| not_ready("config"))?
-            .config;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
         let dirs = |v: &[String]| -> Vec<PathBuf> { v.iter().map(|d| ctx.cwd.join(d)).collect() };
         let found = discover(
             ctx.global.agents.as_deref(),
@@ -529,11 +520,7 @@ impl Step for LoadAccounts {
     }
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
-        let cfg = &ctx
-            .loaded
-            .as_ref()
-            .ok_or_else(|| not_ready("config"))?
-            .config;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
 
         let script_text = match &ctx.run.script {
             Some(p) => std::fs::read_to_string(p)?,
@@ -547,22 +534,13 @@ impl Step for LoadAccounts {
             Arc::new(OsKeychain),
             ctx.redactor.clone(),
         ));
-        factories.extend(
-            builtin_factories(store.clone())
-                .into_iter()
-                .filter(|f| f.id().0 != "fake"),
-        );
+        factories.extend(builtin_factories(store.clone()).into_iter().filter(|f| f.id().0 != "fake"));
         let paths = ctx.paths.as_ref().ok_or_else(|| not_ready("paths"))?;
         let configs = provider_configs(&cfg.accounts, &cfg.providers, paths)?;
         let providers = Arc::new(ProviderRegistry::new(&factories, &configs)?);
         let builtin = cfg.accounts.is_empty();
         if !builtin {
-            refresh_stale_models(
-                &cfg.accounts,
-                providers.clone(),
-                store.clone(),
-                paths.cache.join("models"),
-            );
+            refresh_stale_models(&cfg.accounts, providers.clone(), store.clone(), paths.cache.join("models"));
         }
 
         let mut effective = cfg.clone();
@@ -639,11 +617,7 @@ impl Step for EnterLoop {
     }
 
     fn start(&mut self, ctx: &mut Ctx) -> Result<(), AibusError> {
-        let cfg = &ctx
-            .loaded
-            .as_ref()
-            .ok_or_else(|| not_ready("config"))?
-            .config;
+        let cfg = &ctx.loaded.as_ref().ok_or_else(|| not_ready("config"))?.config;
         let acc = ctx.accounts.as_ref().ok_or_else(|| not_ready("accounts"))?;
         let agents = ctx.agents.as_ref().ok_or_else(|| not_ready("agents"))?;
         let session = ctx.session.as_ref().ok_or_else(|| not_ready("session"))?;
@@ -652,11 +626,7 @@ impl Step for EnterLoop {
         // `session resume --run`: the run's own definition, model and account, from its transcript.
         let resume = match ctx.run.resume {
             Some(run) => {
-                let file = session
-                    .dir
-                    .join("runs")
-                    .join(run.to_string())
-                    .join("conversation.jsonl");
+                let file = session.dir.join("runs").join(run.to_string()).join("conversation.jsonl");
                 let loaded = aibus_core::run::transcript::load(&file).map_err(AibusError::Usage)?;
                 Some((run, loaded.meta))
             }
@@ -681,17 +651,10 @@ impl Step for EnterLoop {
         // `--agent` submits the definition's `initial_prompt` first (01 section 4.2); a prompt
         // on the command line follows it.
         // The TUI starts no lead here: its prompt waits in the input line.
-        let mut prompt = if ctx.interactive {
-            String::new()
-        } else {
-            ctx.prompt.clone()
-        };
-        if let (false, Some(_), Some(initial), None) = (
-            ctx.interactive,
-            &ctx.global.agent,
-            &def.initial_prompt,
-            &resume,
-        ) {
+        let mut prompt = if ctx.interactive { String::new() } else { ctx.prompt.clone() };
+        if let (false, Some(_), Some(initial), None) =
+            (ctx.interactive, &ctx.global.agent, &def.initial_prompt, &resume)
+        {
             prompt = if prompt.trim().is_empty() {
                 initial.clone()
             } else {
@@ -726,10 +689,7 @@ impl Step for EnterLoop {
         let workflow_dirs = aibus_core::workflow::dirs(&ctx.cwd, Some(&paths.config));
         if let (Some(name), None) = (ctx.run.workflow.clone(), &resume) {
             aibus_core::workflow::load(&workflow_dirs, &name).map_err(AibusError::Usage)?;
-            forced = Some((
-                "workflow".to_owned(),
-                serde_json::json!({"name": name, "input": prompt}),
-            ));
+            forced = Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": prompt})));
             prompt = format!("/workflow {name} {prompt}");
         }
         let limits = Limits::resolve(cfg, |k| std::env::var(k).ok())?;
@@ -741,9 +701,8 @@ impl Step for EnterLoop {
         let i_know = std::env::var("AIBUS_I_KNOW").ok();
         let bypass = bypass_allowed(def.permission_mode, i_know.as_deref())?;
         let pattern = |flag: &str, text: &str| {
-            text.parse::<ToolPattern>().map_err(|()| {
-                AibusError::Usage(format!("{flag} {text}: want tool or tool(specifier)"))
-            })
+            text.parse::<ToolPattern>()
+                .map_err(|()| AibusError::Usage(format!("{flag} {text}: want tool or tool(specifier)")))
         };
         for text in &ctx.global.deny {
             def.tools.deny.push(pattern("--deny", text)?);
@@ -763,12 +722,12 @@ impl Step for EnterLoop {
                 .or(cfg.defaults.model.as_deref())
                 .unwrap_or("fake-small"),
         );
-        let pick =
-            |cli: &Option<String>, conf: &Option<String>| match cli.as_ref().or(conf.as_ref()) {
-                Some(s) if s == "off" => None,
-                Some(s) => Some(acc.registry.model_ref(s)),
-                None => Some(session_default.clone()),
-            };
+        let pick = |cli: &Option<String>, conf: &Option<String>| match cli.as_ref().or(conf.as_ref())
+        {
+            Some(s) if s == "off" => None,
+            Some(s) => Some(acc.registry.model_ref(s)),
+            None => Some(session_default.clone()),
+        };
         let defaults = ModelDefaults {
             default_model: Some(session_default.clone()),
             advisor_model: pick(&ctx.global.advisor, &cfg.defaults.advisor_model),
@@ -855,20 +814,13 @@ impl Step for EnterLoop {
         // The workflow author talks to `aibus mcp` over stdio, read-only (no `--allow`): started
         // here, at the first point the registry is built, because it is built once. A user's own
         // `[mcp.aibus]` is theirs and is left alone.
-        let wants_author =
-            ctx.interactive || ctx.global.agent.as_deref() == Some("workflow-author");
+        let wants_author = ctx.interactive || ctx.global.agent.as_deref() == Some("workflow-author");
         let author = if wants_author && !cfg.mcp.contains_key("aibus") {
             let rt = ctx.rt.as_ref().ok_or_else(|| not_ready("runtime"))?;
             let server = crate::author::server(false);
             let env: Vec<(String, String)> = std::env::vars().collect();
             let connected = match server {
-                Ok(server) => rt.block_on(aibus_core::mcp::Client::connect(
-                    "aibus",
-                    &server,
-                    &env,
-                    &ctx.cwd,
-                    &session.id.to_string(),
-                )),
+                Ok(server) => rt.block_on(aibus_core::mcp::Client::connect("aibus", &server, &env, &ctx.cwd, &session.id.to_string())),
                 Err(e) => Err(e),
             };
             match connected {
@@ -886,11 +838,7 @@ impl Step for EnterLoop {
         } else {
             None
         };
-        registry.register(Arc::new(RunWorkflow::new(
-            orch.clone(),
-            hooks.clone(),
-            workflow_dirs.clone(),
-        )));
+        registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone())));
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
         registry.register(Arc::new(ResumeRun::new(orch.clone())));
@@ -899,19 +847,13 @@ impl Step for EnterLoop {
         // gets which: the continuity tools are the lead's, `memory_*` need `memory:`.
         let layout = Layout::new(&ctx.cwd, cfg, &paths.data, ctx.global.topic.as_deref())
             .map_err(AibusError::Usage)?;
-        registry.register(Arc::new(LedgerUpdate::new(
-            layout.clone(),
-            ctx.redactor.clone(),
-        )));
+        registry.register(Arc::new(LedgerUpdate::new(layout.clone(), ctx.redactor.clone())));
         registry.register(Arc::new(CreateHandoff::new(
             layout.clone(),
             ctx.redactor.clone(),
             ctx.outcome.clone(),
         )));
-        registry.register(Arc::new(Recall::new(
-            layout.clone(),
-            cfg.memory.recall_k as usize,
-        )));
+        registry.register(Arc::new(Recall::new(layout.clone(), cfg.memory.recall_k as usize)));
         registry.register(Arc::new(MemoryRead));
         registry.register(Arc::new(MemoryWrite::new(ctx.redactor.clone())));
         registry.register(Arc::new(MemoryAppend::new(ctx.redactor.clone())));
@@ -936,12 +878,7 @@ impl Step for EnterLoop {
             redactor: ctx.redactor.clone(),
             tools: tools.clone(),
             hooks: hooks.clone(),
-            deny: ctx
-                .global
-                .deny
-                .iter()
-                .filter_map(|t| t.parse().ok())
-                .collect(),
+            deny: ctx.global.deny.iter().filter_map(|t| t.parse().ok()).collect(),
             cwd: ctx.cwd.clone(),
             runs_dir: session.dir.join("runs"),
             limits: tool_limits,
@@ -958,18 +895,11 @@ impl Step for EnterLoop {
         });
         // A `prompt` hook asks the session's own model; the account is only touched when some hook
         // wants it, so a session with none never reads a key for this.
-        let prompt_hooks = cfg
-            .hooks
-            .events
-            .values()
-            .flatten()
-            .any(|h| h.kind == aibus_core::HookKind::Prompt)
-            || agents.agents.values().any(|d| {
-                d.hooks
-                    .values()
-                    .flatten()
-                    .any(|h| h.kind == aibus_core::HookKind::Prompt)
-            });
+        let prompt_hooks = cfg.hooks.events.values().flatten().any(|h| h.kind == aibus_core::HookKind::Prompt)
+            || agents
+                .agents
+                .values()
+                .any(|d| d.hooks.values().flatten().any(|h| h.kind == aibus_core::HookKind::Prompt));
         if prompt_hooks {
             match launcher.pick(&session_default, &SelectHints::default()) {
                 Ok(p) => {
@@ -998,119 +928,93 @@ impl Step for EnterLoop {
             .model
             .as_ref()
             .map(|m| format!("--model {m}"))
-            .or_else(|| {
-                cfg.defaults
-                    .model
-                    .as_ref()
-                    .map(|m| format!("defaults.model {m}"))
-            });
-        let advisor_seat = assist
-            .as_ref()
-            .and_then(|a| a.advisor.as_ref())
-            .map(|a| a.seat.model.0.to_string());
-        let router_seat = assist
-            .as_ref()
-            .and_then(|a| a.router.as_ref())
-            .map(|r| r.label.clone());
+            .or_else(|| cfg.defaults.model.as_ref().map(|m| format!("defaults.model {m}")));
+        let advisor_seat = assist.as_ref().and_then(|a| a.advisor.as_ref()).map(|a| a.seat.model.0.to_string());
+        let router_seat = assist.as_ref().and_then(|a| a.router.as_ref()).map(|r| r.label.clone());
 
         // The lead: `--account`, then the definition's `account`, then the chain (04 section 4.1).
         // `inherit` has no parent here, so it means the session's model. The TUI has none yet.
-        let planned = if ctx.interactive {
-            None
-        } else {
-            let (target, hints) = match &resume {
-                Some((_, meta)) => (
-                    ModelRef::Full(meta.model.clone()),
-                    SelectHints {
-                        explicit: Some(meta.account.clone()),
-                        ..SelectHints::default()
-                    },
-                ),
-                None => (
-                    match expand(&def.model, &defaults) {
-                        ModelRef::Inherit => session_default.clone(),
-                        r => r,
-                    },
-                    SelectHints {
-                        explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
-                        agent: def.account.clone(),
-                        ..SelectHints::default()
-                    },
-                ),
-            };
-            // A missing key fails here, with exit 4, rather than on the first request.
-            let picked = launcher.pick(&target, &hints)?;
-            let fallback = launcher.fallback_for(&picked.account, &target, def.fallback.as_deref());
-            let run = resume
-                .as_ref()
-                .map_or_else(aibus_core::RunId::new, |(run, _)| *run);
-            launcher.remember(run, &picked.account, &picked.model, &def);
-            // A resumed run that worked in a worktree goes back to the one it kept (09 section 7).
-            let (cwd, worktree) = match (&resume, def.isolation) {
-                (Some(_), aibus_core::Isolation::Worktree) => {
-                    let info = aibus_core::worktree::create(
-                        &ctx.cwd,
-                        &launcher.worktrees.join(run.to_string()),
-                    )
-                    .map_err(AibusError::Usage)?;
-                    (info.cwd.clone(), Some(info))
-                }
-                _ => (ctx.cwd.clone(), None),
-            };
-            // `/fix <text>` or `/workflow <name> <text>` as the prompt is the same as `--workflow`.
-            let forced = forced.or_else(|| {
-                launcher
-                    .slash_workflow(&prompt)
-                    .filter(|_| resume.is_none())
-            });
-            let run_cfg = RunConfig {
-                run,
-                def,
-                prompt,
-                parent: None,
-                depth: resume.as_ref().map_or(0, |(_, meta)| meta.depth),
-                model: picked.model,
-                account: picked.account,
-                cwd,
-                runs_dir: session.dir.join("runs"),
-                limits: tool_limits,
-                date: events::date(SystemTime::now()),
-                data_home: Some(paths.data.clone()),
-                budgets: Budgets::from(&cfg.limits),
-                context: Vec::new(),
-                background: false,
-                max_spawn_depth: limits.max_spawn_depth,
-                forced: forced.map(|(tool, input)| (tool.into(), input)),
-                start: if resume.is_some() {
-                    Start::Resume
-                } else {
-                    Start::New
+        let planned = if ctx.interactive { None } else {
+        let (target, hints) = match &resume {
+            Some((_, meta)) => (
+                ModelRef::Full(meta.model.clone()),
+                SelectHints {
+                    explicit: Some(meta.account.clone()),
+                    ..SelectHints::default()
                 },
-                worktree,
-            };
-            // The lead writes an auto-handoff before every compaction (`auto_handoff_on_compact`);
-            // the same model is asked for learnings when the session ends.
-            let compactor = Arc::new(ModelCompactor {
-                provider: picked.provider.clone(),
-                creds: picked.creds.clone(),
-                model: run_cfg.model.clone(),
-                handoff: cfg.continuity.auto_handoff_on_compact.then(|| AutoHandoff {
-                    layout: layout.clone(),
-                    redactor: ctx.redactor.clone(),
-                }),
-            });
-            let extractor = compactor.clone();
-            let deps = RunDeps {
-                provider: picked.provider,
-                creds: picked.creds,
-                tools,
-                tx: tx.clone(),
-                hooks: hooks.clone(),
-                compactor: Some(compactor as Arc<dyn Compactor>),
-                assist,
-                fallback,
-            };
-            Some((run_cfg, deps, extractor))
+            ),
+            None => (
+                match expand(&def.model, &defaults) {
+                    ModelRef::Inherit => session_default.clone(),
+                    r => r,
+                },
+                SelectHints {
+                    explicit: ctx.global.account.as_deref().map(|a| AccountName(a.into())),
+                    agent: def.account.clone(),
+                    ..SelectHints::default()
+                },
+            ),
+        };
+        // A missing key fails here, with exit 4, rather than on the first request.
+        let picked = launcher.pick(&target, &hints)?;
+        let fallback = launcher.fallback_for(&picked.account, &target, def.fallback.as_deref());
+        let run = resume.as_ref().map_or_else(aibus_core::RunId::new, |(run, _)| *run);
+        launcher.remember(run, &picked.account, &picked.model, &def);
+        // A resumed run that worked in a worktree goes back to the one it kept (09 section 7).
+        let (cwd, worktree) = match (&resume, def.isolation) {
+            (Some(_), aibus_core::Isolation::Worktree) => {
+                let info = aibus_core::worktree::create(&ctx.cwd, &launcher.worktrees.join(run.to_string()))
+                    .map_err(AibusError::Usage)?;
+                (info.cwd.clone(), Some(info))
+            }
+            _ => (ctx.cwd.clone(), None),
+        };
+        // `/fix <text>` or `/workflow <name> <text>` as the prompt is the same as `--workflow`.
+        let forced = forced.or_else(|| launcher.slash_workflow(&prompt).filter(|_| resume.is_none()));
+        let run_cfg = RunConfig {
+            run,
+            def,
+            prompt,
+            parent: None,
+            depth: resume.as_ref().map_or(0, |(_, meta)| meta.depth),
+            model: picked.model,
+            account: picked.account,
+            cwd,
+            runs_dir: session.dir.join("runs"),
+            limits: tool_limits,
+            date: events::date(SystemTime::now()),
+            data_home: Some(paths.data.clone()),
+            budgets: Budgets::from(&cfg.limits),
+            context: Vec::new(),
+            background: false,
+            max_spawn_depth: limits.max_spawn_depth,
+            forced: forced.map(|(tool, input)| (tool.into(), input)),
+            start: if resume.is_some() { Start::Resume } else { Start::New },
+            worktree,
+        };
+        // The lead writes an auto-handoff before every compaction (`auto_handoff_on_compact`);
+        // the same model is asked for learnings when the session ends.
+        let compactor = Arc::new(ModelCompactor {
+            provider: picked.provider.clone(),
+            creds: picked.creds.clone(),
+            model: run_cfg.model.clone(),
+            handoff: cfg.continuity.auto_handoff_on_compact.then(|| AutoHandoff {
+                layout: layout.clone(),
+                redactor: ctx.redactor.clone(),
+            }),
+        });
+        let extractor = compactor.clone();
+        let deps = RunDeps {
+            provider: picked.provider,
+            creds: picked.creds,
+            tools,
+            tx: tx.clone(),
+            hooks: hooks.clone(),
+            compactor: Some(compactor as Arc<dyn Compactor>),
+            assist,
+            fallback,
+        };
+        Some((run_cfg, deps, extractor))
         };
         let (plan, extractor) = match planned {
             Some((cfg, deps, e)) => (Some((cfg, deps)), Some(e)),
@@ -1149,8 +1053,7 @@ impl Step for EnterLoop {
                 .map(|(_, d)| d)
                 .collect();
             let reload = move || {
-                let found =
-                    discover(cli_json.as_deref(), &cwd, Some(&user_dir), &extra, &trusted).ok()?;
+                let found = discover(cli_json.as_deref(), &cwd, Some(&user_dir), &extra, &trusted).ok()?;
                 Some(Msg::AgentsReloaded {
                     defs: found.agents.values().cloned().collect(),
                     warnings: found.warnings,
@@ -1213,12 +1116,7 @@ struct StartHooks {
 impl StartHooks {
     /// Fires `event` for the session, tells the user about hooks that failed to run, and
     /// returns what they said.
-    fn fire(
-        ctx: &mut Ctx,
-        lead: &(String, aibus_core::Role),
-        event: HookEvent,
-        trigger: &str,
-    ) -> aibus_core::Fired {
+    fn fire(ctx: &mut Ctx, lead: &(String, aibus_core::Role), event: HookEvent, trigger: &str) -> aibus_core::Fired {
         let (Some(rt), Some(hooks)) = (ctx.rt.as_ref(), ctx.hooks.clone()) else {
             return aibus_core::Fired::default();
         };
@@ -1244,12 +1142,7 @@ impl StartHooks {
         let cancel = tokio_util::sync::CancellationToken::new();
         let fired = rt.block_on(hooks.fire(&input, &def_hooks, &cancel));
         for ran in &fired.ran {
-            if let Some(m) = ran
-                .outcome
-                .message
-                .as_deref()
-                .filter(|m| m.starts_with("hook error: "))
-            {
+            if let Some(m) = ran.outcome.message.as_deref().filter(|m| m.starts_with("hook error: ")) {
                 eprintln!("aibus: warning: {m}");
             }
             if let Some(app) = ctx.app.as_mut() {
@@ -1290,12 +1183,7 @@ impl Step for StartHooks {
                 .finished
                 .as_ref()
                 .is_none_or(|r| r.status == aibus_core::RunStatus::Failed);
-            Self::fire(
-                ctx,
-                &lead,
-                HookEvent::SessionEnd,
-                if failed { "error" } else { "exit" },
-            );
+            Self::fire(ctx, &lead, HookEvent::SessionEnd, if failed { "error" } else { "exit" });
         }
         // The handoff, the learnings and the index come after the hooks, so a `session_end`
         // hook can still change the ledger. `--no-hooks` does not skip them.
@@ -1427,16 +1315,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "parse-cli",
-                "config",
-                "session",
-                "graph",
-                "agents",
-                "accounts",
-                "runtime",
-                "loop",
-                "hooks",
-                "prompt"
+                "parse-cli", "config", "session", "graph", "agents", "accounts", "runtime",
+                "loop", "hooks", "prompt"
             ]
         );
     }

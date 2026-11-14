@@ -131,7 +131,11 @@ struct Exec {
 
 /// Runs `x` to the end, writing output into `out`. `stop` is polled while it runs; when it
 /// turns true the whole process group is killed.
-fn exec(mut x: Exec, out: &Arc<Mutex<Tail>>, stop: &impl Fn() -> bool) -> std::io::Result<End> {
+fn exec(
+    mut x: Exec,
+    out: &Arc<Mutex<Tail>>,
+    stop: &impl Fn() -> bool,
+) -> std::io::Result<End> {
     let cmd = &mut x.cmd;
     cmd.env_clear()
         .envs(x.env.iter().map(|(k, v)| (k, v)))
@@ -292,12 +296,7 @@ impl Bash {
     /// of whichever reader thread got scheduled first.
     fn command(&self, script: &str, cwd: &Path) -> Result<Command, ToolError> {
         let script = format!("exec 2>&1\n{script}");
-        let var = |name: &str| {
-            self.env
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| PathBuf::from(v))
-        };
+        let var = |name: &str| self.env.iter().find(|(k, _)| k == name).map(|(_, v)| PathBuf::from(v));
         let mut cmd = match &self.sandbox {
             None => {
                 let mut c = Command::new("sh");
@@ -315,13 +314,7 @@ impl Bash {
                     });
                 }
                 let tmp = var("TMPDIR").unwrap_or_else(|| PathBuf::from("/tmp"));
-                s.command(
-                    &script,
-                    &self.project_dir,
-                    cwd,
-                    &tmp,
-                    var("HOME").as_deref(),
-                )
+                s.command(&script, &self.project_dir, cwd, &tmp, var("HOME").as_deref())
             }
         };
         cmd.current_dir(cwd);
@@ -394,9 +387,7 @@ impl Tool for Bash {
             return Err(ToolError::Invalid("empty command".into()));
         }
         if i.timeout == Some(0) {
-            return Err(ToolError::Invalid(
-                "timeout must be at least 1 second".into(),
-            ));
+            return Err(ToolError::Invalid("timeout must be at least 1 second".into()));
         }
         let env = scrubbed_env(
             &self.env,
@@ -457,9 +448,7 @@ impl Tool for Bash {
                 timeout: Some(timeout),
                 reap: true,
             };
-            exec(x, &tail, &|| {
-                cancel.is_cancelled() || stop.load(Ordering::SeqCst)
-            })
+            exec(x, &tail, &|| cancel.is_cancelled() || stop.load(Ordering::SeqCst))
         })
         .await
         .map_err(|e| ToolError::Io(std::io::Error::other(e)))??;

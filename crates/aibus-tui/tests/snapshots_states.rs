@@ -17,30 +17,9 @@ const THEMES: [(&str, Theme); 3] = [
 
 fn rig(theme: Theme) -> Rig {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "search",
-        "maps the repo",
-        Some(0.71),
-        "running",
-    );
-    worker(
-        &mut app,
-        3,
-        "grep",
-        "finds call sites",
-        Some(0.35),
-        "partial",
-    );
-    worker(
-        &mut app,
-        4,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "search", "maps the repo", Some(0.71), "running");
+    worker(&mut app, 3, "grep", "finds call sites", Some(0.35), "partial");
+    worker(&mut app, 4, "audit", "runs in a worktree", Some(1.0), "completed");
     ticks(&mut app, 3);
     Rig::new(app, (98, 46), theme)
 }
@@ -48,21 +27,11 @@ fn rig(theme: Theme) -> Rig {
 fn crop_of(r: &Rig) -> Rect {
     let card = r.rect(HitId::Card(0));
     let centre = r.ui.drawn.areas.centre;
-    Rect {
-        x: centre.x,
-        y: card.y.saturating_sub(1),
-        width: centre.width,
-        height: 17,
-    }
+    Rect { x: centre.x, y: card.y.saturating_sub(1), width: centre.width, height: 17 }
 }
 
 fn shot(state: &str, theme: &str, r: &Rig) {
-    assert_crop(
-        &r.frame(),
-        crop_of(r),
-        &format!("state_{state}_{theme}"),
-        true,
-    );
+    assert_crop(&r.frame(), crop_of(r), &format!("state_{state}_{theme}"), true);
 }
 
 #[test]

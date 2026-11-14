@@ -272,18 +272,10 @@ pub enum AgentCmd {
         #[arg(long, hide = true)]
         names: bool,
     },
-    Show {
-        name: String,
-    },
-    New {
-        name: String,
-    },
-    Validate {
-        path: Option<PathBuf>,
-    },
-    Import {
-        dir: PathBuf,
-    },
+    Show { name: String },
+    New { name: String },
+    Validate { path: Option<PathBuf> },
+    Import { dir: PathBuf },
     Where,
 }
 
@@ -295,21 +287,11 @@ pub enum AccountCmd {
         #[arg(long, hide = true)]
         names: bool,
     },
-    Show {
-        name: String,
-    },
-    Test {
-        name: String,
-    },
-    Remove {
-        name: String,
-    },
-    Enable {
-        name: String,
-    },
-    Disable {
-        name: String,
-    },
+    Show { name: String },
+    Test { name: String },
+    Remove { name: String },
+    Enable { name: String },
+    Disable { name: String },
 }
 
 #[derive(Args, Debug)]
@@ -400,15 +382,15 @@ pub enum HandoffCmd {
     /// The handoffs of --topic, or of every topic, newest first
     List,
     /// A handoff, by default the newest
-    Show { path: Option<PathBuf> },
+    Show {
+        path: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum LedgerCmd {
     Show,
-    New {
-        topic: String,
-    },
+    New { topic: String },
     Update {
         section: String,
         text: String,
@@ -555,10 +537,7 @@ mod tests {
     ];
 
     fn leaves(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
-        let subs: Vec<_> = cmd
-            .get_subcommands()
-            .filter(|s| s.get_name() != "help" && !s.is_hide_set())
-            .collect();
+        let subs: Vec<_> = cmd.get_subcommands().filter(|s| s.get_name() != "help" && !s.is_hide_set()).collect();
         if subs.is_empty() {
             out.push(prefix.trim().to_owned());
         }
@@ -595,10 +574,7 @@ mod tests {
             assert!(a.is_global_set(), "--{f} is not global");
         }
         for s in ['v', 'q'] {
-            assert!(
-                root.get_arguments().any(|a| a.get_short() == Some(s)),
-                "-{s}"
-            );
+            assert!(root.get_arguments().any(|a| a.get_short() == Some(s)), "-{s}");
         }
     }
 
@@ -624,9 +600,7 @@ mod tests {
             let cli = Cli::try_parse_from(argv).unwrap();
             assert_eq!(cli.global.model.as_deref(), Some("haiku"));
             assert!(cli.global.json);
-            let Some(Command::Run(r)) = cli.command else {
-                panic!("not run")
-            };
+            let Some(Command::Run(r)) = cli.command else { panic!("not run") };
             assert_eq!(r.prompt.as_deref(), Some("hi"));
         }
     }
@@ -642,58 +616,27 @@ mod tests {
     #[test]
     fn repeatable_flags_and_account_sources() {
         let cli = Cli::try_parse_from([
-            "aibus",
-            "--allow",
-            "bash(cargo *)",
-            "--allow",
-            "edit",
-            "--deny",
-            "web",
-            "account",
-            "add",
-            "work",
-            "--provider",
-            "anthropic",
-            "--env",
-            "MY_KEY",
-            "--label",
-            "Work",
+            "aibus", "--allow", "bash(cargo *)", "--allow", "edit", "--deny", "web", "account",
+            "add", "work", "--provider", "anthropic", "--env", "MY_KEY", "--label", "Work",
         ])
         .unwrap();
         assert_eq!(cli.global.allow, ["bash(cargo *)", "edit"]);
         assert_eq!(cli.global.deny, ["web"]);
-        let Some(Command::Account(AccountCmd::Add(a))) = cli.command else {
-            panic!()
-        };
+        let Some(Command::Account(AccountCmd::Add(a))) = cli.command else { panic!() };
         assert_eq!(a.env.as_deref(), Some("MY_KEY"));
         assert!(Cli::try_parse_from([
-            "aibus",
-            "account",
-            "add",
-            "w",
-            "--provider",
-            "p",
-            "--env",
-            "X",
-            "--key-stdin"
+            "aibus", "account", "add", "w", "--provider", "p", "--env", "X", "--key-stdin"
         ])
         .is_err());
     }
 
     #[test]
     fn doctor_takes_a_session_and_the_name_helpers_parse() {
-        let cli =
-            Cli::try_parse_from(["aibus", "doctor", "--session", "01JC0000000000000000000000"])
-                .unwrap();
-        let Some(Command::Doctor { session }) = cli.command else {
-            panic!()
-        };
+        let cli = Cli::try_parse_from(["aibus", "doctor", "--session", "01JC0000000000000000000000"]).unwrap();
+        let Some(Command::Doctor { session }) = cli.command else { panic!() };
         assert_eq!(session.as_deref(), Some("01JC0000000000000000000000"));
         for sub in ["agent", "account", "session", "workflow"] {
-            assert!(
-                Cli::try_parse_from(["aibus", sub, "list", "--names"]).is_ok(),
-                "{sub}"
-            );
+            assert!(Cli::try_parse_from(["aibus", sub, "list", "--names"]).is_ok(), "{sub}");
         }
     }
 
@@ -701,15 +644,12 @@ mod tests {
     fn the_root_help_ends_with_the_key_map() {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("Keys in the dashboard"), "{help}");
-        assert!(help
-            .trim_end()
-            .ends_with("Esc               close a modal; clear the prompt"));
+        assert!(help.trim_end().ends_with("Esc               close a modal; clear the prompt"));
     }
 
     #[test]
     fn a_bad_permission_mode_is_a_usage_error() {
-        let err =
-            Cli::try_parse_from(["aibus", "--permission-mode", "yolo", "doctor"]).unwrap_err();
+        let err = Cli::try_parse_from(["aibus", "--permission-mode", "yolo", "doctor"]).unwrap_err();
         assert_eq!(err.exit_code(), 2);
     }
 }

@@ -37,22 +37,19 @@ pub fn parse(reply: &str) -> Vec<Learning> {
     let (Some(start), Some(end)) = (reply.find('['), reply.rfind(']')) else {
         return Vec::new();
     };
-    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&reply[start..=end.max(start)])
-    else {
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&reply[start..=end.max(start)]) else {
         return Vec::new();
     };
     items
         .iter()
         .filter_map(|v| {
             let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::trim);
-            let (kind, confidence, content) =
-                (field("type")?, field("confidence")?, field("content")?);
-            (KINDS.contains(&kind) && CONFIDENCES.contains(&confidence) && !content.is_empty())
-                .then(|| Learning {
-                    kind: kind.to_owned(),
-                    confidence: confidence.to_owned(),
-                    content: content.split_whitespace().collect::<Vec<_>>().join(" "),
-                })
+            let (kind, confidence, content) = (field("type")?, field("confidence")?, field("content")?);
+            (KINDS.contains(&kind) && CONFIDENCES.contains(&confidence) && !content.is_empty()).then(|| Learning {
+                kind: kind.to_owned(),
+                confidence: confidence.to_owned(),
+                content: content.split_whitespace().collect::<Vec<_>>().join(" "),
+            })
         })
         .take(MAX)
         .collect()
@@ -69,12 +66,7 @@ pub fn render(entries: &[Learning], heading: &str) -> String {
 
 /// Appends the entries to `file` under `heading`, redacted, holding the file lock. A file two
 /// sessions end into at once keeps both.
-pub fn append(
-    file: &Path,
-    entries: &[Learning],
-    heading: &str,
-    redactor: &Redactor,
-) -> io::Result<()> {
+pub fn append(file: &Path, entries: &[Learning], heading: &str, redactor: &Redactor) -> io::Result<()> {
     if let Some(dir) = file.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -115,14 +107,7 @@ mod tests {
             {\"type\":\"decision\",\"confidence\":\"low\",\"content\":\"use\\nmiddleware\"}]\n```\nDone.";
         let got = parse(reply);
         assert_eq!(got.len(), 2);
-        assert_eq!(
-            got[0],
-            Learning {
-                kind: "fact".into(),
-                confidence: "high".into(),
-                content: "the cache key is the file hash".into()
-            }
-        );
+        assert_eq!(got[0], Learning { kind: "fact".into(), confidence: "high".into(), content: "the cache key is the file hash".into() });
         assert_eq!(got[1].content, "use middleware");
     }
 
@@ -157,18 +142,11 @@ mod tests {
         let file = dir.path().join("agent-memory/lead/LEARNINGS.md");
         let redactor = Redactor::new();
         redactor.register(&crate::ids::AccountName("a".into()), "sk-secret-value");
-        let one = [Learning {
-            kind: "fact".into(),
-            confidence: "high".into(),
-            content: "uses sk-secret-value".into(),
-        }];
+        let one = [Learning { kind: "fact".into(), confidence: "high".into(), content: "uses sk-secret-value".into() }];
         append(&file, &one, "2026-11-08 session A", &redactor).unwrap();
         append(&file, &one, "2026-11-09 session B", &redactor).unwrap();
         let text = fs::read_to_string(&file).unwrap();
-        assert!(
-            text.starts_with("## 2026-11-08 session A\n\n- [fact, high] uses "),
-            "{text}"
-        );
+        assert!(text.starts_with("## 2026-11-08 session A\n\n- [fact, high] uses "), "{text}");
         assert!(text.contains("\n\n## 2026-11-09 session B\n"));
         assert!(!text.contains("sk-secret-value"), "{text}");
         assert_eq!(text.matches("- [fact, high]").count(), 2);

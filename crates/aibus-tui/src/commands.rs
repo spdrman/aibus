@@ -6,10 +6,7 @@
 //! menu item are three ways into one function and cannot drift apart.
 
 use aibus_core::workflow::{valid_name, SaveError};
-use aibus_core::{
-    AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen,
-    UiIntent, WorkflowFile,
-};
+use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent, WorkflowFile};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
@@ -77,17 +74,7 @@ impl<'a> Env<'a> {
     /// No session at all: only the agents and workflows given.
     #[cfg(test)]
     pub fn bare(agents: &'a [String], workflows: &'a [String]) -> Self {
-        Self {
-            agents,
-            workflows,
-            lead: None,
-            focused: None,
-            runs: &[],
-            states: &[],
-            accounts: true,
-            mcp: true,
-            account_names: &[],
-        }
+        Self { agents, workflows, lead: None, focused: None, runs: &[], states: &[], accounts: true, mcp: true, account_names: &[] }
     }
 }
 
@@ -123,11 +110,7 @@ pub struct Spec {
 }
 
 const fn at(slash: u8, palette: u8, menu: u8) -> Surfaces {
-    Surfaces {
-        slash,
-        palette,
-        menu,
-    }
+    Surfaces { slash, palette, menu }
 }
 
 fn need(c: &Call, what: &str) -> Result<(), String> {
@@ -146,17 +129,13 @@ fn run_of(c: &Call) -> Result<RunId, String> {
     match c.target {
         Some(ModelTarget::Run(run)) => Ok(run),
         Some(ModelTarget::Lead) => c.env.lead.ok_or_else(|| "no lead is running".to_owned()),
-        Some(ModelTarget::Advisor | ModelTarget::Router) => {
-            Err(format!("/{} takes a run, not a seat", c.name))
-        }
+        Some(ModelTarget::Advisor | ModelTarget::Router) => Err(format!("/{} takes a run, not a seat", c.name)),
         None => Err(format!("/{} needs a run", c.name)),
     }
 }
 
 fn prompt_line(c: &Call, out: &mut Out) -> Result<(), String> {
-    out.msgs.push(Msg::SubmitPrompt {
-        text: c.line.to_owned(),
-    });
+    out.msgs.push(Msg::SubmitPrompt { text: c.line.to_owned() });
     Ok(())
 }
 
@@ -709,28 +688,13 @@ fn open_status(c: &Call, target: Option<ModelTarget>, out: &mut Out) -> Result<(
 /// workflow to run, so `/workflow review <input>` keeps working (a workflow called `list`,
 /// `show`, `save` or `run` is reached as `/workflow run list <input>`).
 fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
-    let (sub, rest) = c
-        .args
-        .split_once(char::is_whitespace)
-        .map_or((c.args, ""), |(w, r)| (w, r.trim()));
+    let (sub, rest) = c.args.split_once(char::is_whitespace).map_or((c.args, ""), |(w, r)| (w, r.trim()));
     let run = |args: &str, out: &mut Out| match args.split_once(char::is_whitespace) {
         _ if c.env.lacking(c.name, LEAD, None).is_some() => {
             Err(format!("/{} is not available: no lead is running", c.name))
         }
-        Some((name, input)) => command(
-            out,
-            Command::Workflow {
-                name: name.to_owned(),
-                input: input.trim().to_owned(),
-            },
-        ),
-        None if !args.is_empty() => command(
-            out,
-            Command::Workflow {
-                name: args.to_owned(),
-                input: String::new(),
-            },
-        ),
+        Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
+        None if !args.is_empty() => command(out, Command::Workflow { name: args.to_owned(), input: String::new() }),
         None => need(c, "a workflow name"),
     };
     match sub {
@@ -741,57 +705,34 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
             // `--write` is the owner's flag for this one run; `edit` always writes, to the one
             // workflow it names. Nothing else about the author's server can be asked for here.
             let (write, goal) = match rest.strip_prefix("--write") {
-                Some(goal)
-                    if sub == "new"
-                        && (goal.is_empty() || goal.starts_with(char::is_whitespace)) =>
-                {
-                    (true, goal.trim())
-                }
+                Some(goal) if sub == "new" && (goal.is_empty() || goal.starts_with(char::is_whitespace)) => (true, goal.trim()),
                 _ => (sub == "edit", rest),
             };
             if sub == "new" {
                 if goal.is_empty() {
                     return need(c, "a goal, in words");
                 }
-                return command(
-                    out,
-                    Command::WorkflowAuthor {
-                        goal: goal.to_owned(),
-                        write,
-                        edit: None,
-                    },
-                );
+                return command(out, Command::WorkflowAuthor { goal: goal.to_owned(), write, edit: None });
             }
             match goal.split_once(char::is_whitespace) {
                 Some((name, change)) if valid_name(name) && !change.trim().is_empty() => command(
                     out,
-                    Command::WorkflowAuthor {
-                        goal: change.trim().to_owned(),
-                        write: true,
-                        edit: Some(name.to_owned()),
-                    },
+                    Command::WorkflowAuthor { goal: change.trim().to_owned(), write: true, edit: Some(name.to_owned()) },
                 ),
-                Some((name, _)) if !valid_name(name) => {
-                    Err(SaveError::Name(name.to_owned()).to_string())
-                }
+                Some((name, _)) if !valid_name(name) => Err(SaveError::Name(name.to_owned()).to_string()),
                 _ => need(c, "a workflow name and the change, in words"),
             }
         }
         "list" => command(out, Command::WorkflowFile(WorkflowFile::List)),
         "show" if rest.is_empty() => need(c, "a workflow name"),
-        "show" => command(
-            out,
-            Command::WorkflowFile(WorkflowFile::Show(rest.to_owned())),
-        ),
+        "show" => command(out, Command::WorkflowFile(WorkflowFile::Show(rest.to_owned()))),
         "save" => {
             let (mut name, mut user, mut force) = (None, false, false);
             for word in rest.split_whitespace() {
                 match word {
                     "--user" => user = true,
                     "--force" => force = true,
-                    w if w.starts_with("--") => {
-                        return Err(format!("/workflow save: no flag {w} (--user, --force)"))
-                    }
+                    w if w.starts_with("--") => return Err(format!("/workflow save: no flag {w} (--user, --force)")),
                     w if name.is_none() => name = Some(w),
                     _ => return Err("/workflow save takes one name".into()),
                 }
@@ -801,14 +742,7 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
             if !valid_name(name) {
                 return Err(SaveError::Name(name.to_owned()).to_string());
             }
-            command(
-                out,
-                Command::WorkflowFile(WorkflowFile::Save {
-                    name: name.to_owned(),
-                    user,
-                    force,
-                }),
-            )
+            command(out, Command::WorkflowFile(WorkflowFile::Save { name: name.to_owned(), user, force }))
         }
         "run" => run(rest, out),
         _ => run(c.args, out),
@@ -817,13 +751,7 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
 
 /// `/fix <input>` and the other three are `/workflow <name> <input>`.
 fn shorthand(c: &Call, out: &mut Out) -> Result<(), String> {
-    command(
-        out,
-        Command::Workflow {
-            name: c.name.to_owned(),
-            input: c.args.to_owned(),
-        },
-    )
+    command(out, Command::Workflow { name: c.name.to_owned(), input: c.args.to_owned() })
 }
 
 fn find(name: &str) -> Option<&'static Spec> {
@@ -855,18 +783,11 @@ impl Env<'_> {
             return Some(format!("no workflow named {name}"));
         }
         // The lead is the run these commands hand a call to, and a finished one takes none.
-        let lead_runs = self.lead.is_some_and(|l| {
-            self.states
-                .iter()
-                .find(|(id, _)| *id == l)
-                .is_none_or(|(_, st)| !st.is_terminal())
-        });
+        let lead_runs = self.lead.is_some_and(|l| self.states.iter().find(|(id, _)| *id == l).is_none_or(|(_, st)| !st.is_terminal()));
         if missing(LEAD) && !lead_runs {
             return Some("no lead is running".into());
         }
-        let state = run
-            .and_then(|r| self.states.iter().find(|(id, _)| *id == r))
-            .map(|(_, st)| *st);
+        let state = run.and_then(|r| self.states.iter().find(|(id, _)| *id == r)).map(|(_, st)| *st);
         if let Some(st) = state {
             let retryable = matches!(st, RunStatus::Failed | RunStatus::Partial);
             if (missing(RETRYABLE) && !retryable) || (missing(FINISHED) && !st.is_terminal()) {
@@ -889,51 +810,26 @@ pub fn slash_offered(env: &Env) -> Vec<(String, &'static str)> {
     let fallback = env.focused.or(env.lead);
     listed(|s| s.slash)
         .into_iter()
-        .filter(|s| {
-            env.unmet(
-                s,
-                if s.scope == Scope::Run {
-                    fallback
-                } else {
-                    None
-                },
-            )
-            .is_none()
-        })
+        .filter(|s| env.unmet(s, if s.scope == Scope::Run { fallback } else { None }).is_none())
         .map(|s| (format!("/{}", s.name), s.args))
         .collect()
 }
 
 /// The palette's command rows: `(id, label, hint)`, the id being the command's name.
 pub fn palette_rows() -> Vec<(&'static str, &'static str, &'static str)> {
-    listed(|s| s.palette)
-        .into_iter()
-        .map(|s| (s.name, s.label, s.hint))
-        .collect()
+    listed(|s| s.palette).into_iter().map(|s| (s.name, s.label, s.hint)).collect()
 }
 
 /// The card menu's items: `(id, label)`.
 pub fn menu_items() -> Vec<(&'static str, &'static str)> {
-    listed(|s| s.menu)
-        .into_iter()
-        .map(|s| (s.name, s.label))
-        .collect()
+    listed(|s| s.menu).into_iter().map(|s| (s.name, s.label)).collect()
 }
 
 /// The help screen's command section: `(/name args, one line)`, for what is on the slash line.
 pub fn help_lines() -> Vec<(String, &'static str)> {
     listed(|s| s.slash)
         .into_iter()
-        .map(|s| {
-            (
-                if s.args.is_empty() {
-                    format!("/{}", s.name)
-                } else {
-                    format!("/{} {}", s.name, s.args)
-                },
-                s.help,
-            )
-        })
+        .map(|s| (if s.args.is_empty() { format!("/{}", s.name) } else { format!("/{} {}", s.name, s.args) }, s.help))
         .collect()
 }
 
@@ -945,21 +841,11 @@ pub fn help_lines() -> Vec<(String, &'static str)> {
 /// `/workflow` arguments have several.
 pub fn table_markdown() -> String {
     let cell = |text: &str| text.replace('|', "\\|");
-    let mut out =
-        String::from("| Command | Arguments | What it does | Asks first |\n|---|---|---|---|\n");
+    let mut out = String::from("| Command | Arguments | What it does | Asks first |\n|---|---|---|---|\n");
     for s in listed(|s| s.slash) {
-        let args = if s.args.is_empty() {
-            String::new()
-        } else {
-            format!("`{}`", cell(s.args))
-        };
+        let args = if s.args.is_empty() { String::new() } else { format!("`{}`", cell(s.args)) };
         let asks = if s.asks.is_empty() { "no" } else { s.asks };
-        out.push_str(&format!(
-            "| `/{}` | {args} | {} | {} |\n",
-            s.name,
-            cell(s.help),
-            cell(asks)
-        ));
+        out.push_str(&format!("| `/{}` | {args} | {} | {} |\n", s.name, cell(s.help), cell(asks)));
     }
     out
 }
@@ -968,14 +854,7 @@ pub fn table_markdown() -> String {
 /// the menu. Unknown names do nothing.
 pub fn pick(name: &str, via: Via, run: Option<RunId>, env: &Env, out: &mut Out) {
     let Some(spec) = find(name) else { return };
-    let call = Call {
-        name: spec.name,
-        via,
-        line: "",
-        args: "",
-        target: run.map(ModelTarget::Run),
-        env,
-    };
+    let call = Call { name: spec.name, via, line: "", args: "", target: run.map(ModelTarget::Run), env };
     // A pick has no way to show a notice, and none of the picked commands has a bad shape.
     let _ = (spec.run)(&call, out);
 }
@@ -992,17 +871,10 @@ pub fn carries_key(line: &str) -> bool {
 pub fn send(line: &str, env: &Env) -> Sent {
     let line = line.trim();
     let Some(rest) = line.strip_prefix('/') else {
-        return Sent::Msgs(vec![Msg::SubmitPrompt {
-            text: line.to_owned(),
-        }]);
+        return Sent::Msgs(vec![Msg::SubmitPrompt { text: line.to_owned() }]);
     };
-    let (word, args) = rest
-        .split_once(char::is_whitespace)
-        .map_or((rest, ""), |(w, a)| (w, a.trim()));
-    let Some(spec) = REGISTRY
-        .iter()
-        .find(|s| s.surfaces.slash > 0 && s.name == word)
-    else {
+    let (word, args) = rest.split_once(char::is_whitespace).map_or((rest, ""), |(w, a)| (w, a.trim()));
+    let Some(spec) = REGISTRY.iter().find(|s| s.surfaces.slash > 0 && s.name == word) else {
         return Sent::Bad(format!("no command /{word} (try /help)"));
     };
     if let Some(why) = env.unmet(spec, None) {
@@ -1026,20 +898,8 @@ pub fn send(line: &str, env: &Env) -> Sent {
         return Sent::Bad(format!("/{word} is not available: {why}"));
     }
     let mut out = Out::default();
-    match (spec.run)(
-        &Call {
-            name: spec.name,
-            via: Via::Slash,
-            line,
-            args,
-            target,
-            env,
-        },
-        &mut out,
-    ) {
-        Ok(()) if out.login.is_some() => {
-            Sent::Login(out.login.take().unwrap_or_default(), out.msgs)
-        }
+    match (spec.run)(&Call { name: spec.name, via: Via::Slash, line, args, target, env }, &mut out) {
+        Ok(()) if out.login.is_some() => Sent::Login(out.login.take().unwrap_or_default(), out.msgs),
         Ok(()) => Sent::Msgs(out.msgs),
         Err(why) => Sent::Bad(why),
     }
@@ -1051,11 +911,7 @@ pub fn send(line: &str, env: &Env) -> Sent {
 pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(ModelTarget, &'a str), String> {
     let args = args.trim_start();
     let fallback = env.focused.map_or(ModelTarget::Lead, ModelTarget::Run);
-    let Some(word) = args
-        .split_whitespace()
-        .next()
-        .filter(|w| w.starts_with('@') && !w.starts_with("@agent-"))
-    else {
+    let Some(word) = args.split_whitespace().next().filter(|w| w.starts_with('@') && !w.starts_with("@agent-")) else {
         return Ok((fallback, args));
     };
     let rest = args[word.len()..].trim_start();
@@ -1068,12 +924,7 @@ pub fn parse_target<'a>(args: &'a str, env: &Env) -> Result<(ModelTarget, &'a st
             Some((run, _)) => ModelTarget::Run(*run),
             None => {
                 let up = name.to_uppercase();
-                let hits: Vec<&RunId> = env
-                    .runs
-                    .iter()
-                    .map(|(r, _)| r)
-                    .filter(|r| r.to_string().starts_with(&up))
-                    .collect();
+                let hits: Vec<&RunId> = env.runs.iter().map(|(r, _)| r).filter(|r| r.to_string().starts_with(&up)).collect();
                 match hits[..] {
                     [one] => ModelTarget::Run(*one),
                     [] => return Err(format!("no agent or run matches @{name}")),
@@ -1096,12 +947,8 @@ mod tests {
     /// the slash.
     fn spec_slash_names() -> Vec<String> {
         let spec = include_str!("../../../docs/spec/05-ui.md");
-        let start = spec
-            .find("<!-- aibus:commands:start -->")
-            .expect("the start marker");
-        let end = spec
-            .find("<!-- aibus:commands:end -->")
-            .expect("the end marker");
+        let start = spec.find("<!-- aibus:commands:start -->").expect("the start marker");
+        let end = spec.find("<!-- aibus:commands:end -->").expect("the end marker");
         let mut names: Vec<String> = spec[start..end]
             .lines()
             .filter_map(|l| l.strip_prefix("| `/"))
@@ -1115,64 +962,34 @@ mod tests {
     #[test]
     fn login_refuses_anything_after_the_provider_and_never_echoes_it() {
         let env = Env::bare(&[], &[]);
-        for line in [
-            "/login anthropic sk-ant-api03-abcdef",
-            "/login anthropic --key sk-1 sk-2",
-        ] {
-            let Sent::Bad(why) = send(line, &env) else {
-                panic!("{line} is refused")
-            };
-            assert!(
-                why.contains("anthropic") && why.contains("[redacted]"),
-                "{why}"
-            );
+        for line in ["/login anthropic sk-ant-api03-abcdef", "/login anthropic --key sk-1 sk-2"] {
+            let Sent::Bad(why) = send(line, &env) else { panic!("{line} is refused") };
+            assert!(why.contains("anthropic") && why.contains("[redacted]"), "{why}");
             assert!(!why.contains("sk-"), "{why}");
         }
         assert!(carries_key("/login anthropic sk-ant-api03-abcdef"));
-        assert!(
-            !carries_key("/login anthropic")
-                && !carries_key("/login")
-                && !carries_key("/model a b")
-        );
+        assert!(!carries_key("/login anthropic") && !carries_key("/login") && !carries_key("/model a b"));
     }
 
     #[test]
     fn logout_names_an_account_that_exists() {
         let names = vec!["work".to_owned()];
-        let env = Env {
-            account_names: &names,
-            ..Env::bare(&[], &[])
-        };
+        let env = Env { account_names: &names, ..Env::bare(&[], &[]) };
         let m = |l: &str| match send(l, &env) {
-            Sent::Msgs(m) => m
-                .iter()
-                .map(|m| format!("{m:?}"))
-                .collect::<Vec<_>>()
-                .join("|"),
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
             Sent::Login(..) => "login".to_owned(),
             Sent::Bad(why) => format!("BAD {why}"),
         };
-        assert_eq!(
-            m("/logout work"),
-            "Command(OpenScreen(ConfirmLogout(AccountName(\"work\"))))"
-        );
+        assert_eq!(m("/logout work"), "Command(OpenScreen(ConfirmLogout(AccountName(\"work\"))))");
         assert_eq!(m("/logout"), "BAD /logout needs an account");
         assert_eq!(m("/logout nobody"), "BAD /logout: no account named nobody");
     }
 
     #[test]
     fn registry_matches_spec_05_section_4() {
-        let mut ours: Vec<String> = REGISTRY
-            .iter()
-            .filter(|s| s.surfaces.slash > 0)
-            .map(|s| s.name.to_owned())
-            .collect();
+        let mut ours: Vec<String> = REGISTRY.iter().filter(|s| s.surfaces.slash > 0).map(|s| s.name.to_owned()).collect();
         ours.sort();
-        assert_eq!(
-            ours,
-            spec_slash_names(),
-            "a slash command is in the registry and in 05 section 4, or in neither"
-        );
+        assert_eq!(ours, spec_slash_names(), "a slash command is in the registry and in 05 section 4, or in neither");
     }
 
     #[test]
@@ -1180,29 +997,17 @@ mod tests {
         for s in REGISTRY {
             assert!(!s.help.is_empty(), "{} has no help", s.name);
             let on = &s.surfaces;
-            assert!(
-                on.slash + on.palette + on.menu > 0,
-                "{} is on no surface",
-                s.name
-            );
+            assert!(on.slash + on.palette + on.menu > 0, "{} is on no surface", s.name);
             if on.palette > 0 || on.menu > 0 {
                 assert!(!s.label.is_empty(), "{} has no label", s.name);
             }
         }
         let names: std::collections::BTreeSet<_> = REGISTRY.iter().map(|s| s.name).collect();
         assert_eq!(names.len(), REGISTRY.len(), "names are unique");
-        for pos in [
-            (|s: &Surfaces| s.slash) as fn(&Surfaces) -> u8,
-            |s| s.palette,
-            |s| s.menu,
-        ] {
+        for pos in [(|s: &Surfaces| s.slash) as fn(&Surfaces) -> u8, |s| s.palette, |s| s.menu] {
             let n = listed(pos).len();
             let got: Vec<u8> = listed(pos).iter().map(|s| pos(&s.surfaces)).collect();
-            assert_eq!(
-                got,
-                (1..=n as u8).collect::<Vec<_>>(),
-                "positions run 1..n with no gap or repeat"
-            );
+            assert_eq!(got, (1..=n as u8).collect::<Vec<_>>(), "positions run 1..n with no gap or repeat");
         }
     }
 
@@ -1211,53 +1016,17 @@ mod tests {
         let ids: Vec<&str> = palette_rows().iter().map(|r| r.0).collect();
         assert_eq!(
             ids,
-            [
-                "agents",
-                "accounts",
-                "help",
-                "lead",
-                "permission",
-                "handoff",
-                "clear",
-                "rail",
-                "compact",
-                "quit"
-            ]
+            ["agents", "accounts", "help", "lead", "permission", "handoff", "clear", "rail", "compact", "quit"]
         );
-        assert_eq!(
-            palette_rows()[5],
-            ("handoff", "write a handoff", "/handoff")
-        );
+        assert_eq!(palette_rows()[5], ("handoff", "write a handoff", "/handoff"));
         let menu: Vec<&str> = menu_items().iter().map(|r| r.0).collect();
-        assert_eq!(
-            menu,
-            [
-                "open",
-                "cancel",
-                "fork",
-                "resume",
-                "copy_id",
-                "copy_result",
-                "status",
-                "cost"
-            ]
-        );
+        assert_eq!(menu, ["open", "cancel", "fork", "resume", "copy_id", "copy_result", "status", "cost"]);
         assert_eq!(menu_items()[0], ("open", "Open transcript"));
     }
 
     fn msgs(line: &str, agents: &[String], workflows: &[String]) -> String {
-        match send(
-            line,
-            &Env {
-                lead: Some(lead_run()),
-                ..Env::bare(agents, workflows)
-            },
-        ) {
-            Sent::Msgs(m) => m
-                .iter()
-                .map(|m| format!("{m:?}"))
-                .collect::<Vec<_>>()
-                .join("|"),
+        match send(line, &Env { lead: Some(lead_run()), ..Env::bare(agents, workflows) }) {
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
             Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         }
@@ -1267,10 +1036,7 @@ mod tests {
     fn workflow_subcommands_are_file_commands_and_run_is_the_old_command() {
         let m = |line: &str| msgs(line, &[], &[]);
         assert_eq!(m("/workflow list"), "Command(WorkflowFile(List))");
-        assert_eq!(
-            m("/workflow show review"),
-            "Command(WorkflowFile(Show(\"review\")))"
-        );
+        assert_eq!(m("/workflow show review"), "Command(WorkflowFile(Show(\"review\")))");
         assert_eq!(m("/workflow show"), "BAD /workflow needs a workflow name");
         assert_eq!(
             m("/workflow save review"),
@@ -1285,15 +1051,9 @@ mod tests {
         assert!(m("/workflow save --nope x").starts_with("BAD"));
         // A bad name never becomes a message, so nothing downstream can look at the disk for it.
         for bad in ["../x", "A", ".x", "a/b", "-x"] {
-            assert!(
-                m(&format!("/workflow save {bad}")).starts_with("BAD `"),
-                "{bad}"
-            );
+            assert!(m(&format!("/workflow save {bad}")).starts_with("BAD `"), "{bad}");
         }
-        assert_eq!(
-            m("/workflow run review the diff"),
-            m("/workflow review the diff")
-        );
+        assert_eq!(m("/workflow run review the diff"), m("/workflow review the diff"));
     }
 
     #[test]
@@ -1301,27 +1061,14 @@ mod tests {
         let agents: Vec<String> = Vec::new();
         let workflows: Vec<String> = Vec::new();
         let bare = Env::bare(&agents, &workflows);
-        let with_lead = Env {
-            lead: Some(lead_run()),
-            ..bare
-        };
+        let with_lead = Env { lead: Some(lead_run()), ..bare };
         let said = |env: &Env, line: &str| match send(line, env) {
-            Sent::Msgs(m) => m
-                .iter()
-                .map(|m| format!("{m:?}"))
-                .collect::<Vec<_>>()
-                .join("|"),
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
             Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         };
-        assert_eq!(
-            said(&bare, "/workflow new review a pull request"),
-            "BAD /workflow new is not available: no lead is running"
-        );
-        assert_eq!(
-            said(&with_lead, "/workflow new"),
-            "BAD /workflow needs a goal, in words"
-        );
+        assert_eq!(said(&bare, "/workflow new review a pull request"), "BAD /workflow new is not available: no lead is running");
+        assert_eq!(said(&with_lead, "/workflow new"), "BAD /workflow needs a goal, in words");
         assert_eq!(
             said(&with_lead, "/workflow new review a pull request and leave a summary"),
             "Command(WorkflowAuthor { goal: \"review a pull request and leave a summary\", write: false, edit: None })"
@@ -1332,16 +1079,9 @@ mod tests {
     fn write_is_the_owners_flag_for_one_run_and_edit_names_its_workflow() {
         let agents: Vec<String> = Vec::new();
         let workflows: Vec<String> = Vec::new();
-        let env = Env {
-            lead: Some(lead_run()),
-            ..Env::bare(&agents, &workflows)
-        };
+        let env = Env { lead: Some(lead_run()), ..Env::bare(&agents, &workflows) };
         let said = |line: &str| match send(line, &env) {
-            Sent::Msgs(m) => m
-                .iter()
-                .map(|m| format!("{m:?}"))
-                .collect::<Vec<_>>()
-                .join("|"),
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
             Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         };
@@ -1350,10 +1090,7 @@ mod tests {
             "Command(WorkflowAuthor { goal: \"review a pull request\", write: true, edit: None })"
         );
         // `--write` with no goal, or glued to a word, is not the flag.
-        assert_eq!(
-            said("/workflow new --write"),
-            "BAD /workflow needs a goal, in words"
-        );
+        assert_eq!(said("/workflow new --write"), "BAD /workflow needs a goal, in words");
         assert_eq!(
             said("/workflow new --writeable idea"),
             "Command(WorkflowAuthor { goal: \"--writeable idea\", write: false, edit: None })"
@@ -1362,24 +1099,12 @@ mod tests {
             said("/workflow edit review add a test step"),
             "Command(WorkflowAuthor { goal: \"add a test step\", write: true, edit: Some(\"review\") })"
         );
-        assert_eq!(
-            said("/workflow edit review"),
-            "BAD /workflow needs a workflow name and the change, in words"
-        );
-        assert!(
-            said("/workflow edit ../x change it").starts_with("BAD `../x` is not a workflow name")
-        );
+        assert_eq!(said("/workflow edit review"), "BAD /workflow needs a workflow name and the change, in words");
+        assert!(said("/workflow edit ../x change it").starts_with("BAD `../x` is not a workflow name"));
         // Every way into the author carries a yes or no for `--allow write` and nothing more:
         // `gates` and `run` are not in the command at all.
-        for line in [
-            "/workflow new g",
-            "/workflow new --write g",
-            "/workflow edit r c",
-        ] {
-            assert!(
-                said(line).starts_with("Command(WorkflowAuthor { goal:"),
-                "{line}"
-            );
+        for line in ["/workflow new g", "/workflow new --write g", "/workflow edit r c"] {
+            assert!(said(line).starts_with("Command(WorkflowAuthor { goal:"), "{line}");
         }
     }
 
@@ -1391,72 +1116,39 @@ mod tests {
     fn send_table_covers_every_existing_command_unchanged() {
         let agents = vec!["search".to_owned()];
         let m = |line: &str| msgs(line, &agents, &["fix".to_owned()]);
-        assert!(m("/fork try the other way")
-            .starts_with("SubmitPrompt { text: \"/fork try the other way\" }"));
+        assert!(m("/fork try the other way").starts_with("SubmitPrompt { text: \"/fork try the other way\" }"));
         assert!(m("/compact").contains("/compact"));
-        assert!(
-            m("/delegate search map it").contains("Delegate")
-                && m("/delegate search map it").contains("map it")
-        );
+        assert!(m("/delegate search map it").contains("Delegate") && m("/delegate search map it").contains("map it"));
         assert!(m("/delegate nobody map it").starts_with("BAD"));
         assert!(m("/delegate search").starts_with("BAD"));
         assert_eq!(m("/clear"), "Command(OpenScreen(ConfirmClear))");
         assert_eq!(m("/handoff"), "Command(CreateHandoff { outcome: None })");
-        assert!(m("/ledger now ship it")
-            .contains("LedgerUpdate { section: \"now\", text: \"ship it\" }"));
+        assert!(m("/ledger now ship it").contains("LedgerUpdate { section: \"now\", text: \"ship it\" }"));
         assert!(m("/ledger now").starts_with("BAD"));
-        assert_eq!(
-            m("/model opus"),
-            "Command(SetModel { target: Lead, model: \"opus\" })"
-        );
+        assert_eq!(m("/model opus"), "Command(SetModel { target: Lead, model: \"opus\" })");
         assert_eq!(m("/model"), "Command(OpenScreen(Models(Lead)))");
-        assert_eq!(
-            m("/advisor opus"),
-            "Command(SetModel { target: Advisor, model: \"opus\" })"
-        );
-        assert_eq!(
-            m("/advisor off"),
-            "Command(SetModel { target: Advisor, model: \"off\" })"
-        );
-        assert_eq!(
-            m("/router fast"),
-            "Command(SetModel { target: Router, model: \"fast\" })"
-        );
+        assert_eq!(m("/advisor opus"), "Command(SetModel { target: Advisor, model: \"opus\" })");
+        assert_eq!(m("/advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
+        assert_eq!(m("/router fast"), "Command(SetModel { target: Router, model: \"fast\" })");
         assert_eq!(m("/advisor"), "BAD /advisor needs a model or off");
-        assert_eq!(
-            m("/model @advisor off"),
-            "Command(SetModel { target: Advisor, model: \"off\" })"
-        );
-        assert!(m("/workflow review the diff")
-            .contains("Workflow { name: \"review\", input: \"the diff\" }"));
-        assert_eq!(
-            m("/workflow run review the diff"),
-            m("/workflow review the diff")
-        );
+        assert_eq!(m("/model @advisor off"), "Command(SetModel { target: Advisor, model: \"off\" })");
+        assert!(m("/workflow review the diff").contains("Workflow { name: \"review\", input: \"the diff\" }"));
+        assert_eq!(m("/workflow run review the diff"), m("/workflow review the diff"));
         assert_eq!(m("/workflow run"), "BAD /workflow needs a workflow name");
         assert!(m("/fix the bug").contains("Workflow { name: \"fix\", input: \"the bug\" }"));
-        assert_eq!(
-            m("/build x"),
-            "BAD /build is not available: no workflow named build"
-        );
+        assert_eq!(m("/build x"), "BAD /build is not available: no workflow named build");
         assert_eq!(m("/agents"), "Command(OpenScreen(Agents))");
         assert_eq!(m("/accounts"), "Command(OpenScreen(Accounts))");
         assert_eq!(m("/login"), "Command(OpenScreen(Providers))");
         assert_eq!(m("/login anthropic"), "LOGIN anthropic");
-        assert_eq!(
-            m("/login sk-ant-123"),
-            "BAD /login: no provider named sk-ant-123 (/login lists them)"
-        );
+        assert_eq!(m("/login sk-ant-123"), "BAD /login: no provider named sk-ant-123 (/login lists them)");
         assert_eq!(m("/help"), "Command(OpenHelp)");
         assert_eq!(m("/nope"), "BAD no command /nope (try /help)");
         assert_eq!(m("hello"), "SubmitPrompt { text: \"hello\" }");
     }
 
     fn runs() -> Vec<(RunId, String)> {
-        ["grep", "search", "grep"]
-            .iter()
-            .map(|a| (RunId::new(), (*a).to_owned()))
-            .collect()
+        ["grep", "search", "grep"].iter().map(|a| (RunId::new(), (*a).to_owned())).collect()
     }
 
     #[test]
@@ -1464,36 +1156,17 @@ mod tests {
         let rs = runs();
         let lead = RunId::new();
         let card = rs[1].0;
-        let mut env = Env {
-            runs: &rs,
-            lead: Some(lead),
-            ..Env::bare(&[], &[])
-        };
+        let mut env = Env { runs: &rs, lead: Some(lead), ..Env::bare(&[], &[]) };
         let t = |env: &Env, s: &str| parse_target(s, env).map(|(t, rest)| (t, rest.to_owned()));
         // The newest run of the agent.
-        assert_eq!(
-            t(&env, "@grep haiku"),
-            Ok((ModelTarget::Run(rs[2].0), "haiku".into()))
-        );
-        assert_eq!(
-            t(&env, "@search haiku"),
-            Ok((ModelTarget::Run(rs[1].0), "haiku".into()))
-        );
+        assert_eq!(t(&env, "@grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));
+        assert_eq!(t(&env, "@search haiku"), Ok((ModelTarget::Run(rs[1].0), "haiku".into())));
         // A run id prefix.
         let id = rs[0].0.to_string();
-        assert_eq!(
-            t(&env, &format!("@{} x", &id[..20])),
-            Ok((ModelTarget::Run(rs[0].0), "x".into()))
-        );
+        assert_eq!(t(&env, &format!("@{} x", &id[..20])), Ok((ModelTarget::Run(rs[0].0), "x".into())));
         assert_eq!(t(&env, "@lead x"), Ok((ModelTarget::Lead, "x".into())));
-        assert_eq!(
-            t(&env, "@advisor off"),
-            Ok((ModelTarget::Advisor, "off".into()))
-        );
-        assert_eq!(
-            t(&env, "@router fast"),
-            Ok((ModelTarget::Router, "fast".into()))
-        );
+        assert_eq!(t(&env, "@advisor off"), Ok((ModelTarget::Advisor, "off".into())));
+        assert_eq!(t(&env, "@router fast"), Ok((ModelTarget::Router, "fast".into())));
         // No target: the lead, or the focused card.
         assert_eq!(t(&env, "opus"), Ok((ModelTarget::Lead, "opus".into())));
         env.focused = Some(card);
@@ -1505,10 +1178,7 @@ mod tests {
     fn model_at_agent_changes_that_run_and_a_focused_card_is_the_default() {
         let rs = runs();
         let card = rs[1].0;
-        let mut env = Env {
-            runs: &rs,
-            ..Env::bare(&[], &[])
-        };
+        let mut env = Env { runs: &rs, ..Env::bare(&[], &[]) };
         let line = |env: &Env, l: &str| match send(l, env) {
             Sent::Msgs(m) => match &m[..] {
                 [Msg::Command(Command::SetModel { target, model })] => Ok((*target, model.clone())),
@@ -1517,62 +1187,33 @@ mod tests {
             Sent::Login(..) => panic!("/model never logs in"),
             Sent::Bad(why) => Err(why),
         };
-        assert_eq!(
-            line(&env, "/model @grep haiku"),
-            Ok((ModelTarget::Run(rs[2].0), "haiku".into()))
-        );
-        assert_eq!(
-            line(&env, "/model @lead haiku"),
-            Ok((ModelTarget::Lead, "haiku".into()))
-        );
-        assert_eq!(
-            line(&env, "/model haiku"),
-            Ok((ModelTarget::Lead, "haiku".into()))
-        );
+        assert_eq!(line(&env, "/model @grep haiku"), Ok((ModelTarget::Run(rs[2].0), "haiku".into())));
+        assert_eq!(line(&env, "/model @lead haiku"), Ok((ModelTarget::Lead, "haiku".into())));
+        assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Lead, "haiku".into())));
         env.focused = Some(card);
-        assert_eq!(
-            line(&env, "/model haiku"),
-            Ok((ModelTarget::Run(card), "haiku".into()))
-        );
+        assert_eq!(line(&env, "/model haiku"), Ok((ModelTarget::Run(card), "haiku".into())));
         // With no reference the line opens the picker for that target.
-        let Sent::Msgs(m) = send("/model @grep", &env) else {
-            panic!("the picker opens")
-        };
-        assert!(
-            matches!(&m[..], [Msg::Command(Command::OpenScreen(Screen::Models(ModelTarget::Run(r))))] if *r == rs[2].0),
-            "{m:?}"
-        );
+        let Sent::Msgs(m) = send("/model @grep", &env) else { panic!("the picker opens") };
+        assert!(matches!(&m[..], [Msg::Command(Command::OpenScreen(Screen::Models(ModelTarget::Run(r))))] if *r == rs[2].0), "{m:?}");
     }
 
     #[test]
     fn ambiguous_run_prefix_is_a_notice_with_candidates() {
         let rs = runs();
-        let env = Env {
-            runs: &rs,
-            ..Env::bare(&[], &[])
-        };
+        let env = Env { runs: &rs, ..Env::bare(&[], &[]) };
         // Every ULID made in this test starts with the same few characters.
         let common: String = rs[0].0.to_string().chars().take(4).collect();
         let err = parse_target(&format!("@{common} x"), &env).unwrap_err();
         assert!(err.starts_with(&format!("@{common} matches ")), "{err}");
-        assert!(
-            err.contains(&rs[0].0.to_string()) && err.contains(&rs[2].0.to_string()),
-            "{err}"
-        );
+        assert!(err.contains(&rs[0].0.to_string()) && err.contains(&rs[2].0.to_string()), "{err}");
     }
 
     #[test]
     fn agent_mention_prefix_is_never_a_command() {
         let agents = vec!["grep".to_owned()];
-        assert_eq!(
-            msgs("@agent-grep find it", &agents, &[]),
-            "SubmitPrompt { text: \"@agent-grep find it\" }"
-        );
+        assert_eq!(msgs("@agent-grep find it", &agents, &[]), "SubmitPrompt { text: \"@agent-grep find it\" }");
         let env = Env::bare(&agents, &[]);
-        assert_eq!(
-            parse_target("@agent-grep x", &env),
-            Ok((ModelTarget::Lead, "@agent-grep x"))
-        );
+        assert_eq!(parse_target("@agent-grep x", &env), Ok((ModelTarget::Lead, "@agent-grep x")));
     }
 
     #[test]
@@ -1580,18 +1221,8 @@ mod tests {
         let env = Env::bare(&[], &[]);
         assert!(slash_offered(&env).iter().all(|(n, _)| n != "/fix"));
         let wf = ["fix".to_owned()];
-        assert!(
-            slash_offered(&Env::bare(&[], &wf))
-                .iter()
-                .all(|(n, _)| n != "/fix"),
-            "a workflow command needs a lead as well"
-        );
-        assert!(slash_offered(&Env {
-            lead: Some(lead_run()),
-            ..Env::bare(&[], &wf)
-        })
-        .iter()
-        .any(|(n, _)| n == "/fix"));
+        assert!(slash_offered(&Env::bare(&[], &wf)).iter().all(|(n, _)| n != "/fix"), "a workflow command needs a lead as well");
+        assert!(slash_offered(&Env { lead: Some(lead_run()), ..Env::bare(&[], &wf) }).iter().any(|(n, _)| n == "/fix"));
         assert_eq!(slash_offered(&env).len(), 15);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
@@ -1604,40 +1235,19 @@ mod tests {
     }
 
     fn session() -> Session {
-        let rows = [
-            ("lead", RunStatus::Running),
-            ("grep", RunStatus::Running),
-            ("search", RunStatus::Failed),
-            ("review", RunStatus::Completed),
-        ];
-        let runs: Vec<(RunId, String)> = rows
-            .iter()
-            .map(|(a, _)| (RunId::new(), (*a).to_owned()))
-            .collect();
-        let states = runs
-            .iter()
-            .zip(rows)
-            .map(|((id, _), (_, st))| (*id, st))
-            .collect();
+        let rows = [("lead", RunStatus::Running), ("grep", RunStatus::Running), ("search", RunStatus::Failed), ("review", RunStatus::Completed)];
+        let runs: Vec<(RunId, String)> = rows.iter().map(|(a, _)| (RunId::new(), (*a).to_owned())).collect();
+        let states = runs.iter().zip(rows).map(|((id, _), (_, st))| (*id, st)).collect();
         Session { runs, states }
     }
 
     fn env(s: &Session) -> Env<'_> {
-        Env {
-            runs: &s.runs,
-            states: &s.states,
-            lead: Some(s.runs[0].0),
-            ..Env::bare(&[], &[])
-        }
+        Env { runs: &s.runs, states: &s.states, lead: Some(s.runs[0].0), ..Env::bare(&[], &[]) }
     }
 
     fn sent(line: &str, env: &Env) -> String {
         match send(line, env) {
-            Sent::Msgs(m) => m
-                .iter()
-                .map(|m| format!("{m:?}"))
-                .collect::<Vec<_>>()
-                .join("|"),
+            Sent::Msgs(m) => m.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("|"),
             Sent::Login(p, _) => format!("LOGIN {p}"),
             Sent::Bad(why) => format!("BAD {why}"),
         }
@@ -1654,41 +1264,18 @@ mod tests {
             ("/background", "Command(Background { run: {} })"),
             ("/log", "Command(OpenTranscript({}))"),
             ("/status", "Command(OpenScreen(RunStatus({})))"),
-            (
-                "/message hi",
-                "Command(SendMessage { run: {}, text: \"hi\" })",
-            ),
+            ("/message hi", "Command(SendMessage { run: {}, text: \"hi\" })"),
         ];
         for (line, want) in rows {
             let (word, rest) = line.split_once(' ').map_or((line, ""), |(w, r)| (w, r));
             let with = |t: &str| format!("{word} {t} {rest}").trim().to_owned();
             e.focused = None;
-            assert_eq!(
-                sent(&with("@grep"), &e),
-                want.replace("{}", &format!("{grep:?}")),
-                "{line} @agent"
-            );
-            assert_eq!(
-                sent(&with(&format!("@{prefix}")), &e),
-                want.replace("{}", &format!("{grep:?}")),
-                "{line} @runprefix"
-            );
-            assert_eq!(
-                sent(&with("@lead"), &e),
-                want.replace("{}", &format!("{lead:?}")),
-                "{line} @lead"
-            );
-            assert_eq!(
-                sent(&with(""), &e),
-                want.replace("{}", &format!("{lead:?}")),
-                "{line} lead fallback"
-            );
+            assert_eq!(sent(&with("@grep"), &e), want.replace("{}", &format!("{grep:?}")), "{line} @agent");
+            assert_eq!(sent(&with(&format!("@{prefix}")), &e), want.replace("{}", &format!("{grep:?}")), "{line} @runprefix");
+            assert_eq!(sent(&with("@lead"), &e), want.replace("{}", &format!("{lead:?}")), "{line} @lead");
+            assert_eq!(sent(&with(""), &e), want.replace("{}", &format!("{lead:?}")), "{line} lead fallback");
             e.focused = Some(search);
-            assert_eq!(
-                sent(&with(""), &e),
-                want.replace("{}", &format!("{search:?}")),
-                "{line} focused card"
-            );
+            assert_eq!(sent(&with(""), &e), want.replace("{}", &format!("{search:?}")), "{line} focused card");
         }
     }
 
@@ -1696,43 +1283,22 @@ mod tests {
     fn cancel_asks_on_the_lead_and_not_on_a_worker() {
         let s = session();
         let e = env(&s);
-        assert_eq!(
-            sent("/cancel @lead", &e),
-            format!("Command(OpenScreen(ConfirmCancel({:?})))", s.runs[0].0)
-        );
-        assert_eq!(
-            sent("/cancel @grep", &e),
-            format!("Command(Cancel {{ run: {:?} }})", s.runs[1].0)
-        );
+        assert_eq!(sent("/cancel @lead", &e), format!("Command(OpenScreen(ConfirmCancel({:?})))", s.runs[0].0));
+        assert_eq!(sent("/cancel @grep", &e), format!("Command(Cancel {{ run: {:?} }})", s.runs[1].0));
     }
 
     #[test]
     fn retry_and_resume_are_notices_in_the_wrong_state() {
         let s = session();
         let e = env(&s);
-        assert_eq!(
-            sent("/retry @grep", &e),
-            "BAD /retry is not available: the run is running"
-        );
-        assert_eq!(
-            sent("/retry @search", &e),
-            format!("Command(Retry {{ run: {:?} }})", s.runs[2].0)
-        );
-        assert_eq!(
-            sent("/resume @grep go on", &e),
-            "BAD /resume is not available: the run is running"
-        );
+        assert_eq!(sent("/retry @grep", &e), "BAD /retry is not available: the run is running");
+        assert_eq!(sent("/retry @search", &e), format!("Command(Retry {{ run: {:?} }})", s.runs[2].0));
+        assert_eq!(sent("/resume @grep go on", &e), "BAD /resume is not available: the run is running");
         assert!(sent("/resume @review go on", &e).contains("message: \"go on\""));
         assert!(sent("/resume @review", &e).contains("message: \"continue\""));
         let offered: Vec<String> = slash_offered(&e).into_iter().map(|(n, _)| n).collect();
-        assert!(
-            offered.contains(&"/status".to_owned()) && !offered.contains(&"/retry".to_owned()),
-            "{offered:?}"
-        );
-        let focused = Env {
-            focused: Some(s.runs[2].0),
-            ..e
-        };
+        assert!(offered.contains(&"/status".to_owned()) && !offered.contains(&"/retry".to_owned()), "{offered:?}");
+        let focused = Env { focused: Some(s.runs[2].0), ..e };
         assert!(slash_offered(&focused).iter().any(|(n, _)| n == "/retry"));
     }
 
@@ -1740,32 +1306,13 @@ mod tests {
     fn status_takes_a_seat_and_cost_without_a_target_is_the_session_table() {
         let s = session();
         let e = env(&s);
-        assert_eq!(
-            sent("/status @advisor", &e),
-            "Command(OpenScreen(AdvisorStatus))"
-        );
-        assert_eq!(
-            sent("/status @router", &e),
-            "Command(OpenScreen(RouterStatus))"
-        );
-        assert_eq!(
-            sent("/cancel @advisor", &e),
-            "BAD /cancel takes a run, not a seat"
-        );
+        assert_eq!(sent("/status @advisor", &e), "Command(OpenScreen(AdvisorStatus))");
+        assert_eq!(sent("/status @router", &e), "Command(OpenScreen(RouterStatus))");
+        assert_eq!(sent("/cancel @advisor", &e), "BAD /cancel takes a run, not a seat");
         assert_eq!(sent("/cost", &e), "Command(OpenScreen(Cost))");
-        let focused = Env {
-            focused: Some(s.runs[1].0),
-            ..e
-        };
-        assert_eq!(
-            sent("/cost", &focused),
-            "Command(OpenScreen(Cost))",
-            "a focused card does not turn it into a status"
-        );
-        assert_eq!(
-            sent("/cost @grep", &e),
-            format!("Command(OpenScreen(RunStatus({:?})))", s.runs[1].0)
-        );
+        let focused = Env { focused: Some(s.runs[1].0), ..e };
+        assert_eq!(sent("/cost", &focused), "Command(OpenScreen(Cost))", "a focused card does not turn it into a status");
+        assert_eq!(sent("/cost @grep", &e), format!("Command(OpenScreen(RunStatus({:?})))", s.runs[1].0));
         assert_eq!(sent("/message @grep", &e), "BAD /message needs a message");
     }
 
@@ -1774,58 +1321,17 @@ mod tests {
         let s = session();
         let wf = ["review".to_owned()];
         let lead = s.runs[0].0;
-        let done: Vec<(RunId, RunStatus)> = s
-            .states
-            .iter()
-            .map(|(id, st)| {
-                (
-                    *id,
-                    if *id == lead {
-                        RunStatus::Completed
-                    } else {
-                        *st
-                    },
-                )
-            })
-            .collect();
-        let finished = Env {
-            runs: &s.runs,
-            states: &done,
-            lead: Some(lead),
-            ..Env::bare(&[], &wf)
-        };
-        let running = Env {
-            runs: &s.runs,
-            states: &s.states,
-            lead: Some(lead),
-            ..Env::bare(&[], &wf)
-        };
-        for line in [
-            "/review the diff",
-            "/workflow review the diff",
-            "/workflow run review the diff",
-            "/workflow new a goal",
-            "/workflow edit review add a step",
-        ] {
-            assert!(
-                sent(line, &finished).starts_with("BAD /")
-                    && sent(line, &finished).ends_with("is not available: no lead is running"),
-                "{line}: {}",
-                sent(line, &finished)
-            );
-            assert!(
-                !sent(line, &running).starts_with("BAD"),
-                "{line}: {}",
-                sent(line, &running)
-            );
+        let done: Vec<(RunId, RunStatus)> = s.states.iter().map(|(id, st)| (*id, if *id == lead { RunStatus::Completed } else { *st })).collect();
+        let finished = Env { runs: &s.runs, states: &done, lead: Some(lead), ..Env::bare(&[], &wf) };
+        let running = Env { runs: &s.runs, states: &s.states, lead: Some(lead), ..Env::bare(&[], &wf) };
+        for line in ["/review the diff", "/workflow review the diff", "/workflow run review the diff", "/workflow new a goal", "/workflow edit review add a step"] {
+            assert!(sent(line, &finished).starts_with("BAD /") && sent(line, &finished).ends_with("is not available: no lead is running"), "{line}: {}", sent(line, &finished));
+            assert!(!sent(line, &running).starts_with("BAD"), "{line}: {}", sent(line, &running));
         }
         assert!(slash_offered(&finished).iter().all(|(n, _)| n != "/review"));
         assert!(slash_offered(&running).iter().any(|(n, _)| n == "/review"));
         // A workflow that does not exist is still the first thing the notice says.
-        assert_eq!(
-            sent("/build x", &finished),
-            "BAD /build is not available: no workflow named build"
-        );
+        assert_eq!(sent("/build x", &finished), "BAD /build is not available: no workflow named build");
     }
 
     #[test]
@@ -1833,18 +1339,8 @@ mod tests {
         // No new `Command` variant: each row maps onto one the keys already use.
         let s = session();
         let e = env(&s);
-        for (line, variant) in [
-            ("/cancel @grep", "Cancel"),
-            ("/retry @search", "Retry"),
-            ("/message @grep x", "SendMessage"),
-            ("/resume @review", "Resume"),
-            ("/background @grep", "Background"),
-            ("/log @grep", "OpenTranscript"),
-        ] {
-            assert!(
-                sent(line, &e).starts_with(&format!("Command({variant}")),
-                "{line}"
-            );
+        for (line, variant) in [("/cancel @grep", "Cancel"), ("/retry @search", "Retry"), ("/message @grep x", "SendMessage"), ("/resume @review", "Resume"), ("/background @grep", "Background"), ("/log @grep", "OpenTranscript")] {
+            assert!(sent(line, &e).starts_with(&format!("Command({variant}")), "{line}");
         }
     }
 }

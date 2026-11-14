@@ -12,8 +12,8 @@ use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
-use aibus_provider::error::{parse_retry_after, parse_rfc3339};
 use aibus_provider::sse::{SseEvent, SseParser};
+use aibus_provider::error::{parse_retry_after, parse_rfc3339};
 use aibus_provider::{ProviderError, ProviderErrorKind, RateLimitInfo, StreamChunk};
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, RequestBuilder, Response};
@@ -75,17 +75,11 @@ fn error_of(body: &[u8]) -> (String, String) {
     });
     let code = json
         .as_ref()
-        .and_then(|j| {
-            j.pointer("/error/code")
-                .or_else(|| j.pointer("/error/type"))
-        })
+        .and_then(|j| j.pointer("/error/code").or_else(|| j.pointer("/error/type")))
         .and_then(|c| c.as_str())
         .unwrap_or_default()
         .to_owned();
-    (
-        found.unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_owned()),
-        code,
-    )
+    (found.unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_owned()), code)
 }
 
 /// `error.details[].retryDelay` of a Google error body.
@@ -108,9 +102,7 @@ fn parse_go_duration(value: &str) -> Option<Duration> {
         let digits = rest.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
         let n: f64 = rest[..digits].parse().ok()?;
         rest = &rest[digits..];
-        let unit = rest
-            .find(|c: char| c.is_ascii_digit() || c == '.')
-            .unwrap_or(rest.len());
+        let unit = rest.find(|c: char| c.is_ascii_digit() || c == '.').unwrap_or(rest.len());
         let secs = match &rest[..unit] {
             "h" => 3600.0,
             "m" => 60.0,
@@ -132,24 +124,14 @@ fn parse_go_duration(value: &str) -> Option<Duration> {
 /// `now` anchors the date forms, so a test can pin it.
 pub fn rate_limit(headers: &HeaderMap, now: SystemTime) -> Option<RateLimitInfo> {
     let get = |n: &str| headers.get(n).and_then(|v| v.to_str().ok());
-    let count = |names: &[&str]| {
-        names
-            .iter()
-            .filter_map(|n| get(n)?.trim().parse::<u64>().ok())
-            .min()
-    };
+    let count = |names: &[&str]| names.iter().filter_map(|n| get(n)?.trim().parse::<u64>().ok()).min();
     // Anthropic sends a timestamp, OpenAI a span.
     let reset = |names: &[&str]| {
         names
             .iter()
             .filter_map(|n| {
                 let v = get(n)?;
-                parse_go_duration(v).or_else(|| {
-                    parse_rfc3339(v)?
-                        .duration_since(now)
-                        .ok()
-                        .or(Some(Duration::ZERO))
-                })
+                parse_go_duration(v).or_else(|| parse_rfc3339(v)?.duration_since(now).ok().or(Some(Duration::ZERO)))
             })
             .min()
     };
@@ -158,20 +140,14 @@ pub fn rate_limit(headers: &HeaderMap, now: SystemTime) -> Option<RateLimitInfo>
         .filter(|ms| ms.is_finite() && *ms >= 0.0)
         .map(|ms| Duration::from_secs_f64(ms.min(3_600_000.0) / 1000.0))
         .or_else(|| get("retry-after").and_then(|v| parse_retry_after(v, now)));
-    let requests_remaining = count(&[
-        "x-ratelimit-remaining-requests",
-        "anthropic-ratelimit-requests-remaining",
-    ]);
+    let requests_remaining = count(&["x-ratelimit-remaining-requests", "anthropic-ratelimit-requests-remaining"]);
     let tokens_remaining = count(&[
         "x-ratelimit-remaining-tokens",
         "anthropic-ratelimit-tokens-remaining",
         "anthropic-ratelimit-input-tokens-remaining",
         "anthropic-ratelimit-output-tokens-remaining",
     ]);
-    let requests_reset = reset(&[
-        "x-ratelimit-reset-requests",
-        "anthropic-ratelimit-requests-reset",
-    ]);
+    let requests_reset = reset(&["x-ratelimit-reset-requests", "anthropic-ratelimit-requests-reset"]);
     let tokens_reset = reset(&[
         "x-ratelimit-reset-tokens",
         "anthropic-ratelimit-tokens-reset",
@@ -185,12 +161,7 @@ pub fn rate_limit(headers: &HeaderMap, now: SystemTime) -> Option<RateLimitInfo>
         (false, true) => tokens_reset,
         (false, false) => requests_reset.into_iter().chain(tokens_reset).min(),
     };
-    let info = RateLimitInfo {
-        retry_after,
-        requests_remaining,
-        tokens_remaining,
-        resets_in,
-    };
+    let info = RateLimitInfo { retry_after, requests_remaining, tokens_remaining, resets_in };
     (info != RateLimitInfo::default()).then_some(info)
 }
 
@@ -260,9 +231,7 @@ impl Http {
         }
         let (message, code) = error_of(&body);
         // Google sends the wait in the body (`error.details[].retryDelay`, "33s"), not a header.
-        let retry_after = info
-            .and_then(|i| i.retry_after)
-            .or_else(|| retry_delay(&body));
+        let retry_after = info.and_then(|i| i.retry_after).or_else(|| retry_delay(&body));
         let mut e = ProviderError::from_http(status, &message, retry_after, id, &code);
         e.rate_limit = info.map(Box::new);
         Err(e)
@@ -273,19 +242,13 @@ impl Http {
 pub async fn json(resp: Response) -> Result<serde_json::Value, ProviderError> {
     let bytes = resp.bytes().await.map_err(network)?;
     serde_json::from_slice(&bytes).map_err(|e| {
-        ProviderError::new(
-            ProviderErrorKind::Unknown,
-            format!("answer is not JSON: {e}"),
-        )
+        ProviderError::new(ProviderErrorKind::Unknown, format!("answer is not JSON: {e}"))
     })
 }
 
 /// The next piece of a response body that is not SSE (Bedrock's binary event stream), `None` at
 /// the end. Gives up when `cancel` fires.
-pub async fn chunk(
-    resp: &mut Response,
-    cancel: &CancellationToken,
-) -> Result<Option<Vec<u8>>, ProviderError> {
+pub async fn chunk(resp: &mut Response, cancel: &CancellationToken) -> Result<Option<Vec<u8>>, ProviderError> {
     tokio::select! {
         biased;
         () = cancel.cancelled() => Err(cancelled()),
@@ -316,9 +279,8 @@ impl Events {
     /// The next event, `None` when the server closed the stream cleanly. A broken connection
     /// or a malformed line is an error.
     pub async fn next(&mut self) -> Result<Option<SseEvent>, ProviderError> {
-        let malformed = |e: aibus_provider::sse::SseError| {
-            ProviderError::new(ProviderErrorKind::Unknown, format!("malformed SSE: {e}"))
-        };
+        let malformed =
+            |e: aibus_provider::sse::SseError| ProviderError::new(ProviderErrorKind::Unknown, format!("malformed SSE: {e}"));
         loop {
             if let Some(ev) = self.ready.pop_front() {
                 return Ok(Some(ev));
@@ -332,9 +294,7 @@ impl Events {
                 c = self.resp.chunk() => c.map_err(network)?,
             };
             match chunk {
-                Some(bytes) => self
-                    .ready
-                    .extend(self.parser.push(&bytes).map_err(malformed)?),
+                Some(bytes) => self.ready.extend(self.parser.push(&bytes).map_err(malformed)?),
                 None => {
                     self.ended = true;
                     self.ready.extend(self.parser.finish().map_err(malformed)?);
@@ -384,10 +344,7 @@ mod tests {
         let seen = &server.received_requests().await.unwrap()[0];
         let names: Vec<_> = seen.headers.keys().map(|k| k.as_str().to_owned()).collect();
         for n in &names {
-            assert!(
-                !n.contains("auth") && !n.contains("key"),
-                "unexpected header {n}"
-            );
+            assert!(!n.contains("auth") && !n.contains("key"), "unexpected header {n}");
         }
         assert!(UA.starts_with("aibus/"));
     }
@@ -396,10 +353,7 @@ mod tests {
     async fn the_client_has_no_default_headers_to_print() {
         let http = Http::new();
         let text = format!("{:?}", http.client().unwrap());
-        assert!(
-            !text.contains("authorization") && !text.contains("x-api-key"),
-            "{text}"
-        );
+        assert!(!text.contains("authorization") && !text.contains("x-api-key"), "{text}");
     }
 
     #[tokio::test]
@@ -436,10 +390,7 @@ mod tests {
     fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
         let mut h = HeaderMap::new();
         for (k, v) in pairs {
-            h.insert(
-                reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
-                v.parse().unwrap(),
-            );
+            h.insert(reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
         }
         h
     }
@@ -457,10 +408,7 @@ mod tests {
         assert_eq!(parse_go_duration("1s"), Some(Duration::from_secs(1)));
         assert_eq!(parse_go_duration("6m0s"), Some(Duration::from_secs(360)));
         assert_eq!(parse_go_duration("20ms"), Some(Duration::from_millis(20)));
-        assert_eq!(
-            parse_go_duration("1h2m3.5s"),
-            Some(Duration::from_millis(3_723_500))
-        );
+        assert_eq!(parse_go_duration("1h2m3.5s"), Some(Duration::from_millis(3_723_500)));
         assert_eq!(parse_go_duration(""), None);
         assert_eq!(parse_go_duration("soon"), None);
         assert_eq!(parse_go_duration("5"), None);
@@ -469,22 +417,11 @@ mod tests {
     #[test]
     fn retry_after_ms_wins_and_the_http_date_counts_from_now() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_567_590);
-        let both = rate_limit(
-            &headers(&[("retry-after", "20"), ("retry-after-ms", "1500")]),
-            now,
-        )
-        .unwrap();
+        let both = rate_limit(&headers(&[("retry-after", "20"), ("retry-after-ms", "1500")]), now).unwrap();
         assert_eq!(both.retry_after, Some(Duration::from_millis(1500)));
-        let date = rate_limit(
-            &headers(&[("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT")]),
-            now,
-        )
-        .unwrap();
+        let date = rate_limit(&headers(&[("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT")]), now).unwrap();
         assert_eq!(date.retry_after, Some(Duration::from_secs(90)));
-        assert_eq!(
-            rate_limit(&headers(&[("content-type", "text/plain")]), now),
-            None
-        );
+        assert_eq!(rate_limit(&headers(&[("content-type", "text/plain")]), now), None);
     }
 
     #[test]
@@ -496,15 +433,8 @@ mod tests {
             ("x-ratelimit-reset-tokens", "1s"),
         ]);
         let i = rate_limit(&h, SystemTime::now()).unwrap();
-        assert_eq!(
-            (i.requests_remaining, i.tokens_remaining),
-            (Some(0), Some(29_000))
-        );
-        assert_eq!(
-            i.resets_in,
-            Some(Duration::from_secs(360)),
-            "the exhausted window's reset"
-        );
+        assert_eq!((i.requests_remaining, i.tokens_remaining), (Some(0), Some(29_000)));
+        assert_eq!(i.resets_in, Some(Duration::from_secs(360)), "the exhausted window's reset");
     }
 
     #[test]
@@ -519,11 +449,7 @@ mod tests {
         ]);
         let i = rate_limit(&h, now).unwrap();
         assert_eq!(i.requests_remaining, Some(12));
-        assert_eq!(
-            i.tokens_remaining,
-            Some(0),
-            "the smallest of the token counts"
-        );
+        assert_eq!(i.tokens_remaining, Some(0), "the smallest of the token counts");
         assert_eq!(i.resets_in, Some(Duration::from_secs(45)));
     }
 
@@ -550,16 +476,10 @@ mod tests {
         let e = http.send(&token(), |c| c.get(&url)).await.unwrap_err();
         assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Quota, false));
         let info = e.rate_limit.unwrap();
-        assert_eq!(
-            (info.requests_remaining, info.resets_in),
-            (Some(0), Some(Duration::from_secs(9)))
-        );
+        assert_eq!((info.requests_remaining, info.resets_in), (Some(0), Some(Duration::from_secs(9))));
         let url = format!("{}/filter", server.uri());
         let e = http.send(&token(), |c| c.get(&url)).await.unwrap_err();
-        assert_eq!(
-            (e.kind, e.retryable),
-            (ProviderErrorKind::ContentFilter, false)
-        );
+        assert_eq!((e.kind, e.retryable), (ProviderErrorKind::ContentFilter, false));
         assert_eq!(e.rate_limit, None);
     }
 
@@ -594,10 +514,7 @@ mod tests {
     #[tokio::test]
     async fn a_refused_connection_is_a_retryable_network_error() {
         let http = Http::new();
-        let e = http
-            .send(&token(), |c| c.get("http://127.0.0.1:1/"))
-            .await
-            .unwrap_err();
+        let e = http.send(&token(), |c| c.get("http://127.0.0.1:1/")).await.unwrap_err();
         assert_eq!(e.kind, ProviderErrorKind::Network);
         assert!(e.retryable);
     }
@@ -606,10 +523,7 @@ mod tests {
     async fn events_come_out_one_by_one_and_a_bad_line_is_an_error() {
         let server = MockServer::start().await;
         Mock::given(path("/ok"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw("event: a\ndata: 1\n\ndata: 2\n\n", "text/event-stream"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_raw("event: a\ndata: 1\n\ndata: 2\n\n", "text/event-stream"))
             .mount(&server)
             .await;
         Mock::given(path("/bad"))
@@ -634,13 +548,9 @@ mod tests {
     async fn emit_gives_up_on_cancel_while_the_channel_is_full() {
         let (tx, _rx) = mpsc::channel(1);
         let cancel = token();
-        emit(&tx, &cancel, StreamChunk::TextDelta("a".into()))
-            .await
-            .unwrap();
+        emit(&tx, &cancel, StreamChunk::TextDelta("a".into())).await.unwrap();
         cancel.cancel();
-        let e = emit(&tx, &cancel, StreamChunk::TextDelta("b".into()))
-            .await
-            .unwrap_err();
+        let e = emit(&tx, &cancel, StreamChunk::TextDelta("b".into())).await.unwrap_err();
         assert_eq!(e.kind, ProviderErrorKind::Cancelled);
     }
 }

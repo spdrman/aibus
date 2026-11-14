@@ -72,18 +72,12 @@ fn gap(msg: &Msg) -> u64 {
 fn schedule(jsonl: &str) -> Result<Vec<(u64, Step)>, String> {
     let mut msgs = Vec::new();
     for (n, line) in jsonl.lines().enumerate().filter(|(_, l)| !l.is_empty()) {
-        let v: serde_json::Value =
-            serde_json::from_str(line).map_err(|e| format!("line {}: {e}", n + 1))?;
-        msgs.push(
-            aibus_core::replay::msg_from_json(&v).map_err(|e| format!("line {}: {e}", n + 1))?,
-        );
+        let v: serde_json::Value = serde_json::from_str(line).map_err(|e| format!("line {}: {e}", n + 1))?;
+        msgs.push(aibus_core::replay::msg_from_json(&v).map_err(|e| format!("line {}: {e}", n + 1))?);
     }
     let mut steps = Vec::new();
     for (i, c) in PROMPT.chars().enumerate() {
-        steps.push((
-            TYPE_FROM_MS + TYPE_EVERY_MS * i as u64,
-            Step::Key(KeyCode::Char(c)),
-        ));
+        steps.push((TYPE_FROM_MS + TYPE_EVERY_MS * i as u64, Step::Key(KeyCode::Char(c))));
     }
     let enter = TYPE_FROM_MS + TYPE_EVERY_MS * PROMPT.chars().count() as u64 + 200;
     steps.push((enter, Step::Key(KeyCode::Enter)));
@@ -92,9 +86,7 @@ fn schedule(jsonl: &str) -> Result<Vec<(u64, Step)>, String> {
     let mut at = 0;
 
     let lead = msgs.iter().find_map(|m| match m {
-        Msg::RunStarted {
-            run, parent: None, ..
-        } => Some(*run),
+        Msg::RunStarted { run, parent: None, .. } => Some(*run),
         _ => None,
     });
     let mut progress: Vec<(RunId, ToolCallId, f32)> = Vec::new();
@@ -105,21 +97,13 @@ fn schedule(jsonl: &str) -> Result<Vec<(u64, Step)>, String> {
                     let pieces: Vec<StreamChunk> = match ch {
                         StreamChunk::TextDelta(t) => {
                             let cs: Vec<char> = t.chars().collect();
-                            cs.chunks(STREAM_CHARS)
-                                .map(|p| StreamChunk::TextDelta(p.iter().collect()))
-                                .collect()
+                            cs.chunks(STREAM_CHARS).map(|p| StreamChunk::TextDelta(p.iter().collect())).collect()
                         }
                         other => vec![other.clone()],
                     };
                     for p in pieces {
                         let text = matches!(p, StreamChunk::TextDelta(_));
-                        body.push((
-                            at,
-                            Step::Msg(Box::new(Msg::Stream {
-                                run: *run,
-                                chunks: vec![p],
-                            })),
-                        ));
+                        body.push((at, Step::Msg(Box::new(Msg::Stream { run: *run, chunks: vec![p] }))));
                         if text {
                             at += TICK_MS;
                         }
@@ -131,20 +115,10 @@ fn schedule(jsonl: &str) -> Result<Vec<(u64, Step)>, String> {
             // issued, so it is issued here: the worker's card gets its task.
             Msg::ToolCallRequested { call, .. } if call.name == "delegate" => {
                 let child = msgs[i..].iter().find_map(|n| match n {
-                    Msg::RunStarted {
-                        run,
-                        parent: Some(_),
-                        ..
-                    } => Some(*run),
+                    Msg::RunStarted { run, parent: Some(_), .. } => Some(*run),
                     _ => None,
                 });
-                let s = |k: &str| {
-                    call.input
-                        .get(k)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_owned()
-                };
+                let s = |k: &str| call.input.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
                 if let (Ok(agent), Some(run)) = (s("agent").parse(), child) {
                     body.push((
                         at,
@@ -175,18 +149,8 @@ fn schedule(jsonl: &str) -> Result<Vec<(u64, Step)>, String> {
         // The recording keeps only the length of a tool's output; the card's percentage is the
         // one thing in it the dashboard shows, so it is put back.
         // Call ids restart every turn, so the newest request of that run with the id is the one.
-        if let Msg::ToolCallFinished {
-            run,
-            call_id,
-            result,
-            ..
-        } = &mut m
-        {
-            result.progress = progress
-                .iter()
-                .rev()
-                .find(|(r, id, _)| r == run && id == call_id)
-                .map(|(_, _, f)| Progress::Fraction(*f));
+        if let Msg::ToolCallFinished { run, call_id, result, .. } = &mut m {
+            result.progress = progress.iter().rev().find(|(r, id, _)| r == run && id == call_id).map(|(_, _, f)| Progress::Fraction(*f));
         }
         let wait = gap(&m);
         body.push((at, Step::Msg(Box::new(m))));
@@ -194,21 +158,12 @@ fn schedule(jsonl: &str) -> Result<Vec<(u64, Step)>, String> {
     }
     let from = enter + 200;
     let squeeze = ((SESSION_END_MS - from) as f64 / at.max(1) as f64).min(1.0);
-    steps.extend(
-        body.into_iter()
-            .map(|(t, s)| (from + (t as f64 * squeeze) as u64, s)),
-    );
+    steps.extend(body.into_iter().map(|(t, s)| (from + (t as f64 * squeeze) as u64, s)));
     // The pointer: rest on a card (its tooltip), select it, open the menu of the next one.
     steps.push((7_000, Step::Card(0, MouseEventKind::Moved)));
-    steps.push((
-        7_900,
-        Step::Card(0, MouseEventKind::Down(MouseButton::Left)),
-    ));
+    steps.push((7_900, Step::Card(0, MouseEventKind::Down(MouseButton::Left))));
     steps.push((8_000, Step::Card(0, MouseEventKind::Up(MouseButton::Left))));
-    steps.push((
-        8_500,
-        Step::Card(1, MouseEventKind::Down(MouseButton::Right)),
-    ));
+    steps.push((8_500, Step::Card(1, MouseEventKind::Down(MouseButton::Right))));
     steps.sort_by_key(|(t, _)| *t);
     Ok(steps)
 }
@@ -227,13 +182,8 @@ pub fn play<B: Backend>(
     let keys = view::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
     let fail = |e: aibus_core::AibusError| e.to_string();
-    app.set_session_view(None, (Some("fake-large"), true), (Some("fake-small"), true))
-        .map_err(fail)?;
-    app.step(Msg::Resize {
-        cols: COLS,
-        rows: ROWS,
-    })
-    .map_err(fail)?;
+    app.set_session_view(None, (Some("fake-large"), true), (Some("fake-small"), true)).map_err(fail)?;
+    app.step(Msg::Resize { cols: COLS, rows: ROWS }).map_err(fail)?;
 
     let mut ui = Ui::new(Theme::recording());
     ui.prompt.placeholder = "aibus".into();
@@ -247,33 +197,15 @@ pub fn play<B: Backend>(
         clock.store(EPOCH_MS + t, Ordering::Relaxed);
         let at = base + Duration::from_millis(t);
         while pending.peek().is_some_and(|(due, _)| *due <= t) {
-            let Some((_, step)) = pending.next() else {
-                break;
-            };
+            let Some((_, step)) = pending.next() else { break };
             let outs: Vec<Out> = match step {
                 Step::Key(code) => {
                     let cx = Context::read(&app.graph);
-                    vec![input.key(
-                        KeyEvent {
-                            code,
-                            ctrl: false,
-                            alt: false,
-                            shift: false,
-                        },
-                        &cx,
-                        &ui.keys,
-                        &ui.drawn,
-                        &mut ui.prompt,
-                    )]
+                    vec![input.key(KeyEvent { code, ctrl: false, alt: false, shift: false }, &cx, &ui.keys, &ui.drawn, &mut ui.prompt)]
                 }
                 Step::Card(i, kind) => match ui.drawn.hits.find(HitId::Card(i)).map(|r| r.rect) {
                     Some(r) => {
-                        let ev = MouseEvent {
-                            kind,
-                            column: r.x + r.width / 2,
-                            row: r.y + r.height / 2,
-                            modifiers: KeyModifiers::NONE,
-                        };
+                        let ev = MouseEvent { kind, column: r.x + r.width / 2, row: r.y + r.height / 2, modifiers: KeyModifiers::NONE };
                         let cx = Context::read(&app.graph);
                         vec![input.mouse(ev, at, &ui.drawn, &cx, &mut ui.prompt)]
                     }
@@ -290,7 +222,7 @@ pub fn play<B: Backend>(
                         // The prompt starts the lead the way the launcher would: as the run the
                         // recording names, so the recorded messages find it.
                         Msg::SubmitPrompt { text } => {
-                            app.step(Msg::Command(Command::Delegate {
+                                                        app.step(Msg::Command(Command::Delegate {
                                 agent: "lead".parse().map_err(|e| format!("{e}"))?,
                                 prompt: text,
                                 background: false,
@@ -308,16 +240,9 @@ pub fn play<B: Backend>(
             }
         }
         input.settle(at);
-        let typing = app
-            .graph
-            .read_key(view::RAIL)
-            .is_some_and(view::rail_typing);
+        let typing = app.graph.read_key(view::RAIL).is_some_and(view::rail_typing);
         let animating = typing || matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));
-        let blinking = app
-            .graph
-            .read_key(aibus_core::state::FOCUS)
-            .and_then(as_str)
-            == Some("input");
+        let blinking = app.graph.read_key(aibus_core::state::FOCUS).and_then(as_str) == Some("input");
         if t % TICK_MS == 0 && (animating || blinking) {
             app.step(Msg::Tick).map_err(fail)?;
         }
@@ -339,8 +264,7 @@ pub fn play<B: Backend>(
 fn lead_of(jsonl: &str) -> Option<RunId> {
     jsonl.lines().find_map(|l| {
         let v: serde_json::Value = serde_json::from_str(l).ok()?;
-        (v["msg"] == "RunStarted" && v["parent"].is_null())
-            .then(|| v["run"].as_str()?.parse().ok())?
+        (v["msg"] == "RunStarted" && v["parent"].is_null()).then(|| v["run"].as_str()?.parse().ok())?
     })
 }
 
@@ -367,9 +291,7 @@ pub fn print(text: bool, mut out: impl std::io::Write) -> Result<(), String> {
         } else {
             let frame = ansi_of(buf, prev.as_ref());
             prev = Some(buf.clone());
-            write!(out, "{frame}\x1b]7777;{t}\x07")
-                .and_then(|()| out.flush())
-                .err()
+            write!(out, "{frame}\x1b]7777;{t}\x07").and_then(|()| out.flush()).err()
         };
     })?;
     if !text && failed.is_none() {
@@ -401,13 +323,7 @@ fn ansi_of(buf: &ratatui::buffer::Buffer, prev: Option<&ratatui::buffer::Buffer>
             .filter(|(m, _)| c.modifier.contains(*m))
             .map(|(_, n)| format!(";{n}"))
             .collect();
-            let _ = write!(
-                out,
-                "\x1b[0{mods};{};{}m{}",
-                crate::theme::sgr(c.fg, true),
-                crate::theme::sgr(c.bg, false),
-                c.symbol()
-            );
+            let _ = write!(out, "\x1b[0{mods};{};{}m{}", crate::theme::sgr(c.fg, true), crate::theme::sgr(c.bg, false), c.symbol());
         }
         out.push_str("\x1b[0m");
     }
@@ -436,10 +352,7 @@ mod tests {
     fn frames() -> Vec<(u64, String)> {
         let mut term = Terminal::new(TestBackend::new(COLS, ROWS)).unwrap();
         let mut out = Vec::new();
-        play(&mut term, MSGS, |t, term| {
-            out.push((t, text_of(term.backend().buffer())))
-        })
-        .unwrap();
+        play(&mut term, MSGS, |t, term| out.push((t, text_of(term.backend().buffer())))).unwrap();
         out
     }
 
@@ -464,18 +377,8 @@ mod tests {
     #[test]
     fn the_session_finishes_before_the_pointer_starts() {
         let steps = schedule(MSGS).unwrap();
-        let last_msg = steps
-            .iter()
-            .filter(|(_, s)| matches!(s, Step::Msg(_)))
-            .map(|(t, _)| *t)
-            .max()
-            .unwrap();
-        let first_card = steps
-            .iter()
-            .filter(|(_, s)| matches!(s, Step::Card(..)))
-            .map(|(t, _)| *t)
-            .min()
-            .unwrap();
+        let last_msg = steps.iter().filter(|(_, s)| matches!(s, Step::Msg(_))).map(|(t, _)| *t).max().unwrap();
+        let first_card = steps.iter().filter(|(_, s)| matches!(s, Step::Card(..))).map(|(t, _)| *t).min().unwrap();
         assert!(last_msg < first_card && steps.iter().all(|(t, _)| *t < LENGTH_MS));
     }
 }

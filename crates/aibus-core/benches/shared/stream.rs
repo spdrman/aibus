@@ -102,11 +102,7 @@ pub fn run<G: Graph>(label: &str, mk: fn() -> G) -> (Stats, Stats) {
         snap,
         app.graph.now()
     );
-    gate.judge(
-        &format!("commit_stream-{label}-open"),
-        &open_only,
-        OPEN_BUDGET_US,
-    );
+    gate.judge(&format!("commit_stream-{label}-open"), &open_only, OPEN_BUDGET_US);
     gate.judge(&format!("commit_stream-{label}-any"), &any, ANY_BUDGET_US);
     println!(
         "stream_commit_100k_lines_8_runs_2000_log: p50 {:.0} us, p99 {:.0} us, max {:.0} us (budget {ANY_BUDGET_US:.0} us p99)",

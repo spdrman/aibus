@@ -16,9 +16,7 @@ use super::*;
 use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{AgentName, PermissionId, RunId};
-use crate::msg::{
-    AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent,
-};
+use crate::msg::{AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
 use crate::workflow::{self, WorkflowRow};
@@ -322,8 +320,7 @@ impl R<'_> {
     /// what it covered.
     fn open_modal(&mut self, name: &str) {
         let cur = self.now(MODAL);
-        if name == "permission" && !matches!(cur, Value::Null) && as_str(&cur) != Some("permission")
-        {
+        if name == "permission" && !matches!(cur, Value::Null) && as_str(&cur) != Some("permission") {
             self.put(MODAL_UNDER, cur);
         }
         if let Some(run) = name.strip_prefix("transcript:") {
@@ -341,11 +338,7 @@ impl R<'_> {
                 ]),
             );
         }
-        if matches!(
-            name,
-            "palette" | "agents" | "accounts" | "providers" | "workflows"
-        ) || name.starts_with("models:")
-        {
+        if matches!(name, "palette" | "agents" | "accounts" | "providers" | "workflows") || name.starts_with("models:") {
             self.put(SCREEN_SEL, n(0));
             self.put(PALETTE_TEXT, s(""));
         }
@@ -365,11 +358,7 @@ impl R<'_> {
             }
             self.put(TRANSCRIPT_UI, Value::Null);
         }
-        let back = if as_str(&cur) == Some("permission") {
-            self.now(MODAL_UNDER)
-        } else {
-            Value::Null
-        };
+        let back = if as_str(&cur) == Some("permission") { self.now(MODAL_UNDER) } else { Value::Null };
         if !matches!(self.now(MODAL_UNDER), Value::Null) {
             self.put(MODAL_UNDER, Value::Null);
         }
@@ -379,17 +368,12 @@ impl R<'_> {
     /// A key or click in the open transcript.
     fn transcript_op(&mut self, op: TrOp) {
         let st = self.now(TRANSCRIPT_UI);
-        let Some(run) = get(&st, "run").and_then(as_str).map(str::to_owned) else {
-            return;
-        };
-        let Some(entry) = self.transcript_id(&run) else {
-            return;
-        };
+        let Some(run) = get(&st, "run").and_then(as_str).map(str::to_owned) else { return };
+        let Some(entry) = self.transcript_id(&run) else { return };
         let size = self.now(SIZE);
         let cols = get(&size, "cols").and_then(as_i64).unwrap_or(80);
         let rows = get(&size, "rows").and_then(as_i64).unwrap_or(24);
-        let (width, height) =
-            transcript_body(cols.clamp(0, 9999) as u16, rows.clamp(0, 9999) as u16);
+        let (width, height) = transcript_body(cols.clamp(0, 9999) as u16, rows.clamp(0, 9999) as u16);
         let expanded: Vec<String> = get(&st, "expanded")
             .map(as_list)
             .unwrap_or_default()
@@ -397,27 +381,16 @@ impl R<'_> {
             .filter_map(as_str)
             .map(str::to_owned)
             .collect();
-        let ver = get(&st, "ver")
-            .and_then(as_i64)
-            .and_then(|v| u32::try_from(v).ok());
-        let total = |r: &Self, expanded: &[String]| {
-            r.store
-                .transcript_rows(entry, width, expanded, ver, (None, 0))
-                .total
-        };
+        let ver = get(&st, "ver").and_then(as_i64).and_then(|v| u32::try_from(v).ok());
+        let total = |r: &Self, expanded: &[String]| r.store.transcript_rows(entry, width, expanded, ver, (None, 0)).total;
         let follow = matches!(get(&st, "follow"), Some(Value::Bool(true)));
         let max_top = |t: usize| t.saturating_sub(height);
         let mut st = st;
         match op {
             TrOp::Scroll(lines) => {
                 let t = total(self, &expanded);
-                let cur = if follow {
-                    max_top(t)
-                } else {
-                    get(&st, "top").and_then(as_i64).unwrap_or(0).max(0) as usize
-                };
-                let top = (cur.min(max_top(t)) as i64 - i64::from(lines))
-                    .clamp(0, max_top(t) as i64) as usize;
+                let cur = if follow { max_top(t) } else { get(&st, "top").and_then(as_i64).unwrap_or(0).max(0) as usize };
+                let top = (cur.min(max_top(t)) as i64 - i64::from(lines)).clamp(0, max_top(t) as i64) as usize;
                 st = with(&st, "top", n(top));
                 st = with(&st, "follow", Value::Bool(top >= max_top(t)));
             }
@@ -428,14 +401,8 @@ impl R<'_> {
             TrOp::Bottom => st = with(&st, "follow", Value::Bool(true)),
             TrOp::Tool(sel) => {
                 let t = total(self, &expanded);
-                let first = if follow {
-                    max_top(t)
-                } else {
-                    get(&st, "top").and_then(as_i64).unwrap_or(0).max(0) as usize
-                };
-                let seen =
-                    self.store
-                        .transcript_rows(entry, width, &expanded, ver, (Some(first), height));
+                let first = if follow { max_top(t) } else { get(&st, "top").and_then(as_i64).unwrap_or(0).max(0) as usize };
+                let seen = self.store.transcript_rows(entry, width, &expanded, ver, (Some(first), height));
                 let visible: Vec<i64> = seen
                     .rows
                     .iter()
@@ -481,26 +448,14 @@ impl R<'_> {
     /// commit that changed the run's transcript, or back to now. Past the retained window the
     /// view says so and stays where it was.
     fn travel(&self, st: Value, run: &str, op: TrOp) -> Value {
-        let live = with(
-            &with(&with(&st, "at", Value::Null), "ver", Value::Null),
-            "evicted",
-            Value::Null,
-        );
-        let Some(node) = self.g.node(&run_key(run, "tail")) else {
-            return st;
-        };
+        let live = with(&with(&with(&st, "at", Value::Null), "ver", Value::Null), "evicted", Value::Null);
+        let Some(node) = self.g.node(&run_key(run, "tail")) else { return st };
         if op == TrOp::Live {
             return live;
         }
         let log = self.g.commit_log();
-        let changes: Vec<u64> = log
-            .iter()
-            .filter(|c| c.changed_nodes.contains(&node))
-            .map(|c| c.time)
-            .collect();
-        let shown = get(&st, "at")
-            .and_then(as_i64)
-            .map_or_else(|| changes.last().copied(), |t| Some(t as u64));
+        let changes: Vec<u64> = log.iter().filter(|c| c.changed_nodes.contains(&node)).map(|c| c.time).collect();
+        let shown = get(&st, "at").and_then(as_i64).map_or_else(|| changes.last().copied(), |t| Some(t as u64));
         let target = match (op, shown) {
             (TrOp::Back, Some(shown)) => changes.iter().rev().find(|t| **t < shown).copied(),
             (TrOp::Back, None) => None,
@@ -510,9 +465,7 @@ impl R<'_> {
         let Some(target) = target else {
             if op == TrOp::Back {
                 // Nothing earlier is retained: say where the window starts if history was cut.
-                if let aibus_graph::RetentionResult::Evicted { oldest_retained } =
-                    self.g.snapshot_at(1)
-                {
+                if let aibus_graph::RetentionResult::Evicted { oldest_retained } = self.g.snapshot_at(1) {
                     return with(&st, "evicted", n(oldest_retained));
                 }
             }
@@ -527,9 +480,7 @@ impl R<'_> {
                 let st = with(&st, "ver", n(h.version));
                 with(&st, "evicted", Value::Null)
             }
-            aibus_graph::RetentionResult::Evicted { oldest_retained } => {
-                with(&st, "evicted", n(oldest_retained))
-            }
+            aibus_graph::RetentionResult::Evicted { oldest_retained } => with(&st, "evicted", n(oldest_retained)),
             _ => st,
         }
     }
@@ -680,11 +631,7 @@ impl R<'_> {
                 self.put(FOCUS, s(ORDER[next].as_str()));
             }
             UiIntent::Select(pane, sel) => self.select(pane, sel),
-            UiIntent::Scroll {
-                pane,
-                lines,
-                sideways,
-            } => {
+            UiIntent::Scroll { pane, lines, sideways } => {
                 self.scroll(pane, lines, sideways);
                 if pane == Pane::Log && !sideways {
                     let held = as_i64(&self.now(&scroll_key("log"))).unwrap_or(0);
@@ -785,11 +732,7 @@ impl R<'_> {
                     self.log("info", "moved to the background");
                 }
             }
-            Command::Fork {
-                prompt,
-                parent,
-                run,
-            } => {
+            Command::Fork { prompt, parent, run } => {
                 // The user's `/fork` has no parent of its own: it forks the lead.
                 let parent = parent.or_else(|| {
                     as_list(self.cur(RUNS_ORDER))
@@ -815,17 +758,10 @@ impl R<'_> {
                     _ => self.log("warn", "nothing to fork"),
                 }
             }
-            Command::Cancel { run }
-                if self
-                    .status(&run.to_string())
-                    .is_some_and(RunStatus::is_terminal) =>
-            {
+            Command::Cancel { run } if self.status(&run.to_string()).is_some_and(RunStatus::is_terminal) => {
                 // `x` on a finished run dismisses its card; the selection stays on a card.
                 let key = run_key(run, "meta");
-                self.put(
-                    key.clone(),
-                    with(self.cur(&key), "dismissed", Value::Bool(true)),
-                );
+                self.put(key.clone(), with(self.cur(&key), "dismissed", Value::Bool(true)));
                 let left = self.visible_workers().len().saturating_sub(1);
                 let sel = as_i64(self.cur(SELECTED_CARD)).unwrap_or(0).max(0);
                 self.put(SELECTED_CARD, n(sel.min(left.saturating_sub(1) as i64)));
@@ -878,19 +814,11 @@ impl R<'_> {
             Command::OpenScreen(Screen::Agents) => self.open_modal("agents"),
             Command::OpenScreen(Screen::Accounts) => self.open_modal("accounts"),
             Command::OpenScreen(Screen::Providers) => self.open_modal("providers"),
-            Command::OpenScreen(Screen::ConfirmLogout(account)) => {
-                self.open_modal(&format!("confirm:logout:{account}"))
-            }
-            Command::OpenScreen(Screen::Models(target)) => {
-                self.open_modal(&format!("models:{}", target.label()))
-            }
+            Command::OpenScreen(Screen::ConfirmLogout(account)) => self.open_modal(&format!("confirm:logout:{account}")),
+            Command::OpenScreen(Screen::Models(target)) => self.open_modal(&format!("models:{}", target.label())),
             Command::OpenScreen(Screen::ConfirmClear) => self.open_modal("confirm:clear"),
-            Command::OpenScreen(Screen::ConfirmCancel(run)) => {
-                self.open_modal(&format!("confirm:cancel:{run}"))
-            }
-            Command::OpenScreen(Screen::RunStatus(run)) => {
-                self.open_modal(&format!("status:{run}"))
-            }
+            Command::OpenScreen(Screen::ConfirmCancel(run)) => self.open_modal(&format!("confirm:cancel:{run}")),
+            Command::OpenScreen(Screen::RunStatus(run)) => self.open_modal(&format!("status:{run}")),
             Command::OpenScreen(Screen::AdvisorStatus) => self.open_modal("status:advisor"),
             Command::OpenScreen(Screen::RouterStatus) => self.open_modal("status:router"),
             Command::OpenScreen(Screen::Cost) => self.open_modal("cost"),
@@ -911,24 +839,14 @@ impl R<'_> {
                 let model = model.trim();
                 if model.is_empty() {
                     self.log("warn", "model: needs a model");
-                } else if model == "off"
-                    && matches!(target, ModelTarget::Lead | ModelTarget::Run(_))
-                {
-                    let who = if *target == ModelTarget::Lead {
-                        "the lead".to_owned()
-                    } else {
-                        target.label()
-                    };
+                } else if model == "off" && matches!(target, ModelTarget::Lead | ModelTarget::Run(_)) {
+                    let who = if *target == ModelTarget::Lead { "the lead".to_owned() } else { target.label() };
                     self.log("warn", &format!("model: {who} cannot be turned off"));
                 } else {
                     // The reducer has no accounts to resolve an alias with: the request waits in
                     // the graph for the executor, which answers with `Msg::ModelSwitched`.
                     let id = as_i64(&self.now(MSG_SEQ)).unwrap_or(0);
-                    let req = map([
-                        ("id", n(id)),
-                        ("target", s(&target.label())),
-                        ("model", s(model)),
-                    ]);
+                    let req = map([("id", n(id)), ("target", s(&target.label())), ("model", s(model))]);
                     let assist = self.now(SESSION_ASSIST);
                     let queue = pushed(get(&assist, "pending").unwrap_or(&NULL), req);
                     self.put(SESSION_ASSIST, with(&assist, "pending", queue));
@@ -973,30 +891,13 @@ impl R<'_> {
 
 /// The one line a collapsed tool call shows: the command, the path, the pattern.
 pub fn tool_summary(name: &str, input: &serde_json::Value) -> String {
-    let pick = |keys: &[&str]| {
-        keys.iter()
-            .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
-    };
+    let pick = |keys: &[&str]| keys.iter().find_map(|k| input.get(*k).and_then(|v| v.as_str()));
     let line = match name {
         "bash" => pick(&["command"]),
-        _ => pick(&[
-            "path",
-            "file_path",
-            "pattern",
-            "query",
-            "url",
-            "command",
-            "prompt",
-            "agent",
-        ]),
+        _ => pick(&["path", "file_path", "pattern", "query", "url", "command", "prompt", "agent"]),
     }
     .map_or_else(|| input.to_string(), str::to_owned);
-    line.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(120)
-        .collect()
+    line.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect()
 }
 
 /// `/model <ref>`, `/advisor <ref>` and `/router <ref>` as text: a line that reaches the reducer
@@ -1011,19 +912,13 @@ fn slash_model(text: &str) -> Option<Command> {
         _ => return None,
     };
     let model = rest.trim();
-    (!model.is_empty()).then(|| Command::SetModel {
-        target,
-        model: model.to_owned(),
-    })
+    (!model.is_empty()).then(|| Command::SetModel { target, model: model.to_owned() })
 }
 
 /// `/compact` and `/fork <task>` typed while a lead runs: the command, aimed at the lead.
 fn slash(text: &str, lead: Option<&str>) -> Option<Command> {
     let lead: RunId = lead?.parse().ok()?;
-    let (word, rest) = text
-        .trim()
-        .split_once(char::is_whitespace)
-        .unwrap_or((text.trim(), ""));
+    let (word, rest) = text.trim().split_once(char::is_whitespace).unwrap_or((text.trim(), ""));
     match word {
         "/compact" => Some(Command::Compact { run: lead }),
         "/fork" if !rest.trim().is_empty() => Some(Command::Fork {
@@ -1078,13 +973,7 @@ fn def_summary(store: &Store, d: &AgentDef) -> Value {
                 Scope::Builtin => "builtin",
             }),
         ),
-        (
-            "path",
-            d.source
-                .path
-                .as_ref()
-                .map_or(Value::Null, |p| s(&p.to_string_lossy())),
-        ),
+        ("path", d.source.path.as_ref().map_or(Value::Null, |p| s(&p.to_string_lossy()))),
         (
             "model",
             s(&match &d.model {
@@ -1097,11 +986,7 @@ fn def_summary(store: &Store, d: &AgentDef) -> Value {
             "tools",
             s(&match &d.tools.allow {
                 None => "all".to_owned(),
-                Some(allow) => allow
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                Some(allow) => allow.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
             }),
         ),
         // Prompt bodies never enter the graph.
@@ -1197,8 +1082,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     role: Some(Role::Lead),
                     ..Queue::new("lead", text, false, Isolation::None, None)
                 });
-            } else if let Some(c) = slash(text, as_list(r.cur(RUNS_ORDER)).first().and_then(as_str))
-            {
+            } else if let Some(c) = slash(text, as_list(r.cur(RUNS_ORDER)).first().and_then(as_str)) {
                 r.command(&c);
             } else if let Some((agent, rest)) = parse_mention(text) {
                 // `@agent-<name> <rest>` is a forced delegate; the lead still gets the result.
@@ -1206,13 +1090,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     .first()
                     .and_then(as_str)
                     .and_then(|id| id.parse().ok());
-                r.queue_run(Queue::new(
-                    agent.as_str(),
-                    rest,
-                    true,
-                    Isolation::None,
-                    lead,
-                ));
+                r.queue_run(Queue::new(agent.as_str(), rest, true, Isolation::None, lead));
             } else {
                 r.log("info", "prompt for the running lead");
             }
@@ -1261,20 +1139,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             } else {
                 r.new_run(&id, meta, RunStatus::Starting);
             }
-            r.log_row(
-                "info",
-                agent.as_str(),
-                Some(id.clone()),
-                "started",
-                Vec::new(),
-            );
-            let prompt = match get(r.cur(&run_key(&id, "meta")), "prompt")
-                .cloned()
-                .or_else(|| get(&old, "prompt").cloned())
-            {
-                Some(Value::Handle(h)) => {
-                    r.store.text(&h).map(|t| t.to_string()).unwrap_or_default()
-                }
+            r.log_row("info", agent.as_str(), Some(id.clone()), "started", Vec::new());
+            let prompt = match get(r.cur(&run_key(&id, "meta")), "prompt").cloned().or_else(|| get(&old, "prompt").cloned()) {
+                Some(Value::Handle(h)) => r.store.text(&h).map(|t| t.to_string()).unwrap_or_default(),
                 Some(v) => as_str(&v).unwrap_or("").to_owned(),
                 None => String::new(),
             };
@@ -1349,10 +1216,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             // `ask_user` parks the run until the user answers.
             let id = run.to_string();
             if call.name == "ask_user"
-                && matches!(
-                    r.status(&id),
-                    Some(RunStatus::Running | RunStatus::Starting)
-                )
+                && matches!(r.status(&id), Some(RunStatus::Running | RunStatus::Starting))
             {
                 r.set_status(&id, RunStatus::WaitingUser);
             }
@@ -1401,11 +1265,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let id = run.to_string();
             // A write the owner allowed and the server accepted (a refusal says `· error` in the
             // wrapper's header).
-            if let (true, Some(wf), false) = (
-                crate::mcp::asks_every_time(&name),
-                written,
-                result.is_error || result.content.contains("· error]"),
-            ) {
+            if let (true, Some(wf), false) =
+                (crate::mcp::asks_every_time(&name), written, result.is_error || result.content.contains("· error]"))
+            {
                 let who = r.agent_of(&id);
                 r.log("info", &format!("workflow {wf} written by {who}"));
             }
@@ -1413,9 +1275,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.set_status(&id, RunStatus::Running);
             }
             if !result.artifacts.is_empty() {
-                let mut found =
-                    as_list(get(r.cur(&run_key(&id, "meta")), "artifacts").unwrap_or(&Value::Null))
-                        .to_vec();
+                let mut found = as_list(get(r.cur(&run_key(&id, "meta")), "artifacts").unwrap_or(&Value::Null)).to_vec();
                 for a in &result.artifacts {
                     found.push(map([
                         ("name", s(&a.name)),
@@ -1427,9 +1287,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.put(run_key(&id, "meta"), meta);
             }
             match result.progress {
-                Some(Progress::Fraction(f)) => {
-                    r.put(run_key(&id, "progress"), Value::F64(f64::from(f)))
-                }
+                Some(Progress::Fraction(f)) => r.put(run_key(&id, "progress"), Value::F64(f64::from(f))),
                 Some(Progress::Done) => r.put(run_key(&id, "progress"), Value::F64(1.0)),
                 Some(Progress::Indeterminate) => r.put(run_key(&id, "progress"), Value::Null),
                 None => {}
@@ -1478,24 +1336,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.put(run_key(&id, "tail"), Value::Handle(tail));
             }
             let who = r.agent_of(&id);
-            r.log_row(
-                "info",
-                &who,
-                Some(id.clone()),
-                &format!("finished {}", result.status.as_value()),
-                Vec::new(),
-            );
+            r.log_row("info", &who, Some(id.clone()), &format!("finished {}", result.status.as_value()), Vec::new());
             // The workflow author ends with its TOML in a fenced block; the last one is the
             // draft `/workflow save` writes, if it validates against the roster we have.
-            let fenced = result
-                .summary
-                .rsplit_once("```toml")
-                .and_then(|(_, after)| after.split_once("```"));
-            if let (true, true, Some((body, _))) = (
-                result.agent.as_str() == "workflow-author",
-                result.status == RunStatus::Completed,
-                fenced,
-            ) {
+            let fenced = result.summary.rsplit_once("```toml").and_then(|(_, after)| after.split_once("```"));
+            if let (true, true, Some((body, _))) = (result.agent.as_str() == "workflow-author", result.status == RunStatus::Completed, fenced) {
                 let toml = body.trim_start_matches('\n');
                 let roster: Vec<AgentName> = as_list(r.cur(AGENTS_DEFS))
                     .iter()
@@ -1504,18 +1349,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     .collect();
                 let (ok, line) = workflow::summarise(toml, "draft", &roster);
                 if ok {
-                    r.put(
-                        WORKFLOW_DRAFT,
-                        map([
-                            ("toml", r.store.inline_or_handle(toml)),
-                            ("summary", s(&line)),
-                        ]),
-                    );
+                    r.put(WORKFLOW_DRAFT, map([("toml", r.store.inline_or_handle(toml)), ("summary", s(&line))]));
                 }
-                r.log(
-                    if ok { "info" } else { "warn" },
-                    &format!("workflow draft: {line}"),
-                );
+                r.log(if ok { "info" } else { "warn" }, &format!("workflow draft: {line}"));
             }
             r.cancel_queued_below(&id);
         }
@@ -1530,21 +1366,9 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     ("retryable", Value::Bool(error.retryable)),
                 ]),
             );
-            r.event(
-                &id,
-                Ev::Note {
-                    error: true,
-                    text: format!("failed: {}: {}", error.kind.as_str(), error.message),
-                },
-            );
+            r.event(&id, Ev::Note { error: true, text: format!("failed: {}: {}", error.kind.as_str(), error.message) });
             let who = r.agent_of(&id);
-            r.log_row(
-                "error",
-                &who,
-                Some(id.clone()),
-                &format!("failed: {}", error.kind.as_str()),
-                Vec::new(),
-            );
+            r.log_row("error", &who, Some(id.clone()), &format!("failed: {}", error.kind.as_str()), Vec::new());
             r.cancel_queued_below(&id);
         }
         Msg::UsageUpdate { run, usage } => r.put(run_key(run, "usage"), usage_abs(usage)),
@@ -1610,11 +1434,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 "info",
                 "router",
                 None,
-                &format!(
-                    "{} → {}",
-                    question.kind.as_str().replace('_', " "),
-                    answer.choice
-                ),
+                &format!("{} → {}", question.kind.as_str().replace('_', " "), answer.choice),
                 vec![
                     ("p", Value::F64((f64::from(answer.p) * 1e4).round() / 1e4)),
                     ("verdict", s(answer.verdict.as_str())),
@@ -1629,13 +1449,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             );
             r.put(ADVISOR_STATE, with(&a, "status", s("reading")));
             let what = checkpoint.name().replace('_', " ");
-            r.log_row(
-                "info",
-                "advisor",
-                None,
-                &format!("{what} · reading full session"),
-                Vec::new(),
-            );
+            r.log_row("info", "advisor", None, &format!("{what} · reading full session"), Vec::new());
         }
         Msg::AdvisorSpoke {
             checkpoint,
@@ -1655,21 +1469,10 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let skip = all.len().saturating_sub(ADVICE_KEEP);
             r.put(ADVISOR_ADVICE, list(all.split_off(skip)));
             let what = checkpoint.name().replace('_', " ");
-            r.log_row(
-                "info",
-                "advisor",
-                None,
-                &format!("{what} · advice sent"),
-                Vec::new(),
-            );
+            r.log_row("info", "advisor", None, &format!("{what} · advice sent"), Vec::new());
         }
         Msg::Compacted { run, pre_tokens } => {
-            r.event(
-                &run.to_string(),
-                Ev::Compact {
-                    pre_tokens: *pre_tokens,
-                },
-            );
+            r.event(&run.to_string(), Ev::Compact { pre_tokens: *pre_tokens });
             if r.status(&run.to_string()) == Some(RunStatus::Compacting) {
                 r.set_status(run, RunStatus::Running);
             }
@@ -1711,11 +1514,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             if let Some(w) = shown {
                 r.put(
                     WORKFLOW_SHOWN,
-                    map([
-                        ("name", s(&w.name)),
-                        ("text", r.store.inline_or_handle(&w.text)),
-                        ("summary", s(&w.summary)),
-                    ]),
+                    map([("name", s(&w.name)), ("text", r.store.inline_or_handle(&w.text)), ("summary", s(&w.summary))]),
                 );
             }
             if let Some(said) = said {
@@ -1730,18 +1529,10 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.put(ACCOUNTS, list(items));
             r.log("info", &format!("{} accounts loaded", accounts.len()));
         }
-        Msg::AccountOpDone {
-            op, account, ok, ..
-        } => {
+        Msg::AccountOpDone { op, account, ok, .. } => {
             // The line the screen shows can carry a provider's words, so only the outcome is logged.
             let level = if *ok { "info" } else { "warn" };
-            r.log(
-                level,
-                &format!(
-                    "account {op} {account}: {}",
-                    if *ok { "done" } else { "failed" }
-                ),
-            );
+            r.log(level, &format!("account {op} {account}: {}", if *ok { "done" } else { "failed" }));
         }
         // Shown by the modal that asked for it, which reads the message itself.
         Msg::AccountPrompt { .. } => {}
@@ -1755,25 +1546,14 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             r.log("error", &format!("io error in {context}"))
         }
         Msg::Shutdown { reason } => r.put(SHUTDOWN, s(reason.as_str())),
-        Msg::RunSwitched {
-            run,
-            from,
-            to,
-            model,
-        } => {
+        Msg::RunSwitched { run, from, to, model } => {
             let id = run.to_string();
             if r.run_exists(&id) {
                 let meta = r.cur(&run_key(&id, "meta")).clone();
                 let meta = with(&with(&meta, "model", s(&model.0)), "account", s(&to.0));
                 // The card reads this to show `↷ <account>` for the turn.
-                r.put(
-                    run_key(&id, "meta"),
-                    with(&meta, "fallback_from", s(&from.0)),
-                );
-                r.log(
-                    "info",
-                    &format!("{id}: account {} -> {} ({})", from.0, to.0, model.0),
-                );
+                r.put(run_key(&id, "meta"), with(&meta, "fallback_from", s(&from.0)));
+                r.log("info", &format!("{id}: account {} -> {} ({})", from.0, to.0, model.0));
             }
         }
         Msg::ModelSwitched { id, target, to } => {
@@ -1790,11 +1570,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                     let who = target.label();
                     match (target, chosen) {
                         (ModelTarget::Advisor | ModelTarget::Router, chosen) => {
-                            let key = if *target == ModelTarget::Advisor {
-                                "advisor"
-                            } else {
-                                "router"
-                            };
+                            let key = if *target == ModelTarget::Advisor { "advisor" } else { "router" };
                             let seat = get(&assist, key).cloned().unwrap_or(Value::Null);
                             let mut seat = with(&seat, "enabled", Value::Bool(chosen.is_some()));
                             // The advisor's label is its model; the router's is a name from config.
@@ -1812,17 +1588,13 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                             ModelTarget::Lead => as_list(r.cur(RUNS_ORDER))
                                 .iter()
                                 .filter_map(as_str)
-                                .find(|id| {
-                                    get(r.cur(&run_key(id, "meta")), "role").and_then(as_str)
-                                        == Some("lead")
-                                })
+                                .find(|id| get(r.cur(&run_key(id, "meta")), "role").and_then(as_str) == Some("lead"))
                                 .map(str::to_owned),
                             _ => None,
                         };
                         if let Some(run) = run {
                             let meta = r.cur(&run_key(&run, "meta")).clone();
-                            let meta =
-                                with(&with(&meta, "model", s(&m.0)), "account", s(&account.0));
+                            let meta = with(&with(&meta, "model", s(&m.0)), "account", s(&account.0));
                             r.put(run_key(&run, "meta"), meta);
                         }
                         r.log("info", &format!("model: {who} -> {} ({})", m.0, account.0));

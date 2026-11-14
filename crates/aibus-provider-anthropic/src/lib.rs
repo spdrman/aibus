@@ -18,18 +18,15 @@ use std::time::SystemTime;
 
 use aibus_provider::models::ModelTable;
 use aibus_provider::{
-    AccountInfo, AliasTable, Api, AuthMethodKind, CacheHint, Capabilities, ChatRequest,
-    ChatResponse, CompatFlag, ConfigError, Credential, Message, MessageRole, ModelId, ModelInfo,
-    ModelRef, ModelTableSpec, Price, Provider, ProviderConfig, ProviderDef, ProviderError,
-    ProviderErrorKind, ProviderFactory, ProviderId, RequestMetadata, StreamChunk, SystemRole,
-    ToolChoice,
+    AccountInfo, AliasTable, Api, AuthMethodKind, CacheHint, Capabilities, ChatRequest, ChatResponse, CompatFlag,
+    ConfigError, Credential, Message, MessageRole, ModelId, RequestMetadata, ToolChoice, ModelInfo, ModelRef, Price, Provider, ProviderConfig,
+    ModelTableSpec, ProviderDef, ProviderError, ProviderErrorKind, ProviderFactory, ProviderId,
+    StreamChunk, SystemRole,
 };
 use aibus_provider_http::reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE,
 };
-use aibus_provider_http::{
-    cancelled, chunk, emit, json, rate_limit, request_id, sensitive, Events, Http,
-};
+use aibus_provider_http::{cancelled, chunk, emit, json, rate_limit, request_id, sensitive, Events, Http};
 use async_trait::async_trait;
 use cloud::Transport;
 use tokio::sync::mpsc;
@@ -52,11 +49,7 @@ impl ProviderFactory for Factory {
     }
 
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
-        &[
-            AuthMethodKind::ApiKey,
-            AuthMethodKind::Bearer,
-            AuthMethodKind::Env,
-        ]
+        &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env]
     }
 
     fn apis(&self) -> &'static [&'static str] {
@@ -82,12 +75,7 @@ pub struct Anthropic {
 
 impl Anthropic {
     pub fn new(cfg: &ProviderConfig) -> Result<Self, ConfigError> {
-        Self::with_transport(
-            cfg,
-            DEFAULT_BASE_URL.to_owned(),
-            Transport::Direct,
-            &["claude-"],
-        )
+        Self::with_transport(cfg, DEFAULT_BASE_URL.to_owned(), Transport::Direct, &["claude-"])
     }
 
     pub(crate) fn with_transport(
@@ -106,28 +94,16 @@ impl Anthropic {
         });
         let api_ok = match &transport {
             Transport::Direct => def.api == Some(Api::AnthropicMessages),
-            Transport::Bedrock { .. } => matches!(
-                def.api,
-                Some(Api::AnthropicMessages | Api::AnthropicBedrock)
-            ),
-            Transport::Vertex { .. } => {
-                matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicVertex))
-            }
+            Transport::Bedrock { .. } => matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicBedrock)),
+            Transport::Vertex { .. } => matches!(def.api, Some(Api::AnthropicMessages | Api::AnthropicVertex)),
         };
         if !api_ok {
             return Err(ConfigError::Invalid(def.id.clone(), "this adapter speaks the Messages API (anthropic-messages, anthropic-bedrock, anthropic-vertex) only".into()));
         }
         let id = def.static_id();
-        let base = def
-            .base_url
-            .as_deref()
-            .unwrap_or(&default_base)
-            .trim_end_matches('/');
+        let base = def.base_url.as_deref().unwrap_or(&default_base).trim_end_matches('/');
         if !(base.starts_with("https://") || base.starts_with("http://")) {
-            return Err(ConfigError::Invalid(
-                id.into(),
-                "base_url must start with https:// or http://".into(),
-            ));
+            return Err(ConfigError::Invalid(id.into(), "base_url must start with https:// or http://".into()));
         }
         let mut extra_headers = HeaderMap::new();
         for (k, v) in &def.headers {
@@ -140,12 +116,7 @@ impl Anthropic {
         let builtin = match &def.model_table {
             Some(ModelTableSpec::Inline(v)) => v.to_string(),
             Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
-                .ok_or_else(|| {
-                    ConfigError::Invalid(
-                        id.into(),
-                        format!("model_table: no built-in table called {n}"),
-                    )
-                })?
+                .ok_or_else(|| ConfigError::Invalid(id.into(), format!("model_table: no built-in table called {n}")))?
                 .to_owned(),
             None => {
                 let name = match transport {
@@ -153,18 +124,12 @@ impl Anthropic {
                     Transport::Bedrock { .. } => "bedrock",
                     Transport::Vertex { .. } => "vertex",
                 };
-                aibus_provider::catalog::table(name)
-                    .unwrap_or_default()
-                    .to_owned()
+                aibus_provider::catalog::table(name).unwrap_or_default().to_owned()
             }
         };
         // A definition's own prefixes win over the transport's (Bedrock has its own).
         let own: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
-        let prefixes = if own.is_empty() || !matches!(transport, Transport::Direct) {
-            prefixes
-        } else {
-            &own[..]
-        };
+        let prefixes = if own.is_empty() || !matches!(transport, Transport::Direct) { prefixes } else { &own[..] };
         Ok(Self {
             id,
             extra_headers,
@@ -244,18 +209,10 @@ impl Anthropic {
         let (resp, ()) = tokio::join!(self.stream(creds, req, tx, CancellationToken::new()), drain);
         let resp = resp?;
         let cost_usd = self.price(&model).and_then(|p| p.cost_usd(&resp.usage));
-        Ok(AccountInfo {
-            label: creds.account.to_string(),
-            org: None,
-            models: models.into_iter().map(|m| m.id).collect(),
-            cost_usd,
-        })
+        Ok(AccountInfo { label: creds.account.to_string(), org: None, models: models.into_iter().map(|m| m.id).collect(), cost_usd })
     }
 
-    async fn list_models(
-        &self,
-        creds: &Credential,
-    ) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
+    async fn list_models(&self, creds: &Credential) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
         let url = format!("{}/v1/models?limit=1000", self.base);
         let headers = self.headers(creds)?;
         let resp = self
@@ -270,12 +227,7 @@ impl Anthropic {
         let body = json(resp).await?;
         let ids = body["data"]
             .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|m| m["id"].as_str())
-                    .map(|id| ModelId(id.into()))
-                    .collect()
-            })
+            .map(|a| a.iter().filter_map(|m| m["id"].as_str()).map(|id| ModelId(id.into())).collect())
             .unwrap_or_default();
         Ok((ids, org))
     }
@@ -292,9 +244,7 @@ impl Provider for Anthropic {
     }
 
     fn capabilities_for(&self, model: &ModelId) -> Capabilities {
-        self.table()
-            .capabilities_for(self.base_caps.clone(), model)
-            .with_compat(&self.compat)
+        self.table().capabilities_for(self.base_caps.clone(), model).with_compat(&self.compat)
     }
 
     fn models(&self) -> Vec<ModelInfo> {
@@ -340,20 +290,14 @@ impl Provider for Anthropic {
         let req = self.capabilities_for(&req.model).degrade(req);
         let (price, effort_ok) = {
             let t = self.table();
-            (
-                t.price(&req.model),
-                t.entry(&req.model).is_some_and(|e| e.effort),
-            )
+            (t.price(&req.model), t.entry(&req.model).is_some_and(|e| e.effort))
         };
         let body = wire::messages_body(&req, effort_ok, &self.compat);
         let beta = req.effort.is_some() && effort_ok;
         tracing::debug!(account = %creds.account, model = %req.model, "anthropic: stream");
 
         let (url, headers, body) = self.prepare(creds, &req.model, body, beta).await?;
-        let mut resp = self
-            .http
-            .send(&cancel, |c| c.post(&url).headers(headers).body(body))
-            .await?;
+        let mut resp = self.http.send(&cancel, |c| c.post(&url).headers(headers).body(body)).await?;
         let request_id = request_id(&resp);
         let window = rate_limit(resp.headers(), SystemTime::now());
 
@@ -369,10 +313,7 @@ impl Provider for Anthropic {
                 }
             }
             if frames.is_partial() {
-                return Err(ProviderError::new(
-                    ProviderErrorKind::Network,
-                    "the event stream broke off inside a frame",
-                ));
+                return Err(ProviderError::new(ProviderErrorKind::Network, "the event stream broke off inside a frame"));
             }
         } else {
             let mut events = Events::new(resp, cancel.clone());
@@ -413,10 +354,7 @@ impl Provider for Anthropic {
                 })
                 .await?;
             json(resp).await?["input_tokens"].as_u64().ok_or_else(|| {
-                ProviderError::new(
-                    aibus_provider::ProviderErrorKind::Unknown,
-                    "count_tokens: no input_tokens in the answer",
-                )
+                ProviderError::new(aibus_provider::ProviderErrorKind::Unknown, "count_tokens: no input_tokens in the answer")
             })
         }
         .await;
@@ -428,12 +366,7 @@ impl Provider for Anthropic {
             return self.probe(creds).await;
         }
         let (models, org) = self.list_models(creds).await?;
-        Ok(AccountInfo {
-            label: creds.account.to_string(),
-            org,
-            models,
-            cost_usd: None,
-        })
+        Ok(AccountInfo { label: creds.account.to_string(), org, models, cost_usd: None })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

@@ -21,43 +21,13 @@ const TH: Theme = Theme::recording();
 /// A lead and three workers: running, partial and done.
 fn rig() -> Rig {
     let mut app = session();
-    worker(
-        &mut app,
-        2,
-        "search",
-        "maps the repo",
-        Some(0.71),
-        "running",
-    );
-    worker(
-        &mut app,
-        3,
-        "grep",
-        "finds call sites",
-        Some(0.35),
-        "partial",
-    );
-    worker(
-        &mut app,
-        4,
-        "audit",
-        "runs in a worktree",
-        Some(1.0),
-        "completed",
-    );
+    worker(&mut app, 2, "search", "maps the repo", Some(0.71), "running");
+    worker(&mut app, 3, "grep", "finds call sites", Some(0.35), "partial");
+    worker(&mut app, 4, "audit", "runs in a worktree", Some(1.0), "completed");
     Rig::new(app, (98, 46), TH)
 }
 
-const ITEMS: [&str; 8] = [
-    "Open transcript",
-    "Cancel",
-    "Fork",
-    "Resume",
-    "Copy id",
-    "Copy result",
-    "Status",
-    "Cost",
-];
+const ITEMS: [&str; 8] = ["Open transcript", "Cancel", "Fork", "Resume", "Copy id", "Copy result", "Status", "Cost"];
 
 fn opened(r: &mut Rig, card: usize) {
     let (c, row) = r.centre(HitId::Card(card));
@@ -81,13 +51,7 @@ fn a_click_on_a_status_segment_does_what_its_key_would() {
     }
     // The advisor segment opens the last advice, like Enter on the rail.
     let mut r = rig();
-    r.app
-        .step(Msg::AdvisorSpoke {
-            checkpoint: Checkpoint::BeforePlan,
-            advice: "plan skips auth".into(),
-            tokens_read: 1,
-        })
-        .unwrap();
+    r.app.step(Msg::AdvisorSpoke { checkpoint: Checkpoint::BeforePlan, advice: "plan skips auth".into(), tokens_read: 1 }).unwrap();
     r.settle();
     r.click(HitId::Status(Segment::Advisor));
     assert!(r.text().contains("» plan skips auth"), "{}", r.text());
@@ -96,25 +60,13 @@ fn a_click_on_a_status_segment_does_what_its_key_would() {
 #[test]
 fn a_click_on_the_ledger_shows_all_of_it_and_a_click_elsewhere_hides_it() {
     let mut app = session();
-    for (section, text) in [
-        ("goal", "ship the dashboard widgets with their tests"),
-        ("now", "writing the mouse tests"),
-    ] {
-        app.step(Msg::Command(Command::LedgerUpdate {
-            section: section.into(),
-            text: text.into(),
-        }))
-        .unwrap();
+    for (section, text) in [("goal", "ship the dashboard widgets with their tests"), ("now", "writing the mouse tests")] {
+        app.step(Msg::Command(Command::LedgerUpdate { section: section.into(), text: text.into() })).unwrap();
     }
     let mut r = Rig::new(app, (110, 46), TH);
     assert!(!r.text().contains("goal: ship"), "cut to fit, so not whole");
     r.click(HitId::Status(Segment::Ledger));
-    assert!(
-        r.text()
-            .contains("goal: ship the dashboard widgets with their tests"),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().contains("goal: ship the dashboard widgets with their tests"), "{}", r.text());
     assert!(r.text().contains("now: writing the mouse tests"));
     r.down(2, 12);
     assert!(!r.text().contains("goal: ship"));
@@ -124,32 +76,15 @@ fn a_click_on_the_ledger_shows_all_of_it_and_a_click_elsewhere_hides_it() {
 fn a_double_click_on_a_log_row_of_a_run_opens_its_transcript() {
     let mut r = rig();
     let rows = aibus_tui::input::Context::read(&r.app.graph).log_runs;
-    let at = rows
-        .iter()
-        .position(|x| *x == Some(run_id(3)))
-        .expect("a row of the grep worker");
+    let at = rows.iter().position(|x| *x == Some(run_id(3))).expect("a row of the grep worker");
     let id = HitId::LogRow(at);
     let (c, row) = r.centre(id);
     r.down(c, row);
     r.up(c, row);
     r.advance(100);
     let msgs = r.down(c, row);
-    assert!(
-        names(&msgs)
-            .iter()
-            .any(|m| m.starts_with("Command(OpenTranscript(")),
-        "{:?}",
-        names(&msgs)
-    );
-    assert_eq!(
-        r.app
-            .graph
-            .read_key("ctrl:modal")
-            .cloned()
-            .map(|v| format!("{v:?}"))
-            .unwrap_or_default(),
-        format!("Str(\"transcript:{}\")", run_id(3))
-    );
+    assert!(names(&msgs).iter().any(|m| m.starts_with("Command(OpenTranscript(")), "{:?}", names(&msgs));
+    assert_eq!(r.app.graph.read_key("ctrl:modal").cloned().map(|v| format!("{v:?}")).unwrap_or_default(), format!("Str(\"transcript:{}\")", run_id(3)));
 }
 
 // ---- the context menu ------------------------------------------------------------------------
@@ -159,10 +94,7 @@ fn right_click_on_a_card_selects_it_and_opens_the_menu_with_all_eight_items() {
     let mut r = rig();
     let (c, row) = r.centre(HitId::Card(1));
     let msgs = names(&r.right_down(c, row));
-    assert_eq!(
-        &msgs[..2],
-        ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(1)))"]
-    );
+    assert_eq!(&msgs[..2], ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(1)))"]);
     assert!(msgs[2].starts_with("Ui(OpenMenu { run: "), "{msgs:?}");
     assert_eq!(r.int(SELECTED_CARD), Some(1));
     for label in ITEMS {
@@ -217,10 +149,7 @@ fn a_click_outside_closes_the_menu_and_does_not_reach_what_is_behind() {
     opened(&mut r, 0);
     let (c, row) = r.centre(HitId::Card(2));
     let msgs = names(&r.right_down(c, row));
-    assert_eq!(
-        &msgs[..2],
-        ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(2)))"]
-    );
+    assert_eq!(&msgs[..2], ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(2)))"]);
     assert!(msgs[2].starts_with("Ui(OpenMenu { run: "), "{msgs:?}");
 }
 
@@ -238,11 +167,7 @@ fn choosing_an_item_sends_its_command_and_closes_the_menu() {
     let msgs = names(&r.click(HitId::MenuItem(0)));
     assert!(msgs[0].starts_with("Command(OpenTranscript("), "{msgs:?}");
     assert_eq!(
-        r.app
-            .graph
-            .read_key("ctrl:modal")
-            .cloned()
-            .map(|v| format!("{v:?}")),
+        r.app.graph.read_key("ctrl:modal").cloned().map(|v| format!("{v:?}")),
         Some(format!("Str(\"transcript:{}\")", run_id(2)))
     );
 
@@ -324,17 +249,7 @@ fn the_menu_key_works_in_the_log_too_and_the_pointer_events_are_ignored_when_the
     });
     let mut off = rig();
     let before = off.int("eng:msg_seq");
-    terminal_events(
-        vec![event],
-        &mut off.app,
-        &mut ui,
-        &mut Input::default(),
-        &mut CtrlC::default(),
-        false,
-        Instant::now(),
-        &mut |app, m| app.step(m),
-    )
-    .unwrap();
+    terminal_events(vec![event], &mut off.app, &mut ui, &mut Input::default(), &mut CtrlC::default(), false, Instant::now(), &mut |app, m| app.step(m)).unwrap();
     assert_eq!(off.int("eng:msg_seq"), before);
 }
 
@@ -369,12 +284,7 @@ fn a_tooltip_comes_after_500_ms_at_rest_and_changes_nothing_underneath() {
     assert_eq!(r.frame().text, hovered.text, "not yet");
     r.advance(1);
     let tip = r.frame();
-    for line in [
-        format!("run {}", run_id(3)),
-        "cost $0.0000".to_owned(),
-        "model Haiku 5.5  account acct".to_owned(),
-        "finds call sites".to_owned(),
-    ] {
+    for line in [format!("run {}", run_id(3)), "cost $0.0000".to_owned(), "model Haiku 5.5  account acct".to_owned(), "finds call sites".to_owned()] {
         assert!(tip.text.contains(&line), "{line}\n{}", tip.text);
     }
     // It is a layer: the hit map and the geometry are the same, and the cells it did not
@@ -383,22 +293,9 @@ fn a_tooltip_comes_after_500_ms_at_rest_and_changes_nothing_underneath() {
     let (a, b): (Vec<_>, Vec<_>) = (hovered.text.lines().collect(), tip.text.lines().collect());
     let changed: Vec<usize> = (0..a.len()).filter(|i| a[*i] != b[*i]).collect();
     let card = r.rect(HitId::Card(1));
-    assert!(
-        changed.first().is_some_and(|y| *y as u16 >= card.bottom()),
-        "below the card: {changed:?}"
-    );
+    assert!(changed.first().is_some_and(|y| *y as u16 >= card.bottom()), "below the card: {changed:?}");
     assert!(changed.len() <= 7, "{changed:?}");
-    assert_eq!(
-        before
-            .text
-            .lines()
-            .take(usize::from(card.y))
-            .collect::<Vec<_>>(),
-        b.iter()
-            .copied()
-            .take(usize::from(card.y))
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(before.text.lines().take(usize::from(card.y)).collect::<Vec<_>>(), b.iter().copied().take(usize::from(card.y)).collect::<Vec<_>>());
     // Moving away takes it down.
     r.hover(0, 0);
     assert!(!r.text().contains("cost $"));
@@ -423,11 +320,7 @@ fn space_shows_the_tooltip_of_the_selection_and_any_key_hides_it() {
     let mut r = rig();
     r.key(KeyCode::Tab);
     r.press(' ');
-    assert!(
-        r.text().contains(&format!("run {}", run_id(2))),
-        "{}",
-        r.text()
-    );
+    assert!(r.text().contains(&format!("run {}", run_id(2))), "{}", r.text());
     // Space again closes it.
     r.press(' ');
     assert!(!r.text().contains("cost $"));
@@ -445,10 +338,7 @@ fn nothing_but_cards_rows_and_the_cut_off_segments_have_tooltips() {
     assert!(!r.text().contains("cost $"));
     // The corner of the centre column is a pane, not a card.
     r.hover(a.centre.x, a.centre.y);
-    assert_eq!(
-        r.ui.drawn.hits.at(a.centre.x, a.centre.y).map(|h| h.id),
-        Some(HitId::Pane(Pane::Cards))
-    );
+    assert_eq!(r.ui.drawn.hits.at(a.centre.x, a.centre.y).map(|h| h.id), Some(HitId::Pane(Pane::Cards)));
     r.advance(1000);
     assert!(!r.text().contains("cost $"));
 }

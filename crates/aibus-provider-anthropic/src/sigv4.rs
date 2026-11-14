@@ -26,9 +26,7 @@ impl AwsKeys {
             (Some(id), Some(key), token) if !id.is_empty() && !key.is_empty() => Ok(Self {
                 access_key: id.to_owned(),
                 secret_key: Zeroizing::new(key.to_owned()),
-                session_token: token
-                    .filter(|t| !t.is_empty())
-                    .map(|t| Zeroizing::new(t.to_owned())),
+                session_token: token.filter(|t| !t.is_empty()).map(|t| Zeroizing::new(t.to_owned())),
             }),
             _ => Err(ProviderError::new(
                 ProviderErrorKind::Auth,
@@ -67,10 +65,7 @@ pub fn uri_encode(s: &str) -> String {
 
 /// `YYYYMMDD'T'HHMMSS'Z'` for a moment in time.
 pub fn amz_date(t: SystemTime) -> String {
-    let secs = t
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs();
+    let secs = t.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
     let (days, rem) = ((secs / 86_400) as i64, secs % 86_400);
     // Days since 1970-01-01 to a calendar date (the proleptic Gregorian algorithm).
     let z = days + 719_468;
@@ -82,12 +77,7 @@ pub fn amz_date(t: SystemTime) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    format!("{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 fn signing_key(secret: &str, date: &str, region: &str, service: &str) -> Vec<u8> {
@@ -118,14 +108,8 @@ pub fn authorization(
     );
     let date = &stamp[..8];
     let scope = format!("{date}/{region}/{service}/aws4_request");
-    let to_sign = format!(
-        "AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}",
-        sha256_hex(canonical.as_bytes())
-    );
-    let signature = hex(&hmac(
-        &signing_key(&keys.secret_key, date, region, service),
-        to_sign.as_bytes(),
-    ));
+    let to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}", sha256_hex(canonical.as_bytes()));
+    let signature = hex(&hmac(&signing_key(&keys.secret_key, date, region, service), to_sign.as_bytes()));
     format!(
         "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed}, Signature={signature}",
         keys.access_key
@@ -171,15 +155,9 @@ mod tests {
     #[test]
     fn dates_format_as_amz_dates() {
         assert_eq!(amz_date(UNIX_EPOCH), "19700101T000000Z");
-        assert_eq!(
-            amz_date(UNIX_EPOCH + Duration::from_secs(1_440_938_160)),
-            "20150830T123600Z"
-        );
+        assert_eq!(amz_date(UNIX_EPOCH + Duration::from_secs(1_440_938_160)), "20150830T123600Z");
         // 2024-02-29, a leap day.
-        assert_eq!(
-            amz_date(UNIX_EPOCH + Duration::from_secs(1_709_210_096)),
-            "20240229T123456Z"
-        );
+        assert_eq!(amz_date(UNIX_EPOCH + Duration::from_secs(1_709_210_096)), "20240229T123456Z");
     }
 
     #[test]
@@ -193,10 +171,7 @@ mod tests {
 
     #[test]
     fn colons_are_encoded() {
-        assert_eq!(
-            uri_encode("anthropic.claude-v1:0"),
-            "anthropic.claude-v1%3A0"
-        );
+        assert_eq!(uri_encode("anthropic.claude-v1:0"), "anthropic.claude-v1%3A0");
         assert_eq!(uri_encode("a b~"), "a%20b~");
     }
 }

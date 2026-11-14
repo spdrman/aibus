@@ -12,13 +12,11 @@ use common::transcript::Transcript;
 use serde_json::{json, Value};
 
 fn fixture_server(home: &std::path::Path) -> McpClient {
-    let script =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mcp/server.sh");
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mcp/server.sh");
     let mut cmd = Command::new("sh");
     cmd.arg(script);
     let mut c = McpClient::spawn(cmd, Protocol::V2025_11_25, home);
-    c.initialize_legacy()
-        .expect("the fixture answers initialize");
+    c.initialize_legacy().expect("the fixture answers initialize");
     c
 }
 
@@ -50,10 +48,7 @@ fn the_harness_drives_the_fixture_server() {
 fn the_client_reports_a_server_that_exits_instead_of_panicking_on_a_missing_field() {
     let home = xdg_temp();
     let mut cmd = Command::new("sh");
-    cmd.args([
-        "-c",
-        "echo 'error: unrecognized subcommand mcp' >&2; exit 2",
-    ]);
+    cmd.args(["-c", "echo 'error: unrecognized subcommand mcp' >&2; exit 2"]);
     let mut c = McpClient::spawn(cmd, Protocol::V2025_11_25, home.path());
     let said = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.initialize_legacy()))
         .expect_err("a server that exits cannot answer");

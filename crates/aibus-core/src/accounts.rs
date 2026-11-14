@@ -35,9 +35,7 @@ pub struct SelectHints {
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SelectError {
     /// Exit code 4; the message is also the TUI banner.
-    #[error(
-        "no account serves model {model}; add one with: aibus account add <name> --provider <id>"
-    )]
+    #[error("no account serves model {model}; add one with: aibus account add <name> --provider <id>")]
     NoAccount { model: String },
     #[error("no account named {0}")]
     Unknown(AccountName),
@@ -124,20 +122,12 @@ impl AccountRegistry {
     /// The accounts to try after `name`, in order: `pinned` (an agent definition's `fallback`,
     /// which may be empty) over the account's own list. Names that are unknown or disabled are
     /// left out; whether each serves the model is for `select` with `explicit` to say.
-    pub fn fallback_names(
-        &self,
-        name: &AccountName,
-        pinned: Option<&[AccountName]>,
-    ) -> Vec<AccountName> {
+    pub fn fallback_names(&self, name: &AccountName, pinned: Option<&[AccountName]>) -> Vec<AccountName> {
         let own: Vec<AccountName>;
         let names = match (pinned, self.account(name)) {
             (Some(p), _) => p,
             (None, Some(a)) => {
-                own = a
-                    .fallback
-                    .iter()
-                    .map(|n| AccountName(n.as_str().into()))
-                    .collect();
+                own = a.fallback.iter().map(|n| AccountName(n.as_str().into())).collect();
                 &own
             }
             (None, None) => return Vec::new(),
@@ -162,18 +152,12 @@ impl AccountRegistry {
             FallbackKind::Auth => None,
         };
         let until = span.map(|d| Instant::now() + d);
-        self.cooldowns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(name.clone(), until);
+        self.cooldowns.lock().unwrap_or_else(PoisonError::into_inner).insert(name.clone(), until);
     }
 
     /// Whether `name` is still sitting out. An expired entry is dropped on the way.
     pub fn cooled(&self, name: &AccountName) -> bool {
-        let mut g = self
-            .cooldowns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut g = self.cooldowns.lock().unwrap_or_else(PoisonError::into_inner);
         match g.get(name) {
             None => false,
             Some(None) => true,
@@ -187,10 +171,7 @@ impl AccountRegistry {
 
     /// `aibus account test` passed for `name`: it is back in the chain.
     pub fn tested(&self, name: &AccountName) {
-        self.cooldowns
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(name);
+        self.cooldowns.lock().unwrap_or_else(PoisonError::into_inner).remove(name);
     }
 
     /// The account's provider, behind that account's rate limit.
@@ -212,9 +193,7 @@ impl AccountRegistry {
     pub fn model_ref(&self, s: &str) -> ModelRef {
         if s == "inherit" {
             ModelRef::Inherit
-        } else if self.models.contains_key(s)
-            || self.accounts.iter().any(|a| a.aliases.contains_key(s))
-        {
+        } else if self.models.contains_key(s) || self.accounts.iter().any(|a| a.aliases.contains_key(s)) {
             ModelRef::Alias(s.into())
         } else {
             ModelRef::Full(ModelId(s.into()))
@@ -258,12 +237,8 @@ impl AccountRegistry {
     /// when the provider keeps one), without a request: the `/model` picker's rows. Deprecated
     /// models are left out; a price the table lacks stays `None`.
     pub fn model_views(&self, name: &AccountName) -> Vec<ModelView> {
-        let Some(a) = self.account(name) else {
-            return Vec::new();
-        };
-        let Ok(provider) = self.providers.get(&a.provider) else {
-            return Vec::new();
-        };
+        let Some(a) = self.account(name) else { return Vec::new() };
+        let Ok(provider) = self.providers.get(&a.provider) else { return Vec::new() };
         let aliases = self.alias_table(a);
         // Capabilities are the provider's today; `capabilities_for(&id)` replaces this one line.
         let caps = provider.capabilities();
@@ -274,10 +249,7 @@ impl AccountRegistry {
             .map(|m| {
                 let price = provider.price(&m.id);
                 ModelView {
-                    alias: aliases
-                        .iter()
-                        .find(|(_, v)| v.as_str() == m.id.0.as_str())
-                        .map(|(k, _)| k.to_string()),
+                    alias: aliases.iter().find(|(_, v)| v.as_str() == m.id.0.as_str()).map(|(k, _)| k.to_string()),
                     context_window: m.context_window,
                     input_per_mtok: price.map(|p| p.input_per_mtok),
                     output_per_mtok: price.map(|p| p.output_per_mtok),
@@ -353,9 +325,7 @@ impl AccountRegistry {
 
         if let ModelRef::Alias(alias) = &model {
             let pinned = self.models.get(alias).and_then(|v| self.pin(v));
-            if let Some((a, m)) =
-                pinned.filter(|(a, _)| a.enabled && !self.cooled(&a.account_name()))
-            {
+            if let Some((a, m)) = pinned.filter(|(a, _)| a.enabled && !self.cooled(&a.account_name())) {
                 if let Some(id) = self.resolve_on(a, &ModelRef::Full(ModelId(m.into()))) {
                     return Ok((a.account_name(), id));
                 }
@@ -387,9 +357,7 @@ impl AccountRegistry {
             })
             .unwrap_or(0);
         if found.is_empty() {
-            return Err(SelectError::NoAccount {
-                model: show(&model),
-            });
+            return Err(SelectError::NoAccount { model: show(&model) });
         }
         let (chosen, id) = found.remove(first);
         if !found.is_empty() {

@@ -74,19 +74,14 @@ fn rig(personal_key: &str) -> Rig {
             .with_account("anthropic-work", WORK_KEY)
             .with_account("anthropic-personal", PERSONAL_KEY),
     );
-    let providers =
-        ProviderRegistry::new(&[Box::new(Shared(fake.clone()))], &BTreeMap::new()).unwrap();
+    let providers = ProviderRegistry::new(&[Box::new(Shared(fake.clone()))], &BTreeMap::new())
+        .unwrap();
     let redactor = Redactor::new();
     let keychain = Arc::new(MemoryKeychain::default());
     let store = Arc::new(CredentialStore::new(keychain, redactor.clone()));
+    store.store(&name("anthropic-work"), &Secret::new(WORK_KEY.into())).unwrap();
     store
-        .store(&name("anthropic-work"), &Secret::new(WORK_KEY.into()))
-        .unwrap();
-    store
-        .store(
-            &name("anthropic-personal"),
-            &Secret::new(personal_key.into()),
-        )
+        .store(&name("anthropic-personal"), &Secret::new(personal_key.into()))
         .unwrap();
     Rig {
         fake,
@@ -187,10 +182,7 @@ async fn a_definition_with_account_anthropic_personal_makes_the_fake_see_that_ac
     let Some(Msg::RunStarted { account, model, .. }) = msgs.first() else {
         panic!("no RunStarted")
     };
-    assert_eq!(
-        (account, model.0.as_str()),
-        (&name("anthropic-personal"), "fake-small")
-    );
+    assert_eq!((account, model.0.as_str()), (&name("anthropic-personal"), "fake-small"));
 }
 
 #[tokio::test]
@@ -213,17 +205,13 @@ async fn the_key_is_registered_with_the_redactor_and_never_reaches_a_message() {
     let rig = rig(PERSONAL_KEY);
     let msgs = rig.run(Some("anthropic-personal")).await;
     assert_eq!(
-        rig.redactor
-            .redact(&format!("Authorization: {PERSONAL_KEY}")),
+        rig.redactor.redact(&format!("Authorization: {PERSONAL_KEY}")),
         "Authorization: [redacted:anthropic-personal]"
     );
     // Not in the messages a run sends, and so not in anything the graph or a recording holds.
     for m in &msgs {
         let line = format!("{m:?} {:?}", m.summary());
-        assert!(
-            !line.contains(PERSONAL_KEY) && !line.contains(WORK_KEY),
-            "{line}"
-        );
+        assert!(!line.contains(PERSONAL_KEY) && !line.contains(WORK_KEY), "{line}");
     }
     // Not in the config the accounts were read from either.
     assert!(!toml::to_string(&rig.cfg).unwrap().contains(PERSONAL_KEY));

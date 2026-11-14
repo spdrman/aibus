@@ -31,9 +31,7 @@ pub struct FakeAuthServer {
 
 impl FakeAuthServer {
     pub async fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind a loopback port");
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind a loopback port");
         let base = format!("http://{}", listener.local_addr().expect("a local address"));
         let state = Arc::new(Mutex::new(State::default()));
         let served = state.clone();
@@ -88,13 +86,10 @@ impl FakeAuthServer {
 /// `k=v&k=v`, split by hand: `form_urlencoded` is not a dependency here, and the test values are
 /// plain ASCII except the grant type's colons.
 fn form(body: &[u8]) -> impl Iterator<Item = (String, String)> + '_ {
-    std::str::from_utf8(body)
-        .unwrap_or("")
-        .split('&')
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            Some((k.to_owned(), v.replace("%3A", ":").replace('+', " ")))
-        })
+    std::str::from_utf8(body).unwrap_or("").split('&').filter_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        Some((k.to_owned(), v.replace("%3A", ":").replace('+', " ")))
+    })
 }
 
 /// One request, one answer, then the connection closes.
@@ -102,9 +97,7 @@ async fn answer(mut sock: TcpStream, state: Arc<Mutex<State>>) {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let (head_len, want) = loop {
-        let Ok(n) = sock.read(&mut chunk).await else {
-            return;
-        };
+        let Ok(n) = sock.read(&mut chunk).await else { return };
         if n == 0 {
             return;
         }
@@ -120,24 +113,15 @@ async fn answer(mut sock: TcpStream, state: Arc<Mutex<State>>) {
         }
     };
     while buf.len() < head_len + want {
-        let Ok(n) = sock.read(&mut chunk).await else {
-            return;
-        };
+        let Ok(n) = sock.read(&mut chunk).await else { return };
         if n == 0 {
             break;
         }
         buf.extend_from_slice(&chunk[..n]);
     }
-    let line = String::from_utf8_lossy(&buf[..head_len])
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .to_owned();
+    let line = String::from_utf8_lossy(&buf[..head_len]).lines().next().unwrap_or_default().to_owned();
     let mut parts = line.split_whitespace();
-    let (method, target) = (
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default().to_owned(),
-    );
+    let (method, target) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default().to_owned());
     let path = target.split('?').next().unwrap_or_default();
     let (status, body) = {
         let mut s = state.lock().unwrap();

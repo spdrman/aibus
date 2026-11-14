@@ -42,10 +42,7 @@ pub fn split(cmd: &str) -> Result<Vec<String>, String> {
     }
     // `normalise_command` splits words on any Unicode whitespace, the shell only on blanks, so
     // a no-break space would let `git\u{a0}status` read as two words to the matcher and one to `sh`.
-    if cmd
-        .chars()
-        .any(|c| c.is_whitespace() && !matches!(c, ' ' | '\t' | '\n'))
-    {
+    if cmd.chars().any(|c| c.is_whitespace() && !matches!(c, ' ' | '\t' | '\n')) {
         return Err("unusual whitespace".into());
     }
     let chars: Vec<char> = cmd.chars().collect();
@@ -109,13 +106,12 @@ fn scan(chars: &[char], i: &mut usize, close: Close, out: &mut Vec<String>) -> R
         }
     };
     // A nested region is scanned for its own parts, and its text stays in the part around it.
-    let nested =
-        |chars: &[char], i: &mut usize, close: Close, cur: &mut String, out: &mut Vec<String>| {
-            let start = *i;
-            scan(chars, i, close, out)?;
-            cur.extend(&chars[start..*i]);
-            Ok::<(), String>(())
-        };
+    let nested = |chars: &[char], i: &mut usize, close: Close, cur: &mut String, out: &mut Vec<String>| {
+        let start = *i;
+        scan(chars, i, close, out)?;
+        cur.extend(&chars[start..*i]);
+        Ok::<(), String>(())
+    };
 
     while *i < chars.len() {
         let c = chars[*i];
@@ -240,11 +236,7 @@ fn scan(chars: &[char], i: &mut usize, close: Close, out: &mut Vec<String>) -> R
             }
             '|' => {
                 flush(&mut cur, out);
-                *i += if matches!(next, Some('|' | '&')) {
-                    2
-                } else {
-                    1
-                };
+                *i += if matches!(next, Some('|' | '&')) { 2 } else { 1 };
             }
             '&' if prev_redir || next == Some('>') => {
                 // `2>&1`, `<&3` and `&>file` are redirections.
@@ -369,10 +361,7 @@ mod tests {
             ("git status; git log", &["git log", "git status"]),
             ("git status;", &["git status"]),
             ("git status;; git log", &["git log", "git status"]),
-            (
-                "git status && git log || git diff",
-                &["git diff", "git log", "git status"],
-            ),
+            ("git status && git log || git diff", &["git diff", "git log", "git status"]),
             ("git status | grep x", &["git status", "grep x"]),
             ("git status |& grep x", &["git status", "grep x"]),
             ("git status & git log", &["git log", "git status"]),
@@ -405,19 +394,9 @@ mod tests {
             ),
             ("(cd sub && make)", &["cd sub", "make"]),
             ("( git status )", &["git status"]),
-            (
-                "echo a; (git status; git log)",
-                &["echo a", "git log", "git status"],
-            ),
+            ("echo a; (git status; git log)", &["echo a", "git log", "git status"]),
             ("echo <(git diff)", &["echo <(git diff)", "git diff"]),
-            (
-                "diff <(git show a) <(git show b)",
-                &[
-                    "diff <(git show a) <(git show b)",
-                    "git show a",
-                    "git show b",
-                ],
-            ),
+            ("diff <(git show a) <(git show b)", &["diff <(git show a) <(git show b)", "git show a", "git show b"]),
             ("tee >(grep x) < in", &["grep x", "tee >(grep x) < in"]),
             // Quoting keeps separators inside a word.
             ("echo 'a; b'", &["echo 'a; b'"]),

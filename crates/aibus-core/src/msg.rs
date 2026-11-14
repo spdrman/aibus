@@ -11,9 +11,9 @@ use smol_str::SmolStr;
 use crate::agent::{AgentDef, Isolation, Role};
 use crate::ids::{AccountName, AgentName, ForkId, ModelId, PermissionId, RunId, ToolCallId};
 use crate::run::{Progress, RunError, RunResult, Usage};
-use crate::state::value::{map, n, s};
 use crate::tool::Artifact;
 use crate::workflow::WorkflowRow;
+use crate::state::value::{map, n, s};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyCode {
@@ -605,11 +605,7 @@ pub enum WorkflowFile {
     List,
     Show(String),
     /// Writes `model:workflow:draft` as `name`, in the user's directory with `user`.
-    Save {
-        name: String,
-        user: bool,
-        force: bool,
-    },
+    Save { name: String, user: bool, force: bool },
 }
 
 /// The text `/workflow show` opens: the file (or the validator's findings), and one line under it.
@@ -819,9 +815,7 @@ impl Msg {
             }
             Msg::SubmitPrompt { text } => map([("msg", name), ("len", len(text))]),
             Msg::Command(c) => map([("msg", name), ("command", s(command_name(c)))]),
-            Msg::RunStarted { run, .. } | Msg::RunSwitched { run, .. } => {
-                map([("msg", name), ("run", s(&run.to_string()))])
-            }
+            Msg::RunStarted { run, .. } | Msg::RunSwitched { run, .. } => map([("msg", name), ("run", s(&run.to_string()))]),
             Msg::Stream { run, chunks } => {
                 let bytes: usize = chunks
                     .iter()
@@ -933,27 +927,17 @@ impl Msg {
                 map([("msg", name), ("accounts", n(accounts.len()))])
             }
             Msg::AccountPrompt { line, .. } => map([("msg", name), ("line_len", len(line))]),
-            Msg::AccountOpDone { ok, text, .. } => map([
-                ("msg", name),
-                ("ok", Value::Bool(*ok)),
-                ("text_len", len(text)),
-            ]),
+            Msg::AccountOpDone { ok, text, .. } => map([("msg", name), ("ok", Value::Bool(*ok)), ("text_len", len(text))]),
             Msg::IoError { context, error } => map([
                 ("msg", name),
                 ("context_len", len(context)),
                 ("error_len", len(error)),
             ]),
             Msg::Shutdown { reason } => map([("msg", name), ("reason", s(reason.as_str()))]),
-            Msg::ModelSwitched { id, to, .. } => map([
-                ("msg", name),
-                ("id", n(*id)),
-                ("ok", Value::Bool(to.is_ok())),
-            ]),
-            Msg::WorkflowsLoaded { rows, shown, .. } => map([
-                ("msg", name),
-                ("rows", n(rows.len())),
-                ("shown", Value::Bool(shown.is_some())),
-            ]),
+            Msg::ModelSwitched { id, to, .. } => map([("msg", name), ("id", n(*id)), ("ok", Value::Bool(to.is_ok()))]),
+            Msg::WorkflowsLoaded { rows, shown, .. } => {
+                map([("msg", name), ("rows", n(rows.len())), ("shown", Value::Bool(shown.is_some()))])
+            }
         }
     }
 }

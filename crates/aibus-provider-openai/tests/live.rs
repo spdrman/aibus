@@ -31,10 +31,7 @@ struct Live {
 
 fn live() -> Option<Live> {
     let account = std::env::var("AIBUS_LIVE_ACCOUNT").ok()?;
-    let var = format!(
-        "AIBUS_LIVE_KEY_{}",
-        account.to_uppercase().replace('-', "_")
-    );
+    let var = format!("AIBUS_LIVE_KEY_{}", account.to_uppercase().replace('-', "_"));
     let key = std::env::var(&var).unwrap_or_else(|_| panic!("{var} is not set"));
     let provider = std::env::var("AIBUS_LIVE_PROVIDER").unwrap_or_else(|_| "openai".into());
     let default_model = match provider.as_str() {
@@ -43,17 +40,8 @@ fn live() -> Option<Live> {
         _ => "gpt-4.1-mini",
     };
     let model = std::env::var("AIBUS_LIVE_MODEL").unwrap_or_else(|_| default_model.into());
-    assert!(
-        !model.is_empty(),
-        "AIBUS_LIVE_MODEL is needed for {provider}"
-    );
-    Some(Live {
-        account,
-        provider,
-        key,
-        base_url: std::env::var("AIBUS_LIVE_BASE_URL").ok(),
-        model,
-    })
+    assert!(!model.is_empty(), "AIBUS_LIVE_MODEL is needed for {provider}");
+    Some(Live { account, provider, key, base_url: std::env::var("AIBUS_LIVE_BASE_URL").ok(), model })
 }
 
 impl Live {
@@ -75,21 +63,13 @@ impl Live {
     }
 
     fn provider(&self) -> std::sync::Arc<dyn Provider> {
-        let cfg = ProviderConfig {
-            base_url: self.base_url.clone(),
-            ..ProviderConfig::default()
-        };
+        let cfg = ProviderConfig { base_url: self.base_url.clone(), ..ProviderConfig::default() };
         self.factory().build(&cfg).unwrap()
     }
 
     fn base(&self) -> String {
         self.base_url.clone().unwrap_or_else(|| {
-            if self.provider == "kimi" {
-                "https://api.moonshot.ai/v1"
-            } else {
-                "https://api.openai.com/v1"
-            }
-            .into()
+            if self.provider == "kimi" { "https://api.moonshot.ai/v1" } else { "https://api.openai.com/v1" }.into()
         })
     }
 
@@ -161,23 +141,12 @@ async fn verify_lists_models() {
 async fn a_short_completion_streams_text_usage_and_done() {
     let l = live_or_skip!();
     let (tx, mut rx) = mpsc::channel(256);
-    let resp = l
-        .provider()
-        .stream(
-            &l.cred(&l.key),
-            l.request("Say hello."),
-            tx,
-            CancellationToken::new(),
-        )
-        .await
-        .unwrap();
+    let resp = l.provider().stream(&l.cred(&l.key), l.request("Say hello."), tx, CancellationToken::new()).await.unwrap();
     let mut chunks = Vec::new();
     while let Ok(c) = rx.try_recv() {
         chunks.push(c);
     }
-    assert!(chunks
-        .iter()
-        .any(|c| matches!(c, StreamChunk::TextDelta(_))));
+    assert!(chunks.iter().any(|c| matches!(c, StreamChunk::TextDelta(_))));
     assert_eq!(resp.stop, StopReason::EndTurn);
     assert!(resp.usage.output_tokens > 0);
     l.record(
@@ -200,11 +169,7 @@ async fn a_forced_tool_call_stops_for_tool_use() {
     }];
     req.tool_choice = ToolChoice::Required;
     let (tx, _rx) = mpsc::channel(256);
-    let resp = l
-        .provider()
-        .stream(&l.cred(&l.key), req, tx, CancellationToken::new())
-        .await
-        .unwrap();
+    let resp = l.provider().stream(&l.cred(&l.key), req, tx, CancellationToken::new()).await.unwrap();
     assert_eq!(resp.stop, StopReason::ToolUse);
     l.record(
         "tool_call",
@@ -223,18 +188,9 @@ async fn a_wrong_key_is_an_auth_error_that_does_not_retry() {
     let l = live_or_skip!();
     let bad = "sk-not-a-real-key";
     let (tx, _rx) = mpsc::channel(8);
-    let e = l
-        .provider()
-        .stream(&l.cred(bad), l.request("hi"), tx, CancellationToken::new())
-        .await
-        .unwrap_err();
+    let e = l.provider().stream(&l.cred(bad), l.request("hi"), tx, CancellationToken::new()).await.unwrap_err();
     assert_eq!((e.kind, e.retryable), (ProviderErrorKind::Auth, false));
-    l.record(
-        "auth_401",
-        bad,
-        json!({"model": l.model, "max_tokens": 8, "messages": [{"role": "user", "content": "hi"}]}),
-    )
-    .await;
+    l.record("auth_401", bad, json!({"model": l.model, "max_tokens": 8, "messages": [{"role": "user", "content": "hi"}]})).await;
 }
 
 #[tokio::test]
@@ -243,11 +199,7 @@ async fn an_unknown_model_is_model_not_found() {
     let mut req = l.request("hi");
     req.model = ModelId("gpt-no-such-model-9".into());
     let (tx, _rx) = mpsc::channel(8);
-    let e = l
-        .provider()
-        .stream(&l.cred(&l.key), req, tx, CancellationToken::new())
-        .await
-        .unwrap_err();
+    let e = l.provider().stream(&l.cred(&l.key), req, tx, CancellationToken::new()).await.unwrap_err();
     assert_eq!(e.kind, ProviderErrorKind::ModelNotFound);
     l.record(
         "not_found_404",

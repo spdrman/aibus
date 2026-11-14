@@ -49,14 +49,8 @@ fn assert_scrubbed(env: &str, who: &str) {
     for name in SCRUBBED {
         assert!(!has(env, name), "{who} still has {name}:\n{env}");
     }
-    assert!(
-        has(env, "EDITOR"),
-        "{who} lost an ordinary variable:\n{env}"
-    );
-    assert!(
-        has(env, "PASSED_TOKEN"),
-        "{who} lost a pass_env entry:\n{env}"
-    );
+    assert!(has(env, "EDITOR"), "{who} lost an ordinary variable:\n{env}");
+    assert!(has(env, "PASSED_TOKEN"), "{who} lost a pass_env entry:\n{env}");
 }
 
 #[tokio::test]
@@ -68,20 +62,10 @@ async fn a_hook_and_a_bash_call_both_start_from_the_scrubbed_environment() {
         pass_env: pass.clone(),
         events: BTreeMap::from([(
             "pre_tool_use".to_owned(),
-            vec![Hook {
-                command: "env > hook-env.txt".into(),
-                ..Hook::default()
-            }],
+            vec![Hook { command: "env > hook-env.txt".into(), ..Hook::default() }],
         )]),
     };
-    let runner = HookRunner::new(
-        &hooks,
-        host(),
-        dir.path().to_path_buf(),
-        "01SESSION".into(),
-        None,
-        None,
-    );
+    let runner = HookRunner::new(&hooks, host(), dir.path().to_path_buf(), "01SESSION".into(), None, None);
     let input = HookInput {
         event: HookEvent::PreToolUse,
         matcher: Some("bash"),
@@ -93,21 +77,10 @@ async fn a_hook_and_a_bash_call_both_start_from_the_scrubbed_environment() {
         permission_mode: PermissionMode::Default,
         extra: Map::new(),
     };
-    runner
-        .fire(&input, &HookSet::new(), &CancellationToken::new())
-        .await;
-    assert_scrubbed(
-        &std::fs::read_to_string(dir.path().join("hook-env.txt")).unwrap(),
-        "the hook",
-    );
+    runner.fire(&input, &HookSet::new(), &CancellationToken::new()).await;
+    assert_scrubbed(&std::fs::read_to_string(dir.path().join("hook-env.txt")).unwrap(), "the hook");
 
-    let bash = Bash::new(
-        20,
-        pass,
-        host(),
-        dir.path().to_path_buf(),
-        "01SESSION".into(),
-    );
+    let bash = Bash::new(20, pass, host(), dir.path().to_path_buf(), "01SESSION".into());
     let cx = ToolCx {
         run: RunId::new(),
         cwd: dir.path().to_path_buf(),

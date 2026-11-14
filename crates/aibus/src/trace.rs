@@ -26,14 +26,7 @@ pub const TARGET: &str = "aibus_trace";
 
 /// The tracks of the viewer, one per kind of span, so that spans of different kinds never have
 /// to nest.
-const TRACKS: [&str; 6] = [
-    "commit",
-    "effect",
-    "provider_call",
-    "tool_call",
-    "hook",
-    "router",
-];
+const TRACKS: [&str; 6] = ["commit", "effect", "provider_call", "tool_call", "hook", "router"];
 
 struct Out {
     file: BufWriter<File>,
@@ -48,11 +41,7 @@ struct Shared {
 impl Shared {
     fn emit(&self, event: &Value) {
         let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
-        let comma = if std::mem::replace(&mut out.first, false) {
-            ""
-        } else {
-            ",\n"
-        };
+        let comma = if std::mem::replace(&mut out.first, false) { "" } else { ",\n" };
         let _ = write!(out.file, "{comma}{event}");
         let _ = out.file.flush();
     }
@@ -153,11 +142,7 @@ where
             return;
         };
         let name = span.name();
-        let tid = TRACKS
-            .iter()
-            .position(|t| *t == name)
-            .unwrap_or(TRACKS.len())
-            + 1;
+        let tid = TRACKS.iter().position(|t| *t == name).unwrap_or(TRACKS.len()) + 1;
         self.0.emit(&json!({
             "name": name,
             "cat": "aibus",
@@ -176,25 +161,22 @@ mod tests {
     use super::*;
     use tracing_subscriber::layer::SubscriberExt;
 
-    /// What a span's name and fields look like in the file, for the tests: `(name, args)` of every
-    /// complete event, in order.
-    pub fn complete_events(text: &str) -> Result<Vec<(String, Value)>, String> {
-        let doc: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        let events = doc["traceEvents"].as_array().ok_or("no traceEvents")?;
-        let mut out = Vec::new();
-        for e in events.iter().filter(|e| e["ph"] == "X") {
-            for key in ["name", "ts", "dur", "pid", "tid"] {
-                if e.get(key).is_none() {
-                    return Err(format!("event without {key}: {e}"));
-                }
+/// What a span's name and fields look like in the file, for the tests: `(name, args)` of every
+/// complete event, in order.
+pub fn complete_events(text: &str) -> Result<Vec<(String, Value)>, String> {
+    let doc: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let events = doc["traceEvents"].as_array().ok_or("no traceEvents")?;
+    let mut out = Vec::new();
+    for e in events.iter().filter(|e| e["ph"] == "X") {
+        for key in ["name", "ts", "dur", "pid", "tid"] {
+            if e.get(key).is_none() {
+                return Err(format!("event without {key}: {e}"));
             }
-            out.push((
-                e["name"].as_str().unwrap_or_default().to_owned(),
-                e["args"].clone(),
-            ));
         }
-        Ok(out)
+        out.push((e["name"].as_str().unwrap_or_default().to_owned(), e["args"].clone()));
     }
+    Ok(out)
+}
 
     #[test]
     fn spans_become_complete_events_with_their_fields_and_the_file_is_valid_json() {
@@ -223,10 +205,6 @@ mod tests {
         assert_eq!(events[1].0, "tool_call");
         // Every event of a track shares one tid.
         let doc: Value = serde_json::from_str(&text).unwrap();
-        assert!(doc["traceEvents"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| e["ph"] == "M"));
+        assert!(doc["traceEvents"].as_array().unwrap().iter().any(|e| e["ph"] == "M"));
     }
 }

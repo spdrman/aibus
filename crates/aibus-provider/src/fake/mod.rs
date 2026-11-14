@@ -274,12 +274,7 @@ impl Provider for FakeProvider {
                     )
                     .await?;
                     emit(&out, &cancel, StreamChunk::ToolUseEnd { id }).await?;
-                    blocks.push(ContentBlock::ToolUse {
-                        id,
-                        name,
-                        input,
-                        signature: None,
-                    });
+                    blocks.push(ContentBlock::ToolUse { id, name, input, signature: None });
                     called_tool = true;
                 }
                 Step::Usage { input, output } => {

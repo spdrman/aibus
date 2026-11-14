@@ -4,9 +4,9 @@
 use aibus_core::state::store::Store;
 use aibus_core::state::value::{as_i64, as_list, as_str, get, list, map, n, s};
 use aibus_core::state::{
-    router_last, run_key, ADVISOR_ADVICE, ADVISOR_STATE, AGENTS_DEFS, CHECKPOINT_PENDING, CLOCK_MS,
-    LEDGER, LOG, LOG_FILTER, MEM, MENU, PERMISSIONS_BYPASS, PERMISSIONS_OPEN, ROUTER_FORKS,
-    RUNS_ORDER, SELECTED_CARD, SESSION_ASSIST, SESSION_MODEL_FLAG, TICK,
+    router_last, run_key, ADVISOR_ADVICE, ADVISOR_STATE, AGENTS_DEFS, CHECKPOINT_PENDING,
+    CLOCK_MS, LEDGER, LOG, LOG_FILTER, MEM, MENU, PERMISSIONS_BYPASS, PERMISSIONS_OPEN,
+    ROUTER_FORKS, RUNS_ORDER, SELECTED_CARD, SESSION_ASSIST, SESSION_MODEL_FLAG, TICK,
 };
 use aibus_core::RunStatus;
 use aibus_graph::{Graph, NodeKey, Tracker, Value};
@@ -89,9 +89,7 @@ fn shown_workers<'a>(t: &mut Tracker<'a>) -> Vec<(&'a str, &'a Value)> {
         let dismissed = matches!(get(m, "dismissed"), Some(Value::Bool(true)));
         let finished = status(t, id).is_some_and(RunStatus::is_terminal);
         let agent = get(m, "agent").and_then(as_str);
-        let replaced = all[i + 1..]
-            .iter()
-            .any(|(_, later)| get(later, "agent").and_then(as_str) == agent);
+        let replaced = all[i + 1..].iter().any(|(_, later)| get(later, "agent").and_then(as_str) == agent);
         if !(dismissed || (finished && replaced)) {
             out.push((*id, *m));
         }
@@ -124,14 +122,8 @@ fn short(label: &str) -> String {
 /// A side seat as startup named it: its label (null when nobody chose one) and whether it is on.
 fn seat<'a>(t: &mut Tracker<'a>, name: &str) -> (Option<&'a str>, bool) {
     let seat = t.get_key(SESSION_ASSIST).and_then(|a| get(a, name));
-    let label = seat
-        .and_then(|x| get(x, "label"))
-        .and_then(as_str)
-        .filter(|l| !l.is_empty());
-    let on = !matches!(
-        seat.and_then(|x| get(x, "enabled")),
-        Some(Value::Bool(false))
-    );
+    let label = seat.and_then(|x| get(x, "label")).and_then(as_str).filter(|l| !l.is_empty());
+    let on = !matches!(seat.and_then(|x| get(x, "enabled")), Some(Value::Bool(false)));
     (label, on)
 }
 
@@ -143,16 +135,8 @@ fn lead_box(t: &mut Tracker) -> Value {
         ("model_label", field(m, "model", "")),
         ("label", field(m, "label", "")),
         ("effort", field(m, "effort", "high")),
-        (
-            "model_flag",
-            t.get_key(SESSION_MODEL_FLAG)
-                .cloned()
-                .unwrap_or(Value::Null),
-        ),
-        (
-            "highlight",
-            Value::Bool(checkpoint(t) == Some("before_plan")),
-        ),
+        ("model_flag", t.get_key(SESSION_MODEL_FLAG).cloned().unwrap_or(Value::Null)),
+        ("highlight", Value::Bool(checkpoint(t) == Some("before_plan"))),
     ])
 }
 
@@ -200,17 +184,10 @@ fn cards(t: &mut Tracker) -> Value {
         let progress = match (state, t.get_key(&run_key(id, "progress"))) {
             ("done", _) => map([("kind", s("done")), ("value", Value::F64(1.0))]),
             (_, Some(Value::F64(p))) => map([("kind", s("fraction")), ("value", Value::F64(*p))]),
-            _ => map([
-                ("kind", s("indeterminate")),
-                ("value", n(bounce(tick + seed, 8))),
-            ]),
+            _ => map([("kind", s("indeterminate")), ("value", n(bounce(tick + seed, 8)))]),
         };
         let phase = if is_running(st) { (tick + seed) % 4 } else { 0 };
-        let border = if failing.as_deref() == Some(id) {
-            "advisor"
-        } else {
-            "swarm"
-        };
+        let border = if failing.as_deref() == Some(id) { "advisor" } else { "swarm" };
         out.push(map([
             ("run_id", s(id)),
             ("name", field(m, "agent", "")),
@@ -229,18 +206,12 @@ fn cards(t: &mut Tracker) -> Value {
 fn delegate_row(t: &mut Tracker) -> Value {
     let tick = t.get_key(TICK).and_then(as_i64).unwrap_or(0);
     let workers = shown_workers(t);
-    let label = workers
-        .first()
-        .map_or_else(|| s(""), |(_, m)| field(m, "model", ""));
+    let label = workers.first().map_or_else(|| s(""), |(_, m)| field(m, "model", ""));
     let mut dots = Vec::new();
     for (id, _) in workers {
         let seed = id.bytes().fold(0i64, |a, b| a + i64::from(b));
         // A dot travels only towards a card that is working; -1 is no dot.
-        dots.push(n(if is_running(status(t, id)) {
-            (tick + seed).rem_euclid(1000)
-        } else {
-            -1
-        }));
+        dots.push(n(if is_running(status(t, id)) { (tick + seed).rem_euclid(1000) } else { -1 }));
     }
     map([("swarm_model_label", label), ("connectors", list(dots))])
 }
@@ -249,10 +220,7 @@ fn fork_layer(t: &mut Tracker) -> Value {
     let mut any_split = false;
     let mut rows = Vec::new();
     for (kind, label) in FORK_KINDS {
-        let last = t
-            .get_key(&router_last(kind))
-            .cloned()
-            .unwrap_or(Value::Null);
+        let last = t.get_key(&router_last(kind)).cloned().unwrap_or(Value::Null);
         let verdict = get(&last, "verdict").and_then(as_str).unwrap_or("");
         any_split |= verdict == "split";
         rows.push(map([
@@ -262,10 +230,7 @@ fn fork_layer(t: &mut Tracker) -> Value {
         ]));
     }
     let (label, enabled) = seat(t, "router");
-    let title = label.map_or_else(
-        || "ROUTER · fork layer".to_owned(),
-        |l| format!("{} · fork layer", l.to_uppercase()),
-    );
+    let title = label.map_or_else(|| "ROUTER · fork layer".to_owned(), |l| format!("{} · fork layer", l.to_uppercase()));
     map([
         ("title", s(&title)),
         ("forks", t.get_key(ROUTER_FORKS).cloned().unwrap_or(n(0))),
@@ -342,9 +307,7 @@ fn status_bar(store: &Store, t: &mut Tracker) -> Value {
         "on_call" => "on call",
         other => other,
     };
-    let adv_label = seat(t, "advisor")
-        .0
-        .map_or_else(|| "advisor".to_owned(), short);
+    let adv_label = seat(t, "advisor").0.map_or_else(|| "advisor".to_owned(), short);
     let (router_label, router_on) = seat(t, "router");
     let goal = t.get_key(LEDGER).and_then(|l| get(l, "goal"));
     let now = t.get_key(LEDGER).and_then(|l| get(l, "now"));
@@ -381,21 +344,12 @@ fn status_bar(store: &Store, t: &mut Tracker) -> Value {
                 ("state", s(if running > 0 { "swarming" } else { "idle" })),
             ]),
         ),
-        (
-            "subagents",
-            map([("running", n(running)), ("total", n(total))]),
-        ),
-        (
-            "advisor",
-            map([("label", s(&adv_label)), ("state", s(adv_word))]),
-        ),
+        ("subagents", map([("running", n(running)), ("total", n(total))])),
+        ("advisor", map([("label", s(&adv_label)), ("state", s(adv_word))])),
         (
             "router",
             map([
-                (
-                    "label",
-                    s(&router_label.map_or_else(|| "router".to_owned(), short)),
-                ),
+                ("label", s(&router_label.map_or_else(|| "router".to_owned(), short))),
                 ("forks", t.get_key(ROUTER_FORKS).cloned().unwrap_or(n(0))),
                 ("enabled", Value::Bool(router_on)),
             ]),
@@ -403,10 +357,7 @@ fn status_bar(store: &Store, t: &mut Tracker) -> Value {
         ("ledger", ledger),
         ("alerts", list(alerts)),
         ("mem", mem),
-        (
-            "cost",
-            s(&crate::views::dollars(crate::views::session_cost(t))),
-        ),
+        ("cost", s(&crate::views::dollars(crate::views::session_cost(t)))),
     ])
 }
 
@@ -432,9 +383,7 @@ fn rail(store: &Store, t: &mut Tracker) -> Value {
             ("active", Value::Bool(active == Some(key))),
         ])
     });
-    let title = seat(t, "advisor")
-        .0
-        .map_or_else(|| "ADVISOR".to_owned(), str::to_uppercase);
+    let title = seat(t, "advisor").0.map_or_else(|| "ADVISOR".to_owned(), str::to_uppercase);
     map([
         ("title", s(&title)),
         ("subtitle", s(subtitle)),
@@ -442,10 +391,7 @@ fn rail(store: &Store, t: &mut Tracker) -> Value {
         ("advice", list(advice.iter().map(|a| s(a)).collect())),
         ("typing_cursor", n(cursor)),
         ("calls", get(&adv, "calls").cloned().unwrap_or(n(0))),
-        (
-            "tokens_read",
-            get(&adv, "tokens_read").cloned().unwrap_or(n(0)),
-        ),
+        ("tokens_read", get(&adv, "tokens_read").cloned().unwrap_or(n(0))),
         ("status", s(status)),
     ])
 }
@@ -463,10 +409,7 @@ fn return_box(t: &mut Tracker) -> Value {
     }
     map([
         ("lead_model_label", label),
-        (
-            "highlight",
-            Value::Bool(checkpoint(t) == Some("before_done")),
-        ),
+        ("highlight", Value::Bool(checkpoint(t) == Some("before_done"))),
         ("pulse", Value::Bool(lead_going && recent)),
     ])
 }
@@ -480,8 +423,8 @@ fn header(t: &mut Tracker) -> Value {
         .and_then(|(_, m)| get(m, "model").and_then(as_str).map(str::to_owned));
     let (adv_label, adv_on) = seat(t, "advisor");
     let adv = t.get_key(ADVISOR_STATE).cloned().unwrap_or(Value::Null);
-    let advisor_present =
-        adv_on && (checkpoint(t).is_some() || get(&adv, "calls").and_then(as_i64).unwrap_or(0) > 0);
+    let advisor_present = adv_on
+        && (checkpoint(t).is_some() || get(&adv, "calls").and_then(as_i64).unwrap_or(0) > 0);
     let forks = t.get_key(ROUTER_FORKS).and_then(as_i64).unwrap_or(0);
     let entry = |text: String, role: &str| map([("text", s(&text)), ("role", s(role))]);
     let mut legend = Vec::new();
@@ -515,20 +458,10 @@ fn clock(ms: i64) -> String {
 fn session_log(store: &Store, t: &mut Tracker) -> Value {
     // The handle's version is the change signal; the rows live in the store.
     t.get_key(LOG);
-    let filter = t
-        .get_key(LOG_FILTER)
-        .and_then(as_str)
-        .unwrap_or("")
-        .to_lowercase();
-    let lead_agent = runs(t, "lead")
-        .first()
-        .and_then(|(_, m)| get(m, "agent").and_then(as_str).map(str::to_owned));
-    let router_name = seat(t, "router")
-        .0
-        .map_or_else(|| "router".to_owned(), short);
-    let advisor_name = seat(t, "advisor")
-        .0
-        .map_or_else(|| "advisor".to_owned(), str::to_lowercase);
+    let filter = t.get_key(LOG_FILTER).and_then(as_str).unwrap_or("").to_lowercase();
+    let lead_agent = runs(t, "lead").first().and_then(|(_, m)| get(m, "agent").and_then(as_str).map(str::to_owned));
+    let router_name = seat(t, "router").0.map_or_else(|| "router".to_owned(), short);
+    let advisor_name = seat(t, "advisor").0.map_or_else(|| "advisor".to_owned(), str::to_lowercase);
     let rows = store
         .log_rows(LOG_LINES_KEPT * 4)
         .into_iter()
@@ -539,9 +472,7 @@ fn session_log(store: &Store, t: &mut Tracker) -> Value {
             let (actor, colour) = match (said, level) {
                 ("router", _) => (router_name.clone(), "router"),
                 ("advisor", _) => (advisor_name.clone(), "advisor"),
-                (a, _) if !a.is_empty() && Some(a) == lead_agent.as_deref() => {
-                    (a.to_owned(), "lead")
-                }
+                (a, _) if !a.is_empty() && Some(a) == lead_agent.as_deref() => (a.to_owned(), "lead"),
                 (a, _) if !a.is_empty() => (a.to_owned(), "swarm"),
                 (_, "error") => ("error".to_owned(), "error"),
                 (_, "warn") => ("warn".to_owned(), "warn"),
@@ -560,10 +491,7 @@ fn session_log(store: &Store, t: &mut Tracker) -> Value {
                 ("actor_colour", s(colour)),
                 ("text", s(&text)),
                 ("p", get(&r, "p").cloned().unwrap_or(Value::Null)),
-                (
-                    "verdict",
-                    get(&r, "verdict").cloned().unwrap_or(Value::Null),
-                ),
+                ("verdict", get(&r, "verdict").cloned().unwrap_or(Value::Null)),
                 ("run", get(&r, "run").cloned().unwrap_or(Value::Null)),
             ]))
         })
@@ -581,9 +509,7 @@ fn run_tips(t: &mut Tracker) -> Value {
     let defs = t.get_key(AGENTS_DEFS).map(as_list).unwrap_or_default();
     let mut out = Vec::new();
     for id in as_list(order).iter().filter_map(as_str) {
-        let Some(meta) = t.get_key(&run_key(id, "meta")) else {
-            continue;
-        };
+        let Some(meta) = t.get_key(&run_key(id, "meta")) else { continue };
         let agent = get(meta, "agent").and_then(as_str).unwrap_or("");
         let description = defs
             .iter()
@@ -614,11 +540,7 @@ fn run_tips(t: &mut Tracker) -> Value {
 
 /// The open context menu with each item marked as applying or not. Null when closed.
 fn menu(t: &mut Tracker) -> Value {
-    let Some(m) = t
-        .get_key(MENU)
-        .filter(|m| !matches!(m, Value::Null))
-        .cloned()
-    else {
+    let Some(m) = t.get_key(MENU).filter(|m| !matches!(m, Value::Null)).cloned() else {
         return Value::Null;
     };
     let id = get(&m, "run").and_then(as_str).unwrap_or("").to_owned();
@@ -630,23 +552,16 @@ fn menu(t: &mut Tracker) -> Value {
         .unwrap_or("")
         .to_owned();
     let live = st.is_some_and(|x| x.is_active() || x == RunStatus::Queued);
-    let items: Vec<Value> = crate::commands::menu_items()
-        .into_iter()
-        .map(|(item, label)| {
-            let enabled = match item {
-                "cancel" => live,
-                "resume" => st == Some(RunStatus::Partial),
-                "copy_result" => matches!(st, Some(RunStatus::Completed | RunStatus::Partial)),
-                "fork" => st.is_some(),
-                _ => true,
-            };
-            map([
-                ("id", s(item)),
-                ("label", s(label)),
-                ("enabled", Value::Bool(enabled)),
-            ])
-        })
-        .collect();
+    let items: Vec<Value> = crate::commands::menu_items().into_iter().map(|(item, label)| {
+        let enabled = match item {
+            "cancel" => live,
+            "resume" => st == Some(RunStatus::Partial),
+            "copy_result" => matches!(st, Some(RunStatus::Completed | RunStatus::Partial)),
+            "fork" => st.is_some(),
+            _ => true,
+        };
+        map([("id", s(item)), ("label", s(label)), ("enabled", Value::Bool(enabled))])
+    }).collect();
     map([
         ("run_id", s(&id)),
         ("title", s(&name)),
@@ -661,11 +576,7 @@ fn menu(t: &mut Tracker) -> Value {
 /// store handle that moves a version when the text does (03 section 8); the screen draws from
 /// `view:transcript`, which reads the same two run handles.
 pub fn ensure_lines<G: Graph>(g: &mut G) -> Option<NodeKey> {
-    let run = g
-        .read_key(aibus_core::state::MODAL)
-        .and_then(as_str)?
-        .strip_prefix("transcript:")?
-        .to_owned();
+    let run = g.read_key(aibus_core::state::MODAL).and_then(as_str)?.strip_prefix("transcript:")?.to_owned();
     let key = NodeKey::from(crate::views::lines_key(&run));
     if g.node(&key).is_none() {
         g.derived(&key, Box::new(move |t| crate::views::lines(t, &run)));
@@ -719,10 +630,7 @@ pub fn register<G: Graph>(g: &mut G, store: Store) -> Vec<NodeKey> {
     g.commit_metadata_derived(
         &dirty,
         Box::new(move |t| {
-            let changed = t
-                .commit()
-                .map(|c| c.changed_nodes.as_slice())
-                .unwrap_or(&[]);
+            let changed = t.commit().map(|c| c.changed_nodes.as_slice()).unwrap_or(&[]);
             list(
                 nodes
                     .iter()

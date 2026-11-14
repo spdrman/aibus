@@ -376,13 +376,7 @@ pub fn cases() -> Vec<Case> {
             name: "RunStarted",
             setup: setup_queued,
             msg: started(first_delegated()),
-            expect: vec![
-                "model:log",
-                "model:run:<id>:blocks",
-                "model:run:<id>:meta",
-                "model:run:<id>:status",
-                "model:run:<id>:tail",
-            ],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:meta", "model:run:<id>:status", "model:run:<id>:tail"],
         },
         Case {
             name: "Stream",
@@ -418,12 +412,7 @@ pub fn cases() -> Vec<Case> {
                 run: R(),
                 call: tool_call(false),
             },
-            expect: vec![
-                "model:log",
-                "model:run:<id>:blocks",
-                "model:run:<id>:tail",
-                "model:tools:pending",
-            ],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:tail", "model:tools:pending"],
         },
         Case {
             name: "ToolCallFinished",
@@ -438,12 +427,7 @@ pub fn cases() -> Vec<Case> {
                 },
                 duration: Duration::from_millis(3),
             },
-            expect: vec![
-                "model:log",
-                "model:run:<id>:blocks",
-                "model:run:<id>:tail",
-                "model:tools:pending",
-            ],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:tail", "model:tools:pending"],
         },
         Case {
             name: "PermissionNeeded",
@@ -513,13 +497,7 @@ pub fn cases() -> Vec<Case> {
                     retryable: true,
                 },
             },
-            expect: vec![
-                "model:log",
-                "model:run:<id>:blocks",
-                "model:run:<id>:error",
-                "model:run:<id>:status",
-                "model:run:<id>:tail",
-            ],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:error", "model:run:<id>:status", "model:run:<id>:tail"],
         },
         Case {
             name: "UsageUpdate",
@@ -597,12 +575,7 @@ pub fn cases() -> Vec<Case> {
                 run: R(),
                 pre_tokens: 90_000,
             },
-            expect: vec![
-                "model:log",
-                "model:run:<id>:blocks",
-                "model:run:<id>:status",
-                "model:run:<id>:tail",
-            ],
+            expect: vec!["model:log", "model:run:<id>:blocks", "model:run:<id>:status", "model:run:<id>:tail"],
         },
         Case {
             name: "HandoffWritten",
@@ -639,21 +612,13 @@ pub fn cases() -> Vec<Case> {
         Case {
             name: "AccountOpDone",
             setup: none,
-            msg: Msg::AccountOpDone {
-                op: "add".into(),
-                account: "work".into(),
-                ok: true,
-                text: t.clone(),
-            },
+            msg: Msg::AccountOpDone { op: "add".into(), account: "work".into(), ok: true, text: t.clone() },
             expect: vec!["model:log"],
         },
         Case {
             name: "AccountPrompt",
             setup: none,
-            msg: Msg::AccountPrompt {
-                account: "work".into(),
-                line: t.clone(),
-            },
+            msg: Msg::AccountPrompt { account: "work".into(), line: t.clone() },
             expect: vec![],
         },
         Case {
@@ -705,11 +670,7 @@ pub fn cases() -> Vec<Case> {
                     agents: vec!["explore".into()],
                     error: None,
                 }],
-                shown: Some(WorkflowShown {
-                    name: "review".into(),
-                    text: t.clone(),
-                    summary: t.clone(),
-                }),
+                shown: Some(WorkflowShown { name: "review".into(), text: t.clone(), summary: t.clone() }),
                 said: Some(t.clone()),
             },
             expect: vec!["model:log", "model:workflow:shown", "model:workflows"],
@@ -828,23 +789,11 @@ pub fn cases() -> Vec<Case> {
             vec!["ctrl:selected:log"],
         ),
         cmd(Command::Select(Pane::Advisor, Selection::Next), vec![]),
-        cmd(
-            Command::OpenTranscript(R()),
-            vec!["ctrl:modal", "ctrl:transcript"],
-        ),
-        cmd(
-            Command::PaletteText(SENTINEL.into()),
-            vec!["ctrl:palette:text", "ctrl:screen:sel"],
-        ),
-        cmd(
-            Command::OpenScreen(Screen::Agents),
-            vec!["ctrl:modal", "ctrl:palette:text", "ctrl:screen:sel"],
-        ),
+        cmd(Command::OpenTranscript(R()), vec!["ctrl:modal", "ctrl:transcript"]),
+        cmd(Command::PaletteText(SENTINEL.into()), vec!["ctrl:palette:text", "ctrl:screen:sel"]),
+        cmd(Command::OpenScreen(Screen::Agents), vec!["ctrl:modal", "ctrl:palette:text", "ctrl:screen:sel"]),
         cmd(Command::CloseModal, vec!["ctrl:modal"]),
-        cmd(
-            Command::OpenPalette,
-            vec!["ctrl:modal", "ctrl:palette:text", "ctrl:screen:sel"],
-        ),
+        cmd(Command::OpenPalette, vec!["ctrl:modal", "ctrl:palette:text", "ctrl:screen:sel"]),
         cmd(Command::OpenHelp, vec!["ctrl:modal"]),
         cmd(
             Command::Workflow {
@@ -878,22 +827,8 @@ pub fn cases() -> Vec<Case> {
             },
             vec!["model:session:assist"],
         ),
-        cmd(
-            Command::WorkflowFile(WorkflowFile::Save {
-                name: SENTINEL.into(),
-                user: false,
-                force: false,
-            }),
-            vec![],
-        ),
-        cmd(
-            Command::WorkflowAuthor {
-                goal: SENTINEL.into(),
-                write: true,
-                edit: None,
-            },
-            vec![],
-        ),
+        cmd(Command::WorkflowFile(WorkflowFile::Save { name: SENTINEL.into(), user: false, force: false }), vec![]),
+        cmd(Command::WorkflowAuthor { goal: SENTINEL.into(), write: true, edit: None }, vec![]),
         cmd(Command::Clear, vec!["model:log"]),
         cmd(Command::Quit { force: true }, vec!["eng:shutdown"]),
     ]);

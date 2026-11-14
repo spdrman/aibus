@@ -39,11 +39,7 @@ pub fn run(global: Global, args: RunArgs, redactor: Redactor) -> Result<u8, Aibu
         // `handoff` is that file, relative to the project, or null when none was written.
         let handoff = ctx.continuity.as_ref().and_then(|c| {
             let path = c.ended.as_ref()?;
-            Some(
-                path.strip_prefix(&c.layout.project)
-                    .unwrap_or(path)
-                    .to_path_buf(),
-            )
+            Some(path.strip_prefix(&c.layout.project).unwrap_or(path).to_path_buf())
         });
         let mut line = serde_json::json!({
             "type": "SessionEnd",
@@ -88,26 +84,18 @@ pub fn verdict(result: Option<&RunResult>, interrupted: bool) -> Result<(), Aibu
         RunStatus::Cancelled if interrupted => Err(AibusError::Interrupted),
         RunStatus::Cancelled => Err(failure("cancelled").into()),
         // A run stopped by its token or cost budget keeps its text (`Partial`) but exits 8.
-        RunStatus::Partial
-            if r.error
-                .as_ref()
-                .is_some_and(|e| e.kind == RunErrorKind::Budget) =>
-        {
+        RunStatus::Partial if r.error.as_ref().is_some_and(|e| e.kind == RunErrorKind::Budget) => {
             Err(AibusError::Budget(failure("budget exceeded").message))
         }
         // A rejected credential is exit 4 even when the run kept some text.
         RunStatus::Partial
-            if r.error
-                .as_ref()
-                .is_some_and(|e| matches!(e.kind, RunErrorKind::Auth | RunErrorKind::Quota)) =>
+            if r.error.as_ref().is_some_and(|e| matches!(e.kind, RunErrorKind::Auth | RunErrorKind::Quota)) =>
         {
             Err(CredentialError::RunRejected(failure("credential rejected").message).into())
         }
         RunStatus::Partial => Err(failure("ended with a partial result").into()),
         RunStatus::Denied => Err(AibusError::Denied(
-            r.error
-                .as_ref()
-                .map_or("run denied".into(), |e| e.message.clone()),
+            r.error.as_ref().map_or("run denied".into(), |e| e.message.clone()),
         )),
         RunStatus::Failed => {
             let e = failure("failed");
@@ -115,9 +103,7 @@ pub fn verdict(result: Option<&RunResult>, interrupted: bool) -> Result<(), Aibu
                 RunErrorKind::Provider => {
                     ProviderError::new(ProviderErrorKind::Unknown, e.message).into()
                 }
-                RunErrorKind::Auth | RunErrorKind::Quota => {
-                    CredentialError::RunRejected(e.message).into()
-                }
+                RunErrorKind::Auth | RunErrorKind::Quota => CredentialError::RunRejected(e.message).into(),
                 RunErrorKind::ContentFilter => {
                     ProviderError::new(ProviderErrorKind::ContentFilter, e.message).into()
                 }
@@ -214,8 +200,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
 
     let env_no_color = std::env::var("NO_COLOR").ok();
     let term_var = std::env::var("TERM").ok();
-    let color =
-        |is_tty: bool| term::use_color(is_tty, env_no_color.as_deref(), term_var.as_deref());
+    let color = |is_tty: bool| term::use_color(is_tty, env_no_color.as_deref(), term_var.as_deref());
     let mut pump = Pump {
         json: ctx.global.json,
         events: Events::new(redactor, loaded.config.limits.result_max_bytes),
@@ -238,8 +223,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         if run == handle.id {
             return mailbox.clone();
         }
-        orch.and_then(|o| o.mailbox(run))
-            .unwrap_or_else(|| mailbox.clone())
+        orch.and_then(|o| o.mailbox(run)).unwrap_or_else(|| mailbox.clone())
     };
     let deny = |id: PermissionId, run: RunId| {
         mailbox_of(run).try_send(RunMail::Permission {
@@ -362,8 +346,9 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     if finished.is_none() {
         handle.join.abort();
     }
-    let _ =
-        rt.block_on(async { tokio::time::timeout(Duration::from_secs(2), &mut handle.join).await });
+    let _ = rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), &mut handle.join).await
+    });
     ctx.finished = finished;
     ctx.interrupted = interrupted;
 

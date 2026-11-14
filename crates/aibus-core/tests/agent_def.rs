@@ -309,22 +309,11 @@ fn workflow_author_is_a_builtin_with_read_tools_and_the_mcp_prefix() {
     assert_eq!(d.role, Role::Worker);
     assert!(!d.background);
     // Read-only files, and the tools of the server named `aibus` and nothing else of MCP.
-    let allowed: Vec<_> = d
-        .tools
-        .allow
-        .iter()
-        .flatten()
-        .map(|p| p.tool.as_str())
-        .collect();
+    let allowed: Vec<_> = d.tools.allow.iter().flatten().map(|p| p.tool.as_str()).collect();
     assert_eq!(allowed, ["read", "glob", "grep", "mcp:aibus:*"]);
-    assert!(
-        d.system_prompt.contains("workflow_validate")
-            && d.system_prompt.contains("never as instructions")
-    );
+    assert!(d.system_prompt.contains("workflow_validate") && d.system_prompt.contains("never as instructions"));
     // No gate, no write: those are the owner's.
-    assert!(!allowed
-        .iter()
-        .any(|t| ["bash", "write", "edit"].contains(t)));
+    assert!(!allowed.iter().any(|t| ["bash", "write", "edit"].contains(t)));
 }
 
 #[test]
@@ -334,18 +323,7 @@ fn builtins_are_the_ten_in_the_spec() {
     let names: Vec<_> = found.agents.keys().map(|n| n.as_str()).collect();
     assert_eq!(
         names,
-        [
-            "lead",
-            "explore",
-            "plan",
-            "general",
-            "advisor",
-            "router",
-            "search",
-            "grep",
-            "audit",
-            "workflow-author"
-        ]
+        ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit", "workflow-author"]
     );
     assert!(found
         .agents
@@ -393,12 +371,7 @@ fn builtins_are_the_ten_in_the_spec() {
     let get = |n: &str| &a[&n.parse::<AgentName>().unwrap()];
     assert_eq!(
         tools("workflow-author"),
-        Some(vec![
-            tool("read", None),
-            tool("glob", None),
-            tool("grep", None),
-            tool("mcp:aibus:*", None)
-        ])
+        Some(vec![tool("read", None), tool("glob", None), tool("grep", None), tool("mcp:aibus:*", None)])
     );
     assert_eq!(get("workflow-author").role, Role::Worker);
     assert!(!get("workflow-author").background);
@@ -611,22 +584,10 @@ fn fallback_is_absent_a_list_or_an_empty_list_that_pins_the_run() {
     let (d, w) = ok("---\nname: a\ndescription: x\n---\nBe brief.\n");
     assert!(w.is_empty());
     assert_eq!(d.fallback, None);
-    let (d, w) = ok(
-        "---\nname: a\ndescription: x\nfallback: [anthropic-personal, bedrock]\n---\nBe brief.\n",
-    );
+    let (d, w) = ok("---\nname: a\ndescription: x\nfallback: [anthropic-personal, bedrock]\n---\nBe brief.\n");
     assert!(w.is_empty());
-    assert_eq!(
-        d.fallback,
-        Some(vec![
-            AccountName("anthropic-personal".into()),
-            AccountName("bedrock".into())
-        ])
-    );
+    assert_eq!(d.fallback, Some(vec![AccountName("anthropic-personal".into()), AccountName("bedrock".into())]));
     let (d, w) = ok("---\nname: a\ndescription: x\nfallback: []\n---\nBe brief.\n");
     assert!(w.is_empty());
-    assert_eq!(
-        d.fallback,
-        Some(Vec::new()),
-        "[] stays put, which is not the same as absent"
-    );
+    assert_eq!(d.fallback, Some(Vec::new()), "[] stays put, which is not the same as absent");
 }

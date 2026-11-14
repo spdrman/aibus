@@ -8,9 +8,9 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use aibus_testkit::xdg_temp;
 use common::{aibus, command, stderr};
 use serde_json::Value;
+use aibus_testkit::xdg_temp;
 
 fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -23,10 +23,7 @@ fn plain_mode_streams_the_text_and_keeps_tool_notices_on_stderr() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("Rust workspace"), "{text}");
-    assert!(
-        !text.contains("RunStarted") && !text.starts_with('{'),
-        "{text}"
-    );
+    assert!(!text.contains("RunStarted") && !text.starts_with('{'), "{text}");
     assert!(text.ends_with('\n'));
     let err = stderr(&out);
     assert!(err.contains("aibus: tool ls ."), "{err}");
@@ -36,10 +33,7 @@ fn plain_mode_streams_the_text_and_keeps_tool_notices_on_stderr() {
 
 #[test]
 fn the_prompt_comes_from_stdin_in_plain_mode_too() {
-    for args in [
-        vec!["run", "--agent", "explore"],
-        vec!["run", "--agent", "explore", "-"],
-    ] {
+    for args in [vec!["run", "--agent", "explore"], vec!["run", "--agent", "explore", "-"]] {
         let home = xdg_temp();
         let mut child = command(home.path())
             .args(&args)
@@ -48,12 +42,7 @@ fn the_prompt_comes_from_stdin_in_plain_mode_too() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(b"summarise README.md\n")
-            .unwrap();
+        child.stdin.take().unwrap().write_all(b"summarise README.md\n").unwrap();
         let out = child.wait_with_output().unwrap();
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
         assert!(stdout(&out).contains("Rust workspace"));
@@ -70,26 +59,14 @@ fn no_subcommand_with_stdout_piped_behaves_as_run_and_says_so() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"map this repo\n")
-        .unwrap();
+    child.stdin.take().unwrap().write_all(b"map this repo\n").unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("stdout is not a terminal, running as `aibus run`"),
-        "{}",
-        stderr(&out)
-    );
+    assert!(stderr(&out).contains("stdout is not a terminal, running as `aibus run`"), "{}", stderr(&out));
     assert!(stdout(&out).contains("Rust workspace"));
 
     // A prompt on the command line works the same, and --json still gives events.
-    let out = aibus(
-        home.path(),
-        &["--json", "--agent", "explore", "map this repo"],
-    );
+    let out = aibus(home.path(), &["--json", "--agent", "explore", "map this repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).lines().next().unwrap().contains("RunStarted"));
 }
@@ -98,26 +75,16 @@ fn no_subcommand_with_stdout_piped_behaves_as_run_and_says_so() {
 fn escape_sequences_in_the_model_text_never_reach_a_pipe() {
     let home = xdg_temp();
     let script = home.path().join("ansi.ron");
-    fs::write(
-        &script,
-        r#"[Text("\u{1b}[31mred\u{1b}[0m and \u{1b}]0;title\u{7}plain"), Stop(EndTurn)]"#,
-    )
-    .unwrap();
+    fs::write(&script, r#"[Text("\u{1b}[31mred\u{1b}[0m and \u{1b}]0;title\u{7}plain"), Stop(EndTurn)]"#).unwrap();
     for no_color in [None, Some("1")] {
         let mut c = command(home.path());
-        c.args(["run", "--agent", "explore", "--script"])
-            .arg(&script)
-            .arg("hi");
+        c.args(["run", "--agent", "explore", "--script"]).arg(&script).arg("hi");
         if let Some(v) = no_color {
             c.env("NO_COLOR", v);
         }
         let out = c.output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
-        assert_eq!(
-            stdout(&out).trim_end(),
-            "red and plain",
-            "NO_COLOR={no_color:?}"
-        );
+        assert_eq!(stdout(&out).trim_end(), "red and plain", "NO_COLOR={no_color:?}");
         assert!(!stderr(&out).contains('\u{1b}'));
     }
 }
@@ -133,11 +100,7 @@ fn a_default_mode_prompt_is_refused_with_no_tty_in_plain_mode() {
         .arg("hi")
         .output()
         .unwrap();
-    assert!(
-        stderr(&out).contains("permission denied: no tty"),
-        "{}",
-        stderr(&out)
-    );
+    assert!(stderr(&out).contains("permission denied: no tty"), "{}", stderr(&out));
     assert!(!home.path().join("proj/out.txt").exists());
 }
 
@@ -146,15 +109,7 @@ fn hanging_run(home: &Path) -> (std::process::Child, BufReader<std::process::Chi
     let script = home.join("slow.ron");
     fs::write(&script, "[Delay((secs: 60, nanos: 0)), Text(\"late\")]").unwrap();
     let mut child = command(home)
-        .args([
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--script",
-            script.to_str().unwrap(),
-            "hi",
-        ])
+        .args(["run", "--json", "--agent", "explore", "--script", script.to_str().unwrap(), "hi"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -185,27 +140,15 @@ fn sighup_is_a_graceful_stop_that_exits_7_well_inside_ten_seconds() {
     std::io::Read::read_to_string(&mut out, &mut rest).unwrap();
     assert_eq!(child.wait().unwrap().code(), Some(7), "{rest}");
     let last: Value = serde_json::from_str(rest.lines().last().unwrap()).unwrap();
-    assert_eq!(
-        (last["type"].as_str(), last["exit_code"].as_i64()),
-        (Some("SessionEnd"), Some(7))
-    );
+    assert_eq!((last["type"].as_str(), last["exit_code"].as_i64()), (Some("SessionEnd"), Some(7)));
     assert!(began.elapsed() < Duration::from_secs(9));
     // The session was closed properly: its outcome is on disk.
     let id = last["session"].as_str().unwrap();
     let json: Value = serde_json::from_str(
-        &fs::read_to_string(
-            home.path()
-                .join(".local/state/aibus/sessions")
-                .join(id)
-                .join("session.json"),
-        )
-        .unwrap(),
+        &fs::read_to_string(home.path().join(".local/state/aibus/sessions").join(id).join("session.json")).unwrap(),
     )
     .unwrap();
-    assert!(
-        ["cancelled", "interrupted"].contains(&json["outcome"].as_str().unwrap()),
-        "{json}"
-    );
+    assert!(["cancelled", "interrupted"].contains(&json["outcome"].as_str().unwrap()), "{json}");
 }
 
 #[test]
@@ -218,10 +161,7 @@ fn sigwinch_becomes_a_resize_message() {
     let v: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(v["type"], "Resize", "{line}");
     // No terminal here, so the fallback size.
-    assert_eq!(
-        (v["cols"].as_u64(), v["rows"].as_u64()),
-        (Some(80), Some(24))
-    );
+    assert_eq!((v["cols"].as_u64(), v["rows"].as_u64()), (Some(80), Some(24)));
     signal(&child, "-INT");
     child.wait().unwrap();
 }
@@ -230,10 +170,7 @@ fn sigwinch_becomes_a_resize_message() {
 #[cfg(target_os = "linux")]
 fn term_dumb_refuses_the_tui_with_exit_2() {
     // util-linux `script` gives the binary a pseudo terminal on stdout and passes its exit code on.
-    let has_script = std::process::Command::new("script")
-        .arg("--version")
-        .output()
-        .is_ok();
+    let has_script = std::process::Command::new("script").arg("--version").output().is_ok();
     if !has_script {
         eprintln!("skipped: no script(1) here");
         return;
@@ -253,12 +190,6 @@ fn term_dumb_refuses_the_tui_with_exit_2() {
     // Keep the pipe open until the binary is done, or script ends the session early.
     let _stdin = child.stdin.take();
     let out = child.wait_with_output().unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "{}{}",
-        stdout(&out),
-        stderr(&out)
-    );
+    assert_eq!(out.status.code(), Some(2), "{}{}", stdout(&out), stderr(&out));
     assert!(stdout(&out).contains("TERM=dumb"), "{}", stdout(&out));
 }

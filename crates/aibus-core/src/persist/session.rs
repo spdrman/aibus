@@ -50,13 +50,7 @@ pub struct SessionMeta {
 }
 
 impl SessionMeta {
-    pub fn new(
-        id: SessionId,
-        started: String,
-        topic: Option<String>,
-        cwd: PathBuf,
-        lead: &str,
-    ) -> Self {
+    pub fn new(id: SessionId, started: String, topic: Option<String>, cwd: PathBuf, lead: &str) -> Self {
         Self {
             schema_version: SCHEMA,
             id: id.to_string(),

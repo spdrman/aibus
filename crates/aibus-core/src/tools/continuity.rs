@@ -32,9 +32,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, ToolError> {
     match tokio::task::spawn_blocking(f).await {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) if e.kind() == io::ErrorKind::InvalidInput => {
-            Err(ToolError::Invalid(e.to_string()))
-        }
+        Ok(Err(e)) if e.kind() == io::ErrorKind::InvalidInput => Err(ToolError::Invalid(e.to_string())),
         Ok(Err(e)) => Err(ToolError::Io(e)),
         Err(e) => Err(ToolError::Io(io::Error::other(e))),
     }
@@ -92,10 +90,7 @@ impl Tool for LedgerUpdate {
         let (layout, today) = (self.layout.clone(), date(SystemTime::now()));
         let (section, append) = (i.section, i.append);
         let l = blocking(move || ledger::update(&layout, &section, &text, append, &today)).await?;
-        for (to, text) in [
-            ("goal", l.goal()),
-            ("in_progress", l.in_progress().unwrap_or("")),
-        ] {
+        for (to, text) in [("goal", l.goal()), ("in_progress", l.in_progress().unwrap_or(""))] {
             let _ = cx
                 .tx
                 .send(Msg::Command(Command::LedgerUpdate {
@@ -104,9 +99,7 @@ impl Tool for LedgerUpdate {
                 }))
                 .await;
         }
-        Ok(json_out(
-            json!({ "ok": true, "path": self.layout.ledger(), "updated": l.updated }),
-        ))
+        Ok(json_out(json!({ "ok": true, "path": self.layout.ledger(), "updated": l.updated })))
     }
 }
 
@@ -176,8 +169,7 @@ impl Tool for CreateHandoff {
             status: &status,
             outcome: outcome.as_deref(),
         };
-        let h = Handoff::build(&front, body.as_object().unwrap_or(&Map::new()))
-            .map_err(ToolError::Invalid)?;
+        let h = Handoff::build(&front, body.as_object().unwrap_or(&Map::new())).map_err(ToolError::Invalid)?;
         let layout = self.layout.clone();
         let path = blocking(move || handoff::write(&layout, &h, false, now)).await?;
         let _ = cx.tx.send(Msg::HandoffWritten { path: path.clone() }).await;
@@ -215,10 +207,9 @@ impl Tool for Recall {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "recall".into(),
-            description:
-                "Search the memory files, learnings, ledgers and handoffs for a query. Returns \
+            description: "Search the memory files, learnings, ledgers and handoffs for a query. Returns \
                 `[{path, score, snippet}]`, best first; read a file with `read` or `memory_read`."
-                    .into(),
+                .into(),
             schema: json!({"type":"object","required":["query"],"additionalProperties":false,"properties":{
                 "query":{"type":"string","minLength":1},
                 "k":{"type":"integer","minimum":1,"maximum":50}}}),

@@ -23,19 +23,8 @@ fn code_lines(src: &str) -> impl Iterator<Item = &str> {
 #[test]
 fn no_colour_literals_outside_the_theme() {
     let banned = [
-        "Color::",
-        "Rgb(",
-        "Indexed(",
-        ".red()",
-        ".green()",
-        ".blue()",
-        ".yellow()",
-        ".white()",
-        ".black()",
-        ".cyan()",
-        ".magenta()",
-        ".gray()",
-        ".on_",
+        "Color::", "Rgb(", "Indexed(", ".red()", ".green()", ".blue()", ".yellow()", ".white()",
+        ".black()", ".cyan()", ".magenta()", ".gray()", ".on_",
     ];
     for (name, src) in sources() {
         if name == "theme.rs" {
@@ -43,10 +32,7 @@ fn no_colour_literals_outside_the_theme() {
         }
         for line in code_lines(&src) {
             for b in banned {
-                assert!(
-                    !line.contains(b),
-                    "{name}: colour literal `{b}` in `{line}`"
-                );
+                assert!(!line.contains(b), "{name}: colour literal `{b}` in `{line}`");
             }
             let hex = line.match_indices('#').any(|(i, _)| {
                 line.get(i + 1..i + 7)
@@ -62,9 +48,7 @@ fn widgets_cannot_reach_the_graph() {
     for (name, src) in sources() {
         match name.as_str() {
             "widgets.rs" => {
-                for banned in [
-                    "model:", "ctrl:", "eng:", "Graph", "Tracker", "read_key", "mini::",
-                ] {
+                for banned in ["model:", "ctrl:", "eng:", "Graph", "Tracker", "read_key", "mini::"] {
                     assert!(
                         !code_lines(&src).any(|l| l.contains(banned)),
                         "widgets.rs mentions {banned}"

@@ -22,34 +22,19 @@ fn block(b: &ContentBlock) -> Option<Value> {
         // The API rejects empty text blocks.
         ContentBlock::Text(t) if t.is_empty() => return None,
         ContentBlock::Text(t) => json!({"type": "text", "text": t}),
-        ContentBlock::Thinking {
-            text,
-            redacted: true,
-            ..
-        } => {
+        ContentBlock::Thinking { text, redacted: true, .. } => {
             json!({"type": "redacted_thinking", "data": text})
         }
-        ContentBlock::Thinking {
-            text,
-            signature: Some(sig),
-            ..
-        } => {
+        ContentBlock::Thinking { text, signature: Some(sig), .. } => {
             json!({"type": "thinking", "thinking": text, "signature": sig})
         }
         // Without its signature the API would refuse the block, so it stays out.
         ContentBlock::Thinking { .. } => return None,
-        ContentBlock::ToolUse {
-            id, name, input, ..
-        } => {
+        ContentBlock::ToolUse { id, name, input, .. } => {
             json!({"type": "tool_use", "id": wire_id(*id), "name": name, "input": input})
         }
-        ContentBlock::ToolResult {
-            id,
-            content,
-            is_error,
-        } => {
-            let mut v =
-                json!({"type": "tool_result", "tool_use_id": wire_id(*id), "content": content});
+        ContentBlock::ToolResult { id, content, is_error } => {
+            let mut v = json!({"type": "tool_result", "tool_use_id": wire_id(*id), "content": content});
             if *is_error {
                 v["is_error"] = json!(true);
             }
@@ -71,11 +56,7 @@ fn block(b: &ContentBlock) -> Option<Value> {
 fn messages(msgs: &[Message]) -> Vec<Value> {
     let mut out: Vec<(&str, Vec<Value>)> = Vec::new();
     for m in msgs {
-        let role = if m.role == MessageRole::Assistant {
-            "assistant"
-        } else {
-            "user"
-        };
+        let role = if m.role == MessageRole::Assistant { "assistant" } else { "user" };
         let blocks: Vec<Value> = m.blocks.iter().filter_map(block).collect();
         if blocks.is_empty() {
             continue;
@@ -128,12 +109,10 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool, compat: &[CompatFlag]) 
         }
         CacheHint::LastMessage => {
             let last = msgs.last_mut().and_then(|m| m["content"].as_array_mut());
-            if let Some(v) = last.and_then(|c| {
-                c.iter_mut().rev().find(|b| {
-                    // Every block type but thinking can carry a breakpoint.
-                    !matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking"))
-                })
-            }) {
+            if let Some(v) = last.and_then(|c| c.iter_mut().rev().find(|b| {
+                // Every block type but thinking can carry a breakpoint.
+                !matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking"))
+            })) {
                 mark(v);
             }
         }
@@ -153,14 +132,8 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool, compat: &[CompatFlag]) 
         .map(|t| t.tokens.min(req.max_output_tokens.saturating_sub(1)))
         .filter(|b| *b >= 1024);
     if let Some(budget) = thinking {
-        body.insert(
-            "thinking".into(),
-            json!({"type": "enabled", "budget_tokens": budget}),
-        );
-    } else if let (Some(t), false) = (
-        req.temperature_f64(),
-        compat.contains(&CompatFlag::NoSamplingParams),
-    ) {
+        body.insert("thinking".into(), json!({"type": "enabled", "budget_tokens": budget}));
+    } else if let (Some(t), false) = (req.temperature_f64(), compat.contains(&CompatFlag::NoSamplingParams)) {
         body.insert("temperature".into(), json!(t));
     }
     if !req.tools.is_empty() && !compat.contains(&CompatFlag::NoToolChoice) {
@@ -169,36 +142,25 @@ pub fn messages_body(req: &ChatRequest, effort_ok: bool, compat: &[CompatFlag]) 
             (ToolChoice::Auto, _) | (_, Some(_)) => json!({"type": "auto"}),
             (ToolChoice::None, _) => json!({"type": "none"}),
             (ToolChoice::Required, _) => json!({"type": "any"}),
-            (ToolChoice::Named(_), _) if compat.contains(&CompatFlag::NoNamedToolChoice) => {
-                json!({"type": "any"})
-            }
+            (ToolChoice::Named(_), _) if compat.contains(&CompatFlag::NoNamedToolChoice) => json!({"type": "any"}),
             (ToolChoice::Named(n), _) => json!({"type": "tool", "name": n}),
         };
         body.insert("tool_choice".into(), choice);
     }
     if let (Some(e), true) = (req.effort, effort_ok) {
-        body.insert(
-            "output_config".into(),
-            json!({"effort": match e {
-                Effort::Low => "low",
-                Effort::Medium => "medium",
-                // The API stops at high.
-                Effort::High | Effort::Max => "high",
-            }}),
-        );
+        body.insert("output_config".into(), json!({"effort": match e {
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            // The API stops at high.
+            Effort::High | Effort::Max => "high",
+        }}));
     }
-    let ids: Vec<&str> = [
-        req.metadata.session_id.as_deref(),
-        req.metadata.run_id.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let ids: Vec<&str> = [req.metadata.session_id.as_deref(), req.metadata.run_id.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect();
     if !ids.is_empty() {
-        body.insert(
-            "metadata".into(),
-            json!({"user_id": format!("aibus:{}", ids.join(":"))}),
-        );
+        body.insert("metadata".into(), json!({"user_id": format!("aibus:{}", ids.join(":"))}));
     }
     Value::Object(body)
 }
@@ -217,9 +179,7 @@ pub fn count_body(req: &ChatRequest) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aibus_provider::{
-        Capabilities, ModelId, RequestMetadata, SystemRole, ThinkingBudget, ToolSpec,
-    };
+    use aibus_provider::{Capabilities, ModelId, RequestMetadata, SystemRole, ThinkingBudget, ToolSpec};
     use ulid::Ulid;
 
     fn req() -> ChatRequest {
@@ -228,16 +188,8 @@ mod tests {
             system: "You are terse.".into(),
             messages: vec![Message::text(MessageRole::User, "hi")],
             tools: vec![
-                ToolSpec {
-                    name: "read".into(),
-                    description: "Read a file".into(),
-                    schema: json!({"type": "object"}),
-                },
-                ToolSpec {
-                    name: "bash".into(),
-                    description: "Run".into(),
-                    schema: json!({"type": "object"}),
-                },
+                ToolSpec { name: "read".into(), description: "Read a file".into(), schema: json!({"type": "object"}) },
+                ToolSpec { name: "bash".into(), description: "Run".into(), schema: json!({"type": "object"}) },
             ],
             tool_choice: ToolChoice::Auto,
             max_output_tokens: 4096,
@@ -252,10 +204,7 @@ mod tests {
 
     fn count_marks(v: &Value) -> usize {
         match v {
-            Value::Object(m) => {
-                usize::from(m.contains_key("cache_control"))
-                    + m.values().map(count_marks).sum::<usize>()
-            }
+            Value::Object(m) => usize::from(m.contains_key("cache_control")) + m.values().map(count_marks).sum::<usize>(),
             Value::Array(a) => a.iter().map(count_marks).sum(),
             _ => 0,
         }
@@ -270,17 +219,10 @@ mod tests {
         assert_eq!(b["system"][0]["text"], "You are terse.");
         assert_eq!(b["tools"][1]["input_schema"], json!({"type": "object"}));
         assert_eq!(b["tool_choice"], json!({"type": "auto"}));
-        assert_eq!(
-            b["messages"][0],
-            json!({"role": "user", "content": [{"type": "text", "text": "hi"}]})
-        );
+        assert_eq!(b["messages"][0], json!({"role": "user", "content": [{"type": "text", "text": "hi"}]}));
         assert!((b["temperature"].as_f64().unwrap() - 0.2).abs() < 1e-6);
         assert_eq!(count_marks(&b), 0);
-        assert!(
-            b.get("thinking").is_none()
-                && b.get("output_config").is_none()
-                && b.get("metadata").is_none()
-        );
+        assert!(b.get("thinking").is_none() && b.get("output_config").is_none() && b.get("metadata").is_none());
     }
 
     #[test]
@@ -289,40 +231,22 @@ mod tests {
         r.cache_hint = CacheHint::AfterTools;
         let b = messages_body(&r, false, &[]);
         assert_eq!(count_marks(&b), 1);
-        assert!(
-            b["tools"][1].get("cache_control").is_some()
-                && b["tools"][0].get("cache_control").is_none()
-        );
+        assert!(b["tools"][1].get("cache_control").is_some() && b["tools"][0].get("cache_control").is_none());
 
         r.cache_hint = CacheHint::AfterSystem;
         let b = messages_body(&r, false, &[]);
-        assert_eq!(
-            (
-                count_marks(&b),
-                b["system"][0]["cache_control"]["type"].as_str()
-            ),
-            (1, Some("ephemeral"))
-        );
+        assert_eq!((count_marks(&b), b["system"][0]["cache_control"]["type"].as_str()), (1, Some("ephemeral")));
 
         r.cache_hint = CacheHint::LastMessage;
         r.messages.push(Message {
             role: MessageRole::Assistant,
-            blocks: vec![
-                ContentBlock::Text("a".into()),
-                ContentBlock::Thinking {
-                    text: "t".into(),
-                    redacted: false,
-                    signature: Some("s".into()),
-                },
-            ],
+            blocks: vec![ContentBlock::Text("a".into()), ContentBlock::Thinking { text: "t".into(), redacted: false, signature: Some("s".into()) }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         let b = messages_body(&r, false, &[]);
         assert_eq!(count_marks(&b), 1);
         // The last block that can carry it: the text, not the thinking block after it.
-        assert!(b["messages"][1]["content"][0]
-            .get("cache_control")
-            .is_some());
+        assert!(b["messages"][1]["content"][0].get("cache_control").is_some());
     }
 
     #[test]
@@ -338,21 +262,15 @@ mod tests {
     fn a_fork_repeats_its_parents_prefix_byte_for_byte() {
         let parent = req();
         let mut fork = req();
-        fork.messages
-            .push(Message::text(MessageRole::Assistant, "ok"));
-        fork.messages
-            .push(Message::text(MessageRole::User, "now do the other thing"));
+        fork.messages.push(Message::text(MessageRole::Assistant, "ok"));
+        fork.messages.push(Message::text(MessageRole::User, "now do the other thing"));
         for hint in [CacheHint::AfterTools, CacheHint::AfterSystem] {
             let (mut p, mut f) = (parent.clone(), fork.clone());
             p.cache_hint = hint;
             f.cache_hint = hint;
             let (pb, fb) = (messages_body(&p, false, &[]), messages_body(&f, false, &[]));
             for key in ["tools", "system"] {
-                assert_eq!(
-                    pb[key].to_string(),
-                    fb[key].to_string(),
-                    "{key} under {hint:?}"
-                );
+                assert_eq!(pb[key].to_string(), fb[key].to_string(), "{key} under {hint:?}");
             }
             assert_eq!(pb["messages"][0].to_string(), fb["messages"][0].to_string());
         }
@@ -364,21 +282,12 @@ mod tests {
         let mut r = req();
         r.messages.push(Message {
             role: MessageRole::Assistant,
-            blocks: vec![ContentBlock::ToolUse {
-                id,
-                name: "read".into(),
-                input: json!({"p": 1}),
-                signature: None,
-            }],
+            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}), signature: None }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         r.messages.push(Message {
             role: MessageRole::User,
-            blocks: vec![ContentBlock::ToolResult {
-                id,
-                content: "boom".into(),
-                is_error: true,
-            }],
+            blocks: vec![ContentBlock::ToolResult { id, content: "boom".into(), is_error: true }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         let b = messages_body(&r, false, &[]);
@@ -392,8 +301,7 @@ mod tests {
     #[test]
     fn neighbouring_messages_of_one_role_merge_and_system_notes_become_user_text() {
         let mut r = req();
-        r.messages
-            .push(Message::text(MessageRole::System, "advice"));
+        r.messages.push(Message::text(MessageRole::System, "advice"));
         r.messages.push(Message::text(MessageRole::Assistant, ""));
         let b = messages_body(&r, false, &[]);
         assert_eq!(b["messages"].as_array().unwrap().len(), 1);
@@ -406,18 +314,12 @@ mod tests {
         r.thinking = Some(ThinkingBudget { tokens: 2048 });
         r.tool_choice = ToolChoice::Required;
         let b = messages_body(&r, false, &[]);
-        assert_eq!(
-            b["thinking"],
-            json!({"type": "enabled", "budget_tokens": 2048})
-        );
+        assert_eq!(b["thinking"], json!({"type": "enabled", "budget_tokens": 2048}));
         assert!(b.get("temperature").is_none());
         assert_eq!(b["tool_choice"], json!({"type": "auto"}));
 
         r.max_output_tokens = 1500;
-        assert_eq!(
-            messages_body(&r, false, &[])["thinking"]["budget_tokens"],
-            1499
-        );
+        assert_eq!(messages_body(&r, false, &[])["thinking"]["budget_tokens"], 1499);
         r.max_output_tokens = 1000;
         let b = messages_body(&r, false, &[]);
         assert!(b.get("thinking").is_none() && b.get("temperature").is_some());
@@ -428,20 +330,11 @@ mod tests {
         let mut r = req();
         r.effort = Some(Effort::Max);
         r.tool_choice = ToolChoice::Named("read".into());
-        assert_eq!(
-            messages_body(&r, true, &[])["tool_choice"],
-            json!({"type": "tool", "name": "read"})
-        );
-        assert_eq!(
-            messages_body(&r, true, &[])["output_config"],
-            json!({"effort": "high"})
-        );
+        assert_eq!(messages_body(&r, true, &[])["tool_choice"], json!({"type": "tool", "name": "read"}));
+        assert_eq!(messages_body(&r, true, &[])["output_config"], json!({"effort": "high"}));
         assert!(messages_body(&r, false, &[]).get("output_config").is_none());
         r.tool_choice = ToolChoice::None;
-        assert_eq!(
-            messages_body(&r, false, &[])["tool_choice"],
-            json!({"type": "none"})
-        );
+        assert_eq!(messages_body(&r, false, &[])["tool_choice"], json!({"type": "none"}));
         r.tools.clear();
         assert!(messages_body(&r, false, &[]).get("tool_choice").is_none());
     }
@@ -452,30 +345,15 @@ mod tests {
         r.messages.push(Message {
             role: MessageRole::Assistant,
             blocks: vec![
-                ContentBlock::Thinking {
-                    text: "a".into(),
-                    redacted: false,
-                    signature: Some("sig".into()),
-                },
-                ContentBlock::Thinking {
-                    text: "unsigned".into(),
-                    redacted: false,
-                    signature: None,
-                },
-                ContentBlock::Thinking {
-                    text: "opaque".into(),
-                    redacted: true,
-                    signature: None,
-                },
+                ContentBlock::Thinking { text: "a".into(), redacted: false, signature: Some("sig".into()) },
+                ContentBlock::Thinking { text: "unsigned".into(), redacted: false, signature: None },
+                ContentBlock::Thinking { text: "opaque".into(), redacted: true, signature: None },
                 ContentBlock::Text("x".into()),
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         let c = &messages_body(&r, false, &[])["messages"][1]["content"];
-        assert_eq!(
-            c[0],
-            json!({"type": "thinking", "thinking": "a", "signature": "sig"})
-        );
+        assert_eq!(c[0], json!({"type": "thinking", "thinking": "a", "signature": "sig"}));
         assert_eq!(c[1], json!({"type": "redacted_thinking", "data": "opaque"}));
         assert_eq!(c.as_array().unwrap().len(), 3);
     }
@@ -483,21 +361,13 @@ mod tests {
     #[test]
     fn metadata_carries_ids_only_and_count_tokens_drops_sampling() {
         let mut r = req();
-        r.metadata = RequestMetadata {
-            run_id: Some("RUN".into()),
-            session_id: Some("SES".into()),
-        };
-        assert_eq!(
-            messages_body(&r, false, &[])["metadata"]["user_id"],
-            "aibus:SES:RUN"
-        );
+        r.metadata = RequestMetadata { run_id: Some("RUN".into()), session_id: Some("SES".into()) };
+        assert_eq!(messages_body(&r, false, &[])["metadata"]["user_id"], "aibus:SES:RUN");
         let c = count_body(&r);
         for k in ["max_tokens", "stream", "temperature", "metadata"] {
             assert!(c.get(k).is_none(), "{k}");
         }
-        assert!(
-            c.get("messages").is_some() && c.get("tools").is_some() && c.get("model").is_some()
-        );
+        assert!(c.get("messages").is_some() && c.get("tools").is_some() && c.get("model").is_some());
     }
 
     #[test]
@@ -533,43 +403,26 @@ mod tests {
     fn flag_no_tool_choice_sends_tools_without_a_choice() {
         let b = messages_body(&req(), false, &[CompatFlag::NoToolChoice]);
         assert!(b.get("tools").is_some() && b.get("tool_choice").is_none());
-        assert_eq!(
-            messages_body(&req(), false, &[])["tool_choice"],
-            json!({"type": "auto"})
-        );
+        assert_eq!(messages_body(&req(), false, &[])["tool_choice"], json!({"type": "auto"}));
     }
 
     #[test]
     fn flag_no_named_tool_choice_turns_a_named_choice_into_any() {
         let mut r = req();
         r.tool_choice = ToolChoice::Named("read".into());
-        assert_eq!(
-            messages_body(&r, false, &[])["tool_choice"],
-            json!({"type": "tool", "name": "read"})
-        );
-        assert_eq!(
-            messages_body(&r, false, &[CompatFlag::NoNamedToolChoice])["tool_choice"],
-            json!({"type": "any"})
-        );
+        assert_eq!(messages_body(&r, false, &[])["tool_choice"], json!({"type": "tool", "name": "read"}));
+        assert_eq!(messages_body(&r, false, &[CompatFlag::NoNamedToolChoice])["tool_choice"], json!({"type": "any"}));
     }
 
     #[test]
     fn flag_no_sampling_params_leaves_temperature_out() {
-        assert!(messages_body(&req(), false, &[])
-            .get("temperature")
-            .is_some());
-        assert!(
-            messages_body(&req(), false, &[CompatFlag::NoSamplingParams])
-                .get("temperature")
-                .is_none()
-        );
+        assert!(messages_body(&req(), false, &[]).get("temperature").is_some());
+        assert!(messages_body(&req(), false, &[CompatFlag::NoSamplingParams]).get("temperature").is_none());
     }
 
     #[test]
     fn flag_no_system_role_folds_the_prompt_into_the_first_message() {
-        let degraded = caps()
-            .with_compat(&[CompatFlag::NoSystemRole])
-            .degrade(req());
+        let degraded = caps().with_compat(&[CompatFlag::NoSystemRole]).degrade(req());
         let b = messages_body(&degraded, false, &[]);
         assert!(b.get("system").is_none());
         assert_eq!(b["messages"][0]["content"][0]["text"], "You are terse.\n\n");
@@ -578,15 +431,8 @@ mod tests {
     #[test]
     fn flag_strip_images_sends_a_note_instead_of_the_picture() {
         let mut r = req();
-        r.messages[0].blocks.push(ContentBlock::Image {
-            media_type: "image/png".into(),
-            data: bytes::Bytes::from_static(b"\x89PNG"),
-        });
-        let b = messages_body(
-            &caps().with_compat(&[CompatFlag::StripImages]).degrade(r),
-            false,
-            &[],
-        );
+        r.messages[0].blocks.push(ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") });
+        let b = messages_body(&caps().with_compat(&[CompatFlag::StripImages]).degrade(r), false, &[]);
         assert!(!b.to_string().contains("\"image\""), "{b}");
         assert!(b.to_string().contains("[image omitted]"));
     }

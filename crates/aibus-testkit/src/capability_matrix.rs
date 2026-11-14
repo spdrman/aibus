@@ -97,11 +97,7 @@ pub fn render(rows: &[Row]) -> String {
             yes(list),
             yes(count),
             r.catalog_rows,
-            if compat.is_empty() {
-                "none".to_owned()
-            } else {
-                compat.join(", ")
-            },
+            if compat.is_empty() { "none".to_owned() } else { compat.join(", ") },
         ));
     }
     out

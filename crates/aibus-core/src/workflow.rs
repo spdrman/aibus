@@ -18,18 +18,9 @@ use crate::run::RunStatus;
 /// The four chains shipped as examples (`examples/workflows/`), installed by `aibus init`.
 pub const EXAMPLES: [(&str, &str); 4] = [
     ("fix", include_str!("../../../examples/workflows/fix.toml")),
-    (
-        "build",
-        include_str!("../../../examples/workflows/build.toml"),
-    ),
-    (
-        "review",
-        include_str!("../../../examples/workflows/review.toml"),
-    ),
-    (
-        "explore",
-        include_str!("../../../examples/workflows/explore.toml"),
-    ),
+    ("build", include_str!("../../../examples/workflows/build.toml")),
+    ("review", include_str!("../../../examples/workflows/review.toml")),
+    ("explore", include_str!("../../../examples/workflows/explore.toml")),
 ];
 
 /// The most a step may be retried; a larger `retry:N` is a mistake in the file.
@@ -136,8 +127,7 @@ impl Workflow {
                 return Err(bad("the prompt is empty".into()));
             }
             let mut seen = Vec::new();
-            scan(&raw.prompt, |_, key| seen.extend(key))
-                .map_err(|()| bad("a `{{` is never closed".into()))?;
+            scan(&raw.prompt, |_, key| seen.extend(key)).map_err(|()| bad("a `{{` is never closed".into()))?;
             for key in seen {
                 match var(key) {
                     None => return Err(bad(format!("unknown template `{{{{{key}}}}}`"))),
@@ -145,9 +135,7 @@ impl Workflow {
                         return Err(bad("the first step has no `{{prev.summary}}`".into()))
                     }
                     Some(Var::Step(a)) if !steps.iter().any(|s| s.agent.as_str() == a) => {
-                        return Err(bad(format!(
-                            "`{key}` names a step that does not come before this one"
-                        )))
+                        return Err(bad(format!("`{key}` names a step that does not come before this one")))
                     }
                     Some(_) => {}
                 }
@@ -158,11 +146,7 @@ impl Workflow {
                     .strip_prefix("retry:")
                     .and_then(|n| n.trim().parse::<u32>().ok())
                     .filter(|n| (1..=MAX_RETRIES).contains(n))
-                    .ok_or_else(|| {
-                        bad(format!(
-                            "on_fail {v:?}: want retry:N with N from 1 to {MAX_RETRIES}"
-                        ))
-                    })?,
+                    .ok_or_else(|| bad(format!("on_fail {v:?}: want retry:N with N from 1 to {MAX_RETRIES}")))?,
             };
             if raw.gate.as_deref().is_some_and(|g| g.trim().is_empty()) {
                 return Err(bad("the gate is empty".into()));
@@ -210,11 +194,7 @@ const MARKERS: [&str; 6] = ["[hint]", "[run ", "[mcp ", "[hook ", "[web ", "[adv
 pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
     let mut out = Validation::default();
     let mut error = |step: Option<usize>, field: Option<&str>, message: String| {
-        out.errors.push(Problem {
-            step,
-            field: field.map(str::to_owned),
-            message,
-        });
+        out.errors.push(Problem { step, field: field.map(str::to_owned), message });
     };
     match Workflow::parse(stem, text) {
         Ok(_) => {}
@@ -231,11 +211,7 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
     for (i, raw) in file.steps.iter().enumerate() {
         let n = i + 1;
         let mut note = |field: Option<&str>, message: String| {
-            warn.push(Problem {
-                step: Some(n),
-                field: field.map(str::to_owned),
-                message,
-            });
+            warn.push(Problem { step: Some(n), field: field.map(str::to_owned), message });
         };
         if AgentName::new(&raw.agent).is_ok_and(|a| !roster.contains(&a)) {
             out.errors.push(Problem {
@@ -245,10 +221,7 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
             });
         }
         if let Some(gate) = raw.gate.as_ref().filter(|g| !g.trim().is_empty()) {
-            note(
-                Some("gate"),
-                format!("runs a shell command after this step: {gate}"),
-            );
+            note(Some("gate"), format!("runs a shell command after this step: {gate}"));
         }
         // The last step's summary is the workflow's result, so nobody else has to read it.
         let read = |j: usize| {
@@ -257,8 +230,7 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
             let named = format!("steps.{}.summary", raw.agent);
             // A step of the same name in between hides this one from `steps.<agent>.summary`.
             let hidden = file.steps[i + 1..j].iter().any(|s| s.agent == raw.agent);
-            keys.iter()
-                .any(|k| (j == i + 1 && *k == "prev.summary") || (*k == named && !hidden))
+            keys.iter().any(|k| (j == i + 1 && *k == "prev.summary") || (*k == named && !hidden))
         };
         if n < file.steps.len() && !(i + 1..file.steps.len()).any(read) {
             note(
@@ -272,18 +244,12 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
         for m in MARKERS.iter().filter(|m| raw.prompt.contains(**m)) {
             note(
                 Some("prompt"),
-                format!(
-                    "the prompt contains `{}`, which has the shape of an aibus marker",
-                    m.trim_end()
-                ),
+                format!("the prompt contains `{}`, which has the shape of an aibus marker", m.trim_end()),
             );
         }
         if raw.on_fail.is_some() {
             if n < file.steps.len() {
-                note(
-                    Some("on_fail"),
-                    "on_fail is set on a step that is not the last one".into(),
-                );
+                note(Some("on_fail"), "on_fail is set on a step that is not the last one".into());
             }
             if i > 0 && file.steps[i - 1].gate.is_some() {
                 note(
@@ -306,23 +272,9 @@ pub fn summarise(text: &str, stem: &str, roster: &[AgentName]) -> (bool, String)
     let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
     if found.ok {
         let steps = Workflow::parse(stem, text).map_or(0, |w| w.steps.len());
-        (
-            true,
-            format!(
-                "valid, {}, {}",
-                plural(steps, "step"),
-                plural(found.warnings.len(), "warning")
-            ),
-        )
+        (true, format!("valid, {}, {}", plural(steps, "step"), plural(found.warnings.len(), "warning")))
     } else {
-        (
-            false,
-            format!(
-                "{}, {}",
-                plural(found.errors.len(), "error"),
-                plural(found.warnings.len(), "warning")
-            ),
-        )
+        (false, format!("{}, {}", plural(found.errors.len(), "error"), plural(found.warnings.len(), "warning")))
     }
 }
 
@@ -338,26 +290,15 @@ pub fn write_summary(tool: &str, input: &serde_json::Value) -> Option<String> {
                 |_| "an unreadable draft".to_owned(),
                 |w| {
                     let gates = w.steps.iter().filter(|s| s.gate.is_some()).count();
-                    let gate = if gates == 0 {
-                        "no gate".to_owned()
-                    } else {
-                        format!("{gates} gate(s)")
-                    };
-                    format!(
-                        "{} step{}, {gate}",
-                        w.steps.len(),
-                        if w.steps.len() == 1 { "" } else { "s" }
-                    )
+                    let gate = if gates == 0 { "no gate".to_owned() } else { format!("{gates} gate(s)") };
+                    format!("{} step{}, {gate}", w.steps.len(), if w.steps.len() == 1 { "" } else { "s" })
                 },
             );
             Some(format!("create {name} ({scope}), {steps}"))
         }
         "mcp:aibus-write:workflow_update" => {
             let (name, revision) = (text("name")?, text("expected_revision")?);
-            Some(format!(
-                "update {name}, revision {}...",
-                revision.chars().take(8).collect::<String>()
-            ))
+            Some(format!("update {name}, revision {}...", revision.chars().take(8).collect::<String>()))
         }
         _ => None,
     }
@@ -378,9 +319,7 @@ pub type Found = (String, PathBuf, Result<Workflow, WorkflowError>);
 pub fn list(dirs: &[PathBuf]) -> Vec<Found> {
     let mut by_name: BTreeMap<String, Found> = BTreeMap::new();
     for dir in dirs {
-        let Ok(read) = std::fs::read_dir(dir) else {
-            continue;
-        };
+        let Ok(read) = std::fs::read_dir(dir) else { continue };
         for entry in read.flatten() {
             let path = entry.path();
             let Some(stem) = path
@@ -415,9 +354,7 @@ pub fn load(dirs: &[PathBuf], name: &str) -> Result<Workflow, String> {
 /// line). `save` and the MCP write tools both check it.
 pub fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
         && name.len() <= 64
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
@@ -447,26 +384,12 @@ pub fn rows(dirs: &[PathBuf]) -> Vec<WorkflowRow> {
     list(dirs)
         .into_iter()
         .map(|(name, path, parsed)| {
-            let scope = if dirs.first().is_some_and(|d| path.starts_with(d)) {
-                "project"
-            } else {
-                "user"
-            };
+            let scope = if dirs.first().is_some_and(|d| path.starts_with(d)) { "project" } else { "user" };
             let (description, agents, error) = match parsed {
-                Ok(w) => (
-                    w.description,
-                    w.steps.iter().map(|s| s.agent.to_string()).collect(),
-                    None,
-                ),
+                Ok(w) => (w.description, w.steps.iter().map(|s| s.agent.to_string()).collect(), None),
                 Err(e) => (String::new(), Vec::new(), Some(e.to_string())),
             };
-            WorkflowRow {
-                name,
-                scope: scope.into(),
-                description,
-                agents,
-                error,
-            }
+            WorkflowRow { name, scope: scope.into(), description, agents, error }
         })
         .collect()
 }
@@ -505,18 +428,13 @@ pub fn save(
     if !found.ok {
         return Err(SaveError::Invalid(found.errors));
     }
-    let dir = dirs
-        .get(usize::from(user))
-        .ok_or_else(|| SaveError::Io("there is no user directory for workflows".into()))?;
+    let dir = dirs.get(usize::from(user)).ok_or_else(|| SaveError::Io("there is no user directory for workflows".into()))?;
     let path = dir.join(format!("{name}.toml"));
     match std::fs::symlink_metadata(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(SaveError::Io(format!("{}: {e}", path.display()))),
         Ok(md) if md.file_type().is_symlink() || !md.is_file() => {
-            return Err(SaveError::Io(format!(
-                "{} is not a plain file, refusing to write through it",
-                path.display()
-            )))
+            return Err(SaveError::Io(format!("{} is not a plain file, refusing to write through it", path.display())))
         }
         Ok(_) if !force => return Err(SaveError::Exists(path)),
         Ok(_) => {}
@@ -526,11 +444,7 @@ pub fn save(
         .lines()
         .skip_while(|l| l.starts_with("# schema: ") || l.starts_with("# written through aibus"))
         .collect();
-    let bytes = format!(
-        "{SCHEMA_LINE}\n{PROVENANCE}{}\n{}\n",
-        rfc3339(at),
-        body.join("\n")
-    );
+    let bytes = format!("{SCHEMA_LINE}\n{PROVENANCE}{}\n{}\n", rfc3339(at), body.join("\n"));
     write_atomic(&path, bytes).map_err(|e| SaveError::Io(format!("{}: {e}", path.display())))?;
     Ok(path)
 }
@@ -545,10 +459,7 @@ pub fn parse_slash<'a>(text: &'a str, known: &[String]) -> Option<(&'a str, &'a 
         let (name, input) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
         return (!name.is_empty()).then_some((name, input.trim()));
     }
-    known
-        .iter()
-        .any(|k| k == word)
-        .then_some((word, rest.trim()))
+    known.iter().any(|k| k == word).then_some((word, rest.trim()))
 }
 
 /// What the templates of one step can see.
@@ -595,14 +506,7 @@ pub fn preview(wf: &Workflow, input: &str) -> Vec<String> {
     let mut prev: Option<String> = None;
     let mut out = Vec::new();
     for (i, step) in wf.steps.iter().enumerate() {
-        out.push(render(
-            &step.prompt,
-            &Scope {
-                input,
-                prev: prev.as_deref(),
-                steps: &steps,
-            },
-        ));
+        out.push(render(&step.prompt, &Scope { input, prev: prev.as_deref(), steps: &steps }));
         let placeholder = format!("<summary of step {} ({})>", i + 1, step.agent);
         steps.insert(step.agent.to_string(), placeholder.clone());
         prev = Some(placeholder);
@@ -700,9 +604,7 @@ pub async fn execute(wf: &Workflow, input: &str, host: &dyn StepHost) -> Report 
     let mut i = 0;
     while i < wf.steps.len() {
         let step = &wf.steps[i];
-        let prev = i
-            .checked_sub(1)
-            .and_then(|p| summaries.get(wf.steps[p].agent.as_str()));
+        let prev = i.checked_sub(1).and_then(|p| summaries.get(wf.steps[p].agent.as_str()));
         let mut prompt = render(
             &step.prompt,
             &Scope {
@@ -726,21 +628,12 @@ pub async fn execute(wf: &Workflow, input: &str, host: &dyn StepHost) -> Report 
             Err(HostError::Cancelled) => {
                 attempt.failure = Some("cancelled".into());
                 attempts.push(attempt);
-                return Report {
-                    attempts,
-                    ending: Ending::Cancelled,
-                };
+                return Report { attempts, ending: Ending::Cancelled };
             }
             Err(HostError::Stop(reason)) => {
                 attempt.failure = Some(reason.clone());
                 attempts.push(attempt);
-                return Report {
-                    attempts,
-                    ending: Ending::Stopped {
-                        step: i + 1,
-                        reason,
-                    },
-                };
+                return Report { attempts, ending: Ending::Stopped { step: i + 1, reason } };
             }
             Err(HostError::Failed(reason)) => Some(reason),
             Ok(out) => {
@@ -750,39 +643,20 @@ pub async fn execute(wf: &Workflow, input: &str, host: &dyn StepHost) -> Report 
                 if out.status == RunStatus::Cancelled {
                     attempt.failure = Some("cancelled".into());
                     attempts.push(attempt);
-                    return Report {
-                        attempts,
-                        ending: Ending::Cancelled,
-                    };
+                    return Report { attempts, ending: Ending::Cancelled };
                 }
                 if out.status != RunStatus::Completed {
-                    let detail = out
-                        .error
-                        .as_deref()
-                        .unwrap_or(tail(&out.summary, REASON_BYTES));
-                    Some(format!(
-                        "{} ended {}: {detail}",
-                        step.agent,
-                        out.status.as_value()
-                    ))
+                    let detail = out.error.as_deref().unwrap_or(tail(&out.summary, REASON_BYTES));
+                    Some(format!("{} ended {}: {detail}", step.agent, out.status.as_value()))
                 } else if let Some(command) = &step.gate {
-                    let call = GateCall {
-                        workflow: &wf.name,
-                        step: i + 1,
-                        agent: &step.agent,
-                        input,
-                        outcome: &out,
-                    };
+                    let call = GateCall { workflow: &wf.name, step: i + 1, agent: &step.agent, input, outcome: &out };
                     match host.gate(command, &call).await {
                         Ok(GateVerdict::Pass) => None,
                         Ok(GateVerdict::Block(reason)) => Some(format!("gate blocked: {reason}")),
                         Err(HostError::Cancelled) => {
                             attempt.failure = Some("cancelled".into());
                             attempts.push(attempt);
-                            return Report {
-                                attempts,
-                                ending: Ending::Cancelled,
-                            };
+                            return Report { attempts, ending: Ending::Cancelled };
                         }
                         Err(HostError::Stop(reason) | HostError::Failed(reason)) => {
                             Some(format!("gate could not run: {reason}"))
@@ -809,20 +683,11 @@ pub async fn execute(wf: &Workflow, input: &str, host: &dyn StepHost) -> Report 
                 i = i.saturating_sub(1);
             }
             Some(reason) => {
-                return Report {
-                    attempts,
-                    ending: Ending::Stopped {
-                        step: i + 1,
-                        reason,
-                    },
-                };
+                return Report { attempts, ending: Ending::Stopped { step: i + 1, reason } };
             }
         }
     }
-    Report {
-        attempts,
-        ending: Ending::Completed,
-    }
+    Report { attempts, ending: Ending::Completed }
 }
 
 impl Report {
@@ -840,10 +705,7 @@ impl Report {
                 } else {
                     format!(" Not run: {}.", left.join(", "))
                 };
-                format!(
-                    "workflow {}: stopped at step {step} of {steps} ({agent}): {reason}.{rest}",
-                    wf.name
-                )
+                format!("workflow {}: stopped at step {step} of {steps} ({agent}): {reason}.{rest}", wf.name)
             }
         };
         for a in &self.attempts {
@@ -903,28 +765,13 @@ on_fail = "retry:2"
     #[test]
     fn mistakes_are_named_with_the_step() {
         let bad = |t: &str| Workflow::parse("x", t).unwrap_err().to_string();
-        assert_eq!(
-            bad("name = \"x\""),
-            "a workflow needs at least one [[step]]"
-        );
-        assert!(bad("[[step]]\nagent = \"A B\"\nprompt = \"p\"")
-            .starts_with("step 1: invalid agent name"));
-        assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"{{nope}}\"")
-            .contains("unknown template `{{nope}}`"));
-        assert!(
-            bad("[[step]]\nagent = \"a\"\nprompt = \"{{prev.summary}}\"").contains("first step")
-        );
-        assert!(
-            bad("[[step]]\nagent = \"a\"\nprompt = \"{{steps.b.summary}}\"")
-                .contains("does not come before")
-        );
-        assert!(
-            bad("[[step]]\nagent = \"a\"\nprompt = \"p\"\non_fail = \"retry:9\"")
-                .contains("retry:N")
-        );
-        assert!(
-            bad("[[step]]\nagent = \"a\"\nprompt = \"p\"\non_fail = \"again\"").contains("retry:N")
-        );
+        assert_eq!(bad("name = \"x\""), "a workflow needs at least one [[step]]");
+        assert!(bad("[[step]]\nagent = \"A B\"\nprompt = \"p\"").starts_with("step 1: invalid agent name"));
+        assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"{{nope}}\"").contains("unknown template `{{nope}}`"));
+        assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"{{prev.summary}}\"").contains("first step"));
+        assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"{{steps.b.summary}}\"").contains("does not come before"));
+        assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"p\"\non_fail = \"retry:9\"").contains("retry:N"));
+        assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"p\"\non_fail = \"again\"").contains("retry:N"));
         assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"{{input\"").contains("never closed"));
         assert!(bad("[[step]]\nagent = \"a\"\nprompt = \"p\"\nextra = 1").contains("unknown field"));
     }
@@ -932,31 +779,15 @@ on_fail = "retry:2"
     #[test]
     fn templates_fill_in_input_prev_and_named_steps() {
         let steps = BTreeMap::from([("a".to_owned(), "AAA".to_owned())]);
-        let scope = Scope {
-            input: "I",
-            prev: Some("P"),
-            steps: &steps,
-        };
-        assert_eq!(
-            render(
-                "{{input}}|{{ prev.summary }}|{{steps.a.summary}}|{{steps.z.summary}}.",
-                &scope
-            ),
-            "I|P|AAA|."
-        );
+        let scope = Scope { input: "I", prev: Some("P"), steps: &steps };
+        assert_eq!(render("{{input}}|{{ prev.summary }}|{{steps.a.summary}}|{{steps.z.summary}}.", &scope), "I|P|AAA|.");
     }
 
     #[test]
     fn slash_commands_need_a_known_name_or_the_workflow_word() {
         let known = vec!["fix".to_owned()];
-        assert_eq!(
-            parse_slash("/fix the login", &known),
-            Some(("fix", "the login"))
-        );
-        assert_eq!(
-            parse_slash("/workflow build add a flag", &known),
-            Some(("build", "add a flag"))
-        );
+        assert_eq!(parse_slash("/fix the login", &known), Some(("fix", "the login")));
+        assert_eq!(parse_slash("/workflow build add a flag", &known), Some(("build", "add a flag")));
         assert_eq!(parse_slash("/fixme please", &known), None);
         assert_eq!(parse_slash("/etc/passwd explain", &known), None);
         assert_eq!(parse_slash("fix it", &known), None);
@@ -968,30 +799,16 @@ on_fail = "retry:2"
         let dir = tempfile::tempdir().unwrap();
         let dirs = vec![dir.path().join("project"), dir.path().join("user")];
         let text = EXAMPLES[2].1;
-        let roster: Vec<AgentName> = Workflow::parse("review", text)
-            .unwrap()
-            .steps
-            .iter()
-            .map(|s| s.agent.clone())
-            .collect();
+        let roster: Vec<AgentName> = Workflow::parse("review", text).unwrap().steps.iter().map(|s| s.agent.clone()).collect();
         let at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let path = save(&dirs, false, "review", text, false, &roster, at).unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         let mut lines = saved.lines();
         assert_eq!(lines.next(), Some(SCHEMA_LINE));
-        assert_eq!(
-            lines.next(),
-            Some("# written through aibus, 2023-11-14T22:13:20.000Z")
-        );
-        assert_eq!(
-            Workflow::parse("review", &saved),
-            Workflow::parse("review", text)
-        );
+        assert_eq!(lines.next(), Some("# written through aibus, 2023-11-14T22:13:20.000Z"));
+        assert_eq!(Workflow::parse("review", &saved), Workflow::parse("review", text));
         // Saving what was saved does not stack a second header.
-        assert_eq!(
-            save(&dirs, false, "review", &saved, false, &roster, at),
-            Err(SaveError::Exists(path.clone()))
-        );
+        assert_eq!(save(&dirs, false, "review", &saved, false, &roster, at), Err(SaveError::Exists(path.clone())));
         save(&dirs, false, "review", &saved, true, &roster, at).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
         let scopes: Vec<_> = rows(&dirs).into_iter().map(|r| (r.name, r.scope)).collect();
@@ -1005,15 +822,9 @@ on_fail = "retry:2"
         let at = SystemTime::UNIX_EPOCH;
         let long = "a".repeat(65);
         for name in ["", "../x", "A", "-x", "a.b", long.as_str()] {
-            assert_eq!(
-                save(&dirs, false, name, EXAMPLES[2].1, true, &[], at),
-                Err(SaveError::Name(name.to_owned()))
-            );
+            assert_eq!(save(&dirs, false, name, EXAMPLES[2].1, true, &[], at), Err(SaveError::Name(name.to_owned())));
         }
-        assert!(matches!(
-            save(&dirs, false, "ok", "nonsense", true, &[], at),
-            Err(SaveError::Invalid(_))
-        ));
+        assert!(matches!(save(&dirs, false, "ok", "nonsense", true, &[], at), Err(SaveError::Invalid(_))));
         assert!(!dirs[0].exists());
     }
 
@@ -1035,12 +846,7 @@ on_fail = "retry:2"
     impl Scripted {
         fn new(runs: Vec<(RunStatus, &str)>, gates: Vec<GateVerdict>) -> Self {
             Self {
-                runs: Mutex::new(
-                    runs.into_iter()
-                        .rev()
-                        .map(|(s, t)| (s, t.to_owned()))
-                        .collect(),
-                ),
+                runs: Mutex::new(runs.into_iter().rev().map(|(s, t)| (s, t.to_owned())).collect()),
                 gates: Mutex::new(gates.into_iter().rev().collect()),
                 prompts: Mutex::default(),
             }
@@ -1050,17 +856,9 @@ on_fail = "retry:2"
     #[async_trait::async_trait]
     impl StepHost for Scripted {
         async fn run(&self, agent: &AgentName, prompt: String) -> Result<StepOutcome, HostError> {
-            self.prompts
-                .lock()
-                .unwrap()
-                .push((agent.to_string(), prompt));
+            self.prompts.lock().unwrap().push((agent.to_string(), prompt));
             let (status, summary) = self.runs.lock().unwrap().pop().expect("a scripted run");
-            Ok(StepOutcome {
-                wrapped: format!("[{agent}] {summary}"),
-                status,
-                summary,
-                error: None,
-            })
+            Ok(StepOutcome { wrapped: format!("[{agent}] {summary}"), status, summary, error: None })
         }
 
         async fn gate(&self, _: &str, _: &GateCall<'_>) -> Result<GateVerdict, HostError> {
@@ -1075,10 +873,7 @@ on_fail = "retry:2"
     #[tokio::test]
     async fn a_chain_runs_in_order_with_each_step_seeing_the_ones_before() {
         let wf = Workflow::parse("fix", FIX).unwrap();
-        let host = Scripted::new(
-            vec![ok("cause"), ok("low"), ok("patched"), ok("green")],
-            vec![GateVerdict::Pass],
-        );
+        let host = Scripted::new(vec![ok("cause"), ok("low"), ok("patched"), ok("green")], vec![GateVerdict::Pass]);
         let report = execute(&wf, "login fails", &host).await;
         assert_eq!(report.ending, Ending::Completed);
         let prompts = host.prompts.lock().unwrap().clone();
@@ -1086,15 +881,9 @@ on_fail = "retry:2"
             prompts,
             [
                 ("sleuth".to_owned(), "Diagnose: login fails".to_owned()),
-                (
-                    "premortem".to_owned(),
-                    "Risks of this fix: cause".to_owned()
-                ),
+                ("premortem".to_owned(), "Risks of this fix: cause".to_owned()),
                 ("kraken".to_owned(), "Implement: cause".to_owned()),
-                (
-                    "arbiter".to_owned(),
-                    "Verify the fix with tests.".to_owned()
-                ),
+                ("arbiter".to_owned(), "Verify the fix with tests.".to_owned()),
             ]
         );
     }
@@ -1102,21 +891,13 @@ on_fail = "retry:2"
     #[tokio::test]
     async fn a_gate_that_blocks_stops_the_chain_and_names_what_was_not_run() {
         let wf = Workflow::parse("fix", FIX).unwrap();
-        let host = Scripted::new(
-            vec![ok("cause"), ok("high risk")],
-            vec![GateVerdict::Block("high risk".into())],
-        );
+        let host = Scripted::new(vec![ok("cause"), ok("high risk")], vec![GateVerdict::Block("high risk".into())]);
         let report = execute(&wf, "x", &host).await;
         assert_eq!(report.attempts.len(), 2);
-        let Ending::Stopped { step, reason } = &report.ending else {
-            panic!("{:?}", report.ending)
-        };
+        let Ending::Stopped { step, reason } = &report.ending else { panic!("{:?}", report.ending) };
         assert_eq!((*step, reason.as_str()), (2, "gate blocked: high risk"));
         let text = report.text(&wf);
-        assert!(
-            text.contains("stopped at step 2 of 4 (premortem)"),
-            "{text}"
-        );
+        assert!(text.contains("stopped at step 2 of 4 (premortem)"), "{text}");
         assert!(text.contains("Not run: kraken, arbiter."), "{text}");
     }
 
@@ -1125,48 +906,18 @@ on_fail = "retry:2"
         let wf = Workflow::parse("fix", FIX).unwrap();
         let failed = (RunStatus::Failed, "tests red");
         let host = Scripted::new(
-            vec![
-                ok("cause"),
-                ok("low"),
-                ok("p1"),
-                failed,
-                ok("p2"),
-                failed,
-                ok("p3"),
-                failed,
-            ],
+            vec![ok("cause"), ok("low"), ok("p1"), failed, ok("p2"), failed, ok("p3"), failed],
             vec![GateVerdict::Pass],
         );
         let report = execute(&wf, "x", &host).await;
         // kraken and arbiter ran three times each: once, and twice again.
-        let agents: Vec<_> = report
-            .attempts
-            .iter()
-            .map(|a| a.agent.to_string())
-            .collect();
-        assert_eq!(
-            agents.iter().filter(|a| *a == "kraken").count(),
-            3,
-            "{agents:?}"
-        );
-        assert_eq!(
-            agents.iter().filter(|a| *a == "arbiter").count(),
-            3,
-            "{agents:?}"
-        );
-        assert!(
-            matches!(report.ending, Ending::Stopped { step: 4, .. }),
-            "{:?}",
-            report.ending
-        );
+        let agents: Vec<_> = report.attempts.iter().map(|a| a.agent.to_string()).collect();
+        assert_eq!(agents.iter().filter(|a| *a == "kraken").count(), 3, "{agents:?}");
+        assert_eq!(agents.iter().filter(|a| *a == "arbiter").count(), 3, "{agents:?}");
+        assert!(matches!(report.ending, Ending::Stopped { step: 4, .. }), "{:?}", report.ending);
         // The re-run was told why.
         let prompts = host.prompts.lock().unwrap().clone();
-        assert!(
-            prompts[4]
-                .1
-                .contains("did not pass: arbiter ended failed: tests red"),
-            "{prompts:?}"
-        );
+        assert!(prompts[4].1.contains("did not pass: arbiter ended failed: tests red"), "{prompts:?}");
         assert!(prompts[5].1.contains("did not pass"), "{prompts:?}");
         // The first pass saw no such note.
         assert!(!prompts[2].1.contains("did not pass"));
@@ -1176,14 +927,7 @@ on_fail = "retry:2"
     async fn a_retry_that_works_carries_on_to_the_end() {
         let wf = Workflow::parse("fix", FIX).unwrap();
         let host = Scripted::new(
-            vec![
-                ok("cause"),
-                ok("low"),
-                ok("p1"),
-                (RunStatus::Failed, "red"),
-                ok("p2"),
-                ok("green"),
-            ],
+            vec![ok("cause"), ok("low"), ok("p1"), (RunStatus::Failed, "red"), ok("p2"), ok("green")],
             vec![GateVerdict::Pass],
         );
         let report = execute(&wf, "x", &host).await;

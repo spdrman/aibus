@@ -87,22 +87,12 @@ impl Solo {
         let dir = xdg.root().join("proj");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "alpha\n").unwrap();
-        Self {
-            xdg,
-            dir,
-            _logs: logs,
-        }
+        Self { xdg, dir, _logs: logs }
     }
 
     /// The standard tools, behind `gate`.
     pub fn tools(&self, gate: Gate) -> Arc<ToolExecutor> {
-        let bash = Arc::new(Bash::new(
-            20,
-            vec![],
-            path_env(),
-            self.dir.clone(),
-            "s".into(),
-        ));
+        let bash = Arc::new(Bash::new(20, vec![], path_env(), self.dir.clone(), "s".into()));
         Arc::new(ToolExecutor::with_gate(ToolRegistry::standard(bash), gate).unwrap())
     }
 

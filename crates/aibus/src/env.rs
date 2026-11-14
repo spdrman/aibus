@@ -15,11 +15,9 @@ pub fn apply_limits(
     let number = |var: &str| -> Result<Option<u32>, AibusError> {
         match get(var).filter(|v| !v.trim().is_empty()) {
             None => Ok(None),
-            Some(v) => v
-                .trim()
-                .parse::<u32>()
-                .map(Some)
-                .map_err(|_| AibusError::Usage(format!("{var}={v}: want a whole number"))),
+            Some(v) => v.trim().parse::<u32>().map(Some).map_err(|_| {
+                AibusError::Usage(format!("{var}={v}: want a whole number"))
+            }),
         }
     };
     if let Some(n) = number("AIBUS_MAX_SPAWN_DEPTH")? {
@@ -43,9 +41,7 @@ pub fn apply_limits(
             .parse::<f64>()
             .ok()
             .filter(|c| c.is_finite() && *c > 0.0)
-            .ok_or_else(|| {
-                AibusError::Usage(format!("AIBUS_MAX_COST_USD={v}: want a positive number"))
-            })?;
+            .ok_or_else(|| AibusError::Usage(format!("AIBUS_MAX_COST_USD={v}: want a positive number")))?;
     }
     Ok(())
 }
@@ -79,12 +75,7 @@ mod tests {
     use super::*;
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
-        move |k| {
-            pairs
-                .iter()
-                .find(|(n, _)| *n == k)
-                .map(|(_, v)| (*v).to_owned())
-        }
+        move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_owned())
     }
 
     #[test]
@@ -95,16 +86,10 @@ mod tests {
 
         apply_limits(
             &mut cfg,
-            env(&[
-                ("AIBUS_MAX_SPAWN_DEPTH", "1"),
-                ("AIBUS_MAX_CONCURRENT_RUNS", " 2 "),
-            ]),
+            env(&[("AIBUS_MAX_SPAWN_DEPTH", "1"), ("AIBUS_MAX_CONCURRENT_RUNS", " 2 ")]),
         )
         .unwrap();
-        assert_eq!(
-            (cfg.limits.max_spawn_depth, cfg.limits.max_concurrent_runs),
-            (1, 2)
-        );
+        assert_eq!((cfg.limits.max_spawn_depth, cfg.limits.max_concurrent_runs), (1, 2));
 
         for bad in [
             ("AIBUS_MAX_SPAWN_DEPTH", "deep"),
@@ -135,9 +120,7 @@ mod tests {
         assert_eq!(outcome(None, env(&[])).unwrap(), None);
         assert_eq!(outcome(Some("great"), &vars).unwrap_err().exit_code(), 2);
         assert_eq!(
-            outcome(None, env(&[("AIBUS_OUTCOME", "meh")]))
-                .unwrap_err()
-                .exit_code(),
+            outcome(None, env(&[("AIBUS_OUTCOME", "meh")])).unwrap_err().exit_code(),
             2
         );
     }

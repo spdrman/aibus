@@ -107,11 +107,7 @@ const LIGHT_SPLIT_REST_ON_PANEL: f64 = 1.69;
 #[test]
 fn decorative_pairs_are_recorded() {
     for (t, dim, rest) in [
-        (
-            Theme::recording(),
-            RECORDING_DIM_ON_BG,
-            RECORDING_SPLIT_REST_ON_PANEL,
-        ),
+        (Theme::recording(), RECORDING_DIM_ON_BG, RECORDING_SPLIT_REST_ON_PANEL),
         (Theme::light(), LIGHT_DIM_ON_BG, LIGHT_SPLIT_REST_ON_PANEL),
     ] {
         assert!((ratio(t.dim, t.bg) - dim).abs() < 0.01);
@@ -135,9 +131,7 @@ fn the_interaction_tokens_can_be_told_apart() {
 #[test]
 fn mono_carries_no_colour() {
     let t = Theme::mono();
-    for name in [
-        "bg", "panel", "fg", "dim", "lead", "swarm", "hover", "pressed", "selected", "focus",
-    ] {
+    for name in ["bg", "panel", "fg", "dim", "lead", "swarm", "hover", "pressed", "selected", "focus"] {
         assert_eq!(pick(&t, name), Color::Reset, "{name}");
     }
 }
@@ -319,10 +313,7 @@ fn the_rataflow_palette_meets_3_on_bg_and_panel() {
         assert_eq!(p.surface, t.panel);
     }
     let mono = aibus_tui::diagram::palette(&Theme::mono());
-    assert_eq!(
-        [mono.muted, mono.accent, mono.text, mono.canvas_bg],
-        [Color::Reset; 4]
-    );
+    assert_eq!([mono.muted, mono.accent, mono.text, mono.canvas_bg], [Color::Reset; 4]);
 }
 
 /// The colours the `Dotted` edge paints with, on `bg` and `panel`: the travelling dots (`lead`,
@@ -335,11 +326,7 @@ fn the_rataflow_palette_meets_3_on_bg_and_panel() {
 #[test]
 fn the_dotted_edge_colours_meet_3_on_bg_and_panel() {
     for (name, t) in [("recording", Theme::recording()), ("light", Theme::light())] {
-        for (role, colour) in [
-            ("lead", t.lead),
-            ("swarm", t.swarm),
-            ("dim_text", t.dim_text),
-        ] {
+        for (role, colour) in [("lead", t.lead), ("swarm", t.swarm), ("dim_text", t.dim_text)] {
             for (on, bg) in [("bg", t.bg), ("panel", t.panel)] {
                 let r = ratio(colour, bg);
                 println!("{name}: dotted {role} on {on} = {r:.2}");

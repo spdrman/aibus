@@ -14,9 +14,7 @@ const SCHEMA: &str = include_str!("../../../docs/schemas/workflow/v1.json");
 pub fn list() -> Vec<Resource> {
     vec![
         Resource::new("aibus://workflows", "workflows")
-            .with_description(
-                "The workflow_list result: every workflow of this project and of the user.",
-            )
+            .with_description("The workflow_list result: every workflow of this project and of the user.")
             .with_mime_type("application/json"),
         Resource::new("aibus://schema/workflow", "workflow-schema")
             .with_description("The JSON Schema (v1) of a workflow file.")
@@ -28,11 +26,9 @@ pub fn list() -> Vec<Resource> {
 }
 
 pub fn templates() -> Vec<ResourceTemplate> {
-    vec![
-        ResourceTemplate::new("aibus://workflows/{scope}/{name}", "workflow-file")
-            .with_description("One workflow file as TOML. The scope is `project` or `user`.")
-            .with_mime_type("application/toml"),
-    ]
+    vec![ResourceTemplate::new("aibus://workflows/{scope}/{name}", "workflow-file")
+        .with_description("One workflow file as TOML. The scope is `project` or `user`.")
+        .with_mime_type("application/toml")]
 }
 
 /// The run resources, listed only with `--allow run` (#105).
@@ -62,9 +58,7 @@ impl Server {
             ["agents"] => json(serde_json::json!({ "agents": self.agent_rows() })),
             ["schema", "workflow"] => Ok(("application/schema+json", SCHEMA.to_owned())),
             ["workflows", scope, name] => match self.workflow_file(name, Some(scope))? {
-                Some((_, _, text)) => {
-                    Ok(("application/toml", self.redactor.redact(&text).into_owned()))
-                }
+                Some((_, _, text)) => Ok(("application/toml", self.redactor.redact(&text).into_owned())),
                 None => Err(unknown()),
             },
             // Handles this process gave out and nothing else: an id from disk or from another
@@ -73,9 +67,7 @@ impl Server {
                 let runs = self.runs.as_ref().ok_or_else(unknown)?;
                 if !rest.is_empty() {
                     let max = aibus_core::config::Limits::default().result_max_bytes;
-                    let text = runs
-                        .log_text(run, &self.redactor, max)
-                        .ok_or_else(unknown)?;
+                    let text = runs.log_text(run, &self.redactor, max).ok_or_else(unknown)?;
                     Ok(("text/plain", text))
                 } else {
                     let mut body = runs.body(run, &self.redactor).ok_or_else(unknown)?;

@@ -26,20 +26,13 @@ fn first_frame() -> App<MiniGraph> {
     let mut app = App::new(MiniGraph::new(), || 1_700_000_000_000);
     let keys = aibus_tui::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
-    app.set_session_view(
-        Some("--model sonnet"),
-        (Some("opus 5.5"), true),
-        (None, true),
-    )
-    .unwrap();
+    app.set_session_view(Some("--model sonnet"), (Some("opus 5.5"), true), (None, true))
+        .unwrap();
     app.step(Msg::Resize { cols: 98, rows: 46 }).unwrap();
     let mut term = Terminal::new(TestBackend::new(98, 46)).unwrap();
     let mut ui = Ui::new(Theme::recording());
     ui.note_commit(&app.graph);
-    assert!(
-        ui.draw(&mut term, &app.graph).unwrap(),
-        "the first frame draws"
-    );
+    assert!(ui.draw(&mut term, &app.graph).unwrap(), "the first frame draws");
     app
 }
 
@@ -74,28 +67,14 @@ fn first_frame_warm_and_cold() {
     let opened = start.elapsed();
     first_frame();
     let cold = start.elapsed();
-    assert!(
-        found.agents.len() >= 100,
-        "{} definitions found",
-        found.agents.len()
-    );
+    assert!(found.agents.len() >= 100, "{} definitions found", found.agents.len());
     println!(
         "first frame, cold (100 definitions, SQLite open): {cold:?} (target {COLD_TARGET:?}); discovery {discovered:?}, index open done at {opened:?}"
     );
 
     // The bundled SQLite is built without optimisation in a debug build, which is most of the
     // cold number there; the targets are for `--release`.
-    let ceiling = if cfg!(debug_assertions) {
-        CEILING * 5
-    } else {
-        CEILING
-    };
-    assert!(
-        warm < WARM_TARGET * ceiling,
-        "warm first frame took {warm:?}"
-    );
-    assert!(
-        cold < COLD_TARGET * ceiling,
-        "cold first frame took {cold:?}"
-    );
+    let ceiling = if cfg!(debug_assertions) { CEILING * 5 } else { CEILING };
+    assert!(warm < WARM_TARGET * ceiling, "warm first frame took {warm:?}");
+    assert!(cold < COLD_TARGET * ceiling, "cold first frame took {cold:?}");
 }

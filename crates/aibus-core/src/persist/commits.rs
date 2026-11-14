@@ -127,10 +127,7 @@ mod tests {
         assert!(dir.path().join("commits.0002.jsonl.zst").is_file());
         assert!(!dir.path().join("commits.0003.jsonl.zst").exists());
         let all = read_all(dir.path()).unwrap();
-        assert_eq!(
-            all.iter().map(|r| r.time).collect::<Vec<_>>(),
-            (1..=25).collect::<Vec<_>>()
-        );
+        assert_eq!(all.iter().map(|r| r.time).collect::<Vec<_>>(), (1..=25).collect::<Vec<_>>());
         assert_eq!(all[24], rec(25));
     }
 

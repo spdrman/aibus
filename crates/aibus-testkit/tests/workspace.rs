@@ -18,50 +18,24 @@ fn root() -> PathBuf {
 /// crates for code that is not in the build. `cargo tree` prints what the feature set links.
 fn closure(name: &str) -> BTreeSet<String> {
     let out = Command::new(env!("CARGO"))
-        .args([
-            "tree", "--locked", "--target", "all", "-e", "normal", "--prefix", "none", "-f", "{p}",
-            "-p", name,
-        ])
+        .args(["tree", "--locked", "--target", "all", "-e", "normal", "--prefix", "none", "-f", "{p}", "-p", name])
         .current_dir(root())
         .output()
         .expect("run cargo tree");
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).expect("cargo tree is utf-8");
     // The first line is `name` itself; every other line is `name vX.Y.Z [(path)] [(*)]`.
-    text.lines()
-        .skip(1)
-        .filter_map(|l| l.split_whitespace().next())
-        .map(str::to_owned)
-        .collect()
+    text.lines().skip(1).filter_map(|l| l.split_whitespace().next()).map(str::to_owned).collect()
 }
 
 #[test]
 fn core_never_sees_ratatui_or_a_concrete_provider() {
     let deps = closure("aibus-core");
-    for banned in [
-        "ratatui",
-        "crossterm",
-        "aibus-tui",
-        "aibus-provider-anthropic",
-        "aibus-provider-openai",
-        "aibus-provider-gemini",
-        "aibus-provider-http",
-        "reqwest",
-    ] {
+    for banned in ["ratatui", "crossterm", "aibus-tui", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http", "reqwest"] {
         assert!(!deps.contains(banned), "aibus-core depends on {banned}");
     }
-    let providers: Vec<_> = deps
-        .iter()
-        .filter(|d| d.starts_with("aibus-provider-"))
-        .collect();
-    assert!(
-        providers.is_empty(),
-        "aibus-core depends on provider crates {providers:?}"
-    );
+    let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
+    assert!(providers.is_empty(), "aibus-core depends on provider crates {providers:?}");
 }
 
 #[test]
@@ -69,18 +43,7 @@ fn provider_crate_has_no_network_crates() {
     // Not socket2 or mio: tokio has its `net` feature on workspace-wide because reqwest needs it,
     // and cargo metadata shows that feature set to every crate that depends on tokio.
     let deps = closure("aibus-provider");
-    for banned in [
-        "reqwest",
-        "hyper",
-        "h2",
-        "ureq",
-        "isahc",
-        "surf",
-        "curl",
-        "native-tls",
-        "rustls",
-        "openssl",
-    ] {
+    for banned in ["reqwest", "hyper", "h2", "ureq", "isahc", "surf", "curl", "native-tls", "rustls", "openssl"] {
         assert!(!deps.contains(banned), "aibus-provider depends on {banned}");
     }
 }
@@ -88,13 +51,7 @@ fn provider_crate_has_no_network_crates() {
 #[test]
 fn tui_never_sees_reqwest_or_a_provider_crate() {
     let deps = closure("aibus-tui");
-    for banned in [
-        "reqwest",
-        "aibus-provider-anthropic",
-        "aibus-provider-openai",
-        "aibus-provider-gemini",
-        "aibus-provider-http",
-    ] {
+    for banned in ["reqwest", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
         assert!(!deps.contains(banned), "aibus-tui depends on {banned}");
     }
 }
@@ -104,24 +61,10 @@ fn tui_never_sees_reqwest_or_a_provider_crate() {
 /// certificates through them; they do no TLS.
 #[test]
 fn provider_crates_use_rustls_and_never_openssl() {
-    for krate in [
-        "aibus-provider-anthropic",
-        "aibus-provider-openai",
-        "aibus-provider-gemini",
-        "aibus-provider-http",
-    ] {
+    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
         let deps = closure(krate);
-        assert!(
-            deps.contains("rustls") && deps.contains("reqwest"),
-            "{krate} lost its TLS stack"
-        );
-        for banned in [
-            "openssl",
-            "openssl-sys",
-            "openssl-src",
-            "native-tls",
-            "hyper-tls",
-        ] {
+        assert!(deps.contains("rustls") && deps.contains("reqwest"), "{krate} lost its TLS stack");
+        for banned in ["openssl", "openssl-sys", "openssl-src", "native-tls", "hyper-tls"] {
             assert!(!deps.contains(banned), "{krate} depends on {banned}");
         }
     }
@@ -129,13 +72,7 @@ fn provider_crates_use_rustls_and_never_openssl() {
 
 #[test]
 fn only_the_provider_http_crates_open_sockets() {
-    for krate in [
-        "aibus-core",
-        "aibus-graph",
-        "aibus-tui",
-        "aibus-provider",
-        "aibus-mcp",
-    ] {
+    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider", "aibus-mcp"] {
         let deps = closure(krate);
         for banned in ["reqwest", "hyper", "h2", "rustls"] {
             assert!(!deps.contains(banned), "{krate} depends on {banned}");
@@ -149,38 +86,17 @@ fn only_the_provider_http_crates_open_sockets() {
 #[test]
 fn mcp_crate_never_sees_a_transport_or_ui_crate() {
     let deps = closure("aibus-mcp");
-    assert!(
-        deps.contains("rmcp") && deps.contains("aibus-core"),
-        "aibus-mcp lost its parts"
-    );
-    for banned in [
-        "reqwest",
-        "hyper",
-        "h2",
-        "rustls",
-        "ratatui",
-        "crossterm",
-        "aibus-tui",
-        "aibus",
-    ] {
+    assert!(deps.contains("rmcp") && deps.contains("aibus-core"), "aibus-mcp lost its parts");
+    for banned in ["reqwest", "hyper", "h2", "rustls", "ratatui", "crossterm", "aibus-tui", "aibus"] {
         assert!(!deps.contains(banned), "aibus-mcp depends on {banned}");
     }
-    let providers: Vec<_> = deps
-        .iter()
-        .filter(|d| d.starts_with("aibus-provider-"))
-        .collect();
-    assert!(
-        providers.is_empty(),
-        "aibus-mcp depends on provider crates {providers:?}"
-    );
+    let providers: Vec<_> = deps.iter().filter(|d| d.starts_with("aibus-provider-")).collect();
+    assert!(providers.is_empty(), "aibus-mcp depends on provider crates {providers:?}");
 }
 
 #[test]
 fn graph_has_no_workspace_deps() {
-    let deps: Vec<_> = closure("aibus-graph")
-        .into_iter()
-        .filter(|d| d.starts_with("aibus"))
-        .collect();
+    let deps: Vec<_> = closure("aibus-graph").into_iter().filter(|d| d.starts_with("aibus")).collect();
     assert!(deps.is_empty(), "aibus-graph depends on {deps:?}");
 }
 
@@ -222,11 +138,7 @@ fn tui_is_on_ratatui_030_and_crossterm_029() {
         .current_dir(root())
         .output()
         .expect("run cargo metadata");
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let meta: Value = serde_json::from_slice(&out.stdout).expect("metadata json");
     let versions = |name: &str| -> Vec<String> {
         meta["packages"]
@@ -239,32 +151,18 @@ fn tui_is_on_ratatui_030_and_crossterm_029() {
     };
     for (name, line) in [("ratatui", "0.30."), ("crossterm", "0.29.")] {
         let got = versions(name);
-        assert_eq!(
-            got.len(),
-            1,
-            "{name} must appear once in Cargo.lock, got {got:?}"
-        );
-        assert!(
-            got[0].starts_with(line),
-            "{name} is {}, want {line}x",
-            got[0]
-        );
+        assert_eq!(got.len(), 1, "{name} must appear once in Cargo.lock, got {got:?}");
+        assert!(got[0].starts_with(line), "{name} is {}, want {line}x", got[0]);
     }
 }
 
 #[test]
 fn rataflow_is_in_the_default_build() {
     for krate in ["aibus", "aibus-tui"] {
-        assert!(
-            closure(krate).contains("rataflow"),
-            "{krate} lacks rataflow"
-        );
+        assert!(closure(krate).contains("rataflow"), "{krate} lacks rataflow");
     }
     for krate in ["aibus-core", "aibus-graph", "aibus-provider"] {
-        assert!(
-            !closure(krate).contains("rataflow"),
-            "{krate} sees rataflow"
-        );
+        assert!(!closure(krate).contains("rataflow"), "{krate} sees rataflow");
     }
 }
 
@@ -275,33 +173,17 @@ fn rataflow_is_a_plain_dependency_of_the_tui() {
         .current_dir(root())
         .output()
         .expect("run cargo metadata");
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let meta: Value = serde_json::from_slice(&out.stdout).expect("metadata json");
     let mut owners = Vec::new();
     for p in meta["packages"].as_array().unwrap() {
         for d in p["dependencies"].as_array().unwrap() {
             if d["name"] == "rataflow" {
-                assert_eq!(
-                    d["optional"], false,
-                    "{} has an optional rataflow",
-                    p["name"]
-                );
+                assert_eq!(d["optional"], false, "{} has an optional rataflow", p["name"]);
                 owners.push(p["name"].as_str().unwrap().to_owned());
             }
         }
-        assert!(
-            p["features"]
-                .as_object()
-                .unwrap()
-                .keys()
-                .all(|k| k != "flow-diagram"),
-            "{} still has the feature",
-            p["name"]
-        );
+        assert!(p["features"].as_object().unwrap().keys().all(|k| k != "flow-diagram"), "{} still has the feature", p["name"]);
     }
     assert_eq!(owners, ["aibus-tui"], "only the TUI names rataflow");
 }
@@ -311,14 +193,7 @@ fn rataflow_brings_no_layout_or_network_crates() {
     let tui = closure("aibus-tui");
     let rataflow = closure("rataflow");
     assert!(!rataflow.is_empty(), "rataflow has dependencies");
-    for banned in [
-        "rust-sugiyama",
-        "petgraph",
-        "ratzilla",
-        "termion",
-        "termwiz",
-        "serde_json",
-    ] {
+    for banned in ["rust-sugiyama", "petgraph", "ratzilla", "termion", "termwiz", "serde_json"] {
         assert!(!rataflow.contains(banned), "rataflow pulls in {banned}");
     }
     assert!(tui.contains("rataflow"));
@@ -364,11 +239,7 @@ fn no_production_tokio_runtime_is_built_without_io() {
             seen += 1;
             let stmt = &prod[i..];
             let stmt = &stmt[..stmt.find(".build(").expect("a Builder is built")];
-            let name = f
-                .strip_prefix(root().join("crates"))
-                .unwrap()
-                .to_string_lossy()
-                .into_owned();
+            let name = f.strip_prefix(root().join("crates")).unwrap().to_string_lossy().into_owned();
             let excused = exceptions.iter().any(|(s, _)| name.ends_with(s));
             if !stmt.contains("enable_all()") && !stmt.contains("enable_io()") && !excused {
                 let line = prod[..i].matches('\n').count() + 1;
@@ -376,14 +247,8 @@ fn no_production_tokio_runtime_is_built_without_io() {
             }
         }
     }
-    assert!(
-        seen >= 6,
-        "the scan found only {seen} runtime builders; is it looking in the right place?"
-    );
-    assert!(
-        bad.is_empty(),
-        "tokio runtimes built without IO (call enable_all): {bad:?}"
-    );
+    assert!(seen >= 6, "the scan found only {seen} runtime builders; is it looking in the right place?");
+    assert!(bad.is_empty(), "tokio runtimes built without IO (call enable_all): {bad:?}");
 }
 
 /// docs/TESTING.md promises one ci.yml job per layer row, so the capability matrix and every
@@ -391,35 +256,15 @@ fn no_production_tokio_runtime_is_built_without_io() {
 #[test]
 fn ci_has_the_capability_matrix_job_and_every_provider_crate() {
     let ci = std::fs::read_to_string(root().join(".github/workflows/ci.yml")).expect("read ci.yml");
-    let has = |cmd: &str| {
-        ci.lines().any(|l| {
-            l.trim_start()
-                .strip_prefix("- run: ")
-                .is_some_and(|c| c == cmd)
-        })
-    };
-    assert!(
-        has("cargo test --locked -p aibus-testkit --test capability_matrix"),
-        "ci.yml has no capability-matrix command"
-    );
+    let has = |cmd: &str| ci.lines().any(|l| l.trim_start().strip_prefix("- run: ").is_some_and(|c| c == cmd));
+    assert!(has("cargo test --locked -p aibus-testkit --test capability_matrix"), "ci.yml has no capability-matrix command");
     let provider = ci
         .lines()
-        .filter_map(|l| {
-            l.trim_start()
-                .strip_prefix("- run: cargo test --locked -p aibus-provider ")
-        })
+        .filter_map(|l| l.trim_start().strip_prefix("- run: cargo test --locked -p aibus-provider "))
         .next()
         .expect("provider-contract command");
-    for krate in [
-        "aibus-provider-http",
-        "aibus-provider-anthropic",
-        "aibus-provider-openai",
-        "aibus-provider-gemini",
-    ] {
-        assert!(
-            provider.split_whitespace().any(|w| w == krate),
-            "provider-contract leaves out {krate}"
-        );
+    for krate in ["aibus-provider-http", "aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini"] {
+        assert!(provider.split_whitespace().any(|w| w == krate), "provider-contract leaves out {krate}");
     }
 }
 
@@ -430,22 +275,9 @@ fn ci_has_the_capability_matrix_job_and_every_provider_crate() {
 fn the_causl_crate_lock_and_deny_follow_the_root() {
     let dir = root().join("crates/aibus-graph-causl");
     let lock = std::fs::read_to_string(dir.join("Cargo.lock")).expect("read the causl crate lock");
-    assert!(
-        !lock.contains("name = \"ratatui\"\nversion = \"0.29"),
-        "the causl crate lock still pins ratatui 0.29"
-    );
-    assert!(
-        !lock.contains("name = \"crossterm\"\nversion = \"0.28"),
-        "the causl crate lock still pins crossterm 0.28"
-    );
-    assert!(
-        !lock.contains("name = \"paste\""),
-        "the causl crate lock still has paste"
-    );
-    let deny =
-        std::fs::read_to_string(dir.join("deny.toml")).expect("read the causl crate deny.toml");
-    assert!(
-        !deny.contains("RUSTSEC-2024-0436"),
-        "the causl crate deny.toml still ignores the paste advisory"
-    );
+    assert!(!lock.contains("name = \"ratatui\"\nversion = \"0.29"), "the causl crate lock still pins ratatui 0.29");
+    assert!(!lock.contains("name = \"crossterm\"\nversion = \"0.28"), "the causl crate lock still pins crossterm 0.28");
+    assert!(!lock.contains("name = \"paste\""), "the causl crate lock still has paste");
+    let deny = std::fs::read_to_string(dir.join("deny.toml")).expect("read the causl crate deny.toml");
+    assert!(!deny.contains("RUSTSEC-2024-0436"), "the causl crate deny.toml still ignores the paste advisory");
 }

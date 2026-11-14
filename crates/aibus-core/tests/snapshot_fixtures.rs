@@ -11,9 +11,7 @@ use aibus_graph::mini::MiniGraph;
 use aibus_graph::{Graph, Snapshot, Value};
 
 fn root() -> PathBuf {
-    [env!("CARGO_MANIFEST_DIR"), "../../fixtures/snapshots"]
-        .iter()
-        .collect()
+    [env!("CARGO_MANIFEST_DIR"), "../../fixtures/snapshots"].iter().collect()
 }
 
 /// `(schema version from the directory name, file)`.
@@ -43,12 +41,8 @@ fn every_fixture_migrates_and_hydrates() {
         assert_eq!(version_of(&snap), version, "{}", file.display());
         let snap = chain(version, snap).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
         let mut app = App::new(MiniGraph::new(), || 0);
-        app.hydrate(snap, &[])
-            .unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-        assert_eq!(
-            app.graph.read_key(SCHEMA_VERSION),
-            Some(&Value::I64(SCHEMA))
-        );
+        app.hydrate(snap, &[]).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        assert_eq!(app.graph.read_key(SCHEMA_VERSION), Some(&Value::I64(SCHEMA)));
         assert!(app.graph.read_key("model:session:id").is_some());
     }
 }
@@ -59,18 +53,14 @@ fn every_fixture_migrates_and_hydrates() {
 #[ignore]
 fn write_the_fixture_for_the_current_schema() {
     let msgs = std::fs::read_to_string(
-        [
-            env!("CARGO_MANIFEST_DIR"),
-            "../../tests/replay/explore-fake/msgs.jsonl",
-        ]
-        .iter()
-        .collect::<PathBuf>(),
+        [env!("CARGO_MANIFEST_DIR"), "../../tests/replay/explore-fake/msgs.jsonl"]
+            .iter()
+            .collect::<PathBuf>(),
     )
     .unwrap();
     let mut app = App::new(MiniGraph::new(), || 0);
     for line in msgs.lines() {
-        app.step(msg_from_json(&serde_json::from_str(line).unwrap()).unwrap())
-            .unwrap();
+        app.step(msg_from_json(&serde_json::from_str(line).unwrap()).unwrap()).unwrap();
     }
     let dir = root().join(format!("v{SCHEMA}"));
     std::fs::create_dir_all(&dir).unwrap();

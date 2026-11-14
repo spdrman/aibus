@@ -113,12 +113,7 @@ pub fn serve(
     })
 }
 
-async fn handle(
-    mcp: &Mcp,
-    token: &Secret<String>,
-    peer: SocketAddr,
-    mut req: Request<Incoming>,
-) -> Response<Body> {
+async fn handle(mcp: &Mcp, token: &Secret<String>, peer: SocketAddr, mut req: Request<Incoming>) -> Response<Body> {
     // The token comes first, before the path or anything rmcp would say, so an unauthenticated
     // caller learns nothing about the server except that it wants a token.
     if !bearer_matches(req.headers().get(header::AUTHORIZATION), token.expose()) {
@@ -141,14 +136,8 @@ async fn handle(
 /// `Authorization: Bearer <token>` with exactly the token. Both sides are hashed first, so the
 /// comparison takes the same time whatever the attacker sends.
 fn bearer_matches(header: Option<&header::HeaderValue>, token: &str) -> bool {
-    let sent = header
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    let ok: bool = Sha256::digest(sent.as_bytes())
-        .as_slice()
-        .ct_eq(Sha256::digest(token.as_bytes()).as_slice())
-        .into();
+    let sent = header.and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).unwrap_or("");
+    let ok: bool = Sha256::digest(sent.as_bytes()).as_slice().ct_eq(Sha256::digest(token.as_bytes()).as_slice()).into();
     // An absent or malformed header hashes like the empty string, which no token equals.
     ok && !sent.is_empty()
 }
@@ -160,18 +149,9 @@ mod tests {
     #[test]
     fn only_the_exact_bearer_token_passes() {
         let v = |s: &str| header::HeaderValue::from_str(s).unwrap();
-        assert!(bearer_matches(
-            Some(&v("Bearer s3cret-token")),
-            "s3cret-token"
-        ));
-        assert!(!bearer_matches(
-            Some(&v("Bearer s3cret-token ")),
-            "s3cret-token"
-        ));
-        assert!(!bearer_matches(
-            Some(&v("bearer s3cret-token")),
-            "s3cret-token"
-        ));
+        assert!(bearer_matches(Some(&v("Bearer s3cret-token")), "s3cret-token"));
+        assert!(!bearer_matches(Some(&v("Bearer s3cret-token ")), "s3cret-token"));
+        assert!(!bearer_matches(Some(&v("bearer s3cret-token")), "s3cret-token"));
         assert!(!bearer_matches(Some(&v("s3cret-token")), "s3cret-token"));
         assert!(!bearer_matches(Some(&v("Bearer ")), ""));
         assert!(!bearer_matches(None, "s3cret-token"));

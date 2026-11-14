@@ -43,11 +43,7 @@ pub struct RunMeta {
 enum Block {
     Text(String),
     Thinking(String),
-    Tool {
-        id: ToolCallId,
-        name: String,
-        input: String,
-    },
+    Tool { id: ToolCallId, name: String, input: String },
 }
 
 pub struct Transcript {
@@ -138,10 +134,7 @@ impl Transcript {
         if blocks.is_empty() {
             return Ok(());
         }
-        self.line(
-            at,
-            json!({"type": "message", "role": "assistant", "blocks": blocks}),
-        )
+        self.line(at, json!({"type": "message", "role": "assistant", "blocks": blocks}))
     }
 
     fn stream(&mut self, at: SystemTime, chunks: &[StreamChunk]) -> io::Result<()> {
@@ -151,12 +144,10 @@ impl Transcript {
                     Some(Block::Text(s)) => s.push_str(t),
                     _ => self.blocks.push(Block::Text(t.clone())),
                 },
-                StreamChunk::ThinkingDelta(t) if self.store_thinking => {
-                    match self.blocks.last_mut() {
-                        Some(Block::Thinking(s)) => s.push_str(t),
-                        _ => self.blocks.push(Block::Thinking(t.clone())),
-                    }
-                }
+                StreamChunk::ThinkingDelta(t) if self.store_thinking => match self.blocks.last_mut() {
+                    Some(Block::Thinking(s)) => s.push_str(t),
+                    _ => self.blocks.push(Block::Thinking(t.clone())),
+                },
                 StreamChunk::ToolUseStart { id, name } => self.blocks.push(Block::Tool {
                     id: *id,
                     name: name.to_string(),
@@ -221,16 +212,13 @@ impl Transcript {
     pub fn record(&mut self, msg: &Msg, at: SystemTime) -> io::Result<()> {
         match msg {
             Msg::Stream { chunks, .. } => self.stream(at, chunks),
-            Msg::ToolCallFinished {
-                call_id, result, ..
-            } => self.tool_result(at, *call_id, result),
+            Msg::ToolCallFinished { call_id, result, .. } => self.tool_result(at, *call_id, result),
             Msg::Compacted { pre_tokens, .. } => self.line(
                 at,
                 json!({"type": "compact_boundary", "trigger": "auto", "pre_tokens": pre_tokens}),
             ),
             Msg::HookFired { event, outcome, .. } => {
-                let mut v =
-                    json!({"type": "hook", "event": event.as_str(), "exit": outcome.exit_code});
+                let mut v = json!({"type": "hook", "event": event.as_str(), "exit": outcome.exit_code});
                 if let Some(m) = &outcome.message {
                     v["message"] = m.as_str().into();
                 }
@@ -245,7 +233,9 @@ impl Transcript {
                 self.meta.summary_head = self.redactor.redact(head).into_owned();
                 self.end(at, &result.status.as_value(), result.turns)
             }
-            Msg::RunFailed { .. } => self.end(at, "failed", self.meta.turns),
+            Msg::RunFailed { .. } => {
+                self.end(at, "failed", self.meta.turns)
+            }
             _ => Ok(()),
         }
     }
@@ -262,29 +252,14 @@ pub enum Item {
 
 /// The view items of one line; a line that is not one of ours, or is cut short, gives none.
 pub fn items(line: &str) -> Vec<Item> {
-    let Ok(v) = serde_json::from_str::<Value>(line) else {
-        return Vec::new();
-    };
-    let text_of = |b: &Value| {
-        b.get("text")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned()
-    };
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+    let text_of = |b: &Value| b.get("text").and_then(Value::as_str).unwrap_or("").to_owned();
     match v.get("type").and_then(Value::as_str) {
         Some("message") => {
-            let blocks = v
-                .get("blocks")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
+            let blocks = v.get("blocks").and_then(Value::as_array).cloned().unwrap_or_default();
             if v.get("role").and_then(Value::as_str) == Some("user") {
                 let text = blocks.iter().map(text_of).collect::<Vec<_>>().join("\n");
-                return if text.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![Item::Ev(Ev::User(text))]
-                };
+                return if text.is_empty() { Vec::new() } else { vec![Item::Ev(Ev::User(text))] };
             }
             blocks
                 .iter()
@@ -316,10 +291,7 @@ pub fn items(line: &str) -> Vec<Item> {
                 Done {
                     ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
                     ms: 0,
-                    bytes: v
-                        .get("bytes")
-                        .and_then(Value::as_u64)
-                        .map_or(content.len(), |b| b as usize),
+                    bytes: v.get("bytes").and_then(Value::as_u64).map_or(content.len(), |b| b as usize),
                     output: content.chars().take(OUTPUT_KEEP).collect(),
                 },
             )]
@@ -333,13 +305,7 @@ pub fn items(line: &str) -> Vec<Item> {
 
 /// Reads `path` back into the store entry `entry`, `chunk` lines at a time, calling `after` once
 /// per chunk so a view can draw what has arrived. Returns the number of lines read.
-pub fn reload(
-    store: &Store,
-    entry: u64,
-    path: &Path,
-    chunk: usize,
-    mut after: impl FnMut(),
-) -> io::Result<usize> {
+pub fn reload(store: &Store, entry: u64, path: &Path, chunk: usize, mut after: impl FnMut()) -> io::Result<usize> {
     use std::io::BufRead;
     let file = io::BufReader::new(File::open(path)?);
     let mut n = 0;

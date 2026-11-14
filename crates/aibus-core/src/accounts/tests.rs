@@ -49,9 +49,11 @@ fn registry(edit: impl FnOnce(&mut Config)) -> AccountRegistry {
     install_log_router();
     let mut cfg: Config = toml::from_str(CONFIG).unwrap();
     edit(&mut cfg);
-    let providers =
-        ProviderRegistry::new(&[Box::new(aibus_provider::fake::Factory)], &BTreeMap::new())
-            .unwrap();
+    let providers = ProviderRegistry::new(
+        &[Box::new(aibus_provider::fake::Factory)],
+        &BTreeMap::new(),
+    )
+    .unwrap();
     AccountRegistry::new(&cfg, Arc::new(providers))
 }
 
@@ -98,10 +100,7 @@ impl io::Write for Route {
 fn install_log_router() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        let sub = tracing_subscriber::fmt()
-            .with_writer(|| Route)
-            .with_ansi(false)
-            .finish();
+        let sub = tracing_subscriber::fmt().with_writer(|| Route).with_ansi(false).finish();
         tracing::subscriber::set_global_default(sub).unwrap();
     });
 }
@@ -122,36 +121,12 @@ fn issue_55_capture_sees_a_fresh_callsite_that_another_thread_hits_first() {
     use std::sync::Barrier;
 
     // Every expansion of `one` is its own callsite; each level multiplies by four.
-    macro_rules! one {
-        () => {
-            (|| tracing::info!("hammer")) as fn()
-        };
-    }
-    macro_rules! x4 {
-        () => {
-            vec![one!(), one!(), one!(), one!()]
-        };
-    }
-    macro_rules! x16 {
-        () => {
-            [x4!(), x4!(), x4!(), x4!()].concat()
-        };
-    }
-    macro_rules! x64 {
-        () => {
-            [x16!(), x16!(), x16!(), x16!()].concat()
-        };
-    }
-    macro_rules! x256 {
-        () => {
-            [x64!(), x64!(), x64!(), x64!()].concat()
-        };
-    }
-    macro_rules! x1024 {
-        () => {
-            [x256!(), x256!(), x256!(), x256!()].concat()
-        };
-    }
+    macro_rules! one { () => { (|| tracing::info!("hammer")) as fn() }; }
+    macro_rules! x4 { () => { vec![one!(), one!(), one!(), one!()] }; }
+    macro_rules! x16 { () => { [x4!(), x4!(), x4!(), x4!()].concat() }; }
+    macro_rules! x64 { () => { [x16!(), x16!(), x16!(), x16!()].concat() }; }
+    macro_rules! x256 { () => { [x64!(), x64!(), x64!(), x64!()].concat() }; }
+    macro_rules! x1024 { () => { [x256!(), x256!(), x256!(), x256!()].concat() }; }
     let sites: Vec<fn()> = [x1024!(), x1024!(), x1024!(), x1024!()].concat();
     // Every real test gets this from `registry`, before it fires anything.
     install_log_router();
@@ -175,10 +150,7 @@ fn issue_55_capture_sees_a_fresh_callsite_that_another_thread_hits_first() {
         }
     }
     rival.join().unwrap();
-    assert_eq!(
-        missed, 0,
-        "{missed} of {total} events never reached the capture"
-    );
+    assert_eq!(missed, 0, "{missed} of {total} events never reached the capture");
 }
 
 #[test]
@@ -200,20 +172,11 @@ fn step_1_is_a_demand_not_a_hint() {
         explicit: Some(name(a)),
         ..hints()
     };
-    assert_eq!(
-        r.select(&alias("sonnet"), &with("nope")),
-        Err(SelectError::Unknown(name("nope")))
-    );
-    assert_eq!(
-        r.select(&alias("dormant"), &with("asleep")),
-        Err(SelectError::Disabled(name("asleep")))
-    );
+    assert_eq!(r.select(&alias("sonnet"), &with("nope")), Err(SelectError::Unknown(name("nope"))));
+    assert_eq!(r.select(&alias("dormant"), &with("asleep")), Err(SelectError::Disabled(name("asleep"))));
     assert_eq!(
         r.select(&alias("sonnet"), &with("kimi")),
-        Err(SelectError::CannotServe {
-            account: name("kimi"),
-            model: "sonnet".into()
-        })
+        Err(SelectError::CannotServe { account: name("kimi"), model: "sonnet".into() })
     );
 }
 
@@ -230,10 +193,7 @@ fn step_2_the_definitions_account_comes_next() {
         agent: Some(name("kimi")),
         ..hints()
     };
-    assert!(matches!(
-        r.select(&alias("sonnet"), &bad),
-        Err(SelectError::CannotServe { .. })
-    ));
+    assert!(matches!(r.select(&alias("sonnet"), &bad), Err(SelectError::CannotServe { .. })));
 }
 
 #[test]
@@ -264,25 +224,17 @@ fn step_3_gives_way_when_the_model_does_not_resolve_on_the_parents_account() {
         inherit: Some((name("kimi"), ModelId("fake-large".into()))),
         ..hints()
     };
-    assert_eq!(
-        r.select(&alias("sonnet"), &h),
-        pair("personal", "fake-small")
-    );
+    assert_eq!(r.select(&alias("sonnet"), &h), pair("personal", "fake-small"));
 }
 
 #[test]
 fn inherit_without_a_parent_means_the_configured_default_model() {
     let r = registry(|_| {});
-    assert_eq!(
-        r.select(&ModelRef::Inherit, &hints()),
-        pair("personal", "fake-small")
-    );
+    assert_eq!(r.select(&ModelRef::Inherit, &hints()), pair("personal", "fake-small"));
     let none = registry(|c| c.defaults = config::Defaults::default());
     assert_eq!(
         none.select(&ModelRef::Inherit, &hints()),
-        Err(SelectError::NoAccount {
-            model: "inherit".into()
-        })
+        Err(SelectError::NoAccount { model: "inherit".into() })
     );
 }
 
@@ -290,28 +242,19 @@ fn inherit_without_a_parent_means_the_configured_default_model() {
 fn step_4_the_default_account_wins_over_config_order() {
     let r = registry(|_| {});
     // work comes first in the file, but defaults.account is personal.
-    assert_eq!(
-        r.select(&alias("sonnet"), &hints()),
-        pair("personal", "fake-small")
-    );
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("personal", "fake-small"));
 }
 
 #[test]
 fn step_4_gives_way_when_the_default_account_cannot_serve_the_model() {
     let r = registry(|_| {});
-    assert_eq!(
-        r.select(&alias("fast"), &hints()),
-        pair("kimi", "fake-large")
-    );
+    assert_eq!(r.select(&alias("fast"), &hints()), pair("kimi", "fake-large"));
 }
 
 #[test]
 fn step_5_an_alias_pinned_to_an_account_picks_it() {
     let r = registry(|_| {});
-    assert_eq!(
-        r.select(&alias("pinned"), &hints()),
-        pair("kimi", "fake-large")
-    );
+    assert_eq!(r.select(&alias("pinned"), &hints()), pair("kimi", "fake-large"));
 }
 
 #[test]
@@ -319,10 +262,7 @@ fn step_5_other_accounts_do_not_serve_a_pinned_alias_even_when_they_define_it() 
     let r = registry(|c| {
         c.models.insert("sonnet".into(), "kimi/fake-large".into());
     });
-    assert_eq!(
-        r.select(&alias("sonnet"), &hints()),
-        pair("kimi", "fake-large")
-    );
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("kimi", "fake-large"));
 }
 
 #[test]
@@ -332,9 +272,7 @@ fn step_5_a_pin_to_a_disabled_account_serves_nothing() {
     });
     assert_eq!(
         r.select(&alias("ghost"), &hints()),
-        Err(SelectError::NoAccount {
-            model: "ghost".into()
-        })
+        Err(SelectError::NoAccount { model: "ghost".into() })
     );
 }
 
@@ -343,10 +281,7 @@ fn step_6_several_accounts_resolve_so_config_order_decides_and_the_others_are_lo
     // No default account, so the chain reaches step 6.
     let r = registry(|c| c.defaults = config::Defaults::default());
     let text = logged(|| {
-        assert_eq!(
-            r.select(&full("fake-large"), &hints()),
-            pair("work", "fake-large")
-        );
+        assert_eq!(r.select(&full("fake-large"), &hints()), pair("work", "fake-large"));
     });
     assert!(
         text.contains("model fake-large served by work (also: personal, kimi)"),
@@ -361,29 +296,17 @@ fn step_6_prefers_an_account_with_a_wanted_tag() {
         prefer_tags: vec![tag.into()],
         ..hints()
     };
-    assert_eq!(
-        r.select(&full("fake-large"), &tagged("cheap")),
-        pair("kimi", "fake-large")
-    );
-    assert_eq!(
-        r.select(&full("fake-large"), &tagged("default")),
-        pair("work", "fake-large")
-    );
+    assert_eq!(r.select(&full("fake-large"), &tagged("cheap")), pair("kimi", "fake-large"));
+    assert_eq!(r.select(&full("fake-large"), &tagged("default")), pair("work", "fake-large"));
     // A tag nobody has changes nothing.
-    assert_eq!(
-        r.select(&full("fake-large"), &tagged("eu")),
-        pair("work", "fake-large")
-    );
+    assert_eq!(r.select(&full("fake-large"), &tagged("eu")), pair("work", "fake-large"));
 }
 
 #[test]
 fn step_6_exactly_one_account_is_chosen_without_a_log_line() {
     let r = registry(|c| c.defaults = config::Defaults::default());
     let text = logged(|| {
-        assert_eq!(
-            r.select(&alias("mine"), &hints()),
-            pair("personal", "fake-small")
-        );
+        assert_eq!(r.select(&alias("mine"), &hints()), pair("personal", "fake-small"));
     });
     assert!(!text.contains("also:"), "{text}");
 }
@@ -393,9 +316,7 @@ fn step_6_a_disabled_account_never_serves() {
     let r = registry(|c| c.defaults = config::Defaults::default());
     assert_eq!(
         r.select(&alias("dormant"), &hints()),
-        Err(SelectError::NoAccount {
-            model: "dormant".into()
-        })
+        Err(SelectError::NoAccount { model: "dormant".into() })
     );
 }
 
@@ -403,21 +324,13 @@ fn step_6_a_disabled_account_never_serves() {
 fn step_7_no_account_is_exit_4_with_a_hint_the_banner_can_show() {
     let r = registry(|_| {});
     let e = r.select(&full("gpt-9"), &hints()).unwrap_err();
-    assert_eq!(
-        e,
-        SelectError::NoAccount {
-            model: "gpt-9".into()
-        }
-    );
+    assert_eq!(e, SelectError::NoAccount { model: "gpt-9".into() });
     assert!(e.to_string().contains("aibus account add"));
     assert_eq!(AibusError::from(e).exit_code(), 4);
     for e in [
         SelectError::Unknown(name("x")),
         SelectError::Disabled(name("x")),
-        SelectError::CannotServe {
-            account: name("x"),
-            model: "m".into(),
-        },
+        SelectError::CannotServe { account: name("x"), model: "m".into() },
     ] {
         assert_eq!(AibusError::from(e).exit_code(), 4);
     }
@@ -449,21 +362,15 @@ fn an_account_whose_provider_is_not_registered_serves_nothing_and_has_no_provide
     let mut cfg: Config = toml::from_str(CONFIG).unwrap();
     cfg.accounts[0].provider = "ghost".into();
     let providers =
-        ProviderRegistry::new(&[Box::new(aibus_provider::fake::Factory)], &BTreeMap::new())
-            .unwrap();
+        ProviderRegistry::new(&[Box::new(aibus_provider::fake::Factory)], &BTreeMap::new()).unwrap();
     let r = AccountRegistry::new(&cfg, Arc::new(providers));
-    assert!(
-        matches!(r.provider(&name("work")), Err(ConfigError::UnknownProvider(p)) if p == "ghost")
-    );
+    assert!(matches!(r.provider(&name("work")), Err(ConfigError::UnknownProvider(p)) if p == "ghost"));
     assert!(r.provider(&name("personal")).is_ok());
     let h = SelectHints {
         explicit: Some(name("work")),
         ..hints()
     };
-    assert!(matches!(
-        r.select(&alias("sonnet"), &h),
-        Err(SelectError::CannotServe { .. })
-    ));
+    assert!(matches!(r.select(&alias("sonnet"), &h), Err(SelectError::CannotServe { .. })));
 }
 
 /// The fake provider, except that its `fake-small` has no logprobs (the model, not the provider).
@@ -475,13 +382,8 @@ impl aibus_provider::ProviderFactory for SmallHasNoLogprobs {
     }
     fn build(&self, _: &aibus_provider::ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
         use aibus_provider::fake::{FakeProvider, Script};
-        let over = aibus_provider::CapabilityOverrides {
-            logprobs: Some(false),
-            ..Default::default()
-        };
-        Ok(Arc::new(
-            FakeProvider::new(Script::new()).with_model_capabilities("fake-small", over),
-        ))
+        let over = aibus_provider::CapabilityOverrides { logprobs: Some(false), ..Default::default() };
+        Ok(Arc::new(FakeProvider::new(Script::new()).with_model_capabilities("fake-small", over)))
     }
     fn auth_methods(&self) -> &'static [aibus_provider::AuthMethodKind] {
         &[aibus_provider::AuthMethodKind::None]
@@ -507,30 +409,19 @@ aliases = { judge = "fake-large" }
 "#,
     )
     .unwrap();
-    let providers =
-        ProviderRegistry::new(&[Box::new(SmallHasNoLogprobs)], &BTreeMap::new()).unwrap();
+    let providers = ProviderRegistry::new(&[Box::new(SmallHasNoLogprobs)], &BTreeMap::new()).unwrap();
     let r = AccountRegistry::new(&cfg, Arc::new(providers));
 
     // Without the hint the first account in the file wins.
-    assert_eq!(
-        r.select(&alias("judge"), &hints()),
-        pair("first", "fake-small")
-    );
+    assert_eq!(r.select(&alias("judge"), &hints()), pair("first", "fake-small"));
     // With it, the account whose model reports logprobs does, though both share one provider.
-    let h = SelectHints {
-        logprobs: true,
-        ..hints()
-    };
+    let h = SelectHints { logprobs: true, ..hints() };
     assert_eq!(r.select(&alias("judge"), &h), pair("second", "fake-large"));
 }
 
 fn quota(resets_in: Option<Duration>) -> aibus_provider::ProviderError {
-    let mut e =
-        aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Quota, "spent");
-    e.rate_limit = Some(Box::new(aibus_provider::RateLimitInfo {
-        resets_in,
-        ..Default::default()
-    }));
+    let mut e = aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Quota, "spent");
+    e.rate_limit = Some(Box::new(aibus_provider::RateLimitInfo { resets_in, ..Default::default() }));
     e
 }
 
@@ -538,32 +429,16 @@ fn quota(resets_in: Option<Duration>) -> aibus_provider::ProviderError {
 async fn a_cooled_down_account_is_skipped_by_select_and_comes_back_after_the_cooldown() {
     let r = registry(|_| {});
     // `sonnet` is on `work` and `personal`; the default account is `personal`.
-    assert_eq!(
-        r.select(&alias("sonnet"), &hints()),
-        pair("personal", "fake-small")
-    );
-    r.cool(
-        &name("personal"),
-        FallbackKind::Quota,
-        &quota(Some(Duration::from_secs(90))),
-    );
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("personal", "fake-small"));
+    r.cool(&name("personal"), FallbackKind::Quota, &quota(Some(Duration::from_secs(90))));
     assert!(r.cooled(&name("personal")));
-    assert_eq!(
-        r.select(&alias("sonnet"), &hints()),
-        pair("work", "fake-small")
-    );
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("work", "fake-small"));
 
     tokio::time::advance(Duration::from_secs(89)).await;
-    assert_eq!(
-        r.select(&alias("sonnet"), &hints()),
-        pair("work", "fake-small")
-    );
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("work", "fake-small"));
     tokio::time::advance(Duration::from_secs(2)).await;
     assert!(!r.cooled(&name("personal")));
-    assert_eq!(
-        r.select(&alias("sonnet"), &hints()),
-        pair("personal", "fake-small")
-    );
+    assert_eq!(r.select(&alias("sonnet"), &hints()), pair("personal", "fake-small"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -571,16 +446,8 @@ async fn the_cooldown_length_follows_the_kind() {
     let r = registry(|_| {});
     let (a, b, c) = (name("work"), name("personal"), name("kimi"));
     r.cool(&a, FallbackKind::Quota, &quota(None));
-    r.cool(
-        &b,
-        FallbackKind::Overloaded,
-        &aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Overloaded, "busy"),
-    );
-    r.cool(
-        &c,
-        FallbackKind::Auth,
-        &aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Auth, "bad key"),
-    );
+    r.cool(&b, FallbackKind::Overloaded, &aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Overloaded, "busy"));
+    r.cool(&c, FallbackKind::Auth, &aibus_provider::ProviderError::new(aibus_provider::ProviderErrorKind::Auth, "bad key"));
     tokio::time::advance(Duration::from_secs(61)).await;
     assert!(r.cooled(&a) && !r.cooled(&b) && r.cooled(&c));
     tokio::time::advance(Duration::from_secs(30 * 60)).await;
@@ -594,16 +461,10 @@ async fn the_cooldown_length_follows_the_kind() {
 async fn an_explicit_account_is_a_demand_and_ignores_the_cooldown_and_so_does_the_last_resort() {
     let r = registry(|_| {});
     r.cool(&name("kimi"), FallbackKind::Quota, &quota(None));
-    let h = SelectHints {
-        explicit: Some(name("kimi")),
-        ..hints()
-    };
+    let h = SelectHints { explicit: Some(name("kimi")), ..hints() };
     assert_eq!(r.select(&alias("fast"), &h), pair("kimi", "fake-large"));
     // `fast` is only on `kimi`: with nothing else it serves though it is cooling.
-    assert_eq!(
-        r.select(&alias("fast"), &hints()),
-        pair("kimi", "fake-large")
-    );
+    assert_eq!(r.select(&alias("fast"), &hints()), pair("kimi", "fake-large"));
 }
 
 #[test]
@@ -612,10 +473,7 @@ fn fallback_names_take_the_definition_over_the_account_and_leave_out_unknown_and
         c.accounts[0].fallback = vec!["personal".into(), "asleep".into(), "nobody".into()];
     });
     assert_eq!(r.fallback_names(&name("work"), None), [name("personal")]);
-    assert_eq!(
-        r.fallback_names(&name("work"), Some(&[name("kimi")])),
-        [name("kimi")]
-    );
+    assert_eq!(r.fallback_names(&name("work"), Some(&[name("kimi")])), [name("kimi")]);
     assert!(r.fallback_names(&name("work"), Some(&[])).is_empty());
     assert!(r.fallback_names(&name("kimi"), None).is_empty());
 }

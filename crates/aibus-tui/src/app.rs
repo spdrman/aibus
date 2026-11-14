@@ -103,10 +103,7 @@ pub fn osc52(text: &str) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::from("\x1b]52;c;");
     for chunk in text.as_bytes().chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |a, (i, b)| a | u32::from(*b) << (16 - 8 * i));
+        let n = chunk.iter().enumerate().fold(0u32, |a, (i, b)| a | u32::from(*b) << (16 - 8 * i));
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(char::from(ABC[(n >> (18 - 6 * i) & 63) as usize]));
@@ -125,12 +122,7 @@ pub fn restore() {
     RESTORES.fetch_add(1, Ordering::SeqCst);
     let mut out = io::stdout();
     let _ = out.write_all(input::mouse_switch(MouseMode::Hover, MouseMode::Off).as_bytes());
-    let _ = execute!(
-        out,
-        DisableBracketedPaste,
-        LeaveAlternateScreen,
-        cursor::Show
-    );
+    let _ = execute!(out, DisableBracketedPaste, LeaveAlternateScreen, cursor::Show);
     let _ = disable_raw_mode();
     let _ = out.flush();
 }
@@ -153,12 +145,7 @@ impl Session {
     pub fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut out = io::stdout();
-        if let Err(e) = execute!(
-            out,
-            EnterAlternateScreen,
-            EnableBracketedPaste,
-            cursor::Hide
-        ) {
+        if let Err(e) = execute!(out, EnterAlternateScreen, EnableBracketedPaste, cursor::Hide) {
             restore();
             return Err(e);
         }
@@ -243,9 +230,7 @@ pub fn terminal_events<G: Graph>(
         let cx = Context::read(&app.graph);
         let out = match ev {
             Event::Key(k) => {
-                let Some(key) = key_from_crossterm(k) else {
-                    continue;
-                };
+                let Some(key) = key_from_crossterm(k) else { continue };
                 // The second Ctrl+C quits, unless the first was a copy.
                 if key.ctrl
                     && key.code == KeyCode::Char('c')
@@ -320,10 +305,7 @@ pub fn run_job(
                 *note = "no agents directory is set up".into();
                 return None;
             };
-            let valid = !name.is_empty()
-                && name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
             if !valid {
                 *note = format!("`{name}` is not a name: letters, digits, - and _");
                 return None;
@@ -333,9 +315,7 @@ pub fn run_job(
                 *note = format!("{} already exists", path.display());
                 return Some(path);
             }
-            match std::fs::create_dir_all(dir)
-                .and_then(|()| std::fs::write(&path, agent_template(&name)))
-            {
+            match std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, agent_template(&name))) {
                 Ok(()) => Some(path),
                 Err(e) => {
                     *note = format!("could not write {}: {e}", path.display());
@@ -362,31 +342,20 @@ pub fn run_job(
 
 /// The finished run whose transcript is open but not in memory: its run and store entry.
 pub fn evicted_open<G: Graph>(g: &G, store: &Store) -> Option<(RunId, u64)> {
-    let run = g
-        .read_key(MODAL)
-        .and_then(as_str)?
-        .strip_prefix("transcript:")?
-        .parse::<RunId>()
-        .ok()?;
-    let Some(Value::Handle(h)) = g.read_key(&run_key(run, "blocks")) else {
-        return None;
-    };
+    let run = g.read_key(MODAL).and_then(as_str)?.strip_prefix("transcript:")?.parse::<RunId>().ok()?;
+    let Some(Value::Handle(h)) = g.read_key(&run_key(run, "blocks")) else { return None };
     store.is_evicted(h.id).then_some((run, h.id))
 }
 
 /// Reads the open run's transcript back from `<runs_dir>/<run>/transcript.jsonl`, all of it, and
 /// tells the graph. The loop does the same on a blocking thread, a chunk at a time.
 pub fn reload_open<G: Graph>(app: &mut App<G>, runs_dir: &Path) -> Result<usize, AibusError> {
-    let Some((run, entry)) = evicted_open(&app.graph, &app.store) else {
-        return Ok(0);
-    };
+    let Some((run, entry)) = evicted_open(&app.graph, &app.store) else { return Ok(0) };
     if !app.store.begin_restore(entry) {
         return Ok(0);
     }
     let path = runs_dir.join(run.to_string()).join("transcript.jsonl");
-    let lines =
-        aibus_core::persist::transcript::reload(&app.store, entry, &path, usize::MAX, || {})
-            .unwrap_or(0);
+    let lines = aibus_core::persist::transcript::reload(&app.store, entry, &path, usize::MAX, || {}).unwrap_or(0);
     app.step(Msg::Ui(UiIntent::Loaded(run)))?;
     Ok(lines)
 }
@@ -394,9 +363,7 @@ pub fn reload_open<G: Graph>(app: &mut App<G>, runs_dir: &Path) -> Result<usize,
 /// `text` for the system clipboard, where the terminal ignored OSC 52. Whether it worked is not
 /// something the caller can do anything about.
 pub fn system_clipboard(text: &str) -> bool {
-    arboard::Clipboard::new()
-        .and_then(|mut c| c.set_text(text.to_owned()))
-        .is_ok()
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_owned())).is_ok()
 }
 
 /// What a menu pick wants copied, as text. A run's result is the last block of its transcript
@@ -453,15 +420,8 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut mem = tokio::time::interval(Duration::from_secs(aibus_core::mem::SAMPLE_SECS));
 
     let size = session.term.size()?;
-    app.step(Msg::Resize {
-        cols: size.width,
-        rows: size.height,
-    })?;
-    let saved = opts
-        .layout_file
-        .as_deref()
-        .map(Layout::load)
-        .unwrap_or_default();
+    app.step(Msg::Resize { cols: size.width, rows: size.height })?;
+    let saved = opts.layout_file.as_deref().map(Layout::load).unwrap_or_default();
     if let Some(w) = saved.rail {
         app.step(Msg::Ui(UiIntent::SetRailWidth(w)))?;
     }
@@ -550,14 +510,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             }
         }
         for job in done.jobs.drain(..) {
-            let file = run_job(
-                job,
-                opts.agents_dir.as_deref(),
-                &mut validate,
-                &mut account,
-                &mut input.note,
-                &tx,
-            );
+            let file = run_job(job, opts.agents_dir.as_deref(), &mut validate, &mut account, &mut input.note, &tx);
             if let Some(path) = file {
                 if let Err(e) = edit_file(&mut session, &path) {
                     input.note = format!("could not run the editor: {e}");
@@ -566,20 +519,13 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             }
         }
         // A finished run's transcript that is open streams back from disk, a chunk at a time.
-        if let (Some(dir), Some((run, entry))) =
-            (opts.runs_dir.as_ref(), evicted_open(&app.graph, &app.store))
-        {
+        if let (Some(dir), Some((run, entry))) = (opts.runs_dir.as_ref(), evicted_open(&app.graph, &app.store)) {
             if app.store.begin_restore(entry) {
-                let (store, tx, path) = (
-                    app.store.clone(),
-                    tx.clone(),
-                    dir.join(run.to_string()).join("transcript.jsonl"),
-                );
+                let (store, tx, path) = (app.store.clone(), tx.clone(), dir.join(run.to_string()).join("transcript.jsonl"));
                 tokio::task::spawn_blocking(move || {
-                    let _ =
-                        aibus_core::persist::transcript::reload(&store, entry, &path, 400, || {
-                            let _ = tx.blocking_send(Msg::Ui(UiIntent::Loaded(run)));
-                        });
+                    let _ = aibus_core::persist::transcript::reload(&store, entry, &path, 400, || {
+                        let _ = tx.blocking_send(Msg::Ui(UiIntent::Loaded(run)));
+                    });
                 });
             }
         }
@@ -588,19 +534,12 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             app.keys.push(key);
         }
         ui.note_commit(&app.graph);
-        let typing = app
-            .graph
-            .read_key(view::RAIL)
-            .is_some_and(view::rail_typing);
+        let typing = app.graph.read_key(view::RAIL).is_some_and(view::rail_typing);
         let animating = typing || matches!(app.graph.read_key(ANIMATING), Some(Value::Bool(true)));
         // The prompt's cursor blinks on the tick counter, so ticks also run while it has focus;
         // the frame is only drawn again when the blink changes, unless something animates.
         ui.animating = animating;
-        let blinking = app
-            .graph
-            .read_key(aibus_core::state::FOCUS)
-            .and_then(as_str)
-            == Some("input");
+        let blinking = app.graph.read_key(aibus_core::state::FOCUS).and_then(as_str) == Some("input");
         ticker.set_animating(animating || blinking);
         ui.draw(&mut session.term, &app.graph)?;
         // Move events are only asked for while something on this frame reacts to hover.
@@ -628,24 +567,14 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
 }
 
 /// Steps one message from outside the loop, and has the writer record it and what it did.
-fn step_written<G: Graph>(
-    app: &mut App<G>,
-    writer: &mut Option<SessionWriter>,
-    m: Msg,
-) -> Result<(), AibusError> {
-    let Some(w) = writer.as_mut() else {
-        return app.step(m);
-    };
+fn step_written<G: Graph>(app: &mut App<G>, writer: &mut Option<SessionWriter>, m: Msg) -> Result<(), AibusError> {
+    let Some(w) = writer.as_mut() else { return app.step(m) };
     let at = std::time::SystemTime::now();
     w.msg(&m, at)?;
     // The first message of a run is its task.
     if let Msg::RunStarted { run, .. } = &m {
         app.step(m.clone())?;
-        let prompt = app
-            .graph
-            .read_key(&run_key(run, "meta"))
-            .and_then(|meta| get(meta, "prompt"))
-            .cloned();
+        let prompt = app.graph.read_key(&run_key(run, "meta")).and_then(|meta| get(meta, "prompt")).cloned();
         let text = match prompt {
             Some(Value::Handle(h)) => app.store.text(&h).map(|t| t.to_string()),
             Some(v) => as_str(&v).map(str::to_owned),
@@ -663,32 +592,14 @@ fn step_written<G: Graph>(
 /// Runs `$VISUAL` or `$EDITOR` on `path` with the terminal handed over, then takes it back.
 fn edit_file(session: &mut Session, path: &Path) -> io::Result<()> {
     let mut out = io::stdout();
-    execute!(
-        out,
-        DisableBracketedPaste,
-        LeaveAlternateScreen,
-        cursor::Show
-    )?;
+    execute!(out, DisableBracketedPaste, LeaveAlternateScreen, cursor::Show)?;
     out.write_all(input::mouse_switch(MouseMode::Hover, MouseMode::Off).as_bytes())?;
     disable_raw_mode()?;
-    let cmd = editor(
-        std::env::var("VISUAL").ok().as_deref(),
-        std::env::var("EDITOR").ok().as_deref(),
-    );
+    let cmd = editor(std::env::var("VISUAL").ok().as_deref(), std::env::var("EDITOR").ok().as_deref());
     let mut parts = cmd.split_whitespace();
-    let ran = parts.next().map(|prog| {
-        std::process::Command::new(prog)
-            .args(parts)
-            .arg(path)
-            .status()
-    });
+    let ran = parts.next().map(|prog| std::process::Command::new(prog).args(parts).arg(path).status());
     enable_raw_mode()?;
-    execute!(
-        out,
-        EnterAlternateScreen,
-        EnableBracketedPaste,
-        cursor::Hide
-    )?;
+    execute!(out, EnterAlternateScreen, EnableBracketedPaste, cursor::Hide)?;
     session.term.clear()?;
     ran.transpose().map(|_| ())
 }
@@ -700,14 +611,7 @@ mod tests {
     #[test]
     fn the_clipboard_sequence_is_osc_52_with_standard_base64() {
         // Every remainder of the 3-byte groups: none, two bytes short, one byte short.
-        for (text, b64) in [
-            ("", ""),
-            ("a", "YQ=="),
-            ("ab", "YWI="),
-            ("abc", "YWJj"),
-            ("hello", "aGVsbG8="),
-            ("01HF7YAT", "MDFIRjdZQVQ="),
-        ] {
+        for (text, b64) in [("", ""), ("a", "YQ=="), ("ab", "YWI="), ("abc", "YWJj"), ("hello", "aGVsbG8="), ("01HF7YAT", "MDFIRjdZQVQ=")] {
             assert_eq!(osc52(text), format!("\x1b]52;c;{b64}\x07"), "{text:?}");
         }
     }
@@ -754,8 +658,7 @@ mod tests {
     #[test]
     fn back_tab_is_shift_tab() {
         use crossterm::event::{KeyCode as K, KeyModifiers};
-        let got =
-            key_from_crossterm(event::KeyEvent::new(K::BackTab, KeyModifiers::SHIFT)).unwrap();
+        let got = key_from_crossterm(event::KeyEvent::new(K::BackTab, KeyModifiers::SHIFT)).unwrap();
         assert_eq!((got.code, got.shift), (KeyCode::Tab, true));
         let plain = key_from_crossterm(event::KeyEvent::new(K::Tab, KeyModifiers::NONE)).unwrap();
         assert!(!plain.shift);

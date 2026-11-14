@@ -50,15 +50,9 @@ fn below_80x24_the_frame_is_a_message() {
         let r = rig((w, h));
         let t = r.text();
         assert!(t.contains("terminal too small"), "{w}x{h}: {t}");
-        assert!(
-            t.contains(&format!("need 80x24, have {w}x{h}")),
-            "{w}x{h}: {t}"
-        );
+        assert!(t.contains(&format!("need 80x24, have {w}x{h}")), "{w}x{h}: {t}");
         assert!(!t.contains("session log"));
-        assert!(
-            r.ui.drawn.hits.regions().is_empty(),
-            "nothing to click on a message"
-        );
+        assert!(r.ui.drawn.hits.regions().is_empty(), "nothing to click on a message");
     }
     assert!(rig((80, 24)).text().contains("session log"));
 }
@@ -70,10 +64,7 @@ fn the_rail_is_a_strip_under_98_columns_and_a_opens_it() {
     let mut r = rig((80, 24));
     assert!(!r.text().contains("OPUS 5.5 ─"));
     focus_cards(&mut r);
-    assert_eq!(
-        names(&r.press('a')),
-        ["Ui(Focus(Advisor))", "Ui(ToggleRail)"]
-    );
+    assert_eq!(names(&r.press('a')), ["Ui(Focus(Advisor))", "Ui(ToggleRail)"]);
     assert!(r.text().contains("OPUS 5.5 ─"), "{}", r.text());
     assert_frame!(r.frame(), "shell_rail_open_80x24");
     // On the open rail `a` only keeps the focus there; the strip toggles back.
@@ -94,11 +85,7 @@ fn the_ledger_segment_needs_100_columns() {
         .unwrap();
         let r = Rig::new(app, (cols, 40), Theme::recording());
         let status = last_line(&r.text()).to_owned();
-        assert_eq!(
-            status.contains("ledger: ship it"),
-            shown,
-            "{cols}: {status}"
-        );
+        assert_eq!(status.contains("ledger: ship it"), shown, "{cols}: {status}");
     }
 }
 
@@ -107,11 +94,7 @@ fn under_30_rows_the_log_has_3_rows_and_the_fork_layer_loses_its_footer() {
     for (rows, log_rows, footer) in [(24, 3, false), (29, 3, false), (30, 4, true), (46, 4, true)] {
         let r = rig((98, rows));
         assert_eq!(r.ui.drawn.log.visible, log_rows, "{rows} rows");
-        assert_eq!(
-            r.text().contains("sharp → runs in code"),
-            footer,
-            "{rows} rows"
-        );
+        assert_eq!(r.text().contains("sharp → runs in code"), footer, "{rows} rows");
     }
 }
 
@@ -167,19 +150,14 @@ fn aibus_opens_with_an_empty_prompt_and_its_placeholder() {
     r.settle();
     let text = r.text();
     let lines: Vec<&str> = text.lines().collect();
-    assert!(
-        lines[lines.len() - 2].starts_with(" ~/proj $ aibus --model sonnet"),
-        "{text}"
-    );
+    assert!(lines[lines.len() - 2].starts_with(" ~/proj $ aibus --model sonnet"), "{text}");
 }
 
 #[test]
 fn dashboard_keys_do_what_the_table_says() {
     let mut r = rig((98, 46));
     focus_cards(&mut r);
-    assert!(names(&r.press('t'))
-        .iter()
-        .all(|m| m.starts_with("Command(OpenTranscript(")));
+    assert!(names(&r.press('t')).iter().all(|m| m.starts_with("Command(OpenTranscript(")));
     r.app.step(Msg::Command(Command::CloseModal)).unwrap();
     r.settle();
     assert_eq!(names(&r.press(':')), ["Command(OpenPalette)"]);
@@ -189,10 +167,7 @@ fn dashboard_keys_do_what_the_table_says() {
     // Something finished in this session, so quitting asks how it went first.
     assert_eq!(names(&r.press('q')), ["Command(Quit { force: false })"]);
     assert!(!r.app.should_quit());
-    assert_eq!(
-        r.app.graph.read_key("ctrl:modal"),
-        Some(&aibus_graph::Value::Str("outcome".into()))
-    );
+    assert_eq!(r.app.graph.read_key("ctrl:modal"), Some(&aibus_graph::Value::Str("outcome".into())));
     r.press('!');
     assert!(r.app.should_quit());
 }
@@ -207,16 +182,8 @@ fn help_is_built_from_the_live_key_map_and_any_key_closes_it() {
         assert_eq!(names(&r.press('?')), ["Command(OpenHelp)"]);
         let text = r.text();
         for row in r.ui.keys.help_rows() {
-            assert!(
-                text.contains(row.text),
-                "{size:?}: help lacks `{}`",
-                row.text
-            );
-            assert!(
-                text.contains(&row.keys),
-                "{size:?}: help lacks keys `{}`",
-                row.keys
-            );
+            assert!(text.contains(row.text), "{size:?}: help lacks `{}`", row.text);
+            assert!(text.contains(&row.keys), "{size:?}: help lacks keys `{}`", row.keys);
         }
         assert!(text.contains("any key closes"));
         if size == (98, 46) {
@@ -254,26 +221,14 @@ fn more_than_three_cards_scroll_with_the_selection() {
     let mut r = Rig::new(heavy_app(), (98, 46), Theme::recording());
     assert!(r.text().contains("4 more ▸"), "{}", r.text());
     assert!(!r.text().contains("◂"));
-    r.app
-        .step(Msg::Ui(UiIntent::Select(Pane::Cards, Selection::Index(5))))
-        .unwrap();
+    r.app.step(Msg::Ui(UiIntent::Select(Pane::Cards, Selection::Index(5)))).unwrap();
     r.settle();
     let t = r.text();
     assert!(t.contains("◂ 3 more"), "{t}");
     assert!(t.contains("1 more ▸"), "{t}");
     assert_eq!(r.ui.drawn.cards, 7);
-    assert!(r
-        .ui
-        .drawn
-        .hits
-        .find(aibus_tui::hit::HitId::Card(5))
-        .is_some());
-    assert!(r
-        .ui
-        .drawn
-        .hits
-        .find(aibus_tui::hit::HitId::Card(0))
-        .is_none());
+    assert!(r.ui.drawn.hits.find(aibus_tui::hit::HitId::Card(5)).is_some());
+    assert!(r.ui.drawn.hits.find(aibus_tui::hit::HitId::Card(0)).is_none());
 }
 
 // ---- themes, colour modes and the glyph set -----------------------------------------------
@@ -296,12 +251,7 @@ fn no_color_draws_with_the_terminals_own_colours() {
     let theme = Theme::resolve("recording", Some("1"), Some("truecolor"), false);
     let r = Rig::new(replay_app(), (98, 46), theme);
     for c in cells(&r) {
-        assert_eq!(
-            (c.fg, c.bg),
-            (Color::Reset, Color::Reset),
-            "{:?}",
-            c.symbol()
-        );
+        assert_eq!((c.fg, c.bg), (Color::Reset, Color::Reset), "{:?}", c.symbol());
     }
     assert_eq!(r.text(), rig((98, 46)).text());
 }
@@ -311,9 +261,7 @@ fn without_truecolor_every_colour_is_a_256_palette_index() {
     let theme = Theme::resolve("recording", None, Some("256color"), false);
     let r = Rig::new(replay_app(), (98, 46), theme);
     let all = cells(&r);
-    assert!(all
-        .iter()
-        .all(|c| !matches!(c.fg, Color::Rgb(..)) && !matches!(c.bg, Color::Rgb(..))));
+    assert!(all.iter().all(|c| !matches!(c.fg, Color::Rgb(..)) && !matches!(c.bg, Color::Rgb(..))));
     assert!(all.iter().any(|c| matches!(c.bg, Color::Indexed(_))));
     assert_eq!(r.text(), rig((98, 46)).text());
 }
@@ -323,11 +271,7 @@ fn ascii_swaps_every_glyph_and_widens_nothing_else() {
     let theme = Theme::resolve("recording", None, Some("truecolor"), true);
     let r = Rig::new(replay_app(), (98, 46), theme);
     let t = r.text();
-    assert!(
-        t.is_ascii(),
-        "{}",
-        t.chars().filter(|c| !c.is_ascii()).collect::<String>()
-    );
+    assert!(t.is_ascii(), "{}", t.chars().filter(|c| !c.is_ascii()).collect::<String>());
     assert!(t.contains("ok done"), "{t}");
     assert!(t.contains(">> plan skips"), "{t}");
     assert!(t.contains("sharp -> runs in code"), "{t}");

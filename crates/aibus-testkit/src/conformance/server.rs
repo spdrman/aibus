@@ -60,10 +60,7 @@ impl Fixture {
     pub fn http(status: u16, headers: &[(&str, &str)], body: &str) -> Self {
         Self {
             status,
-            headers: headers
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-                .collect(),
+            headers: headers.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
             delay: Duration::ZERO,
             body: Body::Raw(body.to_owned()),
             end: End::Close,
@@ -72,29 +69,18 @@ impl Fixture {
 
     /// Reads either file form, by extension.
     pub fn load(path: &Path) -> Self {
-        let text =
-            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         match path.extension().and_then(|e| e.to_str()) {
             Some("http") => Self::parse_http(&text),
             Some("json") => Self::parse_scripted(&text),
-            other => panic!(
-                "{}: fixtures are .http or .json, not {other:?}",
-                path.display()
-            ),
+            other => panic!("{}: fixtures are .http or .json, not {other:?}", path.display()),
         }
     }
 
     pub fn parse_http(text: &str) -> Self {
-        let (head, body) = text
-            .split_once("\n\n")
-            .expect("a blank line after the headers");
+        let (head, body) = text.split_once("\n\n").expect("a blank line after the headers");
         let mut lines = head.lines();
-        let status = lines
-            .next()
-            .and_then(|l| l.strip_prefix("HTTP "))
-            .expect("HTTP <status>")
-            .parse()
-            .expect("a status number");
+        let status = lines.next().and_then(|l| l.strip_prefix("HTTP ")).expect("HTTP <status>").parse().expect("a status number");
         let mut f = Self::http(status, &[], body);
         for l in lines {
             let (k, v) = l.split_once(": ").expect("header line");
@@ -109,10 +95,7 @@ impl Fixture {
         let mut f = Self::http(v["status"].as_u64().expect("status") as u16, &[], "");
         f.delay = ms(&v);
         for (k, val) in v["headers"].as_object().into_iter().flatten() {
-            f.headers.push((
-                k.clone(),
-                val.as_str().expect("header value is a string").to_owned(),
-            ));
+            f.headers.push((k.clone(), val.as_str().expect("header value is a string").to_owned()));
         }
         f.body = match (v["body"].as_str(), v["steps"].as_array()) {
             (Some(b), None) => Body::Raw(b.to_owned()),
@@ -160,13 +143,7 @@ impl Fixture {
     /// Keeps the first `n` frames, then goes silent with the connection open. Turns a recorded
     /// stream into "the server is still sending" for the cancel check.
     pub fn hang_after(mut self, n: usize) -> Self {
-        self.body = Body::Steps(
-            self.frames()
-                .into_iter()
-                .take(n)
-                .map(|f| (f, Duration::ZERO))
-                .collect(),
-        );
+        self.body = Body::Steps(self.frames().into_iter().take(n).map(|f| (f, Duration::ZERO)).collect());
         self.end = End::Hang;
         self
     }
@@ -192,10 +169,7 @@ pub struct Seen {
 
 impl Seen {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.as_str())
+        self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
     }
 }
 
@@ -214,9 +188,7 @@ pub struct FakeServer {
 
 impl FakeServer {
     pub async fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind loopback");
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
         let addr = listener.local_addr().unwrap();
         let state = Arc::new(State::default());
         let task = tokio::spawn({
@@ -295,11 +267,7 @@ async fn read_request(sock: &mut TcpStream) -> Option<Seen> {
         .filter_map(|l| l.split_once(':'))
         .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_owned()))
         .collect();
-    let len: usize = headers
-        .iter()
-        .find(|(k, _)| k == "content-length")
-        .and_then(|(_, v)| v.parse().ok())
-        .unwrap_or(0);
+    let len: usize = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < len {
         let n = sock.read(&mut chunk).await.ok()?;
@@ -308,12 +276,7 @@ async fn read_request(sock: &mut TcpStream) -> Option<Seen> {
         }
         body.extend_from_slice(&chunk[..n]);
     }
-    Some(Seen {
-        method,
-        target,
-        headers,
-        body,
-    })
+    Some(Seen { method, target, headers, body })
 }
 
 async fn write_chunk(sock: &mut TcpStream, text: &str) -> std::io::Result<()> {
@@ -324,24 +287,16 @@ async fn write_bytes(sock: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> 
     if bytes.is_empty() {
         return Ok(());
     }
-    sock.write_all(format!("{:x}\r\n", bytes.len()).as_bytes())
-        .await?;
+    sock.write_all(format!("{:x}\r\n", bytes.len()).as_bytes()).await?;
     sock.write_all(bytes).await?;
     sock.write_all(b"\r\n").await?;
     sock.flush().await
 }
 
 async fn serve(mut sock: TcpStream, state: Arc<State>) {
-    let Some(seen) = read_request(&mut sock).await else {
-        return;
-    };
+    let Some(seen) = read_request(&mut sock).await else { return };
     state.seen.lock().unwrap().push(seen);
-    let fx = state
-        .queue
-        .lock()
-        .unwrap()
-        .pop_front()
-        .unwrap_or_else(|| Fixture::http(599, &[], "unscripted request"));
+    let fx = state.queue.lock().unwrap().pop_front().unwrap_or_else(|| Fixture::http(599, &[], "unscripted request"));
     let _ = play(&mut sock, fx, &state).await;
 }
 
@@ -350,10 +305,7 @@ async fn play(sock: &mut TcpStream, fx: Fixture, state: &State) -> std::io::Resu
     let mut head = format!("HTTP/1.1 {} Scripted\r\n", fx.status);
     for (k, v) in &fx.headers {
         let k = k.to_ascii_lowercase();
-        if !matches!(
-            k.as_str(),
-            "content-length" | "transfer-encoding" | "connection"
-        ) {
+        if !matches!(k.as_str(), "content-length" | "transfer-encoding" | "connection") {
             head.push_str(&format!("{k}: {v}\r\n"));
         }
     }

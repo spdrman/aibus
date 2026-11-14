@@ -45,10 +45,7 @@ fn is_error(result: &Value) -> bool {
 }
 
 fn text(result: &Value) -> String {
-    result["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned()
+    result["content"][0]["text"].as_str().unwrap_or_default().to_owned()
 }
 
 #[test]
@@ -58,14 +55,8 @@ fn a_client_without_elicitation_sees_no_confirmation() {
         let mut c = client(home.path(), p, false, &[]);
         let r = c.call("workflow_create", args()).expect("workflow_create");
         assert!(!is_error(&r), "{p:?}: {r}");
-        assert!(
-            r.get("resultType").is_none_or(|t| t == "complete"),
-            "{p:?}: {r}"
-        );
-        assert!(
-            c.elicitations.is_empty(),
-            "{p:?}: a client that never declared elicitation was asked"
-        );
+        assert!(r.get("resultType").is_none_or(|t| t == "complete"), "{p:?}: {r}");
+        assert!(c.elicitations.is_empty(), "{p:?}: a client that never declared elicitation was asked");
         assert!(ship_file(home.path()).exists(), "{p:?}");
     }
 }
@@ -75,8 +66,9 @@ fn legacy_clients_get_one_elicitation_and_need_accept_with_the_name() {
     let accept = |name: &'static str| -> Answer {
         Box::new(move |_| json!({ "action": "accept", "content": { "name": name } }))
     };
-    let decide =
-        |action: &'static str| -> Answer { Box::new(move |_| json!({ "action": action })) };
+    let decide = |action: &'static str| -> Answer {
+        Box::new(move |_| json!({ "action": action }))
+    };
 
     // accept with the name: exactly one question, then the write.
     let home = xdg_temp();
@@ -102,10 +94,7 @@ fn legacy_clients_get_one_elicitation_and_need_accept_with_the_name() {
         let r = c.call("workflow_create", args()).unwrap();
         assert!(is_error(&r) && text(&r).contains(want), "{want}: {r}");
         assert_eq!(c.elicitations.len(), 1);
-        assert!(
-            !ship_file(home.path()).exists(),
-            "{want}: the file was written"
-        );
+        assert!(!ship_file(home.path()).exists(), "{want}: the file was written");
     }
 }
 
@@ -115,22 +104,10 @@ fn stateless_clients_get_input_required_and_a_valid_retry_completes() {
     let mut c = client(home.path(), Protocol::V2026_07_28, true, &[]);
     let first = c.call("workflow_create", args()).unwrap();
     assert_eq!(first["resultType"], "input_required", "{first}");
-    assert_eq!(
-        first["inputRequests"]["confirm"]["method"], "elicitation/create",
-        "{first}"
-    );
-    let state = first["requestState"]
-        .as_str()
-        .expect("a requestState")
-        .to_owned();
-    assert!(
-        c.elicitations.is_empty(),
-        "2026-07-28 servers send no requests of their own"
-    );
-    assert!(
-        !ship_file(home.path()).exists(),
-        "nothing is written before the answer"
-    );
+    assert_eq!(first["inputRequests"]["confirm"]["method"], "elicitation/create", "{first}");
+    let state = first["requestState"].as_str().expect("a requestState").to_owned();
+    assert!(c.elicitations.is_empty(), "2026-07-28 servers send no requests of their own");
+    assert!(!ship_file(home.path()).exists(), "nothing is written before the answer");
 
     let retry = |c: &mut McpClient, state: &str, name: &str| {
         c.request(
@@ -149,10 +126,7 @@ fn stateless_clients_get_input_required_and_a_valid_retry_completes() {
     assert!(is_error(&r), "{r}");
     assert!(!ship_file(home.path()).exists());
 
-    let fresh = c.call("workflow_create", args()).unwrap()["requestState"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let fresh = c.call("workflow_create", args()).unwrap()["requestState"].as_str().unwrap().to_owned();
     let done = retry(&mut c, &fresh, "ship");
     assert!(!is_error(&done), "{done}");
     assert!(ship_file(home.path()).exists());
@@ -167,10 +141,7 @@ fn confirm_never_skips_it() {
         let home = xdg_temp();
         let mut c = client(home.path(), p, true, &["--confirm", "never"]);
         let r = c.call("workflow_create", args()).unwrap();
-        assert!(
-            !is_error(&r) && r.get("inputRequests").is_none(),
-            "{p:?}: {r}"
-        );
+        assert!(!is_error(&r) && r.get("inputRequests").is_none(), "{p:?}: {r}");
         assert!(c.elicitations.is_empty(), "{p:?}");
         assert!(ship_file(home.path()).exists(), "{p:?}");
     }

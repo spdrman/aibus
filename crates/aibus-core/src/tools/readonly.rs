@@ -59,10 +59,7 @@ fn files(root: &Path) -> impl Iterator<Item = PathBuf> {
 }
 
 fn rel(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root)
-        .unwrap_or(p)
-        .to_string_lossy()
-        .into_owned()
+    p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned()
 }
 
 fn glob_matcher(pattern: &str) -> Result<globset::GlobMatcher, ToolError> {
@@ -134,10 +131,7 @@ impl Tool for Read {
                     break;
                 }
                 let line = String::from_utf8_lossy(&buf);
-                out.content.push_str(&format!(
-                    "{n:>6}\t{}\n",
-                    line.trim_end_matches(['\n', '\r'])
-                ));
+                out.content.push_str(&format!("{n:>6}\t{}\n", line.trim_end_matches(['\n', '\r'])));
             }
             Ok(out)
         })
@@ -277,9 +271,7 @@ impl Tool for Grep {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "grep".into(),
-            description:
-                "Search file contents with a regex (ripgrep semantics). Output is `path:line:text`."
-                    .into(),
+            description: "Search file contents with a regex (ripgrep semantics). Output is `path:line:text`.".into(),
             schema: json!({"type":"object","required":["pattern"],"properties":{
                 "pattern":{"type":"string"},
                 "path":{"type":"string"},
@@ -315,9 +307,10 @@ impl Tool for Grep {
             for f in candidates {
                 check(&cancel)?;
                 let r = rel(&root, &f);
-                if name_glob.as_ref().is_some_and(|g| {
-                    !(g.is_match(&r) || f.file_name().is_some_and(|n| g.is_match(n)))
-                }) {
+                if name_glob
+                    .as_ref()
+                    .is_some_and(|g| !(g.is_match(&r) || f.file_name().is_some_and(|n| g.is_match(n))))
+                {
                     continue;
                 }
                 let sink = Lossy(|n, text| {

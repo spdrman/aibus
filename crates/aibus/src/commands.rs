@@ -18,11 +18,8 @@ pub fn account(cmd: &AccountCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
     // `--oauth` never reads the key from stdin, and its paste fallback reads a line itself, so
     // the lock stays free for it.
     let oauth_add = matches!(cmd, AccountCmd::Add(a) if a.oauth);
-    let mut input: Box<dyn std::io::Read> = if oauth_add {
-        Box::new(std::io::empty())
-    } else {
-        Box::new(stdin.lock())
-    };
+    let mut input: Box<dyn std::io::Read> =
+        if oauth_add { Box::new(std::io::empty()) } else { Box::new(stdin.lock()) };
     let mut stdout = std::io::stdout().lock();
     let ask = || rpassword::prompt_password("key (input hidden): ");
     let mut io = Io {
@@ -214,11 +211,7 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
     let dirs = aibus_core::workflow::dirs(&cwd, Some(&g.paths()?.config));
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     match target {
-        Some(t)
-            if t.ends_with(".toml")
-                || t.contains(std::path::MAIN_SEPARATOR)
-                || cwd.join(t).is_file() =>
-        {
+        Some(t) if t.ends_with(".toml") || t.contains(std::path::MAIN_SEPARATOR) || cwd.join(t).is_file() => {
             files.push(cwd.join(t));
         }
         Some(name) => {
@@ -226,22 +219,15 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
             let (_, path, _) = found
                 .into_iter()
                 .find(|(n, _, _)| n == name)
-                .ok_or_else(|| {
-                    AibusError::Usage(format!("no workflow named {name} (aibus workflow list)"))
-                })?;
+                .ok_or_else(|| AibusError::Usage(format!("no workflow named {name} (aibus workflow list)")))?;
             files.push(path);
         }
         None => {
             for dir in &dirs {
-                let Ok(read) = std::fs::read_dir(dir) else {
-                    continue;
-                };
+                let Ok(read) = std::fs::read_dir(dir) else { continue };
                 let mut here: Vec<_> = read.flatten().map(|e| e.path()).collect();
                 here.sort();
-                files.extend(
-                    here.into_iter()
-                        .filter(|p| p.extension().is_some_and(|x| x == "toml")),
-                );
+                files.extend(here.into_iter().filter(|p| p.extension().is_some_and(|x| x == "toml")));
             }
         }
     }
@@ -249,22 +235,19 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
     let roster: Vec<_> = env.discover(g)?.agents.into_keys().collect();
     let (mut errors, mut warnings) = (Vec::new(), Vec::new());
     for path in &files {
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
         let text = std::fs::read_to_string(path)
             .map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
         let v = aibus_core::workflow::validate(&text, stem, &roster);
         let tag = |list: Vec<aibus_core::workflow::Problem>| {
-            list.into_iter()
-                .map(|p| (path.clone(), p))
-                .collect::<Vec<_>>()
+            list.into_iter().map(|p| (path.clone(), p)).collect::<Vec<_>>()
         };
         errors.extend(tag(v.errors));
         warnings.extend(tag(v.warnings));
     }
-    let row = |(path, p): &(std::path::PathBuf, aibus_core::workflow::Problem)| json!({"path": path, "step": p.step, "field": p.field, "message": p.message});
+    let row = |(path, p): &(std::path::PathBuf, aibus_core::workflow::Problem)| {
+        json!({"path": path, "step": p.step, "field": p.field, "message": p.message})
+    };
     let ok = errors.is_empty();
     if g.json {
         let report = json!({
@@ -277,10 +260,7 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
         for (kind, list) in [("error", &errors), ("warning", &warnings)] {
             for (path, p) in list {
                 let step = p.step.map_or(String::new(), |n| format!("step {n}: "));
-                let field = p
-                    .field
-                    .as_deref()
-                    .map_or(String::new(), |f| format!("{f}: "));
+                let field = p.field.as_deref().map_or(String::new(), |f| format!("{f}: "));
                 println!("{kind}: {}: {step}{field}{}", path.display(), p.message);
             }
         }
@@ -297,9 +277,7 @@ pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
     let (_, path, parsed) = aibus_core::workflow::list(&dirs)
         .into_iter()
         .find(|(n, _, _)| n == name)
-        .ok_or_else(|| {
-            AibusError::Usage(format!("no workflow named {name} (aibus workflow list)"))
-        })?;
+        .ok_or_else(|| AibusError::Usage(format!("no workflow named {name} (aibus workflow list)")))?;
     let w = parsed.map_err(|e| AibusError::Usage(format!("{}: {e}", path.display())))?;
     let on_fail = |retries: u32| (retries > 0).then(|| format!("retry:{retries}"));
     if g.json {
@@ -317,10 +295,7 @@ pub fn workflow_show(g: &Global, name: &str) -> Result<u8, AibusError> {
                 step
             })
             .collect();
-        println!(
-            "{}",
-            json!({"name": w.name, "path": path, "description": w.description, "steps": steps})
-        );
+        println!("{}", json!({"name": w.name, "path": path, "description": w.description, "steps": steps}));
         return Ok(0);
     }
     println!("{}  ({})", w.name, path.display());

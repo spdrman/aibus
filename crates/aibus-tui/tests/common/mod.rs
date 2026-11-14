@@ -14,7 +14,9 @@ use aibus_tui::app::key_from_crossterm;
 use aibus_tui::hit::HitId;
 use aibus_tui::input::{Clip, Context, Input, Out};
 use aibus_tui::{Theme, Ui};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Cell;
 use ratatui::Terminal;
@@ -36,11 +38,7 @@ pub struct Rig {
 
 impl Rig {
     pub fn new(mut app: App<MiniGraph>, size: (u16, u16), theme: Theme) -> Self {
-        app.step(Msg::Resize {
-            cols: size.0,
-            rows: size.1,
-        })
-        .unwrap();
+        app.step(Msg::Resize { cols: size.0, rows: size.1 }).unwrap();
         let mut rig = Self {
             app,
             term: Terminal::new(TestBackend::new(size.0, size.1)).unwrap(),
@@ -56,12 +54,7 @@ impl Rig {
     }
 
     pub fn resize(&mut self, size: (u16, u16)) {
-        self.app
-            .step(Msg::Resize {
-                cols: size.0,
-                rows: size.1,
-            })
-            .unwrap();
+        self.app.step(Msg::Resize { cols: size.0, rows: size.1 }).unwrap();
         self.term.backend_mut().resize(size.0, size.1);
         self.settle();
     }
@@ -96,23 +89,10 @@ impl Rig {
         self.mouse(MouseEventKind::Down(MouseButton::Right), col, row)
     }
 
-    pub fn mouse_with(
-        &mut self,
-        kind: MouseEventKind,
-        col: u16,
-        row: u16,
-        mods: KeyModifiers,
-    ) -> Vec<Msg> {
+    pub fn mouse_with(&mut self, kind: MouseEventKind, col: u16, row: u16, mods: KeyModifiers) -> Vec<Msg> {
         let cx = Context::read(&self.app.graph);
-        let ev = MouseEvent {
-            kind,
-            column: col,
-            row,
-            modifiers: mods,
-        };
-        let out = self
-            .input
-            .mouse(ev, self.now, &self.ui.drawn, &cx, &mut self.ui.prompt);
+        let ev = MouseEvent { kind, column: col, row, modifiers: mods };
+        let out = self.input.mouse(ev, self.now, &self.ui.drawn, &cx, &mut self.ui.prompt);
         self.apply(out)
     }
 
@@ -139,9 +119,7 @@ impl Rig {
     pub fn key_with(&mut self, code: KeyCode, mods: KeyModifiers) -> Vec<Msg> {
         let ev = key_from_crossterm(KeyEvent::new(code, mods)).unwrap();
         let cx = Context::read(&self.app.graph);
-        let out = self
-            .input
-            .key(ev, &cx, &self.ui.keys, &self.ui.drawn, &mut self.ui.prompt);
+        let out = self.input.key(ev, &cx, &self.ui.keys, &self.ui.drawn, &mut self.ui.prompt);
         self.apply(out)
     }
 
@@ -163,23 +141,13 @@ impl Rig {
     }
 
     pub fn press(&mut self, c: char) -> Vec<Msg> {
-        let mods = if c.is_uppercase() {
-            KeyModifiers::SHIFT
-        } else {
-            KeyModifiers::NONE
-        };
+        let mods = if c.is_uppercase() { KeyModifiers::SHIFT } else { KeyModifiers::NONE };
         self.key_with(KeyCode::Char(c), mods)
     }
 
     /// The middle of a region of the last frame.
     pub fn centre(&self, id: HitId) -> (u16, u16) {
-        let r = self
-            .ui
-            .drawn
-            .hits
-            .find(id)
-            .unwrap_or_else(|| panic!("{id:?} was not drawn"))
-            .rect;
+        let r = self.ui.drawn.hits.find(id).unwrap_or_else(|| panic!("{id:?} was not drawn")).rect;
         (r.x + r.width / 2, r.y + r.height / 2)
     }
 
@@ -225,29 +193,14 @@ pub fn session() -> App<MiniGraph> {
     let mut app = App::new(MiniGraph::new(), || NOW);
     let keys = aibus_tui::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
-    app.set_session_view(
-        Some("--model sonnet"),
-        (Some("opus 5.5"), true),
-        (Some("jev"), true),
-    )
-    .unwrap();
-    app.step(Msg::SubmitPrompt {
-        text: "edits + runs tests".into(),
-    })
-    .unwrap();
+    app.set_session_view(Some("--model sonnet"), (Some("opus 5.5"), true), (Some("jev"), true)).unwrap();
+    app.step(Msg::SubmitPrompt { text: "edits + runs tests".into() }).unwrap();
     start(&mut app, 1, "lead", Role::Lead, "Sonnet 5.5");
     app
 }
 
 /// Worker `seq` (2 and up, in order) with its task, progress and status word.
-pub fn worker(
-    app: &mut App<MiniGraph>,
-    seq: u128,
-    agent: &str,
-    task: &str,
-    progress: Option<f64>,
-    status: &str,
-) {
+pub fn worker(app: &mut App<MiniGraph>, seq: u128, agent: &str, task: &str, progress: Option<f64>, status: &str) {
     app.step(Msg::Command(Command::Delegate {
         agent: agent.parse().unwrap(),
         prompt: task.into(),
@@ -261,17 +214,9 @@ pub fn worker(
     .unwrap();
     start(app, seq, agent, Role::Worker, "Haiku 5.5");
     if let Some(p) = progress {
-        poke(
-            app,
-            &format!("model:run:{}:progress", run_id(seq)),
-            Value::F64(p),
-        );
+        poke(app, &format!("model:run:{}:progress", run_id(seq)), Value::F64(p));
     }
-    poke(
-        app,
-        &format!("model:run:{}:status", run_id(seq)),
-        Value::Str(status.into()),
-    );
+    poke(app, &format!("model:run:{}:status", run_id(seq)), Value::Str(status.into()));
 }
 
 pub fn ticks(app: &mut App<MiniGraph>, n: u32) {
@@ -288,21 +233,9 @@ pub fn meta(app: &mut App<MiniGraph>, seq: u128, key: &str, v: Value) {
 }
 
 /// A log row as the reducer would write it, for the lines the spec shows.
-pub fn log_row(
-    app: &mut App<MiniGraph>,
-    at: u64,
-    actor: &str,
-    text: &str,
-    extra: Vec<(&str, Value)>,
-) {
+pub fn log_row(app: &mut App<MiniGraph>, at: u64, actor: &str, text: &str, extra: Vec<(&str, Value)>) {
     use aibus_core::state::value::{map_of, n, s};
-    let mut fields = vec![
-        ("at", n(at)),
-        ("level", s("info")),
-        ("actor", s(actor)),
-        ("run", Value::Null),
-        ("text", s(text)),
-    ];
+    let mut fields = vec![("at", n(at)), ("level", s("info")), ("actor", s(actor)), ("run", Value::Null), ("text", s(text))];
     fields.extend(extra);
     let h = app.store.log_push(map_of(fields));
     poke(app, "model:log", Value::Handle(h));
@@ -323,19 +256,12 @@ impl Rig {
 
     /// The cell where `needle` starts.
     pub fn cell_of(&self, needle: &str) -> Cell {
-        let (x, y) = self
-            .find(needle)
-            .unwrap_or_else(|| panic!("`{needle}` is not on screen:\n{}", self.text()));
+        let (x, y) = self.find(needle).unwrap_or_else(|| panic!("`{needle}` is not on screen:\n{}", self.text()));
         self.cell(x, y)
     }
 
     pub fn rect(&self, id: HitId) -> Rect {
-        self.ui
-            .drawn
-            .hits
-            .find(id)
-            .unwrap_or_else(|| panic!("{id:?} was not drawn"))
-            .rect
+        self.ui.drawn.hits.find(id).unwrap_or_else(|| panic!("{id:?} was not drawn")).rect
     }
 }
 
@@ -347,16 +273,7 @@ pub fn crop(frame: &Frame, area: Rect) -> (String, String) {
         .lines()
         .enumerate()
         .filter(|(y, _)| (area.y..area.bottom()).contains(&(*y as u16)))
-        .map(|(_, l)| {
-            format!(
-                "{}\n",
-                l.chars()
-                    .skip(x0)
-                    .take(x1 - x0)
-                    .collect::<String>()
-                    .trim_end()
-            )
-        })
+        .map(|(_, l)| format!("{}\n", l.chars().skip(x0).take(x1 - x0).collect::<String>().trim_end()))
         .collect();
     let mut styles = String::new();
     for line in frame.styles.lines() {
@@ -368,17 +285,9 @@ pub fn crop(frame: &Frame, area: Rect) -> (String, String) {
         let rest = rest.trim_start();
         let (span, style) = rest.split_once(' ').unwrap();
         let (a, b) = span.split_once("..").unwrap();
-        let (a, b) = (
-            a.parse::<usize>().unwrap().max(x0),
-            b.parse::<usize>().unwrap().min(x1),
-        );
+        let (a, b) = (a.parse::<usize>().unwrap().max(x0), b.parse::<usize>().unwrap().min(x1));
         if a < b {
-            styles.push_str(&format!(
-                "{:02} {:02}..{:02} {style}\n",
-                y - area.y,
-                a - x0,
-                b - x0
-            ));
+            styles.push_str(&format!("{:02} {:02}..{:02} {style}\n", y - area.y, a - x0, b - x0));
         }
     }
     (text, styles)
@@ -396,50 +305,27 @@ pub fn assert_crop(frame: &Frame, area: Rect, name: &str, styles: bool) {
 
 // ---- C1.3 -----------------------------------------------------------------------------------
 
-use aibus_core::{
-    AgentDef, DefSource, PermissionId, PermissionRequest, RunResult, RunStatus, Scope, ToolCall,
-    ToolCallId, ToolResult, Usage,
-};
+use aibus_core::{AgentDef, DefSource, PermissionId, PermissionRequest, RunResult, RunStatus, Scope, ToolCall, ToolCallId, ToolResult, Usage};
 
 pub fn call_id(n: u128) -> ToolCallId {
     ToolCallId(ulid::Ulid::from_parts(NOW, n))
 }
 
 pub fn text_stream(app: &mut App<MiniGraph>, seq: u128, text: &str) {
-    app.step(Msg::Stream {
-        run: run_id(seq),
-        chunks: vec![aibus_provider::StreamChunk::TextDelta(text.into())],
-    })
-    .unwrap();
+    app.step(Msg::Stream { run: run_id(seq), chunks: vec![aibus_provider::StreamChunk::TextDelta(text.into())] }).unwrap();
 }
 
 /// A tool call that ran `ms` and returned `content`.
-pub fn tool_call(
-    app: &mut App<MiniGraph>,
-    seq: u128,
-    n: u128,
-    name: &str,
-    input: serde_json::Value,
-    ms: u64,
-    content: &str,
-) {
+pub fn tool_call(app: &mut App<MiniGraph>, seq: u128, n: u128, name: &str, input: serde_json::Value, ms: u64, content: &str) {
     app.step(Msg::ToolCallRequested {
         run: run_id(seq),
-        call: ToolCall {
-            id: call_id(n),
-            name: name.into(),
-            input,
-            needs_permission: false,
-        },
+        call: ToolCall { id: call_id(n), name: name.into(), input, needs_permission: false },
     })
     .unwrap();
     app.step(Msg::ToolCallFinished {
         run: run_id(seq),
         call_id: call_id(n),
-        result: ToolResult {
-            content: content.into(),
-            ..Default::default()
-        },
+        result: ToolResult { content: content.into(), ..Default::default() },
         duration: Duration::from_millis(ms),
     })
     .unwrap();
@@ -449,24 +335,11 @@ pub fn tool_call(
 pub fn tool_app() -> App<MiniGraph> {
     let mut app = session();
     text_stream(&mut app, 1, "I'll run the tests first.");
-    tool_call(
-        &mut app,
-        1,
-        1,
-        "bash",
-        serde_json::json!({"command": "cargo test"}),
-        1200,
-        &format!("running 4 tests\ntest result: ok\n{}", "x".repeat(4000)),
-    );
+    tool_call(&mut app, 1, 1, "bash", serde_json::json!({"command": "cargo test"}), 1200, &format!("running 4 tests\ntest result: ok\n{}", "x".repeat(4000)));
     text_stream(&mut app, 1, "All green. Compacting before the next step.");
-    app.step(Msg::Compacted {
-        run: run_id(1),
-        pre_tokens: 167_000,
-    })
-    .unwrap();
+    app.step(Msg::Compacted { run: run_id(1), pre_tokens: 167_000 }).unwrap();
     text_stream(&mut app, 1, "Done.");
-    app.step(Msg::Command(Command::OpenTranscript(run_id(1))))
-        .unwrap();
+    app.step(Msg::Command(Command::OpenTranscript(run_id(1)))).unwrap();
     app
 }
 
@@ -492,22 +365,12 @@ pub fn finish(app: &mut App<MiniGraph>, seq: u128, status: RunStatus) {
 pub fn fail(app: &mut App<MiniGraph>, seq: u128, retryable: bool) {
     app.step(Msg::RunFailed {
         run: run_id(seq),
-        error: aibus_core::RunError {
-            kind: aibus_core::RunErrorKind::Provider,
-            message: "rate limited".into(),
-            retryable,
-        },
+        error: aibus_core::RunError { kind: aibus_core::RunErrorKind::Provider, message: "rate limited".into(), retryable },
     })
     .unwrap();
 }
 
-pub fn ask(
-    app: &mut App<MiniGraph>,
-    seq: u128,
-    agent: &str,
-    n: u128,
-    summary: &str,
-) -> PermissionId {
+pub fn ask(app: &mut App<MiniGraph>, seq: u128, agent: &str, n: u128, summary: &str) -> PermissionId {
     let id = PermissionId::new();
     app.step(Msg::PermissionNeeded {
         request: PermissionRequest {
@@ -535,17 +398,9 @@ pub fn defs(names: &[&str]) -> Vec<AgentDef> {
 }
 
 pub fn with_agents(app: &mut App<MiniGraph>, names: &[&str]) {
-    app.step(Msg::AgentsReloaded {
-        defs: defs(names),
-        warnings: vec![],
-    })
-    .unwrap();
+    app.step(Msg::AgentsReloaded { defs: defs(names), warnings: vec![] }).unwrap();
 }
 
 pub fn modal(r: &Rig) -> Option<String> {
-    r.app
-        .graph
-        .read_key("ctrl:modal")
-        .and_then(aibus_core::state::value::as_str)
-        .map(str::to_owned)
+    r.app.graph.read_key("ctrl:modal").and_then(aibus_core::state::value::as_str).map(str::to_owned)
 }

@@ -648,9 +648,7 @@ fn hooks(v: Value) -> Result<HookSet, DefError> {
             let Some(Value::String(command)) = h.get(key) else {
                 return Err(want("hooks", what));
             };
-            if kind == HookKind::Http
-                && !(command.starts_with("http://") || command.starts_with("https://"))
-            {
+            if kind == HookKind::Http && !(command.starts_with("http://") || command.starts_with("https://")) {
                 return Err(want("hooks", what));
             }
             specs.push(HookSpec {

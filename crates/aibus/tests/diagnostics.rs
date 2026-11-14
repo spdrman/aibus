@@ -7,9 +7,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use aibus_testkit::xdg_temp;
 use common::{aibus, command, ndjson, stderr};
 use serde_json::Value;
+use aibus_testkit::xdg_temp;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 
@@ -52,10 +52,7 @@ fn the_log_level_follows_the_flags_and_aibus_log_adds_directives() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(
-        !log_text(filtered.path()).is_empty(),
-        "AIBUS_LOG=trace logs something"
-    );
+    assert!(!log_text(filtered.path()).is_empty(), "AIBUS_LOG=trace logs something");
 
     // A directive that does not parse is ignored and noted in the file.
     let bad = xdg_temp();
@@ -81,8 +78,7 @@ fn old_log_files_rotate_and_only_log_files_kept_remain() {
     let active = dir.join("aibus.log");
     fs::write(&active, "yesterday\n").unwrap();
     let file = fs::File::options().write(true).open(&active).unwrap();
-    file.set_modified(SystemTime::now() - Duration::from_secs(2 * 86_400))
-        .unwrap();
+    file.set_modified(SystemTime::now() - Duration::from_secs(2 * 86_400)).unwrap();
     drop(file);
 
     let out = aibus(home.path(), &["-vv", "run", "--agent", "explore", "hi"]);
@@ -95,12 +91,7 @@ fn old_log_files_rotate_and_only_log_files_kept_remain() {
     // The active file plus the two newest rotated ones.
     assert_eq!(names.len(), 3, "{names:?}");
     assert!(names.contains(&"aibus.log".to_owned()));
-    assert!(
-        !names
-            .iter()
-            .any(|n| n.ends_with("2026-01-01") || n.ends_with("2026-01-02")),
-        "{names:?}"
-    );
+    assert!(!names.iter().any(|n| n.ends_with("2026-01-01") || n.ends_with("2026-01-02")), "{names:?}");
     assert!(!log_text(home.path()).contains("yesterday"));
 }
 
@@ -116,14 +107,7 @@ fn trace_writes_chrome_trace_events_for_every_kind_of_span() {
     let trace = home.path().join("run.trace.json");
     let out = aibus(
         home.path(),
-        &[
-            "--trace",
-            trace.to_str().unwrap(),
-            "run",
-            "--agent",
-            "explore",
-            "map this repo",
-        ],
+        &["--trace", trace.to_str().unwrap(), "run", "--agent", "explore", "map this repo"],
     );
     assert!(out.status.success(), "{}", stderr(&out));
     let doc: Value = serde_json::from_str(&fs::read_to_string(&trace).unwrap()).unwrap();
@@ -145,16 +129,12 @@ fn trace_writes_chrome_trace_events_for_every_kind_of_span() {
 
     let provider = named("provider_call");
     assert_eq!(provider.len(), 2, "two turns, two requests");
-    assert!(provider
-        .iter()
-        .all(|e| e["args"]["ttfb_ms"].is_u64() && e["args"]["tokens"].is_u64()));
+    assert!(provider.iter().all(|e| e["args"]["ttfb_ms"].is_u64() && e["args"]["tokens"].is_u64()));
     assert_eq!(named("tool_call")[0]["args"]["tool"], "ls");
     assert_eq!(named("hook")[0]["args"]["event"], "session_start");
     assert!(!named("effect").is_empty(), "no effect spans");
     // Names of the tracks, for the viewer.
-    assert!(events
-        .iter()
-        .any(|e| e["ph"] == "M" && e["args"]["name"] == "provider_call"));
+    assert!(events.iter().any(|e| e["ph"] == "M" && e["args"]["name"] == "provider_call"));
 
     // The spans are not log lines.
     assert!(!log_text(home.path()).contains("recompute_us"));
@@ -181,19 +161,9 @@ fn limits_and_the_outcome_come_from_the_environment() {
         .output()
         .unwrap();
     let v: Value = serde_json::from_slice(&show.stdout).unwrap();
-    assert_eq!(
-        (
-            v["limits"]["max_spawn_depth"].as_u64(),
-            v["limits"]["max_concurrent_runs"].as_u64()
-        ),
-        (Some(1), Some(2))
-    );
+    assert_eq!((v["limits"]["max_spawn_depth"].as_u64(), v["limits"]["max_concurrent_runs"].as_u64()), (Some(1), Some(2)));
 
-    let bad = command(home.path())
-        .env("AIBUS_MAX_SPAWN_DEPTH", "deep")
-        .args(["config", "show"])
-        .output()
-        .unwrap();
+    let bad = command(home.path()).env("AIBUS_MAX_SPAWN_DEPTH", "deep").args(["config", "show"]).output().unwrap();
     assert_eq!(bad.status.code(), Some(2));
 
     let out = command(home.path())
@@ -202,18 +172,9 @@ fn limits_and_the_outcome_come_from_the_environment() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let id = ndjson(&out).last().unwrap()["session"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let id = ndjson(&out).last().unwrap()["session"].as_str().unwrap().to_owned();
     let session: Value = serde_json::from_str(
-        &fs::read_to_string(
-            home.path()
-                .join(".local/state/aibus/sessions")
-                .join(id)
-                .join("session.json"),
-        )
-        .unwrap(),
+        &fs::read_to_string(home.path().join(".local/state/aibus/sessions").join(id).join("session.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(session["handoff_outcome"], "PARTIAL_PLUS");
@@ -221,42 +182,19 @@ fn limits_and_the_outcome_come_from_the_environment() {
     // The flag wins over the variable.
     let out = command(home.path())
         .env("AIBUS_OUTCOME", "failed")
-        .args([
-            "run",
-            "--json",
-            "--agent",
-            "explore",
-            "--outcome",
-            "SUCCEEDED",
-            "hi",
-        ])
+        .args(["run", "--json", "--agent", "explore", "--outcome", "SUCCEEDED", "hi"])
         .output()
         .unwrap();
-    let id = ndjson(&out).last().unwrap()["session"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let text = fs::read_to_string(
-        home.path()
-            .join(".local/state/aibus/sessions")
-            .join(id)
-            .join("session.json"),
-    )
-    .unwrap();
-    assert!(
-        text.contains("\"handoff_outcome\": \"SUCCEEDED\""),
-        "{text}"
-    );
+    let id = ndjson(&out).last().unwrap()["session"].as_str().unwrap().to_owned();
+    let text = fs::read_to_string(home.path().join(".local/state/aibus/sessions").join(id).join("session.json")).unwrap();
+    assert!(text.contains("\"handoff_outcome\": \"SUCCEEDED\""), "{text}");
 }
 
 #[test]
 fn the_environment_is_never_listed_in_the_log() {
     let home = xdg_temp();
     let out = command(home.path())
-        .env(
-            "AIBUS_ACCOUNT_SECRETLY_KEY",
-            "sk-from-the-environment-123456",
-        )
+        .env("AIBUS_ACCOUNT_SECRETLY_KEY", "sk-from-the-environment-123456")
         .env("SOME_OTHER_VARIABLE", "marker-value-should-not-appear")
         .args(["-vvv", "run", "--agent", "explore", "hi"])
         .output()
@@ -271,11 +209,7 @@ fn the_environment_is_never_listed_in_the_log() {
 fn config_edit_opens_the_editor_on_the_user_config_and_checks_the_result() {
     let home = xdg_temp();
     let edit = |editor: &str| {
-        command(home.path())
-            .env("EDITOR", editor)
-            .args(["config", "edit"])
-            .output()
-            .unwrap()
+        command(home.path()).env("EDITOR", editor).args(["config", "edit"]).output().unwrap()
     };
     // $EDITOR can carry arguments, and the file is handed over as the last one.
     let ok = edit("printf '[limits]\\nmax_turns = 7\\n' >>");
@@ -304,31 +238,17 @@ fn doctor_lists_kept_worktrees_and_reads_the_session_numbers() {
     fs::remove_dir_all(home.path().join(".cache")).unwrap();
 
     let run = aibus(home.path(), &["run", "--json", "--agent", "explore", "hi"]);
-    let id = ndjson(&run).last().unwrap()["session"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let id = ndjson(&run).last().unwrap()["session"].as_str().unwrap().to_owned();
     let dir = home.path().join(".local/state/aibus/sessions").join(&id);
     // The run wrote its own numbers on the way out (08 section 5).
     let live = aibus(home.path(), &["doctor", "--session", &id]);
     let live = String::from_utf8_lossy(&live.stdout);
-    assert!(
-        live.contains(r#""log_cap":2000"#) && live.contains(r#""commit_cap":4096"#),
-        "{live}"
-    );
+    assert!(live.contains(r#""log_cap":2000"#) && live.contains(r#""commit_cap":4096"#), "{live}");
     fs::write(dir.join("memory.json"), r#"{"rss_mb":42}"#).unwrap();
     let out = aibus(home.path(), &["doctor", "--session", &id]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
     assert!(String::from_utf8_lossy(&out.stdout).contains(r#"{"rss_mb":42}"#));
-    let gone = aibus(
-        home.path(),
-        &["doctor", "--session", "01JC0000000000000000000000"],
-    );
+    let gone = aibus(home.path(), &["doctor", "--session", "01JC0000000000000000000000"]);
     assert_eq!(gone.status.code(), Some(11));
 }
 
@@ -342,25 +262,10 @@ fn doctor_shows_the_region_and_project_of_the_cloud_providers() {
     );
     let out = aibus(home.path(), &["doctor"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    let row = |id: &str| {
-        text.lines()
-            .find(|l| l.contains(&format!("provider: {id}: ")))
-            .unwrap_or_default()
-    };
+    let row = |id: &str| text.lines().find(|l| l.contains(&format!("provider: {id}: "))).unwrap_or_default();
     let (bedrock, vertex) = (row("bedrock"), row("vertex"));
-    assert!(
-        bedrock.contains("anthropic-bedrock")
-            && bedrock.contains("auth sigv4")
-            && bedrock.contains("region us-east-1"),
-        "{text}"
-    );
-    assert!(
-        vertex.contains("anthropic-vertex")
-            && vertex.contains("auth gcloud")
-            && vertex.contains("project my-project")
-            && vertex.contains("region us-east5"),
-        "{text}"
-    );
+    assert!(bedrock.contains("anthropic-bedrock") && bedrock.contains("auth sigv4") && bedrock.contains("region us-east-1"), "{text}");
+    assert!(vertex.contains("anthropic-vertex") && vertex.contains("auth gcloud") && vertex.contains("project my-project") && vertex.contains("region us-east5"), "{text}");
 }
 
 #[test]
@@ -373,32 +278,11 @@ fn doctor_has_a_row_per_provider_and_warns_about_one_no_account_uses() {
     );
     let out = aibus(home.path(), &["doctor"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    let groq = text
-        .lines()
-        .find(|l| l.contains("provider: groq: "))
-        .unwrap_or_default();
-    assert!(
-        groq.contains("openai-chat")
-            && groq.contains("preset groq")
-            && groq.contains("auth env")
-            && groq.contains("no cache"),
-        "{text}"
-    );
-    assert!(
-        text.lines()
-            .any(|l| l.contains("provider: lab: ") && l.contains("custom [[provider]]")),
-        "{text}"
-    );
-    assert!(
-        text.lines()
-            .any(|l| l.contains("warning: [[provider]] lab is used by no enabled account")),
-        "{text}"
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "a warning is not a failure: {text}"
-    );
+    let groq = text.lines().find(|l| l.contains("provider: groq: ")).unwrap_or_default();
+    assert!(groq.contains("openai-chat") && groq.contains("preset groq") && groq.contains("auth env") && groq.contains("no cache"), "{text}");
+    assert!(text.lines().any(|l| l.contains("provider: lab: ") && l.contains("custom [[provider]]")), "{text}");
+    assert!(text.lines().any(|l| l.contains("warning: [[provider]] lab is used by no enabled account")), "{text}");
+    assert_eq!(out.status.code(), Some(0), "a warning is not a failure: {text}");
 }
 
 // ---- completions ------------------------------------------------------------------------
@@ -410,22 +294,13 @@ fn every_shell_gets_a_script_and_the_help_prints_the_key_map() {
         let out = aibus(home.path(), &["completions", shell]);
         assert!(out.status.success(), "{shell}: {}", stderr(&out));
         let text = String::from_utf8_lossy(&out.stdout);
-        assert!(
-            text.contains("agent list --names") || text.contains("list --names"),
-            "{shell}"
-        );
+        assert!(text.contains("agent list --names") || text.contains("list --names"), "{shell}");
         assert!(text.len() > 2000, "{shell}");
     }
-    assert_eq!(
-        aibus(home.path(), &["completions", "tcsh"]).status.code(),
-        Some(2)
-    );
+    assert_eq!(aibus(home.path(), &["completions", "tcsh"]).status.code(), Some(2));
     let help = aibus(home.path(), &["--help"]);
     let text = String::from_utf8_lossy(&help.stdout);
-    assert!(
-        text.contains("Keys in the dashboard") && text.contains("Ctrl+c"),
-        "{text}"
-    );
+    assert!(text.contains("Keys in the dashboard") && text.contains("Ctrl+c"), "{text}");
 }
 
 #[test]
@@ -442,10 +317,7 @@ fn the_names_helpers_list_one_name_per_line() {
     let names = |args: &[&str]| -> Vec<String> {
         let out = aibus(home.path(), args);
         assert!(out.status.success(), "{args:?}: {}", stderr(&out));
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(str::to_owned)
-            .collect()
+        String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned).collect()
     };
     assert_eq!(names(&["account", "list", "--names"]), ["work"]);
     assert_eq!(names(&["workflow", "list", "--names"]), ["fix", "review"]);
@@ -456,11 +328,7 @@ fn the_names_helpers_list_one_name_per_line() {
 /// The generated bash script, loaded into a real bash, completes names from the helpers.
 #[test]
 fn bash_completes_account_names_dynamically() {
-    if std::process::Command::new("bash")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
+    if std::process::Command::new("bash").arg("--version").output().is_err() {
         eprintln!("skipped: no bash");
         return;
     }
@@ -472,21 +340,10 @@ fn bash_completes_account_names_dynamically() {
     let script = aibus(home.path(), &["completions", "bash"]);
     let path = home.path().join("aibus.bash");
     fs::write(&path, &script.stdout).unwrap();
-    let syntax = std::process::Command::new("bash")
-        .arg("-n")
-        .arg(&path)
-        .output()
-        .unwrap();
-    assert!(
-        syntax.status.success(),
-        "{}",
-        String::from_utf8_lossy(&syntax.stderr)
-    );
+    let syntax = std::process::Command::new("bash").arg("-n").arg(&path).output().unwrap();
+    assert!(syntax.status.success(), "{}", String::from_utf8_lossy(&syntax.stderr));
 
-    let bin_dir = Path::new(env!("CARGO_BIN_EXE_aibus"))
-        .parent()
-        .unwrap()
-        .to_owned();
+    let bin_dir = Path::new(env!("CARGO_BIN_EXE_aibus")).parent().unwrap().to_owned();
     let complete = |words: &str, cword: usize| -> Vec<String> {
         let body = format!(
             "source {}; COMP_WORDS=({words}); COMP_CWORD={cword}; _aibus_dynamic; printf '%s\\n' \"${{COMPREPLY[@]}}\"",
@@ -496,10 +353,7 @@ fn bash_completes_account_names_dynamically() {
         cmd.arg("-c")
             .arg(body)
             .env("HOME", home.path())
-            .env(
-                "PATH",
-                format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap()),
-            )
+            .env("PATH", format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap()))
             .current_dir(home.path().join("proj"));
         // The `aibus` the script calls must read this test's home, not an XDG directory the
         // host happens to export (a hosted runner does).
@@ -507,15 +361,8 @@ fn bash_completes_account_names_dynamically() {
             cmd.env_remove(v);
         }
         let out = cmd.output().unwrap();
-        assert!(
-            out.status.success(),
-            "bash failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(str::to_owned)
-            .collect()
+        assert!(out.status.success(), "bash failed: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned).collect()
     };
     // `aibus account show w<TAB>` offers the two accounts that start with w.
     assert_eq!(complete("aibus account show w", 3), ["work", "wasp"]);

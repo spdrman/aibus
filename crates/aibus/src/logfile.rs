@@ -200,10 +200,7 @@ mod tests {
                 format!("aibus.log.{}", day(3)),
             ]
         );
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("aibus.log")).unwrap(),
-            "day 4\n"
-        );
+        assert_eq!(std::fs::read_to_string(dir.path().join("aibus.log")).unwrap(), "day 4\n");
         let third = dir.path().join(format!("aibus.log.{}", day(3)));
         assert_eq!(std::fs::read_to_string(third).unwrap(), "day 3\n");
     }
@@ -224,10 +221,7 @@ mod tests {
                 format!("aibus.log.{}.1", day(0)),
             ]
         );
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("aibus.log")).unwrap(),
-            "cccccc\n"
-        );
+        assert_eq!(std::fs::read_to_string(dir.path().join("aibus.log")).unwrap(), "cccccc\n");
     }
 
     #[test]
@@ -239,21 +233,14 @@ mod tests {
             log.write_all(b"old\n");
         }
         // Make the file look a day old instead of waiting for one.
-        let file = File::options()
-            .write(true)
-            .open(dir.path().join("aibus.log"))
-            .unwrap();
-        file.set_modified(UNIX_EPOCH + Duration::from_secs(START - DAY))
-            .unwrap();
+        let file = File::options().write(true).open(dir.path().join("aibus.log")).unwrap();
+        file.set_modified(UNIX_EPOCH + Duration::from_secs(START - DAY)).unwrap();
         drop(file);
         let log = RotatingLog::open(dir.path(), 7, MAX_BYTES, clock(secs)).unwrap();
         log.write_all(b"new\n");
         let n = names(dir.path());
         assert_eq!(n.len(), 2, "{n:?}");
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("aibus.log")).unwrap(),
-            "new\n"
-        );
+        assert_eq!(std::fs::read_to_string(dir.path().join("aibus.log")).unwrap(), "new\n");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

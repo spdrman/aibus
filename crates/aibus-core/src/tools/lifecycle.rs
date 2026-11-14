@@ -195,8 +195,6 @@ impl Tool for SendMessage {
         }
         let run = self.orch.resolve(&i.run).map_err(ToolError::Invalid)?;
         self.orch.message(run, i.text).map_err(ToolError::Invalid)?;
-        Ok(json_out(
-            json!({ "queued": true, "run_id": run.to_string() }),
-        ))
+        Ok(json_out(json!({ "queued": true, "run_id": run.to_string() })))
     }
 }

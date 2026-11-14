@@ -6,9 +6,9 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aibus_testkit::xdg_temp;
 use common::{aibus, ndjson, stderr};
 use serde_json::Value;
+use aibus_testkit::xdg_temp;
 
 const FAKE_KEY: &str = "fake-key-DO-NOT-LOG-7f3a9c";
 
@@ -56,10 +56,7 @@ fn run(home: &Path, extra: &[&str], prompt: &str) -> String {
     args.push(prompt);
     let out = aibus(home, &args);
     assert!(out.status.success(), "{}", stderr(&out));
-    ndjson(&out).last().unwrap()["session"]
-        .as_str()
-        .unwrap()
-        .to_owned()
+    ndjson(&out).last().unwrap()["session"].as_str().unwrap().to_owned()
 }
 
 fn json(home: &Path, args: &[&str]) -> Value {
@@ -75,12 +72,7 @@ fn a_run_leaves_the_07_layout_and_no_credential() {
     let home = xdg_temp();
     let id = run(home.path(), &[], &format!("map the repo, key {FAKE_KEY}"));
     let dir = state(home.path()).join("sessions").join(&id);
-    for f in [
-        "session.json",
-        "graph.snapshot.json.zst",
-        "commits.jsonl.zst",
-        "msgs.jsonl.zst",
-    ] {
+    for f in ["session.json", "graph.snapshot.json.zst", "commits.jsonl.zst", "msgs.jsonl.zst"] {
         assert!(dir.join(f).is_file(), "{f}");
     }
     let runs: Vec<_> = fs::read_dir(dir.join("runs")).unwrap().flatten().collect();
@@ -88,10 +80,7 @@ fn a_run_leaves_the_07_layout_and_no_credential() {
     let transcript = fs::read_to_string(runs[0].path().join("transcript.jsonl")).unwrap();
     assert!(transcript.contains("[redacted:fake]"), "{transcript}");
     assert!(runs[0].path().join("meta.json").is_file());
-    assert!(home
-        .path()
-        .join(".local/share/aibus/index.sqlite")
-        .is_file());
+    assert!(home.path().join(".local/share/aibus/index.sqlite").is_file());
     assert_no_credential(home.path());
 }
 
@@ -129,11 +118,7 @@ fn list_and_show_read_the_index_and_deleting_it_loses_nothing() {
 fn log_prints_the_commits_as_ndjson_and_replay_prints_the_recorded_hash() {
     let home = xdg_temp();
     let rec = home.path().join("rec");
-    let id = run(
-        home.path(),
-        &["--record", rec.to_str().unwrap()],
-        "map this repo",
-    );
+    let id = run(home.path(), &["--record", rec.to_str().unwrap()], "map this repo");
 
     let out = aibus(home.path(), &["session", "log", &id]);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -145,10 +130,7 @@ fn log_prints_the_commits_as_ndjson_and_replay_prints_the_recorded_hash() {
     }
     assert!(lines.iter().any(|l| l["intent"] == "RunFinished"));
 
-    let out = aibus(
-        home.path(),
-        &["session", "replay", &id, "--provider", "fake"],
-    );
+    let out = aibus(home.path(), &["session", "replay", &id, "--provider", "fake"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let want = fs::read_to_string(rec.join("snapshot.hash")).unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), want.trim());
@@ -165,15 +147,9 @@ fn export_renders_markdown_per_run_and_jsonl_on_stdout() {
     let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     let md = fs::read_to_string(&path).unwrap();
     assert!(md.starts_with("# Run "), "{md}");
-    assert!(
-        md.contains("Tool call `ls`") && md.contains("Rust workspace"),
-        "{md}"
-    );
+    assert!(md.contains("Tool call `ls`") && md.contains("Rust workspace"), "{md}");
 
-    let out = aibus(
-        home.path(),
-        &["session", "export", &id, "--format", "jsonl"],
-    );
+    let out = aibus(home.path(), &["session", "export", &id, "--format", "jsonl"]);
     let lines = ndjson(&out);
     assert_eq!(lines.first().unwrap()["role"], "user");
     assert_eq!(lines.last().unwrap()["type"], "end");
@@ -189,12 +165,7 @@ fn resume_hydrates_the_snapshot() {
     assert_eq!(out["runs"], 1);
     // The snapshot is the last thing written, so only `Persisted` comes after it.
     assert_eq!(out["replayed"], 1);
-    assert_eq!(
-        aibus(home.path(), &["session", "show", "../etc"])
-            .status
-            .code(),
-        Some(2)
-    );
+    assert_eq!(aibus(home.path(), &["session", "show", "../etc"]).status.code(), Some(2));
 }
 
 #[test]
@@ -202,10 +173,7 @@ fn prune_removes_old_sessions_unless_pinned_and_takes_hook_logs_with_them() {
     let home = xdg_temp();
     let old = run(home.path(), &[], "one");
     let pinned = run(home.path(), &[], "two");
-    let keep = state(home.path())
-        .join("sessions")
-        .join(&pinned)
-        .join("session.json");
+    let keep = state(home.path()).join("sessions").join(&pinned).join("session.json");
     let mut meta: Value = serde_json::from_str(&fs::read_to_string(&keep).unwrap()).unwrap();
     meta["pinned"] = true.into();
     fs::write(&keep, meta.to_string()).unwrap();
@@ -225,10 +193,5 @@ fn prune_removes_old_sessions_unless_pinned_and_takes_hook_logs_with_them() {
     assert!(state(home.path()).join("sessions").join(&pinned).is_dir());
     let list = json(home.path(), &["session", "list"]);
     assert_eq!(list.as_array().unwrap().len(), 1);
-    assert_eq!(
-        aibus(home.path(), &["session", "prune", "--older-than", "soon"])
-            .status
-            .code(),
-        Some(2)
-    );
+    assert_eq!(aibus(home.path(), &["session", "prune", "--older-than", "soon"]).status.code(), Some(2));
 }

@@ -28,10 +28,7 @@ fn line(r: &mut Rig, text: &str) -> Vec<Msg> {
 }
 
 fn said(r: &mut Rig, text: &str) {
-    let m = Msg::AccountPrompt {
-        account: "or1".into(),
-        line: text.into(),
-    };
+    let m = Msg::AccountPrompt { account: "or1".into(), line: text.into() };
     r.input.observe(&m);
     r.app.step(m).unwrap();
     r.settle();
@@ -48,33 +45,17 @@ fn started() -> Rig {
 #[test]
 fn a_provider_with_a_flow_gets_the_modal_instead_of_the_key_step() {
     let r = started();
-    assert_eq!(
-        r.jobs,
-        [Job::Account(AccountOp::AddOauth {
-            name: "or1".into(),
-            provider: "openrouter".into()
-        })]
-    );
+    assert_eq!(r.jobs, [Job::Account(AccountOp::AddOauth { name: "or1".into(), provider: "openrouter".into() })]);
     let shown = r.text();
-    assert!(
-        shown.contains("log in to openrouter") && shown.contains("Esc"),
-        "{shown}"
-    );
+    assert!(shown.contains("log in to openrouter") && shown.contains("Esc"), "{shown}");
     assert!(!shown.contains("openrouter key"), "no key field: {shown}");
-    assert_eq!(
-        r.app.graph.read_key("ctrl:modal").and_then(as_str),
-        Some("accounts")
-    );
+    assert_eq!(r.app.graph.read_key("ctrl:modal").and_then(as_str), Some("accounts"));
 
     // A provider without a flow still asks for a key.
     let mut r = rig();
     line(&mut r, "/login anthropic");
     line(&mut r, "work2");
-    assert!(
-        r.jobs.is_empty() && r.text().contains("anthropic key"),
-        "{}",
-        r.text()
-    );
+    assert!(r.jobs.is_empty() && r.text().contains("anthropic key"), "{}", r.text());
 }
 
 #[test]
@@ -83,21 +64,11 @@ fn the_modal_shows_the_address_and_the_device_code() {
     said(&mut r, &format!("open this address to log in:\n  {URL}"));
     let shown = r.text().replace('\n', "");
     // The address wraps over rows; its head and its tail are both on screen.
-    assert!(
-        shown.contains("https://openrouter.ai/auth?callback_url=") && shown.contains("S256"),
-        "{shown}"
-    );
+    assert!(shown.contains("https://openrouter.ai/auth?callback_url=") && shown.contains("S256"), "{shown}");
 
     let mut r = started();
-    said(
-        &mut r,
-        "open https://example.test/device and enter the code ABCD-1234",
-    );
-    assert!(
-        r.text().contains("ABCD-1234") && r.text().contains("https://example.test/device"),
-        "{}",
-        r.text()
-    );
+    said(&mut r, "open https://example.test/device and enter the code ABCD-1234");
+    assert!(r.text().contains("ABCD-1234") && r.text().contains("https://example.test/device"), "{}", r.text());
 }
 
 #[test]
@@ -111,11 +82,7 @@ fn o_opens_the_address_and_only_an_http_one() {
     r.press('o');
     assert_eq!(r.jobs, [Job::Account(AccountOp::OpenUrl(URL.into()))]);
 
-    for odd in [
-        "open javascript:alert(1)",
-        "open file:///etc/passwd",
-        "open --version",
-    ] {
+    for odd in ["open javascript:alert(1)", "open file:///etc/passwd", "open --version"] {
         let mut r = started();
         r.jobs.clear();
         said(&mut r, odd);
@@ -136,20 +103,11 @@ fn esc_cancels_the_flow_and_closes_the_modal() {
 #[test]
 fn the_end_of_the_flow_closes_the_modal() {
     let mut r = started();
-    let done = Msg::AccountOpDone {
-        op: "add".into(),
-        account: "or1".into(),
-        ok: true,
-        text: "added or1".into(),
-    };
+    let done = Msg::AccountOpDone { op: "add".into(), account: "or1".into(), ok: true, text: "added or1".into() };
     r.input.observe(&done);
     r.app.step(done).unwrap();
     r.settle();
-    assert!(
-        !r.text().contains("log in to openrouter") && r.text().contains("added or1"),
-        "{}",
-        r.text()
-    );
+    assert!(!r.text().contains("log in to openrouter") && r.text().contains("added or1"), "{}", r.text());
     // Esc after that is an ordinary Esc, not a second cancel.
     r.jobs.clear();
     r.key(K::Esc);
@@ -172,15 +130,8 @@ fn the_ops_reach_the_hook_and_the_prompt_text_is_not_logged() {
     assert_eq!(seen.lock().unwrap().len(), 2);
 
     // What the flow said is the user's to read; the graph and the summaries only count it.
-    let m = Msg::AccountPrompt {
-        account: "or1".into(),
-        line: URL.into(),
-    };
-    assert!(
-        !format!("{:?}", m.summary()).contains("openrouter.ai"),
-        "{:?}",
-        m.summary()
-    );
+    let m = Msg::AccountPrompt { account: "or1".into(), line: URL.into() };
+    assert!(!format!("{:?}", m.summary()).contains("openrouter.ai"), "{:?}", m.summary());
     let mut r = started();
     said(&mut r, URL);
     assert!(!format!("{:?}", r.app.graph.read_key("model:log")).contains("openrouter.ai"));

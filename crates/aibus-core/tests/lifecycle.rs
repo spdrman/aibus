@@ -16,9 +16,9 @@ use aibus_graph::Graph;
 use aibus_provider::fake::{FakeProvider, RecordedRequest, Script, Step};
 use aibus_provider::{ContentBlock, MessageRole, StopReason};
 use aibus_testkit::{fake_credential, FakeClock};
-use aibus_testkit::{xdg_temp, Xdg};
 use common::{app, A};
 use serde_json::{json, Value};
+use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {
@@ -204,13 +204,7 @@ impl Rig {
         std::fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let orch = Orchestrator::new(set.limits.clone(), tx.clone());
-        let bash = Arc::new(Bash::new(
-            20,
-            vec![],
-            path_env(),
-            dir.path().to_path_buf(),
-            "s".into(),
-        ));
+        let bash = Arc::new(Bash::new(20, vec![], path_env(), dir.path().to_path_buf(), "s".into()));
         let mut registry = ToolRegistry::standard(bash);
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
@@ -232,8 +226,7 @@ impl Rig {
             fakes: Mutex::default(),
         });
         let mut app = app();
-        app.effects =
-            Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
+        app.effects = Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
         app.set_limits(&set.limits).unwrap();
         let all: Vec<AgentDef> = set.defs.values().cloned().collect();
         app.step(Msg::AgentsReloaded {
@@ -367,12 +360,7 @@ impl Rig {
 }
 
 fn conversation(rig: &Rig, run: RunId) -> String {
-    std::fs::read_to_string(
-        rig.dir
-            .path()
-            .join(format!("runs/{run}/conversation.jsonl")),
-    )
-    .unwrap()
+    std::fs::read_to_string(rig.dir.path().join(format!("runs/{run}/conversation.jsonl"))).unwrap()
 }
 
 // ---- fork -----------------------------------------------------------------------------------
@@ -389,9 +377,7 @@ async fn a_fork_starts_from_the_parents_conversation_and_cannot_fork() {
             .chain(call("ls", json!({"path": "."})))
             .chain([delay(10), text("working"), end(), text("noted")]),
     );
-    let mut rig = Rig::new(Setup::default(), lead, |_| {
-        script([delay(5), text("tests pass")])
-    });
+    let mut rig = Rig::new(Setup::default(), lead, |_| script([delay(5), text("tests pass")]));
     let out = rig.run("start here").await;
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
 
@@ -418,22 +404,11 @@ async fn a_fork_starts_from_the_parents_conversation_and_cannot_fork() {
         .expect("the result came back");
     assert!(report.contains("tests pass"), "{report}");
     // The fork's own request and answer are nowhere in the lead's conversation.
-    assert!(!lead_reqs.iter().any(|r| r
-        .request
-        .messages
-        .iter()
-        .any(|m| m.plain_text() == "tests pass")));
+    assert!(!lead_reqs.iter().any(|r| r.request.messages.iter().any(|m| m.plain_text() == "tests pass")));
 
     // The card and the saved conversation mark it.
-    let meta = rig
-        .app
-        .graph
-        .read_key(&format!("model:run:{fork}:meta"))
-        .unwrap();
-    assert_eq!(
-        aibus_core::state::value::get(meta, "fork"),
-        Some(&aibus_graph::Value::Bool(true))
-    );
+    let meta = rig.app.graph.read_key(&format!("model:run:{fork}:meta")).unwrap();
+    assert_eq!(aibus_core::state::value::get(meta, "fork"), Some(&aibus_graph::Value::Bool(true)));
     assert!(conversation(&rig, fork).contains("\"kind\":\"fork\""));
 }
 
@@ -448,11 +423,7 @@ async fn a_fork_is_not_offered_the_fork_tool_and_cannot_call_it() {
             .chain([delay(10), text("x"), end(), text("y")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |_| {
-        script(
-            call("fork", json!({"prompt": "again"}))
-                .into_iter()
-                .chain([text("could not")]),
-        )
+        script(call("fork", json!({"prompt": "again"})).into_iter().chain([text("could not")]))
     });
     rig.run("start").await;
     let fork = rig.launched()[0].run;
@@ -469,18 +440,11 @@ async fn resume_run_continues_the_same_run_with_its_history_by_name() {
     let lead = script(
         delegate_call("explore", "look around", false)
             .into_iter()
-            .chain(call(
-                "resume_run",
-                json!({"run": "explore", "message": "now the tests", "background": false}),
-            ))
+            .chain(call("resume_run", json!({"run": "explore", "message": "now the tests", "background": false})))
             .chain([text("both done")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |s| {
-        script([text(if s.resume {
-            "second round"
-        } else {
-            "first round"
-        })])
+        script([text(if s.resume { "second round" } else { "first round" })])
     });
     let out = rig.run("go").await;
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
@@ -507,17 +471,11 @@ async fn resume_run_continues_the_same_run_with_its_history_by_name() {
 async fn a_partial_run_resumes_with_its_tool_results_intact() {
     let _clock = FakeClock::new();
     let mut set = Setup::default();
-    set.defs
-        .get_mut(&"explore".parse::<AgentName>().unwrap())
-        .unwrap()
-        .max_turns = Some(1);
+    set.defs.get_mut(&"explore".parse::<AgentName>().unwrap()).unwrap().max_turns = Some(1);
     let lead = script(
         delegate_call("explore", "list it", false)
             .into_iter()
-            .chain(call(
-                "resume_run",
-                json!({"run": "explore", "message": "carry on", "background": false}),
-            ))
+            .chain(call("resume_run", json!({"run": "explore", "message": "carry on", "background": false})))
             .chain([text("fin")]),
     );
     let mut rig = Rig::new(set, lead, |s| {
@@ -532,16 +490,9 @@ async fn a_partial_run_resumes_with_its_tool_results_intact() {
     let child = rig.launched()[0].run;
     let m = &rig.child_requests(child)[0].request.messages;
     // The resumed run saw: task, its `ls` call, the result, and the new message in the same turn.
-    assert_eq!(
-        m.len(),
-        3,
-        "{:?}",
-        m.iter().map(|m| m.plain_text()).collect::<Vec<_>>()
-    );
+    assert_eq!(m.len(), 3, "{:?}", m.iter().map(|m| m.plain_text()).collect::<Vec<_>>());
     assert!(matches!(m[1].blocks[0], ContentBlock::ToolUse { .. }));
-    assert!(m[2].blocks.iter().any(
-        |b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("a.txt"))
-    ));
+    assert!(m[2].blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("a.txt"))));
     assert!(m[2].plain_text().contains("carry on"));
 }
 
@@ -551,10 +502,7 @@ async fn send_message_to_a_finished_run_points_at_resume_run() {
     let lead = script(
         delegate_call("explore", "look", false)
             .into_iter()
-            .chain(call(
-                "send_message",
-                json!({"run": "explore", "text": "psst"}),
-            ))
+            .chain(call("send_message", json!({"run": "explore", "text": "psst"})))
             .chain([text("ok")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |_| script([text("done")]));
@@ -570,26 +518,17 @@ async fn send_message_reaches_a_running_run_at_its_next_turn() {
         delegate_call("explore", "look", true)
             .into_iter()
             .chain([delay(1)])
-            .chain(call(
-                "send_message",
-                json!({"run": "explore", "text": "also check b"}),
-            ))
+            .chain(call("send_message", json!({"run": "explore", "text": "also check b"})))
             .chain([delay(30), text("ok"), end(), text("bye")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |_| {
-        script(
-            [delay(3)]
-                .into_iter()
-                .chain(call("ls", json!({"path": "."})))
-                .chain([delay(1), text("done")]),
-        )
+        script([delay(3)].into_iter().chain(call("ls", json!({"path": "."}))).chain([delay(1), text("done")]))
     });
     rig.run("go").await;
     let child = rig.launched()[0].run;
     let reqs = rig.child_requests(child);
     assert!(
-        reqs.iter()
-            .any(|r| user_text(r).iter().any(|t| t == "also check b")),
+        reqs.iter().any(|r| user_text(r).iter().any(|t| t == "also check b")),
         "the message was delivered"
     );
 }
@@ -600,17 +539,14 @@ async fn send_message_reaches_a_running_run_at_its_next_turn() {
 async fn compaction_at_the_threshold_summarises_cuts_the_context_and_keeps_the_history() {
     let _clock = FakeClock::new();
     let lead = script(
-        [Step::Usage {
-            input: 500,
-            output: 5,
-        }]
-        .into_iter()
-        .chain(call("ls", json!({"path": "."})))
-        .chain([Step::MatchPrompt {
-            contains: "Summarise the conversation below".into(),
-            then: vec![text("SUMMARY: listed the directory"), end()],
-        }])
-        .chain([text("done after compacting")]),
+        [Step::Usage { input: 500, output: 5 }]
+            .into_iter()
+            .chain(call("ls", json!({"path": "."})))
+            .chain([Step::MatchPrompt {
+                contains: "Summarise the conversation below".into(),
+                then: vec![text("SUMMARY: listed the directory"), end()],
+            }])
+            .chain([text("done after compacting")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |_| script([text("unused")]));
     rig.auto_compact_at = Some(100);
@@ -623,55 +559,31 @@ async fn compaction_at_the_threshold_summarises_cuts_the_context_and_keeps_the_h
     let after = &reqs[2].request.messages;
     assert!(after.len() < before, "{} vs {before}", after.len());
     assert_eq!(after.len(), 1);
-    assert!(after[0]
-        .plain_text()
-        .contains("SUMMARY: listed the directory"));
+    assert!(after[0].plain_text().contains("SUMMARY: listed the directory"));
     // The summary request went to the same model and carried the history.
     assert_eq!(reqs[1].request.model, reqs[0].request.model);
-    assert!(reqs[1].request.messages[0]
-        .plain_text()
-        .contains("a long task"));
-    assert_eq!(
-        out.msgs
-            .iter()
-            .filter(|m| matches!(
-                m,
-                Msg::Compacted {
-                    pre_tokens: 500,
-                    ..
-                }
-            ))
-            .count(),
-        1
-    );
+    assert!(reqs[1].request.messages[0].plain_text().contains("a long task"));
+    assert_eq!(out.msgs.iter().filter(|m| matches!(m, Msg::Compacted { pre_tokens: 500, .. })).count(), 1);
 
     // Nothing is lost on disk: the first messages, one boundary, and what came after.
     let saved = conversation(&rig, rig.lead);
     assert!(saved.contains("a long task") && saved.contains("done after compacting"));
     assert_eq!(saved.matches("compact_boundary").count(), 1);
-    let loaded = aibus_core::run::transcript::load(
-        &rig.dir
-            .path()
-            .join(format!("runs/{}/conversation.jsonl", rig.lead)),
-    )
-    .unwrap();
+    let loaded = aibus_core::run::transcript::load(&rig.dir.path().join(format!("runs/{}/conversation.jsonl", rig.lead))).unwrap();
     assert_eq!(loaded.conv.messages.len(), 2, "summary and the last answer");
 }
 
 /// A lead that compacts once, as in the test above.
 fn compacting_lead() -> Script {
     script(
-        [Step::Usage {
-            input: 500,
-            output: 5,
-        }]
-        .into_iter()
-        .chain(call("ls", json!({"path": "."})))
-        .chain([Step::MatchPrompt {
-            contains: "Summarise the conversation below".into(),
-            then: vec![text("SUMMARY: listed the directory"), end()],
-        }])
-        .chain([text("done after compacting")]),
+        [Step::Usage { input: 500, output: 5 }]
+            .into_iter()
+            .chain(call("ls", json!({"path": "."})))
+            .chain([Step::MatchPrompt {
+                contains: "Summarise the conversation below".into(),
+                then: vec![text("SUMMARY: listed the directory"), end()],
+            }])
+            .chain([text("done after compacting")]),
     )
 }
 
@@ -691,50 +603,21 @@ async fn compaction_writes_an_auto_handoff_from_the_ledger_before_it_summarises(
     use aibus_core::continuity::handoff::Handoff;
     use aibus_core::continuity::{ledger, Layout};
     let _clock = FakeClock::new();
-    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| {
-        script([text("unused")])
-    });
+    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| script([text("unused")]));
     rig.auto_compact_at = Some(100);
-    let layout = Layout::new(
-        rig.dir.path(),
-        &config::Config::default(),
-        rig.dir.path(),
-        Some("auth"),
-    )
-    .unwrap();
-    ledger::update(
-        &layout,
-        "goal",
-        "Move auth to middleware",
-        false,
-        "2026-11-08",
-    )
-    .unwrap();
-    ledger::update(
-        &layout,
-        "in progress",
-        "run the migration\nadd a test",
-        false,
-        "2026-11-08",
-    )
-    .unwrap();
+    let layout = Layout::new(rig.dir.path(), &config::Config::default(), rig.dir.path(), Some("auth")).unwrap();
+    ledger::update(&layout, "goal", "Move auth to middleware", false, "2026-11-08").unwrap();
+    ledger::update(&layout, "in progress", "run the migration\nadd a test", false, "2026-11-08").unwrap();
     rig.layout = Some(layout.clone());
     let out = rig.run("a long task").await;
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
 
     let (written, path) = handoff_path(&out);
-    let compacted = out
-        .msgs
-        .iter()
-        .position(|m| matches!(m, Msg::Compacted { .. }))
-        .unwrap();
+    let compacted = out.msgs.iter().position(|m| matches!(m, Msg::Compacted { .. })).unwrap();
     assert!(written < compacted, "the handoff comes first");
     assert_eq!(path.parent().unwrap(), layout.handoff_dir());
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(
-        name.starts_with("auto-handoff-") && name.ends_with(".yaml"),
-        "{name}"
-    );
+    assert!(name.starts_with("auto-handoff-") && name.ends_with(".yaml"), "{name}");
     let h = Handoff::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(h.goal(), "Move auth to middleware");
     assert_eq!(h.now(), "run the migration");
@@ -742,11 +625,7 @@ async fn compaction_writes_an_auto_handoff_from_the_ledger_before_it_summarises(
     assert_eq!(h.text("session").as_deref(), Some("auth"));
     assert_eq!(h.to_json()["next"], json!(["add a test"]));
     // The graph knows: `model:handoff:latest` names it.
-    let latest = rig
-        .app
-        .graph
-        .read_key("model:handoff:latest")
-        .expect("model:handoff:latest");
+    let latest = rig.app.graph.read_key("model:handoff:latest").expect("model:handoff:latest");
     assert!(format!("{latest:?}").contains(&name), "{latest:?}");
 }
 
@@ -755,19 +634,9 @@ async fn without_a_ledger_the_auto_handoff_quotes_the_conversation() {
     use aibus_core::continuity::handoff::Handoff;
     use aibus_core::continuity::Layout;
     let _clock = FakeClock::new();
-    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| {
-        script([text("unused")])
-    });
+    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| script([text("unused")]));
     rig.auto_compact_at = Some(100);
-    rig.layout = Some(
-        Layout::new(
-            rig.dir.path(),
-            &config::Config::default(),
-            rig.dir.path(),
-            None,
-        )
-        .unwrap(),
-    );
+    rig.layout = Some(Layout::new(rig.dir.path(), &config::Config::default(), rig.dir.path(), None).unwrap());
     let out = rig.run("fix the login bug").await;
     let (_, path) = handoff_path(&out);
     let h = Handoff::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -779,30 +648,19 @@ async fn without_a_ledger_the_auto_handoff_quotes_the_conversation() {
 #[tokio::test]
 async fn a_compactor_without_a_handoff_sink_writes_nothing() {
     let _clock = FakeClock::new();
-    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| {
-        script([text("unused")])
-    });
+    let mut rig = Rig::new(Setup::default(), compacting_lead(), |_| script([text("unused")]));
     rig.auto_compact_at = Some(100);
     let out = rig.run("a long task").await;
-    assert!(!out
-        .msgs
-        .iter()
-        .any(|m| matches!(m, Msg::HandoffWritten { .. })));
+    assert!(!out.msgs.iter().any(|m| matches!(m, Msg::HandoffWritten { .. })));
     assert!(!rig.dir.path().join("thoughts").exists());
 }
 
 #[tokio::test]
 async fn a_slash_compact_in_the_prompt_asks_the_lead_to_compact() {
     let _clock = FakeClock::new();
-    let mut rig = Rig::new(Setup::default(), script([text("first"), end()]), |_| {
-        script([text("unused")])
-    });
+    let mut rig = Rig::new(Setup::default(), script([text("first"), end()]), |_| script([text("unused")]));
     rig.lead_started();
-    rig.app
-        .step(Msg::SubmitPrompt {
-            text: "/compact".into(),
-        })
-        .unwrap();
+    rig.app.step(Msg::SubmitPrompt { text: "/compact".into() }).unwrap();
     assert_eq!(rig.status(rig.lead), "compacting");
 }
 

@@ -1,8 +1,8 @@
 use aibus_core::state::value::{as_list, as_str};
-use aibus_core::state::ANIMATING;
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
 use aibus_graph::{Graph, Value};
+use aibus_core::state::ANIMATING;
 use aibus_testkit::tui::{poke, replay_app, run_id};
 use aibus_tui::view::{DIRTY, WIDGETS};
 use aibus_tui::{Theme, Ui};
@@ -18,12 +18,7 @@ fn dirty(app: &App<MiniGraph>) -> Vec<String> {
 }
 
 fn key(c: char) -> Msg {
-    Msg::Key(KeyEvent {
-        code: KeyCode::Char(c),
-        ctrl: false,
-        alt: false,
-        shift: false,
-    })
+    Msg::Key(KeyEvent { code: KeyCode::Char(c), ctrl: false, alt: false, shift: false })
 }
 
 #[test]
@@ -48,11 +43,7 @@ fn the_view_nodes_are_registered() {
 fn dirty_names_the_widgets_a_commit_changed() {
     let mut app = replay_app();
     app.step(key('x')).unwrap();
-    assert!(
-        dirty(&app).is_empty(),
-        "a key press changes no widget: {:?}",
-        dirty(&app)
-    );
+    assert!(dirty(&app).is_empty(), "a key press changes no widget: {:?}", dirty(&app));
 
     app.step(Msg::RouterAnswered {
         fork: ForkId(1400),
@@ -72,10 +63,7 @@ fn dirty_names_the_widgets_a_commit_changed() {
     .unwrap();
     let d = dirty(&app);
     assert!(d.contains(&"fork_layer".to_owned()), "{d:?}");
-    assert!(
-        d.contains(&"status_bar".to_owned()),
-        "the fork count is in the status bar: {d:?}"
-    );
+    assert!(d.contains(&"status_bar".to_owned()), "the fork count is in the status bar: {d:?}");
     assert!(!d.contains(&"cards".to_owned()), "{d:?}");
 }
 
@@ -85,20 +73,13 @@ fn zero_draws_over_100_idle_commits() {
     let mut term = Terminal::new(TestBackend::new(98, 46)).unwrap();
     let mut ui = Ui::new(Theme::recording());
     ui.note_commit(&app.graph);
-    assert!(
-        ui.draw(&mut term, &app.graph).unwrap(),
-        "the first frame draws"
-    );
+    assert!(ui.draw(&mut term, &app.graph).unwrap(), "the first frame draws");
     let start = app.graph.now();
     for i in 0..100 {
         let msg = match i % 3 {
             0 => key('j'),
             1 => Msg::Persisted,
-            _ => Msg::Mouse(MouseEvent {
-                kind: MouseKind::Move,
-                col: 1,
-                row: 1,
-            }),
+            _ => Msg::Mouse(MouseEvent { kind: MouseKind::Move, col: 1, row: 1 }),
         };
         app.step(msg).unwrap();
         ui.note_commit(&app.graph);
@@ -118,14 +99,8 @@ fn a_dirty_widget_draws_once_and_a_resize_draws() {
 
     app.step(Msg::Tick).unwrap();
     ui.note_commit(&app.graph);
-    assert!(
-        ui.draw(&mut term, &app.graph).unwrap(),
-        "a tick moves the spinner of a running card"
-    );
-    assert!(
-        !ui.draw(&mut term, &app.graph).unwrap(),
-        "nothing new, nothing drawn"
-    );
+    assert!(ui.draw(&mut term, &app.graph).unwrap(), "a tick moves the spinner of a running card");
+    assert!(!ui.draw(&mut term, &app.graph).unwrap(), "nothing new, nothing drawn");
 
     // Two commits before the next draw: the dirty one is not lost to the clean one after it.
     app.step(Msg::Tick).unwrap();
@@ -144,21 +119,9 @@ fn a_dirty_widget_draws_once_and_a_resize_draws() {
 #[test]
 fn animating_clears_when_the_last_run_stops() {
     let mut app = replay_app();
-    assert_eq!(
-        app.graph.read_key(ANIMATING),
-        Some(&Value::Bool(true)),
-        "three runs are going"
-    );
+    assert_eq!(app.graph.read_key(ANIMATING), Some(&Value::Bool(true)), "three runs are going");
     for seq in 1..=3 {
-        poke(
-            &mut app,
-            &format!("model:run:{}:status", run_id(seq)),
-            Value::Str("completed".into()),
-        );
+        poke(&mut app, &format!("model:run:{}:status", run_id(seq)), Value::Str("completed".into()));
     }
-    assert_eq!(
-        app.graph.read_key(ANIMATING),
-        Some(&Value::Bool(false)),
-        "every run is done"
-    );
+    assert_eq!(app.graph.read_key(ANIMATING), Some(&Value::Bool(false)), "every run is done");
 }

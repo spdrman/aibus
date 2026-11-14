@@ -131,11 +131,7 @@ pub(crate) fn panel(buf: &mut Buffer, area: Rect, title: &str, border: Color, th
 /// `panel` with one blank column on each side of the inside, as the recorded boxes have.
 pub(crate) fn padded(buf: &mut Buffer, area: Rect, title: &str, border: Color, th: &Theme) -> Rect {
     let inner = panel(buf, area, title, border, th);
-    Rect {
-        x: inner.x + 1,
-        width: inner.width.saturating_sub(2),
-        ..inner
-    }
+    Rect { x: inner.x + 1, width: inner.width.saturating_sub(2), ..inner }
 }
 
 /// `cells` cells, `p` of them filled, with eighth-block resolution; returns the glyphs and how
@@ -170,27 +166,14 @@ pub fn header(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
     let bold = Modifier::BOLD;
     let lead = text(v, "lead_label").to_uppercase();
     let swarm = text(v, "swarm_label").to_uppercase();
-    let mut parts = vec![(
-        "AIBUS".to_owned(),
-        Style::new().fg(th.fg).bg(th.highlight).add_modifier(bold),
-    )];
+    let mut parts = vec![("AIBUS".to_owned(), Style::new().fg(th.fg).bg(th.highlight).add_modifier(bold))];
     if !lead.is_empty() {
-        parts.push((
-            format!("{lead} LEADS"),
-            Style::new().fg(th.lead).add_modifier(bold),
-        ));
+        parts.push((format!("{lead} LEADS"), Style::new().fg(th.lead).add_modifier(bold)));
     }
     if !swarm.is_empty() {
-        parts.push((
-            format!("{swarm} SWARMS"),
-            Style::new().fg(th.swarm).add_modifier(bold),
-        ));
+        parts.push((format!("{swarm} SWARMS"), Style::new().fg(th.swarm).add_modifier(bold)));
     }
-    let width: usize = parts
-        .iter()
-        .map(|(t, _)| t.chars().count() + 7)
-        .sum::<usize>()
-        - 7;
+    let width: usize = parts.iter().map(|(t, _)| t.chars().count() + 7).sum::<usize>() - 7;
     let mut x = u16::try_from(usize::from(area.width).saturating_sub(width) / 2).unwrap_or(0);
     for (i, (t, style)) in parts.iter().enumerate() {
         if i > 0 {
@@ -198,14 +181,7 @@ pub fn header(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
         }
         x = put(buf, area, x, 0, t, *style);
     }
-    put(
-        buf,
-        area,
-        0,
-        1,
-        &"─".repeat(usize::from(area.width)),
-        Style::new().fg(th.dim),
-    );
+    put(buf, area, 0, 1, &"─".repeat(usize::from(area.width)), Style::new().fg(th.dim));
 }
 
 pub fn legend(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
@@ -224,54 +200,20 @@ pub fn legend(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
 pub fn rail(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<Rect> {
     let marks = as_list(get(v, "checkpoints").unwrap_or(&Value::Null));
     let off = text(v, "status") == "off";
-    let diamond = |m: &Value| {
-        if flag(m, "active") {
-            th.g("◆")
-        } else {
-            th.g("◇")
-        }
-    };
+    let diamond = |m: &Value| if flag(m, "active") { th.g("◆") } else { th.g("◇") };
     let mut hits = Vec::new();
     if area.width < 22 {
         fill(buf, area, th.bg);
         for (i, m) in marks.iter().enumerate() {
-            let colour = if flag(m, "active") {
-                th.advisor
-            } else {
-                th.dim_text
-            };
-            put(
-                buf,
-                area,
-                1,
-                i as u16 * 2,
-                diamond(m),
-                Style::new().fg(colour),
-            );
-            hits.push(
-                Rect {
-                    y: area.y + i as u16 * 2,
-                    height: 1,
-                    ..area
-                }
-                .intersection(area),
-            );
+            let colour = if flag(m, "active") { th.advisor } else { th.dim_text };
+            put(buf, area, 1, i as u16 * 2, diamond(m), Style::new().fg(colour));
+            hits.push(Rect { y: area.y + i as u16 * 2, height: 1, ..area }.intersection(area));
         }
         return hits;
     }
     // Padded on the left only: the advice needs the 17 columns of `» plan skips auth`.
-    let inner = panel(
-        buf,
-        area,
-        text(v, "title"),
-        if off { th.dim_text } else { th.advisor },
-        th,
-    );
-    let inner = Rect {
-        x: inner.x + 1,
-        width: inner.width.saturating_sub(1),
-        ..inner
-    };
+    let inner = panel(buf, area, text(v, "title"), if off { th.dim_text } else { th.advisor }, th);
+    let inner = Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner };
     let dim = Style::new().fg(th.dim_text);
     put(buf, inner, 0, 0, text(v, "subtitle"), dim);
     let mut y = 2u16;
@@ -285,42 +227,23 @@ pub fn rail(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<Rect> {
         let style = if off {
             dim
         } else if active {
-            Style::new()
-                .fg(th.advisor)
-                .bg(th.highlight)
-                .add_modifier(Modifier::BOLD)
+            Style::new().fg(th.advisor).bg(th.highlight).add_modifier(Modifier::BOLD)
         } else {
             Style::new().fg(th.advisor)
         };
-        let row = Rect {
-            y: inner.y + y,
-            height: 1,
-            ..inner
-        };
+        let row = Rect { y: inner.y + y, height: 1, ..inner };
         if y < inner.height {
             fill(buf, row, if active { th.highlight } else { th.panel });
             hits.push(row);
         }
-        put(
-            buf,
-            inner,
-            0,
-            y,
-            &format!("{} {}", diamond(m), text(m, "name")),
-            style,
-        );
+        put(buf, inner, 0, y, &format!("{} {}", diamond(m), text(m, "name")), style);
         y += 1;
         if off {
             continue;
         }
         match text(m, "name") {
             "before a plan" => {
-                for line in [
-                    "reads the whole",
-                    "session, every",
-                    "tool call and",
-                    "every result",
-                ] {
+                for line in ["reads the whole", "session, every", "tool call and", "every result"] {
                     timeline(buf, y, line, dim);
                     y += 1;
                 }
@@ -332,11 +255,7 @@ pub fn rail(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<Rect> {
                     let newest = i + 1 == advice.len();
                     let full = as_str(a).unwrap_or("");
                     // The newest advice is typed out one character per tick.
-                    let shown: String = if newest {
-                        full.chars().take(typed).collect()
-                    } else {
-                        full.to_owned()
-                    };
+                    let shown: String = if newest { full.chars().take(typed).collect() } else { full.to_owned() };
                     let lines = wrap(full, body.saturating_sub(2));
                     let mut any = false;
                     for (j, (start, line)) in lines.iter().enumerate() {
@@ -346,12 +265,7 @@ pub fn rail(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<Rect> {
                             break;
                         }
                         let lead = if j == 0 { th.g("»") } else { " " };
-                        timeline(
-                            buf,
-                            y,
-                            &format!("{lead} {seen}"),
-                            Style::new().fg(th.advisor),
-                        );
+                        timeline(buf, y, &format!("{lead} {seen}"), Style::new().fg(th.advisor));
                         y += 1;
                         any = true;
                     }
@@ -361,22 +275,10 @@ pub fn rail(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<Rect> {
                     }
                 }
                 timeline(buf, y, "calls", dim);
-                put_right(
-                    buf,
-                    inner,
-                    y,
-                    &int(v, "calls").to_string(),
-                    Style::new().fg(th.fg),
-                );
+                put_right(buf, inner, y, &int(v, "calls").to_string(), Style::new().fg(th.fg));
                 y += 1;
                 timeline(buf, y, "tokens read", dim);
-                put_right(
-                    buf,
-                    inner,
-                    y,
-                    &kilo(int(v, "tokens_read")),
-                    Style::new().fg(th.fg),
-                );
+                put_right(buf, inner, y, &kilo(int(v, "tokens_read")), Style::new().fg(th.fg));
                 y += 1;
                 for line in ["silent on every", "routine turn"] {
                     timeline(buf, y, line, dim);
@@ -384,12 +286,7 @@ pub fn rail(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<Rect> {
                 }
             }
             "same error x2" => {
-                for line in [
-                    "never writes",
-                    "code itself.",
-                    "Sonnet applies",
-                    "the advice.",
-                ] {
+                for line in ["never writes", "code itself.", "Sonnet applies", "the advice."] {
                     timeline(buf, y, line, dim);
                     y += 1;
                 }
@@ -404,18 +301,8 @@ pub fn lead_box(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
     if matches!(v, Value::Null) {
         return;
     }
-    let border = if flag(v, "highlight") {
-        th.advisor
-    } else {
-        th.lead
-    };
-    let inner = padded(
-        buf,
-        area,
-        &format!("{} · main session", text(v, "model_label")),
-        border,
-        th,
-    );
+    let border = if flag(v, "highlight") { th.advisor } else { th.lead };
+    let inner = padded(buf, area, &format!("{} · main session", text(v, "model_label")), border, th);
     put(buf, inner, 0, 0, text(v, "label"), Style::new().fg(th.fg));
     let effort = text(v, "effort");
     // Four slots: low 1, medium 2, high 4, max 4 and a `+`.
@@ -425,39 +312,15 @@ pub fn lead_box(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
         _ => 4,
     };
     let x = put(buf, inner, 0, 1, "effort ", Style::new().fg(th.dim_text));
-    let x = put(
-        buf,
-        inner,
-        x,
-        1,
-        &th.g("▮").repeat(filled),
-        Style::new().fg(th.lead),
-    );
-    let x = put(
-        buf,
-        inner,
-        x,
-        1,
-        &th.g("·").repeat(4 - filled),
-        Style::new().fg(th.dim_text),
-    );
-    let x = if effort == "max" {
-        put(buf, inner, x, 1, "+", Style::new().fg(th.lead))
-    } else {
-        x
-    };
+    let x = put(buf, inner, x, 1, &th.g("▮").repeat(filled), Style::new().fg(th.lead));
+    let x = put(buf, inner, x, 1, &th.g("·").repeat(4 - filled), Style::new().fg(th.dim_text));
+    let x = if effort == "max" { put(buf, inner, x, 1, "+", Style::new().fg(th.lead)) } else { x };
     let x = put(buf, inner, x + 1, 1, effort, Style::new().fg(th.fg));
     let flag_text = text(v, "model_flag");
     // The flag gets what is left of the row after the effort text and one cell of gap.
     let room = usize::from(inner.width.saturating_sub(x + 1));
     if !flag_text.is_empty() && room > 0 {
-        put_right(
-            buf,
-            inner,
-            1,
-            &clip(flag_text, room),
-            Style::new().fg(th.dim_text),
-        );
+        put_right(buf, inner, 1, &clip(flag_text, room), Style::new().fg(th.dim_text));
     }
 }
 
@@ -482,42 +345,17 @@ fn fork_bar(p: f64, fg: Color, rest: Option<Color>, th: &Theme) -> Vec<(String, 
 pub fn fork_layer(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, footer: bool, lead: &str) {
     if !flag(v, "enabled") {
         let inner = padded(buf, area, "router · off", th.dim_text, th);
-        put(
-            buf,
-            inner,
-            0,
-            0,
-            "not running",
-            Style::new().fg(th.dim_text),
-        );
+        put(buf, inner, 0, 0, "not running", Style::new().fg(th.dim_text));
         return;
     }
     let inner = padded(buf, area, text(v, "title"), th.router, th);
     let forks = format!("forks {}", thousands(int(v, "forks")));
-    put_right(
-        buf,
-        Rect {
-            y: area.y,
-            height: 1,
-            x: area.x,
-            width: area.width.saturating_sub(2),
-        },
-        0,
-        &forks,
-        Style::new().fg(th.router).add_modifier(Modifier::BOLD),
-    );
-    for (i, row) in as_list(get(v, "rows").unwrap_or(&Value::Null))
-        .iter()
-        .enumerate()
-    {
+    put_right(buf, Rect { y: area.y, height: 1, x: area.x, width: area.width.saturating_sub(2) }, 0, &forks, Style::new().fg(th.router).add_modifier(Modifier::BOLD));
+    for (i, row) in as_list(get(v, "rows").unwrap_or(&Value::Null)).iter().enumerate() {
         let y = i as u16;
         put(buf, inner, 0, y, text(row, "label"), Style::new().fg(th.fg));
         let split = text(row, "verdict") == "split";
-        let (fg, rest) = if split {
-            (th.split, Some(th.split_rest))
-        } else {
-            (th.router, None)
-        };
+        let (fg, rest) = if split { (th.split, Some(th.split_rest)) } else { (th.router, None) };
         let Some(p) = real(row, "p") else {
             put(buf, inner, 15, y, "···", Style::new().fg(th.dim_text));
             continue;
@@ -526,40 +364,16 @@ pub fn fork_layer(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, footer: b
         for (s, style) in fork_bar(p, fg, rest, th) {
             x = put(buf, inner, x, y, &s, style);
         }
-        let x = put(
-            buf,
-            inner,
-            x + 1,
-            y,
-            &format!("{p:.2}"),
-            Style::new().fg(th.fg),
-        );
-        put(
-            buf,
-            inner,
-            x + 1,
-            y,
-            text(row, "verdict"),
-            Style::new().fg(fg),
-        );
+        let x = put(buf, inner, x + 1, y, &format!("{p:.2}"), Style::new().fg(th.fg));
+        put(buf, inner, x + 1, y, text(row, "verdict"), Style::new().fg(fg));
     }
     let foot = 3;
     if footer && inner.height > foot {
         let any = flag(v, "any_split");
         let arrow = th.g("→");
-        let x = put(
-            buf,
-            inner,
-            0,
-            foot,
-            &format!("sharp {arrow} runs in code  "),
-            Style::new().fg(th.dim_text),
-        );
+        let x = put(buf, inner, 0, foot, &format!("sharp {arrow} runs in code  "), Style::new().fg(th.dim_text));
         let style = if any {
-            Style::new()
-                .fg(th.split)
-                .bg(th.highlight)
-                .add_modifier(Modifier::BOLD)
+            Style::new().fg(th.split).bg(th.highlight).add_modifier(Modifier::BOLD)
         } else {
             Style::new().fg(th.dim_text)
         };
@@ -585,13 +399,7 @@ pub fn card_rects(area: Rect, len: usize, start: usize) -> Vec<(usize, Rect)> {
     let card_h = area.height.min(7);
     (0..shown)
         .map(|i| {
-            let rect = Rect {
-                x: x0 + i as u16 * (CARD_W + 1),
-                width: CARD_W,
-                height: card_h,
-                ..area
-            }
-            .intersection(area);
+            let rect = Rect { x: x0 + i as u16 * (CARD_W + 1), width: CARD_W, height: card_h, ..area }.intersection(area);
             (start + i, rect)
         })
         .collect()
@@ -599,25 +407,14 @@ pub fn card_rects(area: Rect, len: usize, start: usize) -> Vec<(usize, Rect)> {
 
 /// One worker card inside `rect`.
 pub fn card(buf: &mut Buffer, rect: Rect, c: &Value, th: &Theme) {
-    let border = if text(c, "border") == "advisor" {
-        th.advisor
-    } else {
-        th.swarm
-    };
+    let border = if text(c, "border") == "advisor" { th.advisor } else { th.swarm };
     let name = if flag(c, "selected") {
         format!("{} {}", th.g("▸"), text(c, "name"))
     } else {
         text(c, "name").to_owned()
     };
     let inner = padded(buf, rect, &name, border, th);
-    put(
-        buf,
-        inner,
-        0,
-        0,
-        text(c, "model_label"),
-        Style::new().fg(th.swarm),
-    );
+    put(buf, inner, 0, 0, text(c, "model_label"), Style::new().fg(th.swarm));
     let progress = get(c, "progress").unwrap_or(&Value::Null);
     let blue = Style::new().fg(th.swarm);
     match text(progress, "kind") {
@@ -631,32 +428,14 @@ pub fn card(buf: &mut Buffer, rect: Rect, c: &Value, th: &Theme) {
             let (filled, _) = bar(p, 10);
             let x = put(buf, inner, 0, 1, &filled, blue);
             let pad = 10u16.saturating_sub(x);
-            put(
-                buf,
-                inner,
-                x + pad + 1,
-                1,
-                &format!("{:.0}%", p * 100.0),
-                Style::new().fg(th.fg),
-            );
+            put(buf, inner, x + pad + 1, 1, &format!("{:.0}%", p * 100.0), Style::new().fg(th.fg));
         }
     }
     let label = wrap(text(c, "label"), usize::from(inner.width));
     for (j, (_, line)) in label.iter().take(2).enumerate() {
         let last = j == 1 && label.len() > 2;
-        let line = if last {
-            clip(&format!("{line} …"), usize::from(inner.width))
-        } else {
-            line.clone()
-        };
-        put(
-            buf,
-            inner,
-            0,
-            2 + j as u16,
-            &line,
-            Style::new().fg(th.dim_text),
-        );
+        let line = if last { clip(&format!("{line} …"), usize::from(inner.width)) } else { line.clone() };
+        put(buf, inner, 0, 2 + j as u16, &line, Style::new().fg(th.dim_text));
     }
     let (glyph, colour, word) = match text(c, "status") {
         "done" => (th.g("✓").to_owned(), th.ok, "done"),
@@ -667,36 +446,18 @@ pub fn card(buf: &mut Buffer, rect: Rect, c: &Value, th: &Theme) {
             (th.g(SPINNER[phase]).to_owned(), th.swarm, "running")
         }
     };
-    put(
-        buf,
-        inner,
-        0,
-        4,
-        &format!("{glyph} {word}"),
-        Style::new().fg(colour),
-    );
+    put(buf, inner, 0, 4, &format!("{glyph} {word}"), Style::new().fg(colour));
 }
 
 /// The row under the cards: how many are before the window and how many after it. `window` is
 /// the first card shown, the end of the shown ones and the total.
-pub fn card_counts(
-    buf: &mut Buffer,
-    row: Rect,
-    th: &Theme,
-    (start, end, total): (usize, usize, usize),
-) {
+pub fn card_counts(buf: &mut Buffer, row: Rect, th: &Theme, (start, end, total): (usize, usize, usize)) {
     let dim = Style::new().fg(th.dim_text);
     if start > 0 {
         put(buf, row, 0, 0, &format!("{} {start} more", th.g("◂")), dim);
     }
     if end < total {
-        put_right(
-            buf,
-            row,
-            0,
-            &format!("{} more {}", total - end, th.g("▸")),
-            dim,
-        );
+        put_right(buf, row, 0, &format!("{} more {}", total - end, th.g("▸")), dim);
     }
 }
 
@@ -707,30 +468,13 @@ pub fn delegate_label(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
         return;
     }
     let x = area.width.saturating_sub(24 + model.chars().count() as u16) / 2;
-    let x = put(
-        buf,
-        area,
-        x,
-        0,
-        "delegate to subagents · ",
-        Style::new().fg(th.dim_text),
-    );
+    let x = put(buf, area, x, 0, "delegate to subagents · ", Style::new().fg(th.dim_text));
     put(buf, area, x, 0, model, Style::new().fg(th.swarm));
 }
 
 pub fn return_box(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) {
-    let border = if flag(v, "highlight") {
-        th.advisor
-    } else {
-        th.lead
-    };
-    let inner = padded(
-        buf,
-        area,
-        &format!("back to {} · lead", text(v, "lead_model_label")),
-        border,
-        th,
-    );
+    let border = if flag(v, "highlight") { th.advisor } else { th.lead };
+    let inner = padded(buf, area, &format!("back to {} · lead", text(v, "lead_model_label")), border, th);
     put(buf, inner, 0, 0, "review + verify", Style::new().fg(th.fg));
 }
 
@@ -757,10 +501,7 @@ pub fn session_log(
 ) -> LogGeom {
     let mut title = String::from("session log");
     if editing || !filter.is_empty() {
-        title.push_str(&format!(
-            " · /{filter}{}",
-            if editing { th.g("▌") } else { "" }
-        ));
+        title.push_str(&format!(" · /{filter}{}", if editing { th.g("▌") } else { "" }));
     }
     if !follow {
         title.push_str(" · paused");
@@ -775,14 +516,7 @@ pub fn session_log(
     let width = usize::from(inner.width).saturating_sub(1);
     for (y, line) in lines[first..end].iter().enumerate() {
         let y = y as u16;
-        put(
-            buf,
-            inner,
-            0,
-            y,
-            text(line, "time"),
-            Style::new().fg(th.dim_text),
-        );
+        put(buf, inner, 0, y, text(line, "time"), Style::new().fg(th.dim_text));
         let colour = role_colour(text(line, "actor_colour"), th);
         let actor = clip(text(line, "actor"), 10);
         put(buf, inner, 10, y, &actor, Style::new().fg(colour));
@@ -790,47 +524,22 @@ pub fn session_log(
         let verdict = text(line, "verdict");
         let (cols, split) = match (p, verdict) {
             (Some(p), v) if !v.is_empty() => {
-                let word = if v == "split" {
-                    format!("split {} {}", th.g("→"), lead.to_lowercase())
-                } else {
-                    format!("sharp {} code", th.g("→"))
-                };
+                let word = if v == "split" { format!("split {} {}", th.g("→"), lead.to_lowercase()) } else { format!("sharp {} code", th.g("→")) };
                 (Some((format!("p={p:.2}"), word)), v == "split")
             }
             _ => (None, false),
         };
-        let reserved = cols
-            .as_ref()
-            .map_or(0, |(a, b)| a.chars().count() + b.chars().count() + 4);
+        let reserved = cols.as_ref().map_or(0, |(a, b)| a.chars().count() + b.chars().count() + 4);
         let room = width.saturating_sub(21 + reserved);
-        put(
-            buf,
-            inner,
-            21,
-            y,
-            &clip(text(line, "text"), room),
-            Style::new().fg(th.fg),
-        );
+        put(buf, inner, 21, y, &clip(text(line, "text"), room), Style::new().fg(th.fg));
         if let Some((p, word)) = cols {
             let style = Style::new().fg(if split { th.split } else { th.router });
             let wx = inner.width.saturating_sub(word.chars().count() as u16 + 1);
             put(buf, inner, wx, y, &word, style);
-            put(
-                buf,
-                inner,
-                wx.saturating_sub(p.chars().count() as u16 + 2),
-                y,
-                &p,
-                Style::new().fg(th.fg),
-            );
+            put(buf, inner, wx.saturating_sub(p.chars().count() as u16 + 2), y, &p, Style::new().fg(th.fg));
         }
     }
-    LogGeom {
-        inner,
-        first,
-        shown: end - first,
-        total: lines.len(),
-    }
+    LogGeom { inner, first, shown: end - first, total: lines.len() }
 }
 
 pub use crate::prompt::Prompt;
@@ -838,131 +547,66 @@ pub use crate::prompt::Prompt;
 /// The prompt: `<cwd> $ ` then the lines of the text, or the dim placeholder until the first
 /// submit. The block cursor blinks on the tick counter (30 ticks on, 30 off). Returns the rect
 /// of each row drawn and the char index each starts at, for the hit map.
-pub fn prompt(
-    buf: &mut Buffer,
-    area: Rect,
-    th: &Theme,
-    p: &Prompt,
-    focused: bool,
-    tick: i64,
-) -> Vec<(Rect, usize)> {
+pub fn prompt(buf: &mut Buffer, area: Rect, th: &Theme, p: &Prompt, focused: bool, tick: i64) -> Vec<(Rect, usize)> {
     fill(buf, area, th.bg);
-    let lead = if focused {
-        th.focused()
-    } else {
-        Style::new().fg(th.fg)
-    };
+    let lead = if focused { th.focused() } else { Style::new().fg(th.fg) };
     let prefix = format!("{} $ ", p.cwd);
     let indent = prefix.chars().count() as u16 + 1;
     let lines = p.lines();
     let rows = usize::from(area.height).max(1);
     let (cursor_line, cursor_col) = p.pos(p.at());
-    let first = (cursor_line + 1)
-        .saturating_sub(rows)
-        .min(lines.len().saturating_sub(rows));
+    let first = (cursor_line + 1).saturating_sub(rows).min(lines.len().saturating_sub(rows));
     let on = focused && Prompt::blink_on(tick);
     let sel = p.selection();
     // `/login <provider> <anything>` is refused on Enter (the key belongs in the masked field),
     // but until then what follows the provider could be a key, so it is drawn as dots.
-    let secret_from = p
-        .text
-        .strip_prefix("/login")
-        .filter(|r| r.starts_with(char::is_whitespace))
-        .and_then(|r| {
-            let rest = r
-                .trim_start()
-                .trim_start_matches(|c: char| !c.is_whitespace())
-                .trim_start();
-            (!rest.is_empty()).then(|| p.text.chars().count() - rest.chars().count())
-        });
+    let secret_from = p.text.strip_prefix("/login").filter(|r| r.starts_with(char::is_whitespace)).and_then(|r| {
+        let rest = r.trim_start().trim_start_matches(|c: char| !c.is_whitespace()).trim_start();
+        (!rest.is_empty()).then(|| p.text.chars().count() - rest.chars().count())
+    });
     let mut out = Vec::new();
     let mut start = 0;
     for (i, line) in lines.iter().enumerate() {
         let len = line.chars().count();
         if i >= first && i < first + rows {
             let y = (i - first) as u16;
-            let row = Rect {
-                y: area.y + y,
-                height: 1,
-                ..area
-            };
+            let row = Rect { y: area.y + y, height: 1, ..area };
             out.push((row, start));
             if i == 0 {
                 put(buf, area, 1, y, &prefix, lead);
             }
             let room = usize::from(area.width.saturating_sub(indent + 2));
             // A long line shows its tail around the cursor.
-            let skip = if i == cursor_line {
-                (cursor_col + 1).saturating_sub(room)
-            } else {
-                0
-            };
+            let skip = if i == cursor_line { (cursor_col + 1).saturating_sub(room) } else { 0 };
             if p.shows_placeholder() {
-                put(
-                    buf,
-                    area,
-                    indent,
-                    y,
-                    &format!("{} ", p.placeholder),
-                    Style::new().fg(th.dim_text),
-                );
+                put(buf, area, indent, y, &format!("{} ", p.placeholder), Style::new().fg(th.dim_text));
             } else {
                 let shown: String = line
                     .chars()
                     .enumerate()
                     .skip(skip)
                     .take(room)
-                    .map(|(k, c)| {
-                        if secret_from.is_some_and(|from| start + k >= from) {
-                            '•'
-                        } else {
-                            c
-                        }
-                    })
+                    .map(|(k, c)| if secret_from.is_some_and(|from| start + k >= from) { '•' } else { c })
                     .collect();
                 put(buf, area, indent, y, &shown, Style::new().fg(th.fg));
                 if let Some((a, b)) = sel {
                     for k in 0..shown.chars().count() {
                         let at = start + skip + k;
                         if at >= a && at < b {
-                            buf.set_style(
-                                Rect {
-                                    x: area.x + indent + k as u16,
-                                    y: area.y + y,
-                                    width: 1,
-                                    height: 1,
-                                },
-                                th.interact(Interact::Selected),
-                            );
+                            buf.set_style(Rect { x: area.x + indent + k as u16, y: area.y + y, width: 1, height: 1 }, th.interact(Interact::Selected));
                         }
                     }
                 }
             }
             if i == cursor_line && on {
-                let col = if p.shows_placeholder() {
-                    0
-                } else {
-                    cursor_col - skip
-                };
+                let col = if p.shows_placeholder() { 0 } else { cursor_col - skip };
                 let x = indent + col as u16;
                 let past_end = cursor_col >= len || p.shows_placeholder();
                 if past_end {
-                    let at = if p.shows_placeholder() {
-                        indent + p.placeholder.chars().count() as u16 + 1
-                    } else {
-                        x
-                    };
+                    let at = if p.shows_placeholder() { indent + p.placeholder.chars().count() as u16 + 1 } else { x };
                     put(buf, area, at, y, th.g("▌"), Style::new().fg(th.router));
                 } else {
-                    buf.set_style(
-                        Rect {
-                            x: area.x + x,
-                            y: area.y + y,
-                            width: 1,
-                            height: 1,
-                        },
-                        Style::new().add_modifier(Modifier::REVERSED),
-                    );
+                    buf.set_style(Rect { x: area.x + x, y: area.y + y, width: 1, height: 1 }, Style::new().add_modifier(Modifier::REVERSED));
                 }
             }
         }
@@ -979,45 +623,22 @@ pub fn hint_row(buf: &mut Buffer, area: Rect, th: &Theme, notice: Option<&str>) 
         Some(n) => (n, th.warn),
         None => (hint, th.dim_text),
     };
-    put(
-        buf,
-        area,
-        1,
-        0,
-        &clip(text, usize::from(area.width).saturating_sub(2)),
-        Style::new().fg(colour),
-    );
+    put(buf, area, 1, 0, &clip(text, usize::from(area.width).saturating_sub(2)), Style::new().fg(colour));
 }
 
 /// The completion popup above the prompt: one row per candidate. Returns each row.
-pub fn popup(
-    buf: &mut Buffer,
-    full: Rect,
-    above: Rect,
-    items: &[String],
-    sel: usize,
-    th: &Theme,
-) -> (Rect, Vec<(usize, Rect)>) {
+pub fn popup(buf: &mut Buffer, full: Rect, above: Rect, items: &[String], sel: usize, th: &Theme) -> (Rect, Vec<(usize, Rect)>) {
     let shown = items.len().min(8);
     let widest = items.iter().map(|i| i.chars().count()).max().unwrap_or(0);
     let w = (widest + 4).clamp(8, usize::from(full.width)) as u16;
     let h = shown as u16 + 2;
-    let rect = Rect {
-        x: above.x + 1,
-        y: above.y.saturating_sub(h).max(full.y),
-        width: w,
-        height: h.min(above.y.saturating_sub(full.y)).max(1),
-    };
+    let rect = Rect { x: above.x + 1, y: above.y.saturating_sub(h).max(full.y), width: w, height: h.min(above.y.saturating_sub(full.y)).max(1) };
     Clear.render(rect, buf);
     let inner = panel(buf, rect, "", th.dim_text, th);
     let first = sel.saturating_sub(shown.saturating_sub(1));
     let mut rows = Vec::new();
     for (k, item) in items.iter().skip(first).take(shown).enumerate() {
-        let r = Rect {
-            y: inner.y + k as u16,
-            height: 1,
-            ..inner
-        };
+        let r = Rect { y: inner.y + k as u16, height: 1, ..inner };
         if r.bottom() > inner.bottom() {
             break;
         }
@@ -1038,30 +659,14 @@ pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<(S
     let adv = get(v, "advisor").unwrap_or(&Value::Null);
     let rt = get(v, "router").unwrap_or(&Value::Null);
     let router = if flag(rt, "enabled") {
-        format!(
-            "{} [ {} forks]",
-            text(rt, "label"),
-            thousands(int(rt, "forks"))
-        )
+        format!("{} [ {} forks]", text(rt, "label"), thousands(int(rt, "forks")))
     } else {
         format!("{} · off", text(rt, "label"))
     };
     let segs = [
-        (
-            Segment::Swarm,
-            format!("{} [{}]", text(sw, "label"), text(sw, "state")),
-            th.swarm,
-        ),
-        (
-            Segment::Subagents,
-            format!("subagents [{}/{}]", int(sub, "running"), int(sub, "total")),
-            th.fg,
-        ),
-        (
-            Segment::Advisor,
-            format!("{} [{}]", text(adv, "label"), text(adv, "state")),
-            th.advisor,
-        ),
+        (Segment::Swarm, format!("{} [{}]", text(sw, "label"), text(sw, "state")), th.swarm),
+        (Segment::Subagents, format!("subagents [{}/{}]", int(sub, "running"), int(sub, "total")), th.fg),
+        (Segment::Advisor, format!("{} [{}]", text(adv, "label"), text(adv, "state")), th.advisor),
         (Segment::Router, router, th.router),
     ];
     let mut hits = Vec::new();
@@ -1074,12 +679,7 @@ pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<(S
         w if w >= 98 => (2, 6),
         _ => (1, 2),
     };
-    let at = |x: u16, w: u16| Rect {
-        x: area.x + x,
-        y: area.y,
-        width: w.min(area.width.saturating_sub(x)),
-        height: 1,
-    };
+    let at = |x: u16, w: u16| Rect { x: area.x + x, y: area.y, width: w.min(area.width.saturating_sub(x)), height: 1 };
     for (seg, s, colour) in &segs {
         let w = s.chars().count() as u16;
         hits.push((*seg, at(x, w)));
@@ -1136,14 +736,8 @@ pub fn menu(
     (hover, pressed): (Option<usize>, Option<usize>),
 ) -> (Rect, Vec<Rect>) {
     let items = as_list(get(v, "items").unwrap_or(&Value::Null));
-    let widest = items
-        .iter()
-        .map(|i| text(i, "label").chars().count())
-        .max()
-        .unwrap_or(0);
-    let w = (widest + 6)
-        .max(text(v, "title").chars().count() + 6)
-        .min(usize::from(full.width)) as u16;
+    let widest = items.iter().map(|i| text(i, "label").chars().count()).max().unwrap_or(0);
+    let w = (widest + 6).max(text(v, "title").chars().count() + 6).min(usize::from(full.width)) as u16;
     let h = (items.len() as u16 + 2).min(full.height);
     let col = u16::try_from(int(v, "col")).unwrap_or(0);
     let row = u16::try_from(int(v, "row")).unwrap_or(0);
@@ -1158,11 +752,7 @@ pub fn menu(
     let selected = usize::try_from(int(v, "selected")).unwrap_or(0);
     let mut rows = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let r = Rect {
-            y: inner.y + i as u16,
-            height: 1,
-            ..inner
-        };
+        let r = Rect { y: inner.y + i as u16, height: 1, ..inner };
         if r.bottom() > inner.bottom() {
             break;
         }
@@ -1190,14 +780,7 @@ pub fn menu(
             }
         }
         let marker = if selected == i { th.g("▸") } else { " " };
-        put(
-            buf,
-            r,
-            0,
-            0,
-            &format!("{marker} {}", text(item, "label")),
-            style,
-        );
+        put(buf, r, 0, 0, &format!("{marker} {}", text(item, "label")), style);
         rows.push(r);
     }
     (rect, rows)
@@ -1206,24 +789,13 @@ pub fn menu(
 /// A tooltip: a bordered box of lines next to `anchor`, over whatever is there. It is a layer,
 /// so nothing under it moves.
 pub fn tooltip(buf: &mut Buffer, full: Rect, anchor: Rect, lines: &[String], th: &Theme) -> Rect {
-    let widest = lines
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(60);
+    let widest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0).min(60);
     let w = (widest + 6).min(usize::from(full.width)) as u16;
     let h = (lines.len() as u16 + 2).min(full.height);
     // Below the element when there is room, else above it.
-    let y = if anchor.bottom() + h <= full.bottom() {
-        anchor.bottom()
-    } else {
-        anchor.y.saturating_sub(h)
-    };
+    let y = if anchor.bottom() + h <= full.bottom() { anchor.bottom() } else { anchor.y.saturating_sub(h) };
     let rect = Rect {
-        x: (anchor.x + 1)
-            .min(full.right().saturating_sub(w))
-            .max(full.x),
+        x: (anchor.x + 1).min(full.right().saturating_sub(w)).max(full.x),
         y: y.max(full.y),
         width: w,
         height: h,
@@ -1231,14 +803,7 @@ pub fn tooltip(buf: &mut Buffer, full: Rect, anchor: Rect, lines: &[String], th:
     Clear.render(rect, buf);
     let inner = padded(buf, rect, "", th.dim_text, th);
     for (i, l) in lines.iter().enumerate() {
-        put(
-            buf,
-            inner,
-            0,
-            i as u16,
-            &clip(l, 60),
-            Style::new().fg(th.fg),
-        );
+        put(buf, inner, 0, i as u16, &clip(l, 60), Style::new().fg(th.fg));
     }
     rect
 }

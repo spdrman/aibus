@@ -73,9 +73,7 @@ pub enum RunMail {
     },
     /// A fork is starting from this run (01 section 5.2): at the next turn boundary the run
     /// answers with a copy of its conversation.
-    Fork {
-        reply: oneshot::Sender<Conversation>,
-    },
+    Fork { reply: oneshot::Sender<Conversation> },
     /// `/model`: from the next request on, the run talks to this model. A request already in
     /// flight finishes on the old one.
     Model(ModelSwitch),
@@ -281,10 +279,7 @@ async fn task(
             let loaded = tokio::task::spawn_blocking(move || match from {
                 Some(path) => {
                     let mut conv = transcript::load(&path)?.conv;
-                    let held = (
-                        conv.messages.len(),
-                        conv.messages.last().map_or(0, |m| m.blocks.len()),
-                    );
+                    let held = (conv.messages.len(), conv.messages.last().map_or(0, |m| m.blocks.len()));
                     conv.push_user_text(prompt);
                     Ok((conv, Some(held)))
                 }
@@ -360,12 +355,7 @@ async fn task(
                     tr.mark(held);
                     Ok(())
                 } else {
-                    tr.write(
-                        &Line::System {
-                            text: conv.system.clone(),
-                        },
-                        redact,
-                    )
+                    tr.write(&Line::System { text: conv.system.clone() }, redact)
                 }
             });
             match head {
@@ -397,9 +387,7 @@ async fn task(
 
 impl Task<'_> {
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Transcript>> {
-        self.transcript
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.transcript.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// The transcript could not be written: say so once and stop trying. The run goes on, it
@@ -496,13 +484,8 @@ impl Task<'_> {
         let mut context = cfg.context.clone();
         if cfg.def.role == Role::Worker {
             let name = cfg.def.name.to_string();
-            self.fire(
-                HookEvent::SubagentStart,
-                Some(name.as_str()),
-                mode,
-                Map::new(),
-            )
-            .await;
+            self.fire(HookEvent::SubagentStart, Some(name.as_str()), mode, Map::new())
+                .await;
         }
         if self.user_facing() {
             let extra = Map::from_iter([("prompt".to_owned(), json!(cfg.prompt))]);
@@ -572,8 +555,7 @@ impl Task<'_> {
                 RunMail::Model(to) => *self.now.lock().unwrap_or_else(PoisonError::into_inner) = to,
                 RunMail::Call { tool, input } => call = Some((tool, input)),
                 RunMail::ChildFinished(report) => {
-                    conv.messages
-                        .push(Message::text(MessageRole::User, &report));
+                    conv.messages.push(Message::text(MessageRole::User, &report));
                 }
                 RunMail::Fork { reply } => {
                     // The fork starts from the conversation as it stands, mail so far included.
@@ -655,12 +637,7 @@ impl Task<'_> {
     ) -> ChatRequest {
         let cfg = self.cfg;
         ChatRequest {
-            model: self
-                .now
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .model
-                .clone(),
+            model: self.now.lock().unwrap_or_else(PoisonError::into_inner).model.clone(),
             system: conv.system.clone(),
             messages: conv.messages.clone(),
             tools: specs.to_vec(),
@@ -703,19 +680,9 @@ impl Task<'_> {
         let mut compacted = false;
         let mut waiting = false;
         // The accounts this turn has used, so a fallback never goes back to one.
-        let mut tried = vec![self
-            .now
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .account
-            .clone()];
+        let mut tried = vec![self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone()];
         // The router may have named the tool to call; it holds for every attempt of this turn.
-        let choice = match self
-            .hint
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        let choice = match self.hint.lock().unwrap_or_else(PoisonError::into_inner).take() {
             Some(name) => ToolChoice::Named(name),
             None => ToolChoice::Auto,
         };
@@ -727,11 +694,7 @@ impl Task<'_> {
                 waiting = false;
             }
             // Taken now: a switch that lands while this request runs applies to the next one.
-            let to = self
-                .now
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone();
+            let to = self.now.lock().unwrap_or_else(PoisonError::into_inner).clone();
             let (result, emitted) = stream_turn(self.deps, &to, cfg.run, req, self.cancel).await;
             let e = match result {
                 Ok(resp) => return Ok(resp),
@@ -747,12 +710,7 @@ impl Task<'_> {
                     retries = 0;
                 }
                 ProviderErrorKind::Auth => {
-                    let who = &self
-                        .now
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .account
-                        .clone();
+                    let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
                     let what = if e.message.is_empty() {
                         "authentication failed"
                     } else {
@@ -766,12 +724,7 @@ impl Task<'_> {
                     return Err(end);
                 }
                 ProviderErrorKind::Quota => {
-                    let who = &self
-                        .now
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .account
-                        .clone();
+                    let who = &self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
                     let banner = format!(
                         "account {who}: quota or billing cap reached ({}), top up the plan or switch account, then run aibus account test {who}",
                         e.message
@@ -800,10 +753,7 @@ impl Task<'_> {
                         Err(why) => {
                             return Err(failed(
                                 conv,
-                                format!(
-                                    "run ended early: {} (compacting failed: {why})",
-                                    e.message
-                                ),
+                                format!("run ended early: {} (compacting failed: {why})", e.message),
                                 false,
                             ))
                         }
@@ -846,30 +796,16 @@ impl Task<'_> {
     /// there (the transcript and the graph record it) and this answers true: the caller asks
     /// again, with a fresh retry budget. Never after the first `TextDelta`, `ThinkingDelta` or
     /// `ToolUseStart`.
-    async fn fall_back(
-        &self,
-        e: &ProviderError,
-        emitted: bool,
-        tried: &mut Vec<AccountName>,
-    ) -> bool {
+    async fn fall_back(&self, e: &ProviderError, emitted: bool, tried: &mut Vec<AccountName>) -> bool {
         let Some(fb) = self.deps.fallback.as_ref().filter(|_| !emitted) else {
             return false;
         };
-        let from = self
-            .now
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .account
-            .clone();
+        let from = self.now.lock().unwrap_or_else(PoisonError::into_inner).account.clone();
         let Some(to) = fb.next(&from, tried, e) else {
             return false;
         };
         tried.push(to.account.clone());
-        self.write_line(&Line::Switch {
-            account: to.account.clone(),
-            model: to.model.clone(),
-        })
-        .await;
+        self.write_line(&Line::Switch { account: to.account.clone(), model: to.model.clone() }).await;
         self.send(Msg::RunSwitched {
             run: self.cfg.run,
             from,
@@ -917,8 +853,7 @@ impl Task<'_> {
             reason,
         };
         if !self.deps.tools.tty() {
-            self.send(decided(Decision::Deny, Some("no tty".into())))
-                .await;
+            self.send(decided(Decision::Deny, Some("no tty".into()))).await;
             return Decision::Deny;
         }
         loop {
@@ -977,15 +912,13 @@ impl Task<'_> {
             };
         // A run that had text still reports the provider failure (the account banner for an
         // auth error, for one); a budget stop is not a failure.
-        let provider_error = end.error.as_ref().filter(|e| {
-            matches!(
+        let provider_error = end
+            .error
+            .as_ref()
+            .filter(|e| matches!(
                 e.kind,
-                RunErrorKind::Provider
-                    | RunErrorKind::Auth
-                    | RunErrorKind::Quota
-                    | RunErrorKind::ContentFilter
-            )
-        });
+                RunErrorKind::Provider | RunErrorKind::Auth | RunErrorKind::Quota | RunErrorKind::ContentFilter
+            ));
         if end.status == RunStatus::Failed || provider_error.is_some() {
             if let Some(error) = &end.error {
                 self.send(Msg::RunFailed {
@@ -1066,10 +999,7 @@ async fn drive(
     let (cfg, deps, cancel) = (t.cfg, t.deps, t.cancel);
     let budgets = Budgets {
         max_turns: cfg.def.max_turns.unwrap_or(cfg.budgets.max_turns),
-        max_tokens_total: cfg
-            .def
-            .max_tokens_total
-            .unwrap_or(cfg.budgets.max_tokens_total),
+        max_tokens_total: cfg.def.max_tokens_total.unwrap_or(cfg.budgets.max_tokens_total),
         max_cost_usd: cfg.def.max_cost_usd.unwrap_or(cfg.budgets.max_cost_usd),
     };
     let specs = deps.tools.specs(eff);
@@ -1110,11 +1040,7 @@ async fn drive(
                 .map(u64::from)
                 .or(window.map(|w| w / 10 * 8))
                 .filter(|_| deps.compactor.is_some());
-            (
-                info.map_or(8_192, |m| m.max_output),
-                at.provider.price(&at.model),
-                limit,
-            )
+            (info.map_or(8_192, |m| m.max_output), at.provider.price(&at.model), limit)
         };
         // `auto_compact_at`, else 80 % of the window (01 section 5.5). The count is what the
         // last response said the request was; before there is one, the heuristic's estimate
@@ -1123,10 +1049,7 @@ async fn drive(
             let used = if pre_tokens > 0 {
                 pre_tokens
             } else {
-                aibus_provider::tokens::estimate(
-                    &t.chat_request(conv, &specs, max_output, ToolChoice::Auto),
-                    0.0,
-                )
+                aibus_provider::tokens::estimate(&t.chat_request(conv, &specs, max_output, ToolChoice::Auto), 0.0)
             };
             if used >= limit && conv.messages.len() > 1 {
                 match t.compact(conv, "auto", mode, used).await {
@@ -1175,7 +1098,8 @@ async fn drive(
                     let m = 1_000_000.0;
                     turn.input_tokens as f64 * p.input_per_mtok / m
                         + turn.output_tokens as f64 * p.output_per_mtok / m
-                        + turn.cache_read as f64 * p.cache_read_per_mtok.unwrap_or(p.input_per_mtok)
+                        + turn.cache_read as f64
+                            * p.cache_read_per_mtok.unwrap_or(p.input_per_mtok)
                             / m
                         + turn.cache_write as f64
                             * p.cache_write_per_mtok.unwrap_or(p.input_per_mtok)
@@ -1190,18 +1114,14 @@ async fn drive(
         })
         .await;
 
-        let calls: Vec<(
-            aibus_provider::ToolCallId,
-            smol_str::SmolStr,
-            serde_json::Value,
-        )> = resp
+        let calls: Vec<(aibus_provider::ToolCallId, smol_str::SmolStr, serde_json::Value)> = resp
             .message
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse {
-                    id, name, input, ..
-                } => Some((*id, name.clone(), input.clone())),
+                ContentBlock::ToolUse { id, name, input, .. } => {
+                    Some((*id, name.clone(), input.clone()))
+                }
                 _ => None,
             })
             .collect();
@@ -1222,8 +1142,10 @@ async fn drive(
             };
             let mut again = false;
             if let Some((event, matcher)) = stop {
-                let extra =
-                    Map::from_iter([("last_assistant_message".to_owned(), json!(last_text(conv)))]);
+                let extra = Map::from_iter([(
+                    "last_assistant_message".to_owned(),
+                    json!(last_text(conv)),
+                )]);
                 let fired = t.fire(event, matcher.as_deref(), mode, extra).await;
                 if let Some(b) = fired.block {
                     conv.messages.push(Message::text(
@@ -1247,12 +1169,7 @@ async fn drive(
                             let _ = reply.send(conv.clone());
                         }
                         m => {
-                            again |= matches!(
-                                m,
-                                RunMail::UserMessage(_)
-                                    | RunMail::Call { .. }
-                                    | RunMail::ChildFinished(_)
-                            );
+                            again |= matches!(m, RunMail::UserMessage(_) | RunMail::Call { .. } | RunMail::ChildFinished(_));
                             queued.push(m);
                         }
                     }
@@ -1323,12 +1240,7 @@ async fn drive(
                 ])
             };
             let fired = t
-                .fire(
-                    HookEvent::PreToolUse,
-                    Some(name.as_str()),
-                    mode,
-                    tool_event(&input),
-                )
+                .fire(HookEvent::PreToolUse, Some(name.as_str()), mode, tool_event(&input))
                 .await;
             if let Some(updated) = fired.updated_input {
                 input = updated;
@@ -1339,7 +1251,11 @@ async fn drive(
                 input: input.clone(),
                 needs_permission: false,
             };
-            t.send(Msg::ToolCallRequested { run: cfg.run, call }).await;
+            t.send(Msg::ToolCallRequested {
+                run: cfg.run,
+                call,
+            })
+            .await;
             let cx = ToolCx {
                 run: cfg.run,
                 cwd: cfg.cwd.clone(),
@@ -1522,12 +1438,7 @@ async fn stream_turn(
     // Resolved for every request, so a rotated key is picked up within the store's cache time.
     let creds = match to.creds.credential() {
         Ok(c) => c,
-        Err(e) => {
-            return (
-                Err(ProviderError::new(ProviderErrorKind::Auth, e.to_string())),
-                false,
-            )
-        }
+        Err(e) => return (Err(ProviderError::new(ProviderErrorKind::Auth, e.to_string())), false),
     };
     let span = tracing::trace_span!(
         target: "aibus_trace",
@@ -1545,9 +1456,7 @@ async fn stream_turn(
     let mut seen = |c: &StreamChunk| {
         emitted |= matches!(
             c,
-            StreamChunk::TextDelta(_)
-                | StreamChunk::ThinkingDelta(_)
-                | StreamChunk::ToolUseStart { .. }
+            StreamChunk::TextDelta(_) | StreamChunk::ThinkingDelta(_) | StreamChunk::ToolUseStart { .. }
         );
     };
     let mut co = Coalescer::default();

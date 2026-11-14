@@ -38,27 +38,14 @@ impl Sandbox {
     /// The command that runs `script` with `sh -c` for the sandbox. `project` and `cwd` (a
     /// worktree, say) stay writable, so does `tmp`; `home` is hidden even when it is the parent
     /// of the project.
-    pub fn command(
-        &self,
-        script: &str,
-        project: &Path,
-        cwd: &Path,
-        tmp: &Path,
-        home: Option<&Path>,
-    ) -> Command {
+    pub fn command(&self, script: &str, project: &Path, cwd: &Path, tmp: &Path, home: Option<&Path>) -> Command {
         let (project, cwd, tmp) = (real(project), real(cwd), real(tmp));
         let mut cmd = Command::new("sh");
         match self.kind {
             SandboxKind::None => {}
             SandboxKind::Bwrap => {
                 cmd = Command::new("bwrap");
-                cmd.args([
-                    "--die-with-parent",
-                    "--new-session",
-                    "--unshare-user-try",
-                    "--unshare-pid",
-                    "--unshare-ipc",
-                ]);
+                cmd.args(["--die-with-parent", "--new-session", "--unshare-user-try", "--unshare-pid", "--unshare-ipc"]);
                 if !self.network {
                     cmd.arg("--unshare-net");
                 }
@@ -80,18 +67,9 @@ impl Sandbox {
                 };
                 // A path that matches nothing, so the profile always has a HOME to name.
                 let home = home.map_or_else(|| PathBuf::from("/var/empty"), real);
-                let cut = if self.network {
-                    ""
-                } else {
-                    "(deny network*)\n"
-                };
+                let cut = if self.network { "" } else { "(deny network*)\n" };
                 cmd.arg("-p").arg(format!("{PROFILE}{cut}"));
-                for (name, p) in [
-                    ("PROJECT", &project),
-                    ("CWD", &cwd),
-                    ("TMP", &tmp),
-                    ("HOME", &home),
-                ] {
+                for (name, p) in [("PROJECT", &project), ("CWD", &cwd), ("TMP", &tmp), ("HOME", &home)] {
                     cmd.arg("-D").arg(param(name, p));
                 }
                 cmd.arg("sh");
@@ -122,24 +100,13 @@ mod tests {
     use super::*;
 
     fn args(c: &Command) -> Vec<String> {
-        c.get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect()
+        c.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
     }
 
     #[test]
     fn bwrap_binds_the_project_and_tmp_and_not_the_home() {
-        let s = Sandbox {
-            kind: SandboxKind::Bwrap,
-            network: true,
-        };
-        let c = s.command(
-            "echo hi",
-            Path::new("/proj"),
-            Path::new("/proj"),
-            Path::new("/tmp/t"),
-            Some(Path::new("/home/u")),
-        );
+        let s = Sandbox { kind: SandboxKind::Bwrap, network: true };
+        let c = s.command("echo hi", Path::new("/proj"), Path::new("/proj"), Path::new("/tmp/t"), Some(Path::new("/home/u")));
         let a = args(&c);
         assert_eq!(c.get_program(), "bwrap");
         assert!(!a.contains(&"--unshare-net".to_owned()));
@@ -151,29 +118,11 @@ mod tests {
 
     #[test]
     fn the_network_switch_adds_the_unshare() {
-        let s = Sandbox {
-            kind: SandboxKind::Bwrap,
-            network: false,
-        };
-        let c = s.command(
-            "true",
-            Path::new("/p"),
-            Path::new("/p"),
-            Path::new("/t"),
-            None,
-        );
+        let s = Sandbox { kind: SandboxKind::Bwrap, network: false };
+        let c = s.command("true", Path::new("/p"), Path::new("/p"), Path::new("/t"), None);
         assert!(args(&c).contains(&"--unshare-net".to_owned()));
-        let s = Sandbox {
-            kind: SandboxKind::SandboxExec,
-            network: false,
-        };
-        let c = s.command(
-            "true",
-            Path::new("/p"),
-            Path::new("/p"),
-            Path::new("/t"),
-            Some(Path::new("/Users/u")),
-        );
+        let s = Sandbox { kind: SandboxKind::SandboxExec, network: false };
+        let c = s.command("true", Path::new("/p"), Path::new("/p"), Path::new("/t"), Some(Path::new("/Users/u")));
         let a = args(&c);
         assert_eq!(c.get_program(), "sandbox-exec");
         assert!(a[a.iter().position(|x| x == "-p").unwrap() + 1].ends_with("(deny network*)\n"));
@@ -183,17 +132,10 @@ mod tests {
 
     #[test]
     fn none_is_a_plain_shell_and_always_available() {
-        let s = Sandbox {
-            kind: SandboxKind::None,
-            network: true,
-        };
+        let s = Sandbox { kind: SandboxKind::None, network: true };
         let c = s.command("x", Path::new("/p"), Path::new("/p"), Path::new("/t"), None);
         assert_eq!(c.get_program(), "sh");
         assert!(s.available(""));
-        assert!(!Sandbox {
-            kind: SandboxKind::Bwrap,
-            network: true
-        }
-        .available(""));
+        assert!(!Sandbox { kind: SandboxKind::Bwrap, network: true }.available(""));
     }
 }

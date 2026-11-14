@@ -521,6 +521,42 @@ fn no_spelling_of_quit_ends_the_session() {
     }
 }
 
+/// Review of #276: what a client sends shows in the run's transcript on screen with its badge.
+#[test]
+fn the_transcript_on_screen_badges_what_a_client_sent() {
+    let mut r = rig();
+    call(&mut r, send("and the tests too"), false).unwrap();
+    r.app
+        .step(Msg::Command(Command::OpenTranscript(run_id(1))))
+        .unwrap();
+    r.settle();
+    assert!(
+        r.text().contains("[mcp editor] and the tests too"),
+        "{}",
+        r.text()
+    );
+    // A run a client starts shows its task the same way.
+    let mut r = rig();
+    call(&mut r, send("@agent-search find the call sites"), false).unwrap();
+    let new: RunId = runs(&r).last().unwrap().parse().unwrap();
+    aibus_testkit::tui::start(
+        &mut r.app,
+        2,
+        "search",
+        aibus_core::Role::Worker,
+        "Haiku 5.5",
+    );
+    r.app
+        .step(Msg::Command(Command::OpenTranscript(new)))
+        .unwrap();
+    r.settle();
+    assert!(
+        r.text().contains("[mcp editor] find the call sites"),
+        "{}",
+        r.text()
+    );
+}
+
 #[test]
 fn send_takes_no_slash_line_and_command_takes_only_one() {
     let mut r = rig();

@@ -505,11 +505,32 @@ pub const REGISTRY: &[Spec] = &[
         hint: "q",
         scope: Scope::Global,
         needs: 0,
-        surfaces: at(0, 10, 0),
-        run: |_, out| {
-            out.msgs.extend([Msg::Command(Command::CloseModal), Msg::Command(Command::Quit { force: false })]);
-            Ok(())
-        },
+        surfaces: at(28, 10, 0),
+        run: quit,
+    },
+    Spec {
+        name: "exit",
+        args: "",
+        help: "quit (same as /quit)",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(29, 0, 0),
+        run: quit,
+    },
+    Spec {
+        name: "q",
+        args: "",
+        help: "quit (same as /quit)",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(30, 0, 0),
+        run: quit,
     },
     Spec {
         name: "open",
@@ -749,6 +770,15 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
     }
 }
 
+/// `/quit`, `/exit` and `/q` share this: the same messages as the palette row, and no arguments.
+fn quit(c: &Call, out: &mut Out) -> Result<(), String> {
+    if !c.args.is_empty() {
+        return Err(format!("/{} takes no arguments", c.name));
+    }
+    out.msgs.extend([Msg::Command(Command::CloseModal), Msg::Command(Command::Quit { force: false })]);
+    Ok(())
+}
+
 /// `/fix <input>` and the other three are `/workflow <name> <input>`.
 fn shorthand(c: &Call, out: &mut Out) -> Result<(), String> {
     command(out, Command::Workflow { name: c.name.to_owned(), input: c.args.to_owned() })
@@ -983,6 +1013,31 @@ mod tests {
         assert_eq!(m("/logout work"), "Command(OpenScreen(ConfirmLogout(AccountName(\"work\"))))");
         assert_eq!(m("/logout"), "BAD /logout needs an account");
         assert_eq!(m("/logout nobody"), "BAD /logout: no account named nobody");
+    }
+
+    #[test]
+    fn quit_exit_and_q_quit_like_the_palette_row() {
+        let want = "Command(CloseModal)|Command(Quit { force: false })";
+        for word in ["/quit", "/exit", "/q"] {
+            assert_eq!(msgs(word, &[], &[]), want, "{word}");
+        }
+    }
+
+    #[test]
+    fn quit_with_arguments_is_refused_with_one_line() {
+        for line in ["/quit now", "/exit now", "/q now", "/quit --force"] {
+            let got = msgs(line, &[], &[]);
+            assert!(got.starts_with("BAD /"), "{line}: {got}");
+            assert!(!got.contains("Quit") && !got.contains('\n'), "{line}: {got}");
+        }
+    }
+
+    #[test]
+    fn quit_exit_and_q_are_in_help() {
+        let help: Vec<String> = help_lines().into_iter().map(|(e, _)| e).collect();
+        for e in ["/quit", "/exit", "/q"] {
+            assert!(help.contains(&e.to_owned()), "{e} is not in /help");
+        }
     }
 
     #[test]
@@ -1223,7 +1278,7 @@ mod tests {
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().all(|(n, _)| n != "/fix"), "a workflow command needs a lead as well");
         assert!(slash_offered(&Env { lead: Some(lead_run()), ..Env::bare(&[], &wf) }).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 15);
+        assert_eq!(slash_offered(&env).len(), 18);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
     }

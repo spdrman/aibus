@@ -467,6 +467,38 @@ PATH="$t/skbin:$PATH" TMPDIR=$t/tmp-int RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$
 expect "an interrupted preflight (TERM) exits 143" test $rc = 143
 expect "an interrupted preflight leaves no release-signcheck directory" test -z "$(ls "$t/tmp-int")"
 
+# ---------- issue 267: the push prompt takes y, Y, yes, YES, Yes and nothing else
+if pty_available; then
+  # in: what is typed at the prompt; want: push (confirmed) or stay (refused)
+  prompt267() { # name input want
+    r=$t/rel267; mkrepo "$r"; usegate "$r"; : >"$GH_LOG"
+    ( export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh; unset SSH_AUTH_SOCK SSH_AGENT_PID
+      PTY_INPUT=$2 pty_run 12 tools/release-gate/release.sh 0.2.0 --key "$t/key" ) >"$t/p267.out" 2>&1
+    if [ "$3" = push ]; then
+      expect "#267 $1 confirms: the branch is pushed and the PR opened" bash -c "[ -n \"\$(git ls-remote origin refs/heads/release-prep/v0.2.0)\" ] && [ \$(wc -l <'$GH_LOG') = 1 ]"
+    else
+      expect "#267 $1 does not confirm: nothing pushed, no PR" bash -c "[ -z \"\$(git ls-remote origin refs/heads/release-prep/v0.2.0)\" ] && [ ! -s '$GH_LOG' ]"
+      expect "#267 $1 prints the refusal naming y and yes" grep -q 'not confirmed: only y or yes pushes (the commits stay local)' "$t/p267.out"
+    fi
+  }
+  prompt267 "y" $'y\n' push
+  prompt267 "Y" $'Y\n' push
+  prompt267 "yes" $'yes\n' push
+  prompt267 "YES" $'YES\n' push
+  prompt267 "Yes" $'Yes\n' push
+  prompt267 "n" $'n\n' stay
+  prompt267 "N" $'N\n' stay
+  prompt267 "an empty answer" $'\n' stay
+  prompt267 "end of file" $'\004' stay
+  prompt267 "yy" $'yy\n' stay
+  prompt267 "no" $'no\n' stay
+  prompt267 "a leading space then y" $' y\n' stay
+  prompt267 "y then a trailing space" $'y \n' stay
+  prompt267 "yEs" $'yEs\n' stay
+  prompt267 "yeS" $'yeS\n' stay
+  prompt267 "YEs" $'YEs\n' stay
+else echo "SKIP: script(1) or timeout is missing, the push prompt tests do not run" >&2; fi
+
 # ---------- third review of #242: a hung ssh-keygen and signals (release.sh)
 mkdir "$t/hangbin"
 cat >"$t/hangbin/ssh-keygen" <<HGS

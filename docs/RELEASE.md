@@ -302,7 +302,8 @@ the tag `v<version>` when the PR lands on `release`.
 4. The full e2e (above). A stamp already there for the same tree is reused (`--rerun` forces it).
 5. `tools/release-attest/attest.sh`, then it checks the attestation covers the tree the e2e ran on.
 6. Commits `release-attest/`, runs `verify.sh --expect-version <version>` (the check `prepare` makes),
-   asks once (`--yes` skips), pushes the branch and runs `gh pr create --base release --title "Release
+   asks once (`--yes` skips; `y`, `Y`, `yes`, `YES` or `Yes` confirms, anything else leaves the
+   commits local), pushes the branch and runs `gh pr create --base release --title "Release
    v<version>"`. The body names the attestation, the stamp (tree, host, time) and the tag. When the
    manifest already said the version there is no bump commit: the dry run prints "no bump commit
    needed, the manifest is already X" and the PR body says so instead of "I bumped the version".

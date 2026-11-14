@@ -210,6 +210,35 @@ fn a_killed_run_is_interrupted_never_completed() {
     );
 }
 
+/// Run 15 of the spike: killed while both children were still reading.
+#[test]
+fn a_run_killed_while_its_children_work_is_interrupted_and_their_stops_are_inferred() {
+    let events = replay("15-killed-midrun", Feed::StreamThenHooks);
+    let p = project(&events);
+    assert_eq!(p.attempts[0].status, Some(AttemptStatus::Interrupted));
+    assert!(kinds(&events, EventKind::AttemptCompleted).is_empty());
+    let children: Vec<_> = p
+        .agents
+        .iter()
+        .filter(|a| a.role.as_deref() != Some("lead"))
+        .collect();
+    assert!(!children.is_empty());
+    for c in children {
+        assert_eq!(c.status.as_deref(), Some("ended_with_process"), "{c:#?}");
+        let stop = c.evidence.last().unwrap();
+        assert_eq!(
+            (stop.visibility, stop.origin),
+            (Visibility::Inferred, Origin::Derived)
+        );
+    }
+    // A tool that never reported back is unknown, and the attempt says it needs reconciling.
+    if p.tools.iter().any(|t| t.outcome == ToolOutcome::Unknown) {
+        assert!(p.attempts[0].requires_reconciliation);
+        assert!(p.gaps.iter().any(|g| g.reason == "tool_outcome_unknown"));
+    }
+    assert!(p.gaps.iter().any(|g| g.reason == "stream_truncated"));
+}
+
 #[test]
 fn a_denied_write_is_one_failed_tool_with_its_reason() {
     let events = replay("09-denied", Feed::Stream);

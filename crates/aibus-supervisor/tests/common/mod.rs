@@ -21,7 +21,7 @@ pub fn golden_dir() -> PathBuf {
 }
 
 /// The runs with a stream.
-pub const RUNS: [&str; 9] = [
+pub const RUNS: [&str; 10] = [
     "06-basic",
     "07-deleg",
     "08-control",
@@ -31,6 +31,7 @@ pub const RUNS: [&str; 9] = [
     "12-teams-probe",
     "13-teams-control",
     "14-teams-attempt",
+    "15-killed-midrun",
 ];
 
 pub fn attempt() -> AttemptRef {

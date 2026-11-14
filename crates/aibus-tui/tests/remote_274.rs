@@ -96,7 +96,7 @@ fn a_client_line_takes_the_same_msg_path_as_a_typed_one() {
         } else {
             send(line)
         };
-        let by_client = remote::msgs(&ask, &Context::read(&sent.app.graph), false).unwrap();
+        let by_client = remote::msgs(&ask, &Context::read(&sent.app.graph), false, None).unwrap();
         assert_eq!(names(&by_hand), names(&by_client), "{line}");
 
         // Stepped by `handle`, the session lands where the typed one did, plus the tag.
@@ -179,7 +179,7 @@ fn a_client_name_cannot_put_control_characters_on_screen() {
     deliver(
         &mut r,
         Remote::Connected {
-            client: "ed\u{1b}[31mitor\u{7}\n".into(),
+            client: "ed\u{1b}[31mitor\u{7}\n\u{200b}\u{202e}[x](http://e)".into(),
         },
         false,
     );
@@ -191,7 +191,13 @@ fn a_client_name_cannot_put_control_characters_on_screen() {
     );
     for row in r.app.store.log_rows(200) {
         let client = get(&row, "client").and_then(as_str).unwrap_or("");
-        assert!(client.chars().all(|c| !c.is_control()), "{client:?}");
+        assert!(
+            client
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || " ._-".contains(c)),
+            "{client:?}"
+        );
+        assert!(!client.is_empty() && client.len() <= 32, "{client:?}");
     }
 }
 
@@ -210,7 +216,7 @@ fn a_permission_prompt_stays_the_keyboards_unless_the_session_opted_in() {
     assert_eq!(open, 1, "the prompt is still open");
 
     // With the opt-in the answer is the one `y` gives, tagged.
-    let msgs = remote::msgs(&answer, &Context::read(&r.app.graph), true).unwrap();
+    let msgs = remote::msgs(&answer, &Context::read(&r.app.graph), true, None).unwrap();
     assert_eq!(
         names(&msgs),
         names(&[Msg::Command(Command::Permission {
@@ -302,6 +308,219 @@ fn a_client_can_never_end_the_session() {
     }
 }
 
+fn with_account(r: &mut Rig, name: &str) {
+    use aibus_core::state::value::{list, map, s};
+    aibus_testkit::tui::poke(
+        &mut r.app,
+        aibus_core::state::ACCOUNTS,
+        list(vec![map([("name", s(name))])]),
+    );
+    r.settle();
+}
+
+fn removed(r: &Rig, account: &str) -> bool {
+    use aibus_tui::input::{AccountOp, Job};
+    r.jobs
+        .iter()
+        .any(|j| matches!(j, Job::Account(AccountOp::Remove(a)) if a == account))
+}
+
+/// Review of #276, B1: a client never opens a confirmation, so no keystroke of the user's can
+/// answer one it did not ask for. `/logout`, `/clear` and `/cancel` on the lead stay the keyboard's.
+#[test]
+fn a_client_cannot_open_a_confirmation_the_users_next_key_answers() {
+    // The user is typing "why"; a client sends /logout work; the next `y` must not remove it.
+    let mut r = rig();
+    with_account(&mut r, "work");
+    r.type_text("wh");
+    let why = call(&mut r, command("/logout work"), false).unwrap_err();
+    assert!(why.contains("/logout") && why.contains("keyboard"), "{why}");
+    r.type_text("y did it fail");
+    assert!(
+        !removed(&r, "work"),
+        "the user's typed y removed the account"
+    );
+    assert_eq!(modal(&r), None);
+    // Even with nothing typed and nothing open, a confirmation is the keyboard's.
+    let mut r = rig();
+    with_account(&mut r, "work");
+    assert!(call(&mut r, command("/logout work"), false).is_err());
+    assert_eq!(modal(&r), None);
+    r.type_text("y");
+    assert!(!removed(&r, "work"));
+
+    // /clear and then a typed y: the tagged rows of what the client did are still there.
+    let mut r = rig();
+    call(&mut r, send("do a thing"), false).unwrap();
+    let before = tagged_rows(&r).len();
+    r.type_text("an");
+    let why = call(&mut r, command("/clear"), false).unwrap_err();
+    assert!(why.contains("keyboard"), "{why}");
+    r.type_text("y");
+    assert!(
+        tagged_rows(&r).len() >= before,
+        "a client's /clear was confirmed by a typed y"
+    );
+
+    // Cancelling the lead asks first, so a client cannot do it at all; a worker it can.
+    let mut r = rig();
+    worker(&mut r.app, 2, "search", "maps the repo", 0.5, "running");
+    r.settle();
+    let why = call(&mut r, Ask::Cancel { run: "lead".into() }, false).unwrap_err();
+    assert!(why.contains("keyboard"), "{why}");
+    assert_eq!(modal(&r), None);
+    call(
+        &mut r,
+        Ask::Cancel {
+            run: "search".into(),
+        },
+        false,
+    )
+    .unwrap();
+}
+
+/// Review of #276, B1: whatever the user has open stays open. A client line that would open,
+/// replace or close a screen is refused while one is.
+#[test]
+fn a_client_cannot_replace_or_close_a_modal_the_user_has_open() {
+    let lines = [
+        "/clear",
+        "/rail",
+        "/model",
+        "/help",
+        "/agents",
+        "/accounts",
+        "/cost",
+        "/status",
+        "/workflow list",
+        "/login",
+        "/logout work",
+    ];
+    for line in lines {
+        let mut r = rig();
+        with_account(&mut r, "work");
+        ask(&mut r.app, 1, "lead", 1, "cargo test");
+        r.settle();
+        let got = call(&mut r, command(line), false);
+        assert!(got.is_err(), "{line}: {got:?}");
+        assert_eq!(
+            modal(&r).as_deref(),
+            Some("permission"),
+            "{line}: the permission prompt was taken away"
+        );
+        let open = as_list(r.app.graph.read_key(PERMISSIONS_OPEN).unwrap()).len();
+        assert_eq!(open, 1, "{line}");
+    }
+    // A picker the user opened at the keyboard stays theirs too.
+    let mut r = rig();
+    // What `/model` typed with no reference does: the picker for the lead.
+    let open = aibus_core::Screen::Models(aibus_core::ModelTarget::Lead);
+    r.app.step(Msg::Command(Command::OpenScreen(open))).unwrap();
+    r.settle();
+    let picker = modal(&r);
+    assert!(
+        picker.as_deref().is_some_and(|m| m.starts_with("models")),
+        "{picker:?}"
+    );
+    for line in ["/help", "/cost", "/agents"] {
+        assert!(call(&mut r, command(line), false).is_err(), "{line}");
+        assert_eq!(modal(&r), picker, "{line}");
+    }
+}
+
+/// Review of #276, B1: a screen a client opens lands under the user's keys when the user is in
+/// the middle of something: text on the prompt line, a field being edited, the log filter.
+#[test]
+fn a_client_cannot_open_a_screen_while_the_user_is_typing() {
+    let mut r = rig();
+    r.type_text("wh");
+    let why = call(&mut r, command("/help"), false).unwrap_err();
+    assert!(why.contains("typing") || why.contains("prompt"), "{why}");
+    assert_eq!(modal(&r), None);
+    assert_eq!(r.ui.prompt.text, "wh", "the user's text is untouched");
+
+    let mut r = rig();
+    r.input.filter_edit = true;
+    r.settle();
+    assert!(call(&mut r, command("/help"), false).is_err());
+    assert_eq!(modal(&r), None);
+
+    // With nothing open and nothing typed, a screen is fine, and so is a line that opens none.
+    let mut r = rig();
+    call(&mut r, command("/help"), false).unwrap();
+    assert_eq!(modal(&r).as_deref(), Some("help"));
+    let mut r = rig();
+    r.type_text("wh");
+    call(&mut r, command("/model haiku"), false).unwrap();
+    assert_eq!(r.ui.prompt.text, "wh");
+}
+
+/// Review of #276, item 5: writing files is the keyboard's (and `aibus mcp --allow write`'s for
+/// its own tools), so a client line that would write one is refused.
+#[test]
+fn a_client_line_that_would_write_files_is_refused() {
+    for line in [
+        "/workflow save review --force",
+        "/workflow save review --user",
+        "/handoff",
+        "/ledger goal ship it",
+    ] {
+        let mut r = rig();
+        let why = call(&mut r, command(line), false).unwrap_err();
+        assert!(
+            why.contains("files") && why.contains("keyboard"),
+            "{line}: {why}"
+        );
+        assert!(
+            tagged_rows(&r).iter().any(|t| t.contains("refused")),
+            "{line}"
+        );
+    }
+}
+
+/// Review of #276, item 4: a call the socket gave up on (its reply is gone) is dropped, never run
+/// later, and the screen says so.
+#[test]
+fn a_call_that_timed_out_is_dropped_not_run_later() {
+    let mut r = rig();
+    let before = runs(&r);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    drop(rx);
+    let event = Remote::Call {
+        client: "editor".into(),
+        ask: send("@agent-search find the call sites"),
+        reply: tx,
+    };
+    deliver(&mut r, event, false);
+    assert_eq!(runs(&r), before, "a timed-out call ran");
+    assert!(
+        tagged_rows(&r).iter().any(|t| t.contains("timed out")),
+        "{:?}",
+        tagged_rows(&r)
+    );
+}
+
+/// Review of #276: every spelling the parser might take for quit, and some it should not.
+#[test]
+fn no_spelling_of_quit_ends_the_session() {
+    for line in [
+        "/QUIT",
+        "/Quit",
+        "/quit\u{00a0}",
+        "\u{3000}/quit",
+        "/q\u{200b}",
+        "/quit now",
+        "/exit --force",
+        "/q;/quit",
+        "/quit\n/quit",
+        "\u{feff}/quit",
+    ] {
+        let mut r = rig();
+        let _ = call(&mut r, command(line), false);
+        assert!(!r.app.should_quit(), "{line:?} ended the session");
+    }
+}
+
 #[test]
 fn send_takes_no_slash_line_and_command_takes_only_one() {
     let mut r = rig();
@@ -326,6 +545,7 @@ fn cancel_names_a_run_the_way_a_target_does() {
         },
         &Context::read(&r.app.graph),
         false,
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -338,6 +558,7 @@ fn cancel_names_a_run_the_way_a_target_does() {
         },
         &Context::read(&r.app.graph),
         false,
+        None,
     )
     .unwrap();
     assert_eq!(names(&by_id), names(&msgs));

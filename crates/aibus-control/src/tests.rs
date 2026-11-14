@@ -447,3 +447,268 @@ fn a_session_directory_that_is_not_private_is_refused() {
     let link = Link::new(dir, None);
     assert!(link.target().is_err());
 }
+
+// ---- Review of #276 -------------------------------------------------------------------------
+
+/// `chown` needs root, which the test containers are. Elsewhere the owner cases are skipped
+/// with a line saying so; the mode cases still run.
+fn chown_to_stranger(path: &Path) -> bool {
+    match std::os::unix::fs::chown(path, Some(4242), Some(4242)) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("skipping the owner case for {}: {e}", path.display());
+            false
+        }
+    }
+}
+
+#[test]
+fn every_directory_on_the_way_to_the_sockets_has_to_be_private_and_mine() {
+    // The tmp fallback: `<tmp>/aibus-<uid>/sessions`, with <tmp> shared like /tmp.
+    let home = aibus_testkit::xdg_temp();
+    let tmp = home.path().join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o1777)).unwrap();
+    let dir = runtime_dir(None, &tmp);
+    let parent = dir.parent().unwrap().to_owned();
+    // Somebody else made the parent first, open to everyone: refused, never repaired.
+    std::fs::create_dir_all(&parent).unwrap();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(private_dir(&dir).is_err(), "an open parent was accepted");
+    assert!(Endpoint::open(&dir, "01JCPARENT000000000000000A", &info("x")).is_err());
+    assert_eq!(mode(&parent), 0o777, "a parent that fails is not repaired");
+    // Private but another user's.
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+    if chown_to_stranger(&parent) {
+        assert!(
+            private_dir(&dir).is_err(),
+            "a parent of another user was accepted"
+        );
+        assert!(Link::new(dir.clone(), None).target().is_err());
+    }
+    // A shared directory above it that is open without the sticky bit is refused too.
+    let home = aibus_testkit::xdg_temp();
+    let open = home.path().join("open");
+    std::fs::create_dir_all(&open).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(
+        private_dir(&runtime_dir(None, &open)).is_err(),
+        "a parent anyone can rename in was accepted"
+    );
+    // The good case: made fresh under a sticky shared directory, every level 0700 and mine.
+    let fresh = runtime_dir(None, &tmp.join("again"));
+    std::fs::create_dir_all(tmp.join("again")).unwrap();
+    std::fs::set_permissions(tmp.join("again"), std::fs::Permissions::from_mode(0o1777)).unwrap();
+    private_dir(&fresh).unwrap();
+    assert_eq!(mode(&fresh), 0o700);
+    assert_eq!(mode(fresh.parent().unwrap()), 0o700);
+}
+
+#[test]
+fn a_sessions_directory_of_another_user_is_refused() {
+    let home = aibus_testkit::xdg_temp();
+    let dir = sessions(&home);
+    if chown_to_stranger(&dir) {
+        assert!(private_dir(&dir).is_err());
+        assert!(Endpoint::open(&dir, "01JCOWNER0000000000000000A", &info("x")).is_err());
+        assert!(Link::new(dir, None).target().is_err());
+    }
+}
+
+#[test]
+fn the_link_checks_the_socket_its_peer_and_the_token_file() {
+    // A token file others can read is not used.
+    let (l, ep) = live("01JCLINKCHK00000000000000A");
+    std::fs::set_permissions(ep.token_file(), std::fs::Permissions::from_mode(0o644)).unwrap();
+    let why = Link::new(l.dir.clone(), None)
+        .call("editor", json!({"op": "status"}))
+        .unwrap_err();
+    assert!(why.contains("token"), "{why}");
+    assert!(!l
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|x| x.starts_with("connected")));
+    drop(ep);
+    // A peer that is not this user is not talked to (the link's own peer check).
+    let (l, ep) = live("01JCLINKCHK00000000000000B");
+    let mut link = Link::new(l.dir.clone(), None);
+    link.uid = link.uid.wrapping_add(1);
+    let why = link.call("editor", json!({"op": "status"})).unwrap_err();
+    assert!(
+        why.contains("not this user") || why.contains("owned"),
+        "{why}"
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(
+        !l.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|x| x.starts_with("connected")),
+        "the token went out"
+    );
+    drop(ep);
+}
+
+fn hello(ep: &Endpoint) -> (UnixStream, BufReader<UnixStream>) {
+    let token = std::fs::read_to_string(ep.token_file()).unwrap();
+    let (s, answer) = raw_hello(&ep.socket(), token.trim());
+    assert_eq!(answer["ok"], true, "{answer}");
+    let r = BufReader::new(s.try_clone().unwrap());
+    (s, r)
+}
+
+fn ask_line(s: &mut UnixStream, r: &mut BufReader<UnixStream>, v: Value) -> Value {
+    writeln!(s, "{v}").unwrap();
+    let mut line = String::new();
+    r.read_line(&mut line).unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+#[test]
+fn past_sixty_lines_a_minute_a_read_is_refused_too() {
+    let (_l, ep) = live("01JCLINES0000000000000000A");
+    let (mut s, mut r) = hello(&ep);
+    let mut refused = 0;
+    for i in 0..LINES_PER_MINUTE + 2 {
+        let v = ask_line(&mut s, &mut r, json!({"id": i, "op": "status"}));
+        if v["ok"] == false {
+            assert!(v["error"].as_str().unwrap().contains("rate limit"), "{v}");
+            refused += 1;
+        }
+    }
+    assert_eq!(refused, 2);
+}
+
+#[test]
+fn reconnecting_does_not_reset_the_limits() {
+    let (l, ep) = live("01JCRECON0000000000000000A");
+    for i in 0..CHANGES_PER_MINUTE {
+        let (mut s, mut r) = hello(&ep);
+        let v = ask_line(&mut s, &mut r, json!({"id": i, "op": "send", "text": "go"}));
+        assert_eq!(v["ok"], true, "{v}");
+        drop((s, r));
+        assert!(wait_for(&l.seen, &format!("disconnected raw")));
+        l.seen.lock().unwrap().clear();
+    }
+    let (mut s, mut r) = hello(&ep);
+    let v = ask_line(
+        &mut s,
+        &mut r,
+        json!({"id": 99, "op": "send", "text": "one more"}),
+    );
+    assert_eq!(v["ok"], false, "a new connection got a fresh limit: {v}");
+    assert!(v["error"].as_str().unwrap().contains("rate limit"), "{v}");
+}
+
+#[test]
+fn a_connection_that_never_says_hello_is_closed_within_seconds() {
+    let (_l, ep) = live("01JCSILENT000000000000000A");
+    let s = UnixStream::connect(ep.socket()).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+    let began = std::time::Instant::now();
+    let mut line = String::new();
+    let _ = BufReader::new(s).read_line(&mut line);
+    assert!(
+        began.elapsed() < Duration::from_secs(7),
+        "held open for {:?}",
+        began.elapsed()
+    );
+    assert!(!line.contains("\"ok\":true"), "{line}");
+}
+
+#[test]
+fn an_idle_client_gives_up_the_session() {
+    let (l, ep) = live_with("01JCIDLE00000000000000000A", |ep| {
+        ep.idle = Duration::from_millis(300)
+    });
+    let (_s, _r) = hello(&ep);
+    assert!(
+        wait_for(&l.seen, "disconnected raw"),
+        "an idle client kept the slot: {:?}",
+        l.seen.lock().unwrap()
+    );
+    // The slot is free again.
+    let (_s2, _r2) = hello(&ep);
+}
+
+#[test]
+fn a_storm_of_silent_connections_is_capped_and_the_session_recovers() {
+    let (_l, ep) = live("01JCSTORM0000000000000000A");
+    let mut silent = Vec::new();
+    for _ in 0..PENDING_MAX + 8 {
+        let s = UnixStream::connect(ep.socket()).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        silent.push(s);
+    }
+    // The ones past the cap are closed at once rather than held.
+    let began = std::time::Instant::now();
+    let mut closed = 0;
+    for s in silent.iter().rev().take(8) {
+        let mut line = String::new();
+        let n = BufReader::new(s.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap_or(0);
+        if n == 0 || line.contains("busy") {
+            closed += 1;
+        }
+    }
+    assert_eq!(closed, 8);
+    assert!(
+        began.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        began.elapsed()
+    );
+    drop(silent);
+    std::thread::sleep(Duration::from_millis(200));
+    let (_s, _r) = hello(&ep);
+}
+
+#[test]
+fn two_sessions_starting_together_never_sweep_each_other() {
+    let home = aibus_testkit::xdg_temp();
+    let dir = sessions(&home);
+    for round in 0..40 {
+        let ids = [
+            format!("01JCRACE{round:02}00000000000000A"),
+            format!("01JCRACE{round:02}00000000000000B"),
+        ];
+        let opened: Vec<Endpoint> = std::thread::scope(|s| {
+            let hs: Vec<_> = ids
+                .iter()
+                .map(|id| {
+                    let dir = dir.clone();
+                    s.spawn(move || Endpoint::open(&dir, id, &info(id)).unwrap())
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for ep in &opened {
+            assert!(
+                ep.socket().exists(),
+                "round {round}: {} was swept",
+                ep.socket().display()
+            );
+            assert!(
+                ep.token_file().exists() && ep.info_file().exists(),
+                "round {round}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dropping_an_endpoint_never_removes_a_socket_it_did_not_make() {
+    let home = aibus_testkit::xdg_temp();
+    let dir = sessions(&home);
+    let ep = Endpoint::open(&dir, "01JCMINE00000000000000000A", &info("x")).unwrap();
+    // Somebody replaced the file at our path (a new session with the same id after a sweep).
+    std::fs::remove_file(ep.socket()).unwrap();
+    let theirs = std::os::unix::net::UnixListener::bind(ep.socket()).unwrap();
+    let path = ep.socket();
+    drop(ep);
+    assert!(path.exists(), "the other socket was removed");
+    drop(theirs);
+}

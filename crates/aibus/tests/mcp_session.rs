@@ -263,3 +263,43 @@ fn every_session_flag_is_on_the_help_text() {
         assert!(top.contains(flag), "{flag} is not in `aibus --help`");
     }
 }
+
+/// Review of #276: the four tools that change a live session go through `--confirm elicit` on
+/// the real call path, and reading does not; nothing reaches the session before the answer.
+#[test]
+fn a_client_that_can_be_asked_confirms_a_change_by_retyping_the_tail_of_the_id() {
+    let home = xdg_temp();
+    let rt = runtime();
+    let seen: Seen = Arc::default();
+    let id = "01JCASK0000000000000000XYZ";
+    let _ep = session(&rt, home.path(), id, seen.clone());
+    let mut cmd = mcp_command(
+        home.path(),
+        &["--allow", "session-send", "--allow", "session-status"],
+    );
+    cmd.env("XDG_RUNTIME_DIR", run_dir(home.path()));
+    let mut c = McpClient::spawn(cmd, Protocol::V2026_07_28, home.path());
+    c.capabilities = json!({ "elicitation": { "form": {} } });
+    let read = c.call("session_status", json!({})).unwrap();
+    assert_ne!(read["resultType"], "input_required", "{read}");
+    let first = c.call("session_send", json!({"text": "fix it"})).unwrap();
+    assert_eq!(first["resultType"], "input_required", "{first}");
+    assert!(first.to_string().contains(&id[id.len() - 8..]), "{first}");
+    assert!(
+        !seen.lock().unwrap().iter().any(|l| l.contains("fix it")),
+        "sent before the answer"
+    );
+    let state = first["requestState"].as_str().unwrap().to_owned();
+    let done = c
+        .request(
+            "tools/call",
+            json!({
+                "name": "session_send", "arguments": {"text": "fix it"}, "requestState": state,
+                "inputResponses": { "confirm": { "action": "accept", "content": { "name": &id[id.len() - 8..] } } },
+            }),
+        )
+        .unwrap();
+    assert_ne!(done["isError"], true, "{done}");
+    assert!(wait_for(&seen, "fix it"), "{:?}", seen.lock().unwrap());
+    c.finish();
+}

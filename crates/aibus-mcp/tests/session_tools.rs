@@ -304,14 +304,14 @@ fn a_session_call_leaves_an_audit_line_tagged_with_the_session() {
 }
 
 #[test]
-fn the_confirmation_asks_to_retype_the_session_short_id() {
+fn the_confirmation_asks_to_retype_the_random_tail_of_the_session_id() {
     let (s, _home, _) = server(&["session-send", "session-status"], Redactor::new());
     let a = json!({"text": "fix it"});
     let form = s
         .confirmation_form("session_send", &a)
         .expect("a form for a change");
     let shown = serde_json::to_string(&form).unwrap();
-    assert!(shown.contains(&SESSION[..8]), "{shown}");
+    assert!(shown.contains(&SESSION[SESSION.len() - 8..]), "{shown}");
     assert!(
         s.confirmation_form("session_status", &json!({})).is_none(),
         "reading asks nothing"
@@ -320,9 +320,9 @@ fn the_confirmation_asks_to_retype_the_session_short_id() {
         ElicitResult::new(ElicitationAction::Accept).with_content(json!({"name": typed}))
     };
     assert!(s
-        .confirmation_check("session_send", &a, &answer(&SESSION[..8]))
+        .confirmation_check("session_send", &a, &answer(&SESSION[SESSION.len() - 8..]))
         .is_ok());
     assert!(s
-        .confirmation_check("session_send", &a, &answer("01JCXXXX"))
+        .confirmation_check("session_send", &a, &answer(&SESSION[..8]))
         .is_err());
 }

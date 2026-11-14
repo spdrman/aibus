@@ -95,7 +95,6 @@ impl From<io::Error> for StoreError {
 }
 
 const EVENTS: &str = "events.jsonl";
-const PARSER: &str = "aibus-trace-store/1";
 
 /// One workflow run's trace directory, opened for appending by one writer.
 ///
@@ -224,6 +223,8 @@ impl TraceStore {
 
     /// An event about the trace itself (a repair, a budget), run-wide: the nil attempt.
     fn own_event(&self, kind: EventKind, visibility: Visibility, data: Value) -> TraceEvent {
+        const PARSER: &str = "aibus-trace-store/1";
+
         let attempt = AttemptRef {
             workflow_run_id: self.run.unwrap_or_else(Uuid::nil),
             attempt_id: Uuid::nil(),

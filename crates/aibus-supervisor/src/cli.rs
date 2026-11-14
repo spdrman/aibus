@@ -71,34 +71,33 @@ pub fn parse_version(out: &str) -> Option<Version> {
     ))
 }
 
-/// The flags aibus cannot run without.
-const REQUIRED: [&str; 5] = [
-    "--print",
-    "--output-format",
-    "--verbose",
-    "--permission-prompts",
-    "--setting-sources",
-];
-
-/// The help paragraph of `flag`: its line and the indented lines after it, up to the next option.
-fn paragraph<'a>(help: &'a str, flag: &str) -> Vec<&'a str> {
-    let mut lines = help.lines().skip_while(|l| {
-        let t = l.trim_start();
-        !(l.starts_with("  -")
-            && (t.starts_with(&format!("{flag} "))
-                || t.contains(&format!(", {flag} "))
-                || t == flag))
-    });
-    let Some(first) = lines.next() else {
-        return Vec::new();
-    };
-    let mut out = vec![first];
-    out.extend(lines.take_while(|l| !l.starts_with("  -") && !l.trim().is_empty()));
-    out
-}
-
 /// Checks `--version` and `--help` output.
 pub fn probe(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
+    /// The flags aibus cannot run without.
+    const REQUIRED: [&str; 5] = [
+        "--print",
+        "--output-format",
+        "--verbose",
+        "--permission-prompts",
+        "--setting-sources",
+    ];
+    /// The help paragraph of `flag`: its line and the indented lines after it, up to the next option.
+    fn paragraph<'a>(help: &'a str, flag: &str) -> Vec<&'a str> {
+        let mut lines = help.lines().skip_while(|l| {
+            let t = l.trim_start();
+            !(l.starts_with("  -")
+                && (t.starts_with(&format!("{flag} "))
+                    || t.contains(&format!(", {flag} "))
+                    || t == flag))
+        });
+        let Some(first) = lines.next() else {
+            return Vec::new();
+        };
+        let mut out = vec![first];
+        out.extend(lines.take_while(|l| !l.starts_with("  -") && !l.trim().is_empty()));
+        out
+    }
+
     let version = parse_version(version_out)
         .ok_or_else(|| ProbeError::Version(version_out.chars().take(80).collect()))?;
     if version < MIN_VERSION {
@@ -152,6 +151,41 @@ pub struct Discovery {
 /// other than this user or root), runs `--version` on the rest and chooses the first at or above
 /// `MIN_VERSION`. Every candidate stays in the result with its reason, so the user sees why.
 pub async fn discover(dirs: &[PathBuf], name: &str, env: &[(OsString, OsString)]) -> Discovery {
+    /// Why a resolved executable must not be run, if it must not.
+    fn unsafe_reason(real: &Path) -> Option<String> {
+        let meta = match std::fs::metadata(real) {
+            Ok(m) => m,
+            Err(e) => return Some(format!("cannot stat: {e}")),
+        };
+        if !meta.is_file() {
+            return Some("not a regular file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            let me = rustix::process::geteuid().as_raw();
+            let mode = meta.permissions().mode();
+            if mode & 0o111 == 0 {
+                return Some("not executable".into());
+            }
+            if mode & 0o022 != 0 {
+                return Some("writable by other users".into());
+            }
+            if meta.uid() != me && meta.uid() != 0 {
+                return Some(format!(
+                    "owned by uid {}, not this user or root",
+                    meta.uid()
+                ));
+            }
+            if let Some(parent) = real.parent().and_then(|p| std::fs::metadata(p).ok()) {
+                if parent.permissions().mode() & 0o022 != 0 {
+                    return Some("in a directory writable by other users".into());
+                }
+            }
+        }
+        None
+    }
+
     let mut candidates = Vec::new();
     for dir in dirs {
         let path = dir.join(name);
@@ -199,41 +233,6 @@ pub async fn discover(dirs: &[PathBuf], name: &str, env: &[(OsString, OsString)]
     }
     let chosen = candidates.iter().position(|c| c.verdict.is_ok());
     Discovery { candidates, chosen }
-}
-
-/// Why a resolved executable must not be run, if it must not.
-fn unsafe_reason(real: &Path) -> Option<String> {
-    let meta = match std::fs::metadata(real) {
-        Ok(m) => m,
-        Err(e) => return Some(format!("cannot stat: {e}")),
-    };
-    if !meta.is_file() {
-        return Some("not a regular file".into());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        let me = rustix::process::geteuid().as_raw();
-        let mode = meta.permissions().mode();
-        if mode & 0o111 == 0 {
-            return Some("not executable".into());
-        }
-        if mode & 0o022 != 0 {
-            return Some("writable by other users".into());
-        }
-        if meta.uid() != me && meta.uid() != 0 {
-            return Some(format!(
-                "owned by uid {}, not this user or root",
-                meta.uid()
-            ));
-        }
-        if let Some(parent) = real.parent().and_then(|p| std::fs::metadata(p).ok()) {
-            if parent.permissions().mode() & 0o022 != 0 {
-                return Some("in a directory writable by other users".into());
-            }
-        }
-    }
-    None
 }
 
 /// Runs `exe args` with exactly `env`, null stdin and no shell, and returns stdout (at most

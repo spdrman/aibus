@@ -123,7 +123,7 @@ async fn read_lines(
     }
     let last = match skipping {
         Some(bytes) => Some(Piece::TooLong(ch, bytes)),
-        None => (!line.is_empty()).then(|| Piece::Line(ch, line)),
+        None => (!line.is_empty()).then_some(Piece::Line(ch, line)),
     };
     if let Some(p) = last {
         let _ = tx.send(p).await;

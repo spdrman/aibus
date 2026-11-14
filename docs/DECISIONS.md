@@ -651,3 +651,26 @@ Snapshots: regenerated with `AIBUS_UPDATE_SNAPSHOTS=1` on arm64 (MERCURY) after 
 **Alternatives.** Open the menu on the press and ignore the release (what the issue offered): it changes nothing, the release was never used. Let the left click through as well: a click that dismisses a popup and also presses whatever is under it is how mis-clicks on buttons happen, so I left that alone.
 
 **Why.** A right click always means "this card", whether or not another menu is up, and that is what the issue expected. I could not tell what the one "opened, then gone 0.8 s later" in the second session was; the same toggle explains it if the click reached the loop late (the old menu was still on screen until it was handled), but I did not prove that.
+
+## D-282: The CLI supervisor and the evidence trace (#282)
+
+**Context.** EPIC A needs an official vendor CLI run as an external runtime and a trace aibus can trust and replay offline (spec A1.2). The spike (#281) gave the stream shapes and a list of traps. #282 left four questions open, and building it raised a few more.
+
+**Decision.**
+
+1. Two new crates: `aibus-trace` (envelope, store, projection) and `aibus-supervisor` (discovery, probes, env, host, the Claude Code normaliser). The inspector and durable state read traces without process code. `docs/spec/14-evidence-trace.md` has the design.
+2. The envelope is the spec's, schema version 1, plus `corroborates`, `native`, `source` and `data`. A second report of a fact is its own event pointing at the first, so duplicates and the hook channel add evidence and never count. Event ids are derived from the raw line, so appending is idempotent.
+3. The store is an append-only JSONL file per run, one write and `sync_data` per batch, a writer lock, a torn tail moved aside on open. Not SQLite and not Causl: an append-only file is the easiest thing to prove crash-safe and to read with no aibus at all.
+4. Redaction goes through the existing `aibus_core::Redactor`, inside the store, before every write. No second redactor.
+5. Payloads are off by default; the raw archive the spec asks for is the payload store under `Retain`, bounded by its byte budget.
+6. The attempt ends at process exit. Statuses: killed by anything but the user is `interrupted`, the user's stop is `cancelled`, children that die with the process are `inferred` stops.
+7. The prompt goes on stdin, never in argv (the same reason `aibus mcp` passes workflow inputs on stdin). `--permission-prompts none` always, no bypass flag ever, `--setting-sources` always explicit (the caller says which; `user` keeps a repo's own hooks out).
+8. The environment is an allowlist plus `CLAUDE_CONFIG_DIR`. Credential-shaped names are refused even when the caller asks for them, so an API key in aibus's environment never reaches the CLI. A user who signs the CLI in with an API key does that in the CLI's own config.
+9. The supervisor does not turn hooks on for a live run yet. The normaliser reads hook payloads and every spike fixture is tested with them, but the only tested way to enable hooks writes a project settings file, and the inline `--settings` route is untested (spike). #286 probes it.
+10. The extension id on events is `org.aibus.reference-cli`, provisional, because the spike found the Claude Code name cannot be part of an aibus product or feature name. The owner picks the final id in #286; it is one constant and a plain string in the trace.
+
+The open questions on #282: restart in A1.2 means a restart never corrupts the trace and appending carries on (sequence, lock, torn tail), and resuming aibus-owned steps is A2.4 (#289). The Causl durability check of spec 7.4 goes to #289, since this store does not use Causl. The replay command is `aibus runs replay` (#280's decision) and lands with #284; #282 ships the projection it calls.
+
+**Alternatives.** One crate (rejected: the inspector would pull in tokio's process code to read a file). SQLite for the trace (rejected for now: the session index already uses it, but a torn-tail-tolerant JSONL file has fewer ways to fail and is greppable; #289 can index it). Dropping duplicate hooks instead of keeping them as corroborations (rejected: the second channel is exactly what makes an edge `correlated`). Passing `ANTHROPIC_API_KEY` through on request (rejected: it would make aibus the one handing a credential to the CLI).
+
+**Why.** Every number and edge in the trace has to say where it came from and how sure aibus is, and nothing the vendor did not show may appear as if it had. Those two rules decided most of the above.

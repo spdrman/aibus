@@ -46,13 +46,6 @@ pub const PARSER: &str = "claude-code-stream-json/1";
 /// the final id is the owner's to pick in #286. A trace stores it as a plain string.
 pub const EXTENSION_ID: &str = "org.aibus.reference-cli";
 
-/// Entries the normaliser keeps across its maps and sets. Past this it stops learning new ids,
-/// says so once with a `gap_detected`, and carries on.
-const MAX_TRACKED: usize = 65_536;
-/// Exact duplicate lines are recognised within this many recent lines of the same channel.
-const DEDUP_WINDOW: usize = 4_096;
-/// Content blocks read from one message.
-const MAX_BLOCKS: usize = 1_024;
 /// Names and ids copied into an event are cut to this many bytes.
 const MAX_NAME: usize = 256;
 
@@ -211,6 +204,10 @@ impl Normalizer {
 
     /// Whether another id may be remembered; the first refusal adds one `gap_detected`.
     fn room(&mut self, l: &mut Line, out: &mut Vec<TraceEvent>) -> bool {
+        /// Entries the normaliser keeps across its maps and sets. Past this it stops learning new ids,
+        /// says so once with a `gap_detected`, and carries on.
+        const MAX_TRACKED: usize = 65_536;
+
         if self.tracked() < MAX_TRACKED {
             return true;
         }
@@ -244,6 +241,9 @@ impl Normalizer {
 
     /// Whether this exact line came through this channel recently.
     fn duplicate(&mut self, l: &Line) -> bool {
+        /// Exact duplicate lines are recognised within this many recent lines of the same channel.
+        const DEDUP_WINDOW: usize = 4_096;
+
         let (order, set) = self.recent.entry(l.channel).or_default();
         if set.contains(&l.sha) {
             return true;
@@ -649,6 +649,9 @@ impl Normalizer {
     }
 
     fn message(&mut self, l: &mut Line, v: &Value, role: &str, out: &mut Vec<TraceEvent>) {
+        /// Content blocks read from one message.
+        const MAX_BLOCKS: usize = 1_024;
+
         let via = text(v, "parent_tool_use_id");
         let named = text(v, "agent_id");
         let agent = named

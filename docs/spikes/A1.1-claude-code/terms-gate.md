@@ -42,7 +42,7 @@ Names (S1): "You can accurately say, in plain text, that your product has Claude
 
 | Use | Status on 2026-11-14 | Why |
 |---|---|---|
-| **Open-source, local, user's own unmodified `claude`, signed in with an API key / Console** | **Proceed (pool builds toward this)** | Matches S1/S5/S6's developer path exactly. aibus never sees the key; the CLI owns it |
+| **Open-source, local, user's own unmodified `claude`, signed in with an API key / Console** | **Proceed: this is what the pool builds toward** | Matches S1/S5/S6's developer path exactly. aibus never sees the key; the CLI owns it |
 | **Same, signed in with a claude.ai subscription (Pro/Max/Ultra)** | **Ambiguous: owner decision before aibus documents or advertises it** | S1 allows an end user to sign the unmodified binary in with their own subscription, even on a hosting platform. But S5 says third-party developers may not "offer claude.ai login or rate limits for their products" unless approved, S6 prefers API keys for third-party tools "including open-source projects" and may charge such use to usage credits, and S2 bars scripted access unless "explicitly permit[ted]". Whether a local tool that launches the user's own install is "offering" claude.ai login is exactly what the documents don't say |
 | aibus downloads, bundles or preinstalls Claude Code | **Blocked** | S1 requires the Commercial Terms plus the conditions above; S7 grants no redistribution right ("All rights reserved") |
 | Hosted aibus running Claude Code for users | **Blocked** | S1 names "hosted sandboxes or other agent infrastructure" as needing the Commercial Terms plus conditions |

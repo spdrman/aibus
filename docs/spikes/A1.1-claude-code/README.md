@@ -8,7 +8,7 @@ This is the spike for #281, the hard gate of EPIC A (#280). I ran it on 2026-11-
 | [subagents-vs-teams.md](subagents-vs-teams.md) | Normal subagents vs native agent teams, and the event/control paths that don't exist |
 | [terms-gate.md](terms-gate.md) | The dated terms/distribution gate |
 | [runs.md](runs.md) | Every CLI invocation with its flags, the harness, and the fixture manifest |
-| [`fixtures/claude-code/spike-281/`](../../../fixtures/claude-code/spike-281/) | The captured runs (sanitized paths only, otherwise byte for byte) |
+| [`fixtures/claude-code/spike-281/`](../../../fixtures/claude-code/spike-281/) | The captured runs: byte for byte apart from the path and identity rewrites listed in [runs.md](runs.md) |
 
 ## Recommendation: GO-WITH-CONDITIONS
 
@@ -24,7 +24,7 @@ Policy is where the conditions bite. Open-source local use where the user runs t
 2. **Naming (needs the owner).** Anthropic's legal page says you "can't use the Claude Code or Anthropic names ... as part of your own product, feature, or company name". The spec's extension id `org.aibus.claude-code` and package `aibus-claude-code` probably fall foul of that. Plain-text "runs Claude Code" is fine. #286 needs a different id.
 3. **Commercial, bundled and hosted release stay blocked** pending the review the spec asks for. Nothing in this spike is distribution clearance.
 4. **Pin and probe versions.** I tested 2.1.311 only. Optional flags have minimum versions (`--forward-subagent-text` needs 2.1.211, the `--agents` file form 2.1.281) and the headless docs say `--bare` "will become the default for `-p` in a future release". Bare mode never reads OAuth or the keychain, so that change would silently break subscription users. The adapter has to probe every version and fail loudly, never fall back.
-5. **Bounded environment must pass `CLAUDE_CONFIG_DIR` and drop the parent session's `CLAUDECODE` / `CLAUDE_CODE_*` variables.** The owner's real install lives in `~/.claude-b` (via `CLAUDE_CONFIG_DIR`). A naive `env_clear()` would have pointed the CLI at the wrong config dir.
+5. **Bounded environment must pass `CLAUDE_CONFIG_DIR` and drop `CLAUDECODE` / `CLAUDE_CODE_*` variables inherited from a parent Claude Code process.** The owner's install keeps its config in a non-default directory set by `CLAUDE_CONFIG_DIR`, so a naive `env_clear()` would have pointed the CLI at the wrong config dir.
 6. **Payloads stay local and opt-in**, with the redaction rules from spec 10.3, because hook and stream payloads carry file contents, prompts and absolute paths.
 
 ## Technical capability, in short
@@ -36,7 +36,7 @@ Policy is where the conditions bite. Open-source local use where the user runs t
 | Genuine parent delegation to two native subagents, IDs and hooks | Done, both background and foreground variants | `07-deleg`, `11-foreground` |
 | Normal subagents vs native agent teams | Teams don't spawn under `-p` (documented, and observed: a "team" request ran as two ordinary subagents) | `12`..`14` |
 | Dated terms/distribution gate | Done, commercial marked blocked | [terms-gate.md](terms-gate.md) |
-| Failure shapes for #282 | Permission denial, killed mid-run (truncated stream), multi-`result` background run | `09`, `10`, `07`/`08` |
+| Failure shapes for #282 | Permission denial, killed mid-delegation and killed after the children finished (truncated streams), multi-`result` background run | `09`, `15`, `10`, `07`/`08` |
 
 ## Things the next issues need to know
 
@@ -45,7 +45,7 @@ These change how #282 onwards should be built. The details are in [evidence.md](
 - **`result` isn't terminal.** With background subagents (the default when nothing is said) the lead ends its turn early, gets woken up by each completion, and one process prints two or three `result` events (`07`, `08`). The attempt ends at process exit, and the last `result` before exit is the real one.
 - **No timestamps on system and hook events.** Only `assistant`/`user` messages carry `timestamp`. `observed_at` has to come from aibus.
 - **Tool name drift inside one stream.** `system/init` lists the delegation tool as `Task` while the model calls it `Agent`.
-- **Children are in-process.** Sampling `ps` every 250 ms during `08` showed one `claude` process for the lead and both children. aibus can't signal a single native child; killing the process kills them all (`10`, no orphan left).
+- **Children are in-process.** Sampling `ps` during `08` and `15` showed one `claude` process for the lead and both children. aibus can't signal a single native child. Killing the process mid-delegation (`15`) left no `claude` process in any later sample and no completion event; that the children died with it is an inference from their having no process of their own.
 - **The host can't force foreground subagents.** `run_in_background` is a field the model fills in. Asking in the prompt worked (`11`), but that's a request, not a control.
 - **Costs are estimates.** `total_cost_usd` comes with `costBasis: "list"`. For a subscription user that's a list-price estimate, not a bill, so it's `estimated` under invariant 9.
 

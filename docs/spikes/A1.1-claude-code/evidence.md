@@ -47,8 +47,10 @@ So each child edge has at least two independent sources (stream IDs, and the hoo
 | Hook payloads | `agent_id`/`agent_type` on everything that fires inside a child; `tool_use_id`, `tool_input`, `tool_response`, `duration_ms` on tool hooks; `background_tasks` on `Stop`/`SubagentStop`; `agent_transcript_path` on `SubagentStop` | observed (hook channel) |
 | Stream task id = hook agent id | Same opaque string in two channels | correlated |
 | Denied tool | `system/permission_denied` (`tool_name`, `tool_use_id`, `decision_reason_type`, `decision_reason`), an error `tool_result`, `result.permission_denials[]`. `PreToolUse` fired and no `PostToolUse` did (`09`) | observed |
-| Lead and children share one OS process | `ps` sampled every 250 ms during `08`: one `claude` pid, parent = harness (`08-control.ps.txt`) | observed by the host, at a 250 ms sampling grain |
-| Killing the process ends the children | `10`: killed at 3 s, no `claude` process left 1 s later, stream ends mid-session with no final `result` after the restart and no `SessionEnd` | observed |
+| Lead and children share one OS process | `ps` sampled during `08` showed a single `claude` pid whose parent is the harness (`08-control.ps.txt`, deduplicated); the full series in `15-killed-midrun.ps.tsv` shows one `claude` pid in every sample (about every 300 ms) while both children were working | observed by the host, at roughly 300 ms grain |
+| Killing the process mid-delegation | `15`: killed at 2.2 s while reader-a had done one of three reads and reader-b none. The stream stops at L27 with no `task_notification`, no `result` and no `SessionEnd`, and the `ps` series shows no `claude` process in any sample from the first one after the kill until 2 s later | observed |
+| The children ended with it | They had no process of their own (row above), so nothing was left to keep running. No event says so, because the process that would have reported it is gone | inferred |
+| Killed after the children finished | `10`: killed at 3 s, after both `task_notification`s (L53, L58); the stream stops after a fresh `system/init` with no final `result` and no `SessionEnd` | observed |
 | Background completion re-enters the lead as a new prompt | `07` H29/H35 `UserPromptSubmit` whose prompt starts `<task-notification>`; a fresh `system/init` and an extra `result` per wake-up | observed |
 | Prompt asked for foreground, so children ran in foreground | `11` `run_in_background=false` in the tool input and `is_backgrounded=false`. That the prompt caused it is my reading | inferred |
 | Lead's answer about why no team formed (`14` L57) | Model-written text; it agrees with the docs but it isn't telemetry | inferred |
@@ -69,9 +71,9 @@ So each child edge has at least two independent sources (stream IDs, and the hoo
 - **Hook events in the stream interleave with the work they describe**, and `hook_started`/`hook_response` pairs overlap (`07` L11 to L14).
 - **`SessionStart` hook events show up even without `--include-hook-events`** (`08` L1, L2), which matches the CLI reference.
 - **Child text without `--forward-subagent-text`.** In `08` (background children, flag off) the children's tool calls and final text still appeared. The CLI reference says the flag matters for foreground children's text and thinking, so foreground runs need it if aibus wants the child's narrative.
-- **Truncation.** `10` ends after a `system/init` line with no `result`, so it has to become `interrupted` with `requires_reconciliation`, never `completed`.
+- **Truncation.** `10` ends after a `system/init` line with no final `result`, and `15` ends in the middle of a child's work with no `result` at all. Both have to become `interrupted` with `requires_reconciliation`, never `completed`.
 - **The `init` tool list uses `Task`, tool calls use `Agent`.** Normalise both to one name.
-- **`stderr` was empty in every run.** Errors and denials arrive as stream events.
+- **`stderr` was empty in every run** (the `.stderr.txt` files are committed, all zero bytes). Errors and denials arrive as stream events.
 
 ## Privacy observations
 

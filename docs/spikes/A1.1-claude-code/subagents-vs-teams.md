@@ -20,7 +20,7 @@ From https://code.claude.com/docs/en/sub-agents: subagents can nest "up to three
 |---|---|---|
 | `12-teams-probe` | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, default tools, trivial prompt | `system/init` tool list has `Task`, `SendMessage`, `ListAgents`, `TaskStop` and so on, with no team-creation tool |
 | `13-teams-control` | Same without the env var | Same tool list. Setting the variable changed nothing visible in `-p` |
-| `14-teams-attempt` | Env var set, prompt asks for a team with teammates `alpha` and `beta` | The lead called `Agent` twice with `name: "alpha"` / `"beta"`, `subagent_type: general-purpose`; both ran as `task_type: local_agent`, `spawn_depth: 1`, foreground. No team files, no teammate hooks seen (I hadn't subscribed to `TeammateIdle`/`TaskCreated`, so that part is untested rather than absent) |
+| `14-teams-attempt` | Env var set, prompt asks for a team with teammates `alpha` and `beta` | The lead called `Agent` twice with `name: "alpha"` / `"beta"`, `subagent_type: general-purpose`; both ran as `task_type: local_agent`, `spawn_depth: 1`, foreground. Team files not checked (they'd live in the config dir, which I didn't open). No teammate hooks seen, but I hadn't subscribed to `TeammateIdle`/`TaskCreated`, so that's untested rather than absent |
 
 So the docs and the runs agree: under `-p` you get subagents, whatever you ask for.
 
@@ -31,10 +31,10 @@ So the docs and the runs agree: under `-p` you get subagents, whatever you ask f
 | Available headless (`-p`) | Yes, observed | No: documented, and observed in `14` |
 | Enabled by | Always; custom ones via `--agents` JSON or agent files | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` plus an interactive session |
 | Process model | In the lead's process (one pid in `08`) | In-process or a separate pane per teammate (docs; not observed) |
-| Parent link in events | `task_started.tool_use_id`, child `parent_tool_use_id` and `agent_id` | Not observable headless. Docs mention `teammate_name`/`team_name` on task hooks, marked deprecated |
+| Parent link in events | `task_started.tool_use_id`, child `parent_tool_use_id` and `agent_id` | Not observable headless. Docs list `teammate_name` and `team_name` on task hooks, with `team_name` marked deprecated |
 | Lifecycle events | `task_started`, `task_progress`, `task_updated`, `task_notification`; hooks `SubagentStart`/`SubagentStop` | Hooks `TeammateIdle`, `TaskCreated`, `TaskCompleted`; `SubagentStart` fires per teammate message for in-process teammates (docs) |
 | Communication | Prompt in, final result out (one hand-back) | Shared task list plus mailboxes as files in the user's config dir |
-| Host control | Whole-process only: aibus can kill the `claude` process, which ends every child | Interactive terminal only |
+| Host control | Whole-process only: aibus can kill the `claude` process, and the children have no process of their own to survive it (`15`) | Interactive terminal only |
 | Resume | Not for aibus: `--no-session-persistence` in every run, and the spec forbids assuming vendor resume anyway | Docs: no resumption with in-process teammates |
 
 ## Unavailable event and control paths

@@ -493,6 +493,10 @@ if pty_available; then
   prompt267 "yy" $'yy\n' stay
   prompt267 "no" $'no\n' stay
   prompt267 "a leading space then y" $' y\n' stay
+  prompt267 "y then a trailing space" $'y \n' stay
+  prompt267 "yEs" $'yEs\n' stay
+  prompt267 "yeS" $'yeS\n' stay
+  prompt267 "YEs" $'YEs\n' stay
 else echo "SKIP: script(1) or timeout is missing, the push prompt tests do not run" >&2; fi
 
 # ---------- third review of #242: a hung ssh-keygen and signals (release.sh)

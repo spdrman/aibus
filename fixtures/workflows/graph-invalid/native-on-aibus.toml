@@ -1,0 +1,11 @@
+# expect: step 2: mode native needs a runtime with native_child_lineage, and aibus has none
+[[step]]
+id = "lead"
+agent = "general"
+prompt = "p {{input}}"
+
+[[step]]
+agent = "explore"
+parent = "lead"
+mode = "native"
+prompt = "q"

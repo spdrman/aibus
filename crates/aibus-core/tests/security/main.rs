@@ -15,3 +15,4 @@ mod environment;
 mod fuzz;
 mod redaction;
 mod sandbox;
+mod workflow_compile;

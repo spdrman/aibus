@@ -1,0 +1,24 @@
+# expect: route 1: when: `c` does not run before this route
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+
+[[step]]
+id = "c"
+agent = "explore"
+prompt = "r"
+
+[[route]]
+from = "a"
+to = "b"
+when = "a.completed && c.completed"
+
+[[route]]
+from = "b"
+to = "c"

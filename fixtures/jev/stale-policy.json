@@ -1,0 +1,18 @@
+{
+  "about": "A request made against another policy revision is not decided under this one.",
+  "request": {
+    "task_id": "lead",
+    "requires": ["one_shot"],
+    "candidates": ["aibus"],
+    "policy_revision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "budget_class": "bounded",
+    "risk_class": "read_only"
+  },
+  "decision": {
+    "selected_runtime": null,
+    "execution_mode": null,
+    "reason_code": "stale_policy",
+    "policy_evidence": ["policy_revision:sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+    "decision_source": "jev_deterministic"
+  }
+}

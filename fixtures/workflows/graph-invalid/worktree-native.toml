@@ -1,0 +1,14 @@
+# expect: step 2: isolation = "git_worktree" needs an aibus-managed step
+[[step]]
+id = "lead"
+agent = "general"
+runtime = "cli.claude"
+prompt = "p {{input}}"
+
+[[step]]
+agent = "explore"
+runtime = "cli.claude"
+parent = "lead"
+mode = "native"
+isolation = "git_worktree"
+prompt = "q"

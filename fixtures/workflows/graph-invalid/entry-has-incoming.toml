@@ -1,0 +1,18 @@
+# expect: route 1: the first step is where the workflow starts; only a loop (max_iterations) may go back to it
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+
+[[route]]
+from = "b"
+to = "a"
+
+[[route]]
+from = "a"
+to = "b"

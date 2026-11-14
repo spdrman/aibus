@@ -1,0 +1,13 @@
+# expect: step 2: a native subagent takes its task from its parent, so its prompt can't use {{...}}
+[[step]]
+id = "lead"
+agent = "general"
+runtime = "cli.claude"
+prompt = "p {{input}}"
+
+[[step]]
+agent = "explore"
+runtime = "cli.claude"
+parent = "lead"
+mode = "native"
+prompt = "Search for {{input}}"

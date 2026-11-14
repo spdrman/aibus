@@ -1,0 +1,18 @@
+{
+  "about": "Safety comes first: a risk class the policy does not know stops the decision.",
+  "request": {
+    "task_id": "lead",
+    "requires": ["one_shot"],
+    "candidates": ["aibus"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "bounded",
+    "risk_class": "whatever"
+  },
+  "decision": {
+    "selected_runtime": null,
+    "execution_mode": null,
+    "reason_code": "unknown_risk_class",
+    "policy_evidence": ["risk:whatever"],
+    "decision_source": "jev_deterministic"
+  }
+}

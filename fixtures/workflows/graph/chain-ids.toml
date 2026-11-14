@@ -1,0 +1,16 @@
+name = "chain-ids"
+revision = "1.1"
+description = "A plain chain that runs today: the same agent twice, told apart by id"
+
+[[step]]
+id = "draft"
+agent = "general"
+requires = ["repo_read"]
+prompt = "Draft a fix for: {{input}}"
+
+[[step]]
+id = "check"
+agent = "general"
+requires = ["repo_read"]
+prompt = "Check the draft against the task. Draft: {{steps.draft.summary}} Task: {{input}}"
+on_fail = "retry:1"

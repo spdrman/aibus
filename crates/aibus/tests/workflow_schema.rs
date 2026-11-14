@@ -78,3 +78,18 @@ fn the_schema_rejects_unknown_keys_at_every_level() {
         assert!(!schema_errors(text).is_empty(), "{text}");
     }
 }
+
+/// #283: the optional fields are in the same v1 schema, so every file in the new shape passes it,
+/// and a value outside one of its closed sets (a runtime, a capability) fails it as it fails parse.
+#[test]
+fn the_graph_fixtures_pass_the_v1_schema_and_closed_sets_are_enforced() {
+    for (file, text) in toml_files(&repo("fixtures/workflows/graph")) {
+        let errors = schema_errors(&text);
+        assert!(errors.is_empty(), "{file}: {errors:?}");
+    }
+    for file in ["unknown-runtime.toml", "unknown-capability.toml", "bad-schema-version.toml", "limits-zero.toml"] {
+        let text = std::fs::read_to_string(repo("fixtures/workflows/graph-invalid").join(file)).unwrap();
+        assert!(!schema_errors(&text).is_empty(), "{file} passes the schema");
+        assert!(Workflow::parse("t", &text).is_err(), "{file}");
+    }
+}

@@ -190,7 +190,9 @@ fn a_client_name_cannot_put_control_characters_on_screen() {
         "{text}"
     );
     for row in r.app.store.log_rows(200) {
-        let client = get(&row, "client").and_then(as_str).unwrap_or("");
+        let Some(client) = get(&row, "client").and_then(as_str) else {
+            continue;
+        };
         assert!(
             client
                 .chars()

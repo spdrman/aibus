@@ -1,15 +1,22 @@
 //! A client of `aibus mcp` driving this session (#274). Whatever it sends becomes the messages
 //! the keyboard would have produced for the same line, through the same parser (`commands::send`),
 //! and is stepped through the same `step` a key's messages take, wrapped in `Msg::Via` so the log,
-//! the run's meta and the transcript say who sent it. Three things stay the keyboard's: a
-//! permission prompt (unless the session was started with `--control-permission`), `/login`,
-//! which opens a masked key entry and with a key on the line is refused anyway, and ending the
-//! session (`/quit`, `/exit`, `/q`).
+//! the run's meta and the transcript say who sent it.
+//!
+//! What stays the keyboard's is decided by what a line would do (`effect`), never by the
+//! command's name, so an alias or a later command is covered: ending the session, any
+//! confirmation (`/logout`, `/clear`, `/cancel` on the lead), writing files, and opening,
+//! replacing or closing a screen while the user has one open or is typing (`busy`). A permission
+//! prompt is answered by a client only when the session was started with `--control-permission`,
+//! and `/login` opens a masked key entry, which is the keyboard's too.
 
 use aibus_core::remote::{Ask, Remote};
 use aibus_core::state::value::{as_list, as_str, get};
 use aibus_core::state::{run_key, PERMISSIONS_OPEN};
-use aibus_core::{AibusError, App, ClientEvent, Decision, ModelTarget, Msg, PermissionId, RunId};
+use aibus_core::{
+    AibusError, App, ClientEvent, Command, Decision, ModelTarget, Msg, PermissionId, RunId, Screen,
+    UiIntent, WorkflowFile,
+};
 use aibus_graph::{Graph, Value};
 use serde_json::{json, Value as Json};
 
@@ -26,12 +33,13 @@ const TRANSCRIPT_MAX: usize = 32 * 1024;
 /// Session log rows one read returns, newest last.
 const LOG_ROWS: usize = 200;
 
-/// The name a client gave, safe to draw: no control characters, at most 32 characters, and
-/// `client` when nothing is left.
+/// The name a client gave, safe to draw and to put in a Markdown heading: ASCII letters, digits,
+/// space, `.`, `_` and `-` only (no control, zero-width or bidi characters, no Markdown), at most
+/// 32 characters, and `client` when nothing is left.
 pub fn client_name(raw: &str) -> String {
     let name: String = raw
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
         .take(NAME_MAX)
         .collect();
     let name = name.trim();
@@ -40,6 +48,145 @@ pub fn client_name(raw: &str) -> String {
     } else {
         name.to_owned()
     }
+}
+
+/// What a message would do that a client may not do on its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Effect {
+    None,
+    /// Ends the session (or opens the outcome prompt on the way to ending it).
+    Quits,
+    /// Opens a confirmation, or is the destructive step one stands for.
+    Confirms,
+    /// Writes files: a workflow, a handoff, the ledger.
+    Writes,
+    /// Opens, replaces or closes a screen, or moves the keyboard's focus.
+    Screen,
+}
+
+/// What `m` would do. The matches name every variant on purpose: a new command or intent does
+/// not compile until somebody decides what it means for a client.
+fn effect(m: &Msg) -> Effect {
+    match m {
+        Msg::Command(c) => match c {
+            Command::Quit { .. } => Effect::Quits,
+            Command::OpenScreen(screen) => match screen {
+                Screen::ConfirmLogout(_) | Screen::ConfirmClear | Screen::ConfirmCancel(_) => {
+                    Effect::Confirms
+                }
+                Screen::Agents
+                | Screen::Accounts
+                | Screen::Models(_)
+                | Screen::Providers
+                | Screen::RunStatus(_)
+                | Screen::AdvisorStatus
+                | Screen::RouterStatus
+                | Screen::Cost
+                | Screen::Workflows
+                | Screen::WorkflowShow => Effect::Screen,
+            },
+            Command::Clear => Effect::Confirms,
+            Command::WorkflowFile(WorkflowFile::Save { .. })
+            | Command::LedgerUpdate { .. }
+            | Command::CreateHandoff { .. } => Effect::Writes,
+            Command::WorkflowAuthor { write, .. } => {
+                if *write {
+                    Effect::Writes
+                } else {
+                    Effect::None
+                }
+            }
+            // The loop answers these with a screen.
+            Command::WorkflowFile(WorkflowFile::List | WorkflowFile::Show(_)) => Effect::Screen,
+            Command::OpenTranscript(_)
+            | Command::CloseModal
+            | Command::OpenPalette
+            | Command::OpenHelp
+            | Command::Permission { .. }
+            | Command::Focus(_) => Effect::Screen,
+            Command::Delegate { .. }
+            | Command::Background { .. }
+            | Command::Fork { .. }
+            | Command::Cancel { .. }
+            | Command::Resume { .. }
+            | Command::SendMessage { .. }
+            | Command::Retry { .. }
+            | Command::Scroll(..)
+            | Command::Select(..)
+            | Command::PaletteText(_)
+            | Command::Workflow { .. }
+            | Command::Compact { .. }
+            | Command::LogFilter(_)
+            | Command::SetModel { .. } => Effect::None,
+        },
+        Msg::Ui(intent) => match intent {
+            UiIntent::Open(_)
+            | UiIntent::ShowPermission
+            | UiIntent::OpenMenu { .. }
+            | UiIntent::CloseMenu
+            | UiIntent::Transcript(_)
+            | UiIntent::Focus(_)
+            | UiIntent::FocusNext
+            | UiIntent::FocusPrev => Effect::Screen,
+            UiIntent::Select(..)
+            | UiIntent::Scroll { .. }
+            | UiIntent::ToggleRail
+            | UiIntent::SetRailWidth(_)
+            | UiIntent::SetLogRows(_)
+            | UiIntent::ToggleFollow
+            | UiIntent::MenuSelect(_)
+            | UiIntent::Mem(_)
+            | UiIntent::Loaded(_)
+            | UiIntent::Pick(_) => Effect::None,
+        },
+        Msg::Via { msg, .. } => effect(msg),
+        _ => Effect::None,
+    }
+}
+
+/// What the user is in the middle of, if anything: a screen or a menu open, a field being edited,
+/// the log filter or the prompt line being typed. A client may not open a screen under that.
+pub fn busy(cx: &Context, ui: &Ui) -> Option<&'static str> {
+    if cx.chrome.modal.is_some() {
+        Some("the user has a screen open")
+    } else if cx.chrome.menu_open {
+        Some("the user has a menu open")
+    } else if ui.entry.is_some() {
+        Some("the user is editing a field")
+    } else if ui.filter_edit {
+        Some("the user is typing the log filter")
+    } else if !ui.prompt.is_empty() {
+        Some("the user is typing on the prompt line")
+    } else {
+        None
+    }
+}
+
+/// The messages of a line a client sent, unless one of them would do what only the keyboard may.
+fn checked(line: &str, msgs: Vec<Msg>, busy: Option<&str>) -> Result<Vec<Msg>, String> {
+    let word = line.split_whitespace().next().unwrap_or(line);
+    let effects: Vec<Effect> = msgs.iter().map(effect).collect();
+    if effects.contains(&Effect::Quits) {
+        return Err(format!(
+            "{word} would end the session, and only the keyboard can do that"
+        ));
+    }
+    if effects.contains(&Effect::Confirms) {
+        return Err(format!(
+            "{word} asks for a confirmation, and only the keyboard can give one"
+        ));
+    }
+    if effects.contains(&Effect::Writes) {
+        return Err(format!(
+            "{word} writes files, which only the keyboard can do from a session"
+        ));
+    }
+    if let (true, Some(busy)) = (effects.contains(&Effect::Screen), busy) {
+        return Err(format!(
+            "{word} would open or change a screen while {busy}, so only the keyboard can do that now"
+        ));
+    }
+    Ok(msgs)
 }
 
 fn sent(s: Sent) -> Result<Vec<Msg>, String> {
@@ -78,8 +225,14 @@ fn resolve(run: Option<&str>, cx: &Context) -> Result<RunId, String> {
 }
 
 /// The messages `ask` stands for: what Enter on the prompt line gives for the same text, or what
-/// the permission modal's key gives. A read asks for none. `Err` is the sentence for the client.
-pub fn msgs(ask: &Ask, cx: &Context, permission: bool) -> Result<Vec<Msg>, String> {
+/// the permission modal's key gives. A read asks for none. `busy` is what the user is in the
+/// middle of (`busy()`). `Err` is the sentence for the client.
+pub fn msgs(
+    ask: &Ask,
+    cx: &Context,
+    permission: bool,
+    busy: Option<&str>,
+) -> Result<Vec<Msg>, String> {
     let env = cx.env(&cx.workflows);
     match ask {
         Ask::Status | Ask::Transcript { .. } => Ok(Vec::new()),
@@ -91,32 +244,20 @@ pub fn msgs(ask: &Ask, cx: &Context, permission: bool) -> Result<Vec<Msg>, Strin
             if text.starts_with('/') {
                 return Err("a slash line is a command: send it with session_command".into());
             }
-            sent(commands::send(text, &env))
+            checked(text, sent(commands::send(text, &env))?, busy)
         }
         Ask::Command { line } => {
             let line = line.trim();
             if !line.starts_with('/') {
                 return Err("a command is a slash line such as /model haiku; a prompt goes through session_send".into());
             }
-            let msgs = sent(commands::send(line, &env))?;
-            // Ending the session is the keyboard's alone: whatever command does it (`/quit`, its
-            // aliases, any later one), it is told by what it would do, not by its name.
-            if msgs
-                .iter()
-                .any(|m| matches!(m, Msg::Command(aibus_core::Command::Quit { .. })))
-            {
-                let word = line.split_whitespace().next().unwrap_or(line);
-                return Err(format!(
-                    "{word} would end the session, and only the keyboard can do that"
-                ));
-            }
-            Ok(msgs)
+            checked(line, sent(commands::send(line, &env))?, busy)
         }
-        // As typed: `/cancel` on the lead opens the confirmation at the keyboard.
-        Ask::Cancel { run } => sent(commands::send(
-            &format!("/cancel @{}", run_word(run)?),
-            &env,
-        )),
+        // As typed; on the lead that is a confirmation, so the keyboard's.
+        Ask::Cancel { run } => {
+            let line = format!("/cancel @{}", run_word(run)?);
+            checked(&line, sent(commands::send(&line, &env))?, busy)
+        }
         Ask::Permission { id, decision } => {
             if !permission {
                 return Err("a permission prompt is answered at the keyboard: this session was not started with --control-permission".into());
@@ -267,10 +408,25 @@ pub fn handle<G: Graph>(
         }
         Remote::Call { client, ask, reply } => {
             let name = client_name(&client);
+            // The socket gave up waiting (the loop was busy, an editor open): whatever it asked is
+            // dropped rather than done late, so a retry cannot do it twice.
+            if reply.is_closed() {
+                let why = "a call timed out before the session could take it, so nothing was done"
+                    .to_owned();
+                return step(
+                    app,
+                    Msg::Client {
+                        name,
+                        event: ClientEvent::Refused(why),
+                    },
+                );
+            }
+            let cx = Context::read(&app.graph);
+            let busy = busy(&cx, ui);
             let answer = match &ask {
                 Ask::Status => Ok(status(app, ui.remote.as_deref())),
                 Ask::Transcript { run } => transcript(app, run.as_deref()),
-                _ => match msgs(&ask, &Context::read(&app.graph), permission) {
+                _ => match msgs(&ask, &cx, permission, busy) {
                     Ok(msgs) => {
                         let n = msgs.len();
                         for m in msgs {

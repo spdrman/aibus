@@ -1106,6 +1106,12 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 r.queue_run(Queue::new(agent.as_str(), rest, true, Isolation::None, lead));
             } else {
                 r.log("info", "prompt for the running lead");
+                // A client's message shows in the lead's transcript with its badge (#274).
+                if let (Some(client), Some(lead)) =
+                    (r.via.clone(), as_list(r.cur(RUNS_ORDER)).first().and_then(as_str).map(str::to_owned))
+                {
+                    r.event(&lead, Ev::User(format!("[mcp {client}] {text}")));
+                }
             }
         }
         Msg::Command(c) => r.command(c),
@@ -1185,6 +1191,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 None => String::new(),
             };
             if !prompt.is_empty() {
+                // A task a client of `aibus mcp` gave wears its badge on screen too (#274).
+                let prompt = match get(&old, "client").and_then(as_str) {
+                    Some(client) => format!("[mcp {client}] {prompt}"),
+                    None => prompt,
+                };
                 r.event(&id, Ev::User(prompt));
             }
         }

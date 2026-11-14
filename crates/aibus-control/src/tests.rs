@@ -590,7 +590,7 @@ fn reconnecting_does_not_reset_the_limits() {
         let v = ask_line(&mut s, &mut r, json!({"id": i, "op": "send", "text": "go"}));
         assert_eq!(v["ok"], true, "{v}");
         drop((s, r));
-        assert!(wait_for(&l.seen, &format!("disconnected raw")));
+        assert!(wait_for(&l.seen, "disconnected raw"));
         l.seen.lock().unwrap().clear();
     }
     let (mut s, mut r) = hello(&ep);

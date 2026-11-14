@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::{check_private, client_name, file, uid, valid_id, LINE_MAX};
+use crate::{check_chain, client_name, file, uid, valid_id, LINE_MAX};
 
 /// How long a call waits for the session.
 const WAIT: Duration = Duration::from_secs(35);
@@ -29,14 +29,16 @@ pub struct Link {
     /// `--session <id>`.
     wanted: Option<String>,
     conn: Mutex<Option<Conn>>,
+    /// The user the socket, its token file and the process at the other end have to belong to.
+    pub(crate) uid: u32,
 }
 
-/// The token of session `id`: a file of this user that nobody else can read.
-fn token(dir: &Path, id: &str) -> io::Result<String> {
+/// The token of session `id`: a file of `owner` that nobody else can read.
+fn token(dir: &Path, id: &str, owner: u32) -> io::Result<String> {
     let path = file(dir, id, "token");
     let meta = std::fs::symlink_metadata(&path)?;
     if !meta.is_file()
-        || meta.uid() != uid()
+        || meta.uid() != owner
         || meta.permissions().mode() & 0o077 != 0
         || meta.len() > 256
     {
@@ -46,6 +48,28 @@ fn token(dir: &Path, id: &str) -> io::Result<String> {
         ));
     }
     Ok(std::fs::read_to_string(path)?.trim().to_owned())
+}
+
+/// The user at the other end of `stream`, from the kernel's peer credentials. The standard
+/// library does not offer them yet, so a tokio stream borrows a duplicate of the descriptor for
+/// the question; the throwaway runtime is shut down in the background, which is allowed even
+/// inside the server's own runtime.
+fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()?;
+    let asked = {
+        let _in = rt.enter();
+        let dup = stream.try_clone()?;
+        dup.set_nonblocking(true)?;
+        let uid = tokio::net::UnixStream::from_std(dup)
+            .and_then(|s| s.peer_cred())
+            .map(|c| c.uid());
+        stream.set_nonblocking(false)?;
+        uid
+    };
+    rt.shutdown_background();
+    asked
 }
 
 fn read_reply(reader: &mut BufReader<UnixStream>) -> io::Result<Value> {
@@ -74,6 +98,7 @@ impl Link {
             dir,
             wanted,
             conn: Mutex::new(None),
+            uid: uid(),
         }
     }
 
@@ -82,7 +107,7 @@ impl Link {
         if !self.dir.exists() {
             return Ok(Vec::new());
         }
-        check_private(&self.dir).map_err(|e| e.to_string())?;
+        check_chain(&self.dir).map_err(|e| e.to_string())?;
         let entries = std::fs::read_dir(&self.dir).map_err(|e| e.to_string())?;
         let mut found: Vec<Value> = entries
             .flatten()
@@ -107,11 +132,34 @@ impl Link {
         Ok(found)
     }
 
+    /// Connects to session `id` and says hello. The token is read only once the socket file and
+    /// the process behind it are known to be this user's, so it never goes to anybody else.
     fn connect(&self, id: &str, client: &str) -> Result<Conn, String> {
-        let token = token(&self.dir, id)
-            .map_err(|e| format!("cannot read the token of session {id}: {e}"))?;
-        let writer = UnixStream::connect(file(&self.dir, id, "sock"))
+        check_chain(&self.dir).map_err(|e| e.to_string())?;
+        let sock = file(&self.dir, id, "sock");
+        let meta = std::fs::symlink_metadata(&sock)
             .map_err(|e| format!("cannot reach session {id}: {e}"))?;
+        {
+            use std::os::unix::fs::FileTypeExt;
+            if !meta.file_type().is_socket() || meta.uid() != self.uid {
+                return Err(format!(
+                    "the socket of session {id} is not one owned by this user"
+                ));
+            }
+        }
+        let writer =
+            UnixStream::connect(&sock).map_err(|e| format!("cannot reach session {id}: {e}"))?;
+        match peer_uid(&writer) {
+            Ok(peer) if peer == self.uid => {}
+            Ok(peer) => {
+                return Err(format!(
+                    "the process behind session {id} is uid {peer}, not this user"
+                ))
+            }
+            Err(e) => return Err(format!("cannot tell who is behind session {id}: {e}")),
+        }
+        let token = token(&self.dir, id, self.uid)
+            .map_err(|e| format!("cannot read the token of session {id}: {e}"))?;
         writer
             .set_read_timeout(Some(WAIT))
             .map_err(|e| e.to_string())?;

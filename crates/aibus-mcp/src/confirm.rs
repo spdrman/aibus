@@ -39,7 +39,7 @@ const GATED: [&str; 3] = ["workflow_create", "workflow_update", "workflow_run"];
 /// short id to retype in place of a workflow name.
 const SESSION_GATED: [&str; 4] = ["session_send", "session_command", "session_cancel", "session_permission"];
 
-/// How much of a session id the form asks for.
+/// How much of a session id the form asks for, from its end.
 const SESSION_SHORT: usize = 8;
 
 /// How long a legacy client has to answer the form.
@@ -169,12 +169,15 @@ impl Server {
         })
     }
 
-    /// What the form asks the user to retype: the workflow's name, or the first eight characters
-    /// of the live session's id.
+    /// What the form asks the user to retype: the workflow's name, or the last eight characters
+    /// (the random part) of the live session's id.
     fn confirmation_target(&self, tool: &str, args: &Value) -> Option<String> {
         if SESSION_GATED.contains(&tool) {
             let id = self.session.as_ref()?.target().ok()?;
-            return Some(id.chars().take(SESSION_SHORT).collect());
+            // The tail of a ulid is its random part; the head is a timestamp that sessions
+            // started minutes apart share.
+            let chars: Vec<char> = id.chars().collect();
+            return Some(chars[chars.len().saturating_sub(SESSION_SHORT)..].iter().collect());
         }
         args.get("name")?.as_str().filter(|n| !n.is_empty()).map(str::to_owned)
     }

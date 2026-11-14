@@ -1,9 +1,10 @@
 //! The session's end: the socket, its token and info files, and what a connection has to pass.
 
 use std::io;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream as StdStream;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -19,13 +20,15 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     check_private, client_name, file, private_dir, uid, valid_id, CHANGES_PER_MINUTE,
-    LINES_PER_MINUTE, LINE_MAX,
+    LINES_PER_MINUTE, LINE_MAX, PENDING_MAX,
 };
 
 /// How long a new connection has to say `hello`.
 const HELLO_WITHIN: Duration = Duration::from_secs(5);
 /// How long the session has to answer a call.
 const ANSWER_WITHIN: Duration = Duration::from_secs(30);
+/// How long a client may say nothing before it gives up the session for the next one.
+const IDLE: Duration = Duration::from_secs(10 * 60);
 
 /// The session's end of the control socket. Dropping it closes the socket and removes its three
 /// files.
@@ -35,6 +38,10 @@ pub struct Endpoint {
     token: String,
     /// The user a peer has to be.
     pub(crate) uid: u32,
+    /// How long a client may stay silent before its connection is closed.
+    pub(crate) idle: Duration,
+    /// The device and inode of the socket this endpoint made: only that file is ever removed.
+    made: (u64, u64),
     listener: Option<std::os::unix::net::UnixListener>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -106,8 +113,26 @@ impl Endpoint {
                 format!("session {id} is already live"),
             ));
         }
-        let listener = std::os::unix::net::UnixListener::bind(&sock)?;
-        std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
+        // Bound and listening under a name the sweep ignores, then linked to its real name, which
+        // fails if the name is taken: a session sweeping at the same moment never sees a socket
+        // that is bound but not yet listening, and never one of ours that is half made.
+        let nonce: String = rand::random::<[u8; 8]>()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let fresh = dir.join(format!("{id}.{nonce}.tmp"));
+        let listener = std::os::unix::net::UnixListener::bind(&fresh)?;
+        let linked = std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o600))
+            .and_then(|()| std::fs::hard_link(&fresh, &sock));
+        let _ = std::fs::remove_file(&fresh);
+        linked.map_err(|e| match e.kind() {
+            io::ErrorKind::AlreadyExists => io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!("session {id} is already live"),
+            ),
+            _ => e,
+        })?;
+        let meta = std::fs::symlink_metadata(&sock)?;
         listener.set_nonblocking(true)?;
         let token: String = rand::random::<[u8; 32]>()
             .iter()
@@ -118,6 +143,8 @@ impl Endpoint {
             id: id.to_owned(),
             token,
             uid: uid(),
+            idle: IDLE,
+            made: (meta.dev(), meta.ino()),
             listener: Some(listener),
             task: None,
         };
@@ -147,11 +174,17 @@ impl Endpoint {
             .take()
             .ok_or_else(|| io::Error::other("the endpoint is already served"))?;
         let listener = UnixListener::from_std(std)?;
+        let now = Instant::now();
         let shared = Arc::new(Shared {
             id: self.id.clone(),
             token: self.token.clone(),
             uid: self.uid,
+            idle: self.idle,
             busy: Mutex::new(None),
+            pending: AtomicUsize::new(0),
+            // The session's limits, not a connection's: reconnecting does not refill them.
+            lines: Mutex::new(RateLimiter::new(LINES_PER_MINUTE, now)),
+            changes: Mutex::new(RateLimiter::new(CHANGES_PER_MINUTE, now)),
             tx,
             redactor,
         });
@@ -159,6 +192,16 @@ impl Endpoint {
             loop {
                 match listener.accept().await {
                     Ok((stream, _)) => {
+                        // Connections that have not said hello yet are capped, so silent ones
+                        // cannot run the session out of file descriptors.
+                        if shared.pending.fetch_add(1, Ordering::SeqCst) >= PENDING_MAX {
+                            shared.pending.fetch_sub(1, Ordering::SeqCst);
+                            tokio::spawn(async move {
+                                let (_, mut w) = stream.into_split();
+                                let _ = say(&mut w, &json!({"ok": false, "error": "busy: too many connections waiting to say hello"})).await;
+                            });
+                            continue;
+                        }
                         tokio::spawn(connection(shared.clone(), stream));
                     }
                     Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
@@ -184,9 +227,12 @@ impl Drop for Endpoint {
         if let Some(task) = self.task.take() {
             task.abort();
         }
-        // Only files in a directory that is still ours; a removal that fails leaves a stale file
-        // the next session sweeps.
-        if check_private(&self.dir).is_ok() {
+        // Only in a directory that is still ours, and only when the socket at our name is still
+        // the one this endpoint made: a session with the same id that started after a sweep
+        // keeps its files. A removal that fails leaves a stale file the next session sweeps.
+        let ours =
+            std::fs::symlink_metadata(self.socket()).is_ok_and(|m| (m.dev(), m.ino()) == self.made);
+        if ours && check_private(&self.dir).is_ok() {
             for path in [self.socket(), self.token_file(), self.info_file()] {
                 let _ = std::fs::remove_file(path);
             }
@@ -198,8 +244,13 @@ struct Shared {
     id: String,
     token: String,
     uid: u32,
+    idle: Duration,
     /// The client that controls the session now.
     busy: Mutex<Option<String>>,
+    /// Connections that have not said hello yet.
+    pending: AtomicUsize,
+    lines: Mutex<RateLimiter>,
+    changes: Mutex<RateLimiter>,
     tx: mpsc::Sender<Remote>,
     redactor: Redactor,
 }
@@ -280,7 +331,17 @@ fn ask(v: &Value) -> Result<(Ask, bool), String> {
     })
 }
 
+/// Counts a connection as waiting for its hello until it is dropped.
+struct Waiting<'a>(&'a AtomicUsize);
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 async fn connection(shared: Arc<Shared>, stream: UnixStream) {
+    let waiting = Waiting(&shared.pending);
     // The kernel says who is at the other end; anybody but this user is turned away first.
     let mine = stream.peer_cred().is_ok_and(|c| c.uid() == shared.uid);
     let (r, mut w) = stream.into_split();
@@ -318,6 +379,7 @@ async fn connection(shared: Arc<Shared>, stream: UnixStream) {
         let _ = say(&mut w, &json!({"ok": false, "error": error})).await;
         return;
     }
+    drop(waiting);
     if shared
         .tx
         .send(Remote::Connected {
@@ -342,13 +404,25 @@ async fn serve_lines(
     r: &mut BufReader<OwnedReadHalf>,
     w: &mut OwnedWriteHalf,
 ) {
-    let mut lines = RateLimiter::new(LINES_PER_MINUTE, Instant::now());
-    let mut changes = RateLimiter::new(CHANGES_PER_MINUTE, Instant::now());
+    let take = |limiter: &Mutex<RateLimiter>| {
+        limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take(Instant::now())
+    };
     loop {
-        let line = match read_line(r).await {
-            Ok(Some(l)) => l,
-            Ok(None) | Err(None) => return,
-            Err(Some(TooLong)) => {
+        let line = match tokio::time::timeout(shared.idle, read_line(r)).await {
+            Err(_) => {
+                let error = format!(
+                    "idle for {} s, so the session is free for the next client; closing",
+                    shared.idle.as_secs()
+                );
+                let _ = say(w, &json!({"id": null, "ok": false, "error": error})).await;
+                return;
+            }
+            Ok(Ok(Some(l))) => l,
+            Ok(Ok(None) | Err(None)) => return,
+            Ok(Err(Some(TooLong))) => {
                 let error = format!("a line is at most {LINE_MAX} bytes; closing");
                 let _ = say(w, &json!({"id": null, "ok": false, "error": error})).await;
                 return;
@@ -359,12 +433,12 @@ async fn serve_lines(
         }
         let v: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
         let id = v.get("id").cloned().unwrap_or(Value::Null);
-        let answer = match (lines.take(Instant::now()), ask(&v)) {
+        let answer = match (take(&shared.lines), ask(&v)) {
             (Err(secs), _) => Err(format!(
                 "rate limit: at most {LINES_PER_MINUTE} lines a minute, try again in {secs} s"
             )),
             (_, Err(why)) => Err(why),
-            (Ok(()), Ok((_, true))) if changes.take(Instant::now()).is_err() => Err(format!(
+            (Ok(()), Ok((_, true))) if take(&shared.changes).is_err() => Err(format!(
                 "rate limit: at most {CHANGES_PER_MINUTE} changes to the session a minute"
             )),
             (Ok(()), Ok((ask, _))) => {
@@ -381,9 +455,14 @@ async fn serve_lines(
                 {
                     return;
                 }
+                // On a timeout the receiver is dropped here, and the loop drops the call
+                // instead of running it late.
                 match tokio::time::timeout(ANSWER_WITHIN, answered).await {
                     Ok(Ok(answer)) => answer,
-                    _ => Err("the session did not answer".into()),
+                    _ => Err(format!(
+                        "the session did not answer within {} s (it may be busy, an editor open), so nothing was done",
+                        ANSWER_WITHIN.as_secs()
+                    )),
                 }
             }
         };

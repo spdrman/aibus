@@ -92,7 +92,9 @@ impl Client {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
-        let mut child = cmd.spawn().map_err(|e| format!("could not start {}: {e}", cfg.command))?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("could not start {}: {e}", cfg.command))?;
         let pgid = child.id();
         let (Some(mut stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
@@ -106,7 +108,10 @@ impl Client {
         let kept = Arc::new(Mutex::new(Tail::new(STDERR_KEEP)));
         thread::spawn(move || {
             for line in lines {
-                if writeln!(stdin, "{line}").and_then(|()| stdin.flush()).is_err() {
+                if writeln!(stdin, "{line}")
+                    .and_then(|()| stdin.flush())
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -170,14 +175,23 @@ impl Client {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..MAX_PAGES {
-            let params = cursor.as_ref().map_or_else(|| json!({}), |c| json!({"cursor": c}));
-            let page = self.request("tools/list", params, self.timeout, None).await?;
+            let params = cursor
+                .as_ref()
+                .map_or_else(|| json!({}), |c| json!({"cursor": c}));
+            let page = self
+                .request("tools/list", params, self.timeout, None)
+                .await?;
             for t in page["tools"].as_array().into_iter().flatten() {
-                let Some(name) = t["name"].as_str() else { continue };
+                let Some(name) = t["name"].as_str() else {
+                    continue;
+                };
                 tools.push(Listed {
                     name: name.to_owned(),
                     description: t["description"].as_str().unwrap_or_default().to_owned(),
-                    schema: t.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                    schema: t
+                        .get("inputSchema")
+                        .cloned()
+                        .unwrap_or_else(|| json!({"type": "object"})),
                 });
             }
             cursor = page["nextCursor"].as_str().map(str::to_owned);
@@ -189,7 +203,9 @@ impl Client {
     }
 
     fn notify(&self, method: &str, params: Value) {
-        let _ = self.out.send(json!({"jsonrpc": "2.0", "method": method, "params": params}).to_string());
+        let _ = self
+            .out
+            .send(json!({"jsonrpc": "2.0", "method": method, "params": params}).to_string());
     }
 
     async fn request(
@@ -206,7 +222,8 @@ impl Client {
             lock(&self.pending).remove(&id);
             return Err(self.gone());
         }
-        let line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
+        let line =
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
         if self.out.send(line).is_err() {
             lock(&self.pending).remove(&id);
             return Err(self.gone());
@@ -245,10 +262,19 @@ impl Client {
     /// server has no such prompt, or no text in it).
     pub async fn prompt(&self, name: &str, arguments: Value) -> Result<String, String> {
         let got = self
-            .request("prompts/get", json!({"name": name, "arguments": arguments}), self.timeout, None)
+            .request(
+                "prompts/get",
+                json!({"name": name, "arguments": arguments}),
+                self.timeout,
+                None,
+            )
             .await?;
-        let text: Vec<&str> =
-            got["messages"].as_array().into_iter().flatten().filter_map(|m| m["content"]["text"].as_str()).collect();
+        let text: Vec<&str> = got["messages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m["content"]["text"].as_str())
+            .collect();
         if text.is_empty() {
             return Err(format!("the prompt {name} has no text"));
         }
@@ -263,15 +289,26 @@ impl Client {
         cancel: &CancellationToken,
     ) -> Result<(String, bool), String> {
         let result = self
-            .request("tools/call", json!({"name": tool, "arguments": arguments}), self.timeout, Some(cancel))
+            .request(
+                "tools/call",
+                json!({"name": tool, "arguments": arguments}),
+                self.timeout,
+                Some(cancel),
+            )
             .await?;
         let mut parts: Vec<String> = Vec::new();
         for c in result["content"].as_array().into_iter().flatten() {
             parts.push(match c["type"].as_str() {
                 Some("text") => c["text"].as_str().unwrap_or_default().to_owned(),
-                Some("resource") => c["resource"]["text"]
-                    .as_str()
-                    .map_or_else(|| format!("[resource {}]", c["resource"]["uri"].as_str().unwrap_or("?")), str::to_owned),
+                Some("resource") => c["resource"]["text"].as_str().map_or_else(
+                    || {
+                        format!(
+                            "[resource {}]",
+                            c["resource"]["uri"].as_str().unwrap_or("?")
+                        )
+                    },
+                    str::to_owned,
+                ),
                 Some(other) => format!("[{other} content left out]"),
                 None => c.to_string(),
             });
@@ -281,7 +318,10 @@ impl Client {
                 parts.push(s.to_string());
             }
         }
-        Ok((parts.join("\n"), result["isError"].as_bool().unwrap_or(false)))
+        Ok((
+            parts.join("\n"),
+            result["isError"].as_bool().unwrap_or(false),
+        ))
     }
 }
 
@@ -297,7 +337,9 @@ impl Drop for Client {
 /// One line from the server: a response goes to whoever waits for it, a request the client
 /// cannot serve is refused (`ping` is answered), a notification is ignored.
 fn answer(line: &str, pending: &Pending, out: &mpsc::Sender<String>) {
-    let Ok(msg) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(msg) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     let id = msg.get("id").cloned();
     match (msg.get("method").and_then(Value::as_str), id) {
         (Some(method), Some(id)) => {
@@ -309,9 +351,14 @@ fn answer(line: &str, pending: &Pending, out: &mpsc::Sender<String>) {
             let _ = out.send(reply.to_string());
         }
         (None, Some(id)) => {
-            let Some(tx) = id.as_u64().and_then(|i| lock(pending).remove(&i)) else { return };
+            let Some(tx) = id.as_u64().and_then(|i| lock(pending).remove(&i)) else {
+                return;
+            };
             let reply = match msg.get("error") {
-                Some(e) => Err(e["message"].as_str().unwrap_or("the server reported an error").to_owned()),
+                Some(e) => Err(e["message"]
+                    .as_str()
+                    .unwrap_or("the server reported an error")
+                    .to_owned()),
                 None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
             };
             let _ = tx.send(reply);
@@ -322,7 +369,17 @@ fn answer(line: &str, pending: &Pending, out: &mpsc::Sender<String>) {
 
 /// What the model calls a server's tool: letters, digits, `_` and `-` only, 64 at most.
 fn wire_name(server: &str, tool: &str) -> String {
-    let clean = |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>();
+    let clean = |s: &str| {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    };
     let mut name = format!("mcp__{}__{}", clean(server), clean(tool));
     name.truncate(WIRE_MAX);
     name

@@ -49,7 +49,11 @@ impl SseParser {
             if rest[at] == b'\r' && at + 1 == rest.len() {
                 break;
             }
-            let skip = if rest[at] == b'\r' && rest[at + 1] == b'\n' { 2 } else { 1 };
+            let skip = if rest[at] == b'\r' && rest[at + 1] == b'\n' {
+                2
+            } else {
+                1
+            };
             let line = std::str::from_utf8(&rest[..at])
                 .map_err(|_| SseError::Utf8)?
                 .to_owned();

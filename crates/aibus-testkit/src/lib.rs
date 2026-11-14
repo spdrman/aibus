@@ -20,7 +20,6 @@ use std::time::Duration;
 use aibus_provider::fake::FAKE_KEY;
 use aibus_provider::{AccountName, AuthMethodKind, Credential, Secret};
 
-
 /// Virtual time over `tokio::time::pause()`. Sleeps, timeouts and backoffs in the code under
 /// test finish as soon as every task is idle, and the clock jumps forward by exactly what
 /// they asked for, so five 30 s backoffs cost milliseconds of wall time.
@@ -63,21 +62,81 @@ impl Default for FakeClock {
 /// them, so a test that plants one and lets it reach a log line or a file fails on its own.
 /// `fixtures/redact/provider-errors.toml` must have a row for each (a test in `aibus-core` checks).
 pub const CREDENTIAL_KINDS: &[(&str, &str, Option<&str>)] = &[
-    ("anthropic-api-key", "sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P", Some("anthropic-key")),
-    ("openai-api-key", "sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12", Some("openai-project-key")),
-    ("oauth-access-token", "oat-Hq7Zk2Vm9Xc4Lp1Ws8Nd3Rf6Tb0Yg5Jx", None),
-    ("oauth-refresh-token", "rt-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf", None),
-    ("oauth-pkce-verifier", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", None),
-    ("oauth-authorization-code", "auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9", None),
-    ("oauth-device-code", "dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf", None),
-    ("aws-access-key-id", "AKIAIOSFODNN7EXAMPLE", Some("aws-access-key")),
-    ("aws-secret-access-key", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", None),
-    ("aws-session-token", "IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQD3ExampleSessionTokenOnly", None),
-    ("bedrock-api-key", "ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLTAxMjM0NTY3ODlhYmNkZWY", None),
-    ("vertex-access-token", "ya29.a0AfB_byC-Example0123456789abcdefGHIJKLmnopQRSTuv", Some("google-access-token")),
-    ("gemini-api-key", "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q", Some("google-api-key")),
-    ("openrouter-key", "sk-or-v1-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6MfZq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf", Some("openrouter-key")),
-    ("mcp-http-token", "3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9", None),
+    (
+        "anthropic-api-key",
+        "sk-ant-api03-Zq8wLm2Xv5Rt7Yb1Nc4Hd6Gf9Jk3P",
+        Some("anthropic-key"),
+    ),
+    (
+        "openai-api-key",
+        "sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv12",
+        Some("openai-project-key"),
+    ),
+    (
+        "oauth-access-token",
+        "oat-Hq7Zk2Vm9Xc4Lp1Ws8Nd3Rf6Tb0Yg5Jx",
+        None,
+    ),
+    (
+        "oauth-refresh-token",
+        "rt-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf",
+        None,
+    ),
+    (
+        "oauth-pkce-verifier",
+        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+        None,
+    ),
+    (
+        "oauth-authorization-code",
+        "auth-code-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9",
+        None,
+    ),
+    (
+        "oauth-device-code",
+        "dc-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf",
+        None,
+    ),
+    (
+        "aws-access-key-id",
+        "AKIAIOSFODNN7EXAMPLE",
+        Some("aws-access-key"),
+    ),
+    (
+        "aws-secret-access-key",
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        None,
+    ),
+    (
+        "aws-session-token",
+        "IQoJb3JpZ2luX2VjEJr//////////wEaCXVzLWVhc3QtMSJHMEUCIQD3ExampleSessionTokenOnly",
+        None,
+    ),
+    (
+        "bedrock-api-key",
+        "ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLTAxMjM0NTY3ODlhYmNkZWY",
+        None,
+    ),
+    (
+        "vertex-access-token",
+        "ya29.a0AfB_byC-Example0123456789abcdefGHIJKLmnopQRSTuv",
+        Some("google-access-token"),
+    ),
+    (
+        "gemini-api-key",
+        "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+        Some("google-api-key"),
+    ),
+    (
+        "openrouter-key",
+        "sk-or-v1-Zq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6MfZq81KpLw0Nn5Vd3Ey7Ux2Hc9Ta4Rb6Mf",
+        Some("openrouter-key"),
+    ),
+    (
+        "mcp-http-token",
+        "3b9f1c0a77d24e58a6c1f0e9d8b7a6954c3d2e1f00a9b8c7d6e5f4a3b2c1d0e9",
+        None,
+    ),
 ];
 
 /// Registers the kinds no pattern knows with `r`, the way the credential store does when it
@@ -162,7 +221,10 @@ pub fn capture_logs() -> LogCapture {
     });
     let buf: Buffer = Arc::default();
     let forbidden: Forbidden = Arc::new(Mutex::new(
-        std::iter::once(FAKE_KEY).chain(CREDENTIAL_KINDS.iter().map(|k| k.1)).map(str::to_owned).collect(),
+        std::iter::once(FAKE_KEY)
+            .chain(CREDENTIAL_KINDS.iter().map(|k| k.1))
+            .map(str::to_owned)
+            .collect(),
     ));
     ACTIVE.with(|a| {
         *a.borrow_mut() = Some(Active {
@@ -204,7 +266,10 @@ impl Drop for LogCapture {
         // `xdg_temp` did replaces the slot, and the older one must not clear the newer.
         ACTIVE.with(|a| {
             let mut slot = a.borrow_mut();
-            if slot.as_ref().is_some_and(|s| Arc::ptr_eq(&s.buf, &self.buf)) {
+            if slot
+                .as_ref()
+                .is_some_and(|s| Arc::ptr_eq(&s.buf, &self.buf))
+            {
                 *slot = None;
             }
         });

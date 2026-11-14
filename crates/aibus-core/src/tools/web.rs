@@ -50,7 +50,10 @@ struct FetchInput {
 /// An `http` or `https` URL with a host and no user name or password in it.
 fn check(url: &str) -> Result<(), ToolError> {
     let bad = |why: &str| Err(ToolError::Invalid(format!("url: {why}")));
-    let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")) else {
+    let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    else {
         return bad("only http and https are fetched");
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
@@ -76,18 +79,26 @@ fn html_text(html: &str) -> String {
         let rest = &lower[i..];
         if rest.starts_with("<!--") {
             i += rest.find("-->").map_or(rest.len(), |e| e + 3);
-        } else if let Some(skip) = ["script", "style"].iter().find(|t| {
-            rest.strip_prefix('<').is_some_and(|r| r.starts_with(**t))
-        }) {
+        } else if let Some(skip) = ["script", "style"]
+            .iter()
+            .find(|t| rest.strip_prefix('<').is_some_and(|r| r.starts_with(**t)))
+        {
             let close = format!("</{skip}");
             i += rest.find(&close).map_or(rest.len(), |e| e + close.len());
             i += lower[i..].find('>').map_or(lower.len() - i, |e| e + 1);
         } else if rest.starts_with('<') {
             // A tag ends at '>', a block-level one also ends the line.
             let end = rest.find('>').map_or(rest.len(), |e| e + 1);
-            let name = rest[1..end].trim_start_matches('/').split([' ', '>', '/']).next().unwrap_or_default();
-            if ["p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "pre"]
-                .contains(&name)
+            let name = rest[1..end]
+                .trim_start_matches('/')
+                .split([' ', '>', '/'])
+                .next()
+                .unwrap_or_default();
+            if [
+                "p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section",
+                "article", "pre",
+            ]
+            .contains(&name)
             {
                 out.push('\n');
             } else {
@@ -162,14 +173,26 @@ impl Tool for WebFetch {
         }
         .map_err(|e| ToolError::Invalid(format!("could not fetch {}: {e}", i.url)))?;
         if got.status >= 400 {
-            return Err(ToolError::Invalid(format!("{} answered {}", got.url, got.status)));
+            return Err(ToolError::Invalid(format!(
+                "{} answered {}",
+                got.url, got.status
+            )));
         }
         let kind = got.content_type.clone().unwrap_or_default();
-        let mime = kind.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+        let mime = kind
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
         let text = String::from_utf8_lossy(&got.body);
         let body = if mime.contains("html") {
             html_text(&text)
-        } else if mime.is_empty() || mime.starts_with("text/") || mime.contains("json") || mime.contains("xml") {
+        } else if mime.is_empty()
+            || mime.starts_with("text/")
+            || mime.contains("json")
+            || mime.contains("xml")
+        {
             text.into_owned()
         } else {
             return Err(ToolError::Invalid(format!("{mime} is not text")));
@@ -187,7 +210,11 @@ impl Tool for WebFetch {
         }
         out.push_str(&escape_markers(shown));
         if cut {
-            out.push_str(&format!("\n(cut at {} of {} bytes)", shown.len(), body.len()));
+            out.push_str(&format!(
+                "\n(cut at {} of {} bytes)",
+                shown.len(),
+                body.len()
+            ));
         }
         Ok(ToolOutput {
             content: out,
@@ -205,7 +232,14 @@ mod tests {
     fn only_plain_http_and_https_addresses_pass() {
         assert!(check("https://example.com/a?b=1").is_ok());
         assert!(check("http://localhost:8080").is_ok());
-        for bad in ["file:///etc/passwd", "ftp://x", "https://", "https://u:p@example.com/", "https://a b.com/", "example.com"] {
+        for bad in [
+            "file:///etc/passwd",
+            "ftp://x",
+            "https://",
+            "https://u:p@example.com/",
+            "https://a b.com/",
+            "example.com",
+        ] {
             assert!(check(bad).is_err(), "{bad}");
         }
     }

@@ -60,7 +60,13 @@ pub(crate) fn tools() -> Vec<Tool> {
         "required": ["agent", "prompt", "retries"],
         "additionalProperties": false,
     });
-    let read_only = || ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false);
+    let read_only = || {
+        ToolAnnotations::new()
+            .read_only(true)
+            .destructive(false)
+            .idempotent(true)
+            .open_world(false)
+    };
     vec![
         Tool::new(
             "workflow_get",
@@ -263,15 +269,30 @@ fn take(args: &Value, tool: &str, allowed: &[&str]) -> Result<Map<String, Value>
     let map = match args {
         Value::Null => Map::new(),
         Value::Object(m) => m.clone(),
-        _ => return Err(ErrorData::invalid_params(format!("{tool} takes an object"), None)),
+        _ => {
+            return Err(ErrorData::invalid_params(
+                format!("{tool} takes an object"),
+                None,
+            ))
+        }
     };
     if let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
         let extra = extra.chars().take(40).collect::<String>();
-        let takes = if allowed.is_empty() { "no arguments".to_owned() } else { allowed.join(", ") };
-        return Err(ErrorData::invalid_params(format!("{tool} takes {takes}, not {extra:?}"), None));
+        let takes = if allowed.is_empty() {
+            "no arguments".to_owned()
+        } else {
+            allowed.join(", ")
+        };
+        return Err(ErrorData::invalid_params(
+            format!("{tool} takes {takes}, not {extra:?}"),
+            None,
+        ));
     }
     if let Some((k, _)) = map.iter().find(|(_, v)| !v.is_string()) {
-        return Err(ErrorData::invalid_params(format!("{tool}: {k} must be a string"), None));
+        return Err(ErrorData::invalid_params(
+            format!("{tool}: {k} must be a string"),
+            None,
+        ));
     }
     Ok(map)
 }
@@ -329,8 +350,14 @@ impl Server {
     /// The agent definitions of this project and user, and the built-ins. A bad definition is
     /// skipped, as in the CLI. The server never reads `agents.extra_dirs`, which lives in config.
     fn discovered(&self) -> agent::discover::Discovered {
-        agent::discover::discover(None, &self.project, Some(&self.config.join("agents")), &[], &[])
-            .unwrap_or_default()
+        agent::discover::discover(
+            None,
+            &self.project,
+            Some(&self.config.join("agents")),
+            &[],
+            &[],
+        )
+        .unwrap_or_default()
     }
 
     /// The agents the CLI's `agent list --json` shows.
@@ -370,7 +397,9 @@ impl Server {
     ) -> Result<Option<(&'static str, PathBuf, String)>, ErrorData> {
         let sane = !name.is_empty()
             && name.len() <= 64
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
         if !sane {
             return Err(ErrorData::invalid_params(
                 "a workflow name is letters, digits, `-` and `_`, at most 64",
@@ -381,15 +410,25 @@ impl Server {
             None => &["project", "user"],
             Some("project") => &["project"],
             Some("user") => &["user"],
-            Some(_) => return Err(ErrorData::invalid_params("scope is `project` or `user`", None)),
+            Some(_) => {
+                return Err(ErrorData::invalid_params(
+                    "scope is `project` or `user`",
+                    None,
+                ))
+            }
         };
         let dirs = workflow::dirs(&self.project, Some(&self.config));
         for scope in scopes {
             let dir = &dirs[usize::from(*scope == "user")];
             let path = dir.join(format!("{name}.toml"));
-            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
             if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
-                return Err(ErrorData::invalid_params("that is not a plain workflow file of a sane size", None));
+                return Err(ErrorData::invalid_params(
+                    "that is not a plain workflow file of a sane size",
+                    None,
+                ));
             }
             if let Ok(text) = std::fs::read_to_string(&path) {
                 return Ok(Some((scope, path, text)));
@@ -406,17 +445,32 @@ impl Server {
             }
             "workflow_validate" => self.validate_tool(args),
             _ => {
-                let allowed: &[&str] = if name == "workflow_dry_run" { &["name", "scope", "input"] } else { &["name", "scope"] };
+                let allowed: &[&str] = if name == "workflow_dry_run" {
+                    &["name", "scope", "input"]
+                } else {
+                    &["name", "scope"]
+                };
                 let map = take(args, name, allowed)?;
                 let Some(wanted) = text_of(&map, "name") else {
-                    return Err(ErrorData::invalid_params(format!("{name} needs a name"), None));
+                    return Err(ErrorData::invalid_params(
+                        format!("{name} needs a name"),
+                        None,
+                    ));
                 };
                 let input = text_of(&map, "input");
                 if name == "workflow_dry_run" && input.is_none() {
-                    return Err(ErrorData::invalid_params("workflow_dry_run needs an input", None));
+                    return Err(ErrorData::invalid_params(
+                        "workflow_dry_run needs an input",
+                        None,
+                    ));
                 }
-                let Some((scope, path, text)) = self.workflow_file(wanted, text_of(&map, "scope"))? else {
-                    return Ok(failed(self, &format!("no workflow named {wanted} (workflow_list shows what exists)")));
+                let Some((scope, path, text)) =
+                    self.workflow_file(wanted, text_of(&map, "scope"))?
+                else {
+                    return Ok(failed(
+                        self,
+                        &format!("no workflow named {wanted} (workflow_list shows what exists)"),
+                    ));
                 };
                 let shown = self.shorten(&path.to_string_lossy().replace('\\', "/"));
                 let wf = match Workflow::parse(wanted, &text) {
@@ -456,15 +510,31 @@ impl Server {
         let map = take(args, "workflow_validate", &["name", "scope", "toml"])?;
         let (path, stem, text) = match (text_of(&map, "name"), text_of(&map, "toml")) {
             (Some(_), Some(_)) | (None, None) => {
-                return Err(ErrorData::invalid_params("workflow_validate takes either name or toml", None))
+                return Err(ErrorData::invalid_params(
+                    "workflow_validate takes either name or toml",
+                    None,
+                ))
             }
             (None, Some(draft)) => ("draft".to_owned(), "draft", draft.to_owned()),
             (Some(name), None) => match self.workflow_file(name, text_of(&map, "scope"))? {
-                None => return Ok(failed(self, &format!("no workflow named {name} (workflow_list shows what exists)"))),
-                Some((_, path, text)) => (self.shorten(&path.to_string_lossy().replace('\\', "/")), name, text),
+                None => {
+                    return Ok(failed(
+                        self,
+                        &format!("no workflow named {name} (workflow_list shows what exists)"),
+                    ))
+                }
+                Some((_, path, text)) => (
+                    self.shorten(&path.to_string_lossy().replace('\\', "/")),
+                    name,
+                    text,
+                ),
             },
         };
-        let roster: Vec<_> = self.agent_rows().iter().filter_map(|r| r["name"].as_str()?.parse().ok()).collect();
+        let roster: Vec<_> = self
+            .agent_rows()
+            .iter()
+            .filter_map(|r| r["name"].as_str()?.parse().ok())
+            .collect();
         let found = workflow::validate(&text, stem, &roster);
         let row = |p: &workflow::Problem| json!({ "path": path, "step": p.step, "field": p.field, "message": p.message });
         Ok(self.data_result(
@@ -485,7 +555,12 @@ impl Server {
             .enumerate()
             .map(|(i, (rendered, s))| {
                 let def = found.agents.get(&s.agent).map(to_json);
-                let field = |k: &str| def.as_ref().and_then(|d| d.get(k)).cloned().unwrap_or(Value::Null);
+                let field = |k: &str| {
+                    def.as_ref()
+                        .and_then(|d| d.get(k))
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                };
                 let mut step = json!({
                     "n": i + 1,
                     "prompt_rendered": rendered,
@@ -528,10 +603,18 @@ fn explain(wf: &Workflow) -> Value {
             // The latest earlier step of that agent: the one `steps.<agent>.summary` means.
             let (from, what) = match key.as_str() {
                 "input" => (0, "the workflow input".to_owned()),
-                "prev.summary" => (n - 1, format!("the summary of step {} ({})", n - 1, wf.steps[n - 2].agent)),
+                "prev.summary" => (
+                    n - 1,
+                    format!("the summary of step {} ({})", n - 1, wf.steps[n - 2].agent),
+                ),
                 other => {
-                    let agent = other.trim_start_matches("steps.").trim_end_matches(".summary");
-                    let from = wf.steps[..i].iter().rposition(|p| p.agent.as_str() == agent).map_or(0, |j| j + 1);
+                    let agent = other
+                        .trim_start_matches("steps.")
+                        .trim_end_matches(".summary");
+                    let from = wf.steps[..i]
+                        .iter()
+                        .rposition(|p| p.agent.as_str() == agent)
+                        .map_or(0, |j| j + 1);
                     (from, format!("the summary of step {from} ({agent})"))
                 }
             };

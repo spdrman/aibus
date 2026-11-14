@@ -55,12 +55,7 @@ pub fn clean_topic(raw: &str) -> Result<String, String> {
 impl Layout {
     /// The topic is `flag` (`--topic`); else the git branch when `continuity.topic = "branch"`;
     /// else the topic of the most recently modified ledger; else `general` (Q10).
-    pub fn new(
-        cwd: &Path,
-        cfg: &Config,
-        data: &Path,
-        flag: Option<&str>,
-    ) -> Result<Self, String> {
+    pub fn new(cwd: &Path, cfg: &Config, data: &Path, flag: Option<&str>) -> Result<Self, String> {
         let project = project_root(cwd).unwrap_or(cwd).to_path_buf();
         let dir = crate::persist::paths::continuity_dir(&project, &cfg.continuity.dir);
         let topic = match flag {
@@ -178,7 +173,11 @@ mod tests {
         cfg.continuity.topic = "branch".into();
         let l = Layout::new(dir.path(), &cfg, dir.path(), None).unwrap();
         assert_eq!(l.topic, "feature-login");
-        assert_eq!(l.ledger(), dir.path().join("thoughts/ledgers/CONTINUITY_feature-login.md"));
+        assert_eq!(
+            l.ledger(),
+            dir.path()
+                .join("thoughts/ledgers/CONTINUITY_feature-login.md")
+        );
         assert_eq!(
             l.handoff_dir(),
             dir.path().join("thoughts/shared/handoffs/feature-login")

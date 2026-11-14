@@ -28,7 +28,10 @@ fn server() -> (String, Arc<Mutex<Vec<String>>>) {
                 let head = String::from_utf8_lossy(&buf[..n]).into_owned();
                 let line = head.lines().next().unwrap_or_default().to_owned();
                 let (status, body) = if line.starts_with("GET ") {
-                    ("200 OK", r#"{"object":"list","data":[{"id":"llama3","object":"model"}]}"#)
+                    (
+                        "200 OK",
+                        r#"{"object":"list","data":[{"id":"llama3","object":"model"}]}"#,
+                    )
                 } else {
                     ("401 Unauthorized", r#"{"error":{"message":"bad key"}}"#)
                 };
@@ -50,13 +53,33 @@ fn account_add_verifies_the_key_over_http() {
     let (base, seen) = server();
     let out = command(home.path())
         .env("LOCAL_KEY", "sk-http-0123456789abcdef")
-        .args(["account", "add", "local", "--provider", "openai-compatible", "--base-url", &base, "--env", "LOCAL_KEY"])
+        .args([
+            "account",
+            "add",
+            "local",
+            "--provider",
+            "openai-compatible",
+            "--base-url",
+            &base,
+            "--env",
+            "LOCAL_KEY",
+        ])
         .output()
         .unwrap();
     let err = stderr(&out);
-    assert!(!err.contains("IO is disabled") && !err.contains("panicked"), "{err}");
+    assert!(
+        !err.contains("IO is disabled") && !err.contains("panicked"),
+        "{err}"
+    );
     assert_eq!(out.status.code(), Some(0), "{err}");
-    assert!(seen.lock().unwrap().iter().any(|l| l.starts_with("GET /v1/models")), "{:?}", seen.lock().unwrap());
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.starts_with("GET /v1/models")),
+        "{:?}",
+        seen.lock().unwrap()
+    );
 }
 
 #[test]
@@ -65,7 +88,17 @@ fn a_run_reaches_the_provider_over_http() {
     let (base, seen) = server();
     let added = command(home.path())
         .env("LOCAL_KEY", "sk-http-0123456789abcdef")
-        .args(["account", "add", "local", "--provider", "openai-compatible", "--base-url", &base, "--env", "LOCAL_KEY"])
+        .args([
+            "account",
+            "add",
+            "local",
+            "--provider",
+            "openai-compatible",
+            "--base-url",
+            &base,
+            "--env",
+            "LOCAL_KEY",
+        ])
         .output()
         .unwrap();
     assert_eq!(added.status.code(), Some(0), "{}", stderr(&added));
@@ -75,6 +108,13 @@ fn a_run_reaches_the_provider_over_http() {
         .output()
         .unwrap();
     let err = stderr(&out);
-    assert!(!err.contains("IO is disabled") && !err.contains("panicked"), "{err}");
-    assert!(seen.lock().unwrap().iter().any(|l| l.starts_with("POST ")), "the run never sent a request: {:?}", seen.lock().unwrap());
+    assert!(
+        !err.contains("IO is disabled") && !err.contains("panicked"),
+        "{err}"
+    );
+    assert!(
+        seen.lock().unwrap().iter().any(|l| l.starts_with("POST ")),
+        "the run never sent a request: {:?}",
+        seen.lock().unwrap()
+    );
 }

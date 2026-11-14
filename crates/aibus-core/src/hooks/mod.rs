@@ -23,9 +23,9 @@ use crate::ids::RunId;
 use crate::msg::{HookEvent, HookOutcome};
 use crate::persist::fs::{create_private_dir, write_private};
 use crate::redact::Redactor;
+use crate::tools::scrubbed_env;
 use crate::triggers::Triggers;
 use crate::workflow::GateVerdict;
-use crate::tools::scrubbed_env;
 
 /// What a hook is told. The fields every event carries (01 section 6.2) are named; the
 /// per-event extras (`tool_name`, `last_assistant_message`, `trigger`, ...) go in `extra`.
@@ -111,7 +111,12 @@ impl HookRunner {
         let global = hooks
             .events
             .iter()
-            .map(|(event, list)| (event.clone(), list.iter().filter_map(|h| h.spec().ok()).collect()))
+            .map(|(event, list)| {
+                (
+                    event.clone(),
+                    list.iter().filter_map(|h| h.spec().ok()).collect(),
+                )
+            })
             .collect();
         Self {
             enabled: true,
@@ -176,9 +181,9 @@ impl HookRunner {
         };
         match done.ended {
             exec::Ended::Cancelled => Err(HostError::Cancelled),
-            exec::Ended::TimedOut => {
-                Ok(GateVerdict::Block(format!("the gate timed out after {GATE_TIMEOUT_SECS} s")))
-            }
+            exec::Ended::TimedOut => Ok(GateVerdict::Block(format!(
+                "the gate timed out after {GATE_TIMEOUT_SECS} s"
+            ))),
             exec::Ended::Exited(Some(2)) => Ok(GateVerdict::Block(match done.stderr.trim() {
                 "" => "the gate exited 2".into(),
                 s => self.redact(s).into_owned(),
@@ -229,7 +234,9 @@ impl HookRunner {
         // Hints run nothing, so `--no-hooks` keeps them.
         if event == HookEvent::UserPromptSubmit {
             let prompt = input.extra.get("prompt").and_then(Value::as_str);
-            fired.context.extend(prompt.and_then(|p| self.triggers.hint(p)));
+            fired
+                .context
+                .extend(prompt.and_then(|p| self.triggers.hint(p)));
         }
         if !self.enabled {
             return fired;
@@ -250,8 +257,8 @@ impl HookRunner {
                 })
         };
         // A worker's `stop` is delivered as `subagent_stop` (01 section 6.1).
-        let alias = (event == HookEvent::SubagentStop && input.role == Role::Worker)
-            .then_some("stop");
+        let alias =
+            (event == HookEvent::SubagentStop && input.role == Role::Worker).then_some("stop");
         let specs: Vec<&HookSpec> = self
             .global
             .get(event.as_str())
@@ -271,7 +278,11 @@ impl HookRunner {
             // `prompt`, or the host of the URL (never its path or query).
             let name = match spec.kind {
                 HookKind::Command => {
-                    let first = spec.command.split_whitespace().next().unwrap_or(&spec.command);
+                    let first = spec
+                        .command
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(&spec.command);
                     Path::new(first)
                         .file_name()
                         .map_or(first, |f| f.to_str().unwrap_or(first))
@@ -279,7 +290,10 @@ impl HookRunner {
                 }
                 HookKind::Prompt => "prompt".to_owned(),
                 HookKind::Http => {
-                    let rest = spec.command.split_once("://").map_or(&*spec.command, |(_, r)| r);
+                    let rest = spec
+                        .command
+                        .split_once("://")
+                        .map_or(&*spec.command, |(_, r)| r);
                     let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
                     format!("http {}", host.rsplit('@').next().unwrap_or(host))
                 }
@@ -313,7 +327,8 @@ impl HookRunner {
                     remote::run(self.transport.get(), spec, &body, limit, cancel).await
                 }
             };
-            self.log(event.as_str(), &spec.command, &body, done.as_ref().ok()).await;
+            self.log(event.as_str(), &spec.command, &body, done.as_ref().ok())
+                .await;
 
             let (code, stdout, stderr) = match done {
                 Err(e) => {
@@ -360,9 +375,7 @@ impl HookRunner {
                         }
                         continue;
                     }
-                    exec::Ended::Exited(code) => {
-                        (code.unwrap_or(-1), d.stdout, d.stderr)
-                    }
+                    exec::Ended::Exited(code) => (code.unwrap_or(-1), d.stdout, d.stderr),
                 },
             };
 
@@ -381,7 +394,10 @@ impl HookRunner {
                     };
                     outcome.message = Some(reason.clone());
                     if event.can_block() {
-                        fired.block = Some(Blocked { hook: name.clone(), reason });
+                        fired.block = Some(Blocked {
+                            hook: name.clone(),
+                            reason,
+                        });
                     } else if !stderr.trim().is_empty() {
                         fired.notes.push(format!("[hook {name}] {reason}"));
                     }
@@ -510,4 +526,3 @@ impl HookRunner {
         }
     }
 }
-

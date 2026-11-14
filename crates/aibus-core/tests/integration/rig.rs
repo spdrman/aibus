@@ -236,7 +236,8 @@ impl Rig {
             fakes: Mutex::default(),
         });
         let mut app = app();
-        app.effects = Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
+        app.effects =
+            Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
         app.set_limits(&set.limits).unwrap();
         let all: Vec<AgentDef> = set.defs.values().cloned().collect();
         app.step(Msg::AgentsReloaded {
@@ -372,7 +373,13 @@ impl Rig {
 }
 
 pub fn conversation(rig: &Rig, run: RunId) -> String {
-    std::fs::read_to_string(rig.xdg.paths.state.join(format!("runs/{run}/conversation.jsonl"))).unwrap()
+    std::fs::read_to_string(
+        rig.xdg
+            .paths
+            .state
+            .join(format!("runs/{run}/conversation.jsonl")),
+    )
+    .unwrap()
 }
 
 // ---- fork -----------------------------------------------------------------------------------

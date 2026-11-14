@@ -8,7 +8,9 @@ use super::{SCHEMA, SCHEMA_VERSION};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum MigrateError {
-    #[error("the snapshot is from a newer aibus (schema {found}, this build reads up to {SCHEMA})")]
+    #[error(
+        "the snapshot is from a newer aibus (schema {found}, this build reads up to {SCHEMA})"
+    )]
     Newer { found: i64 },
     #[error("no migration from schema {0}")]
     Missing(i64),
@@ -42,7 +44,8 @@ pub fn chain(from: i64, mut snap: Snapshot) -> Result<Snapshot, MigrateError> {
             .ok_or(MigrateError::Missing(v))?;
         snap = step(snap)?;
     }
-    snap.inputs.insert(SCHEMA_VERSION.into(), Value::I64(SCHEMA));
+    snap.inputs
+        .insert(SCHEMA_VERSION.into(), Value::I64(SCHEMA));
     Ok(snap)
 }
 

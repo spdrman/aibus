@@ -215,9 +215,13 @@ fn the_tracing_layer_redacts_registered_secrets_and_patterns() {
     r.register(&AccountName("work".into()), "live-credential-123");
     let sink = Sink::default();
     let w = sink.clone();
-    let subscriber = tracing_subscriber::registry().with(aibus_core::redact::layer(r, move || w.clone()));
+    let subscriber =
+        tracing_subscriber::registry().with(aibus_core::redact::layer(r, move || w.clone()));
     tracing::subscriber::with_default(subscriber, || {
-        tracing::info!(key = "live-credential-123", "calling with live-credential-123");
+        tracing::info!(
+            key = "live-credential-123",
+            "calling with live-credential-123"
+        );
         tracing::warn!("saw Bearer abcdefghijklmnopqrstuvwxyz0123 in a header");
     });
     let out = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();

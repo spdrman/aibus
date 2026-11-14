@@ -98,7 +98,10 @@ mod tests {
                 role: MessageRole::User,
                 blocks: vec![
                     ContentBlock::Text("look".into()),
-                    ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"x") },
+                    ContentBlock::Image {
+                        media_type: "image/png".into(),
+                        data: bytes::Bytes::from_static(b"x"),
+                    },
                 ],
                 at: std::time::SystemTime::UNIX_EPOCH,
             }],
@@ -116,10 +119,20 @@ mod tests {
 
     #[test]
     fn degrade_runs_on_the_resolved_per_model_capabilities() {
-        let resolved = caps().with(&CapabilityOverrides { effort: Some(false), images: Some(false), ..CapabilityOverrides::default() });
+        let resolved = caps().with(&CapabilityOverrides {
+            effort: Some(false),
+            images: Some(false),
+            ..CapabilityOverrides::default()
+        });
         let out = resolved.degrade(req());
-        assert_eq!(out.effort, None, "this model takes no effort even though the provider does");
-        assert_eq!(out.messages[0].blocks[1], ContentBlock::Text("[image omitted]".into()));
+        assert_eq!(
+            out.effort, None,
+            "this model takes no effort even though the provider does"
+        );
+        assert_eq!(
+            out.messages[0].blocks[1],
+            ContentBlock::Text("[image omitted]".into())
+        );
     }
 
     #[test]
@@ -128,9 +141,18 @@ mod tests {
         assert_eq!((c.system_role, c.images), (SystemRole::FirstMessage, false));
         let out = c.degrade(req());
         assert!(out.system.is_empty());
-        assert_eq!(out.messages[0].blocks[0], ContentBlock::Text("Be terse.\n\n".into()));
-        assert!(!out.messages[0].blocks.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+        assert_eq!(
+            out.messages[0].blocks[0],
+            ContentBlock::Text("Be terse.\n\n".into())
+        );
+        assert!(!out.messages[0]
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. })));
         // Flags that are not about capabilities leave them alone.
-        assert_eq!(caps().with_compat(&[CompatFlag::NoStore, CompatFlag::NoToolChoice]), caps());
+        assert_eq!(
+            caps().with_compat(&[CompatFlag::NoStore, CompatFlag::NoToolChoice]),
+            caps()
+        );
     }
 }

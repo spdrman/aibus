@@ -117,7 +117,9 @@ fn target(dir: &std::path::Path, rel: &str) -> Result<PathBuf, ToolError> {
 
 fn too_long(text: &str) -> Result<(), ToolError> {
     if text.len() > MAX_TEXT {
-        return Err(ToolError::Invalid(format!("`text` is over {MAX_TEXT} bytes")));
+        return Err(ToolError::Invalid(format!(
+            "`text` is over {MAX_TEXT} bytes"
+        )));
     }
     Ok(())
 }
@@ -141,9 +143,10 @@ impl Tool for MemoryWrite {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "memory_write".into(),
-            description: "Create or replace a Markdown file in your memory directory. `MEMORY.md` is \
+            description:
+                "Create or replace a Markdown file in your memory directory. `MEMORY.md` is \
                 the index that is shown to you at the start of every run."
-                .into(),
+                    .into(),
             schema: schema(true),
         }
     }
@@ -204,8 +207,15 @@ impl Tool for MemoryAppend {
         blocking(move || {
             let path = target(&dir, &i.path)?;
             update_locked(&path, |old| {
-                let sep = if old.is_empty() || old.ends_with('\n') { "" } else { "\n" };
-                Ok(format!("{old}{sep}{text}{}", if text.ends_with('\n') { "" } else { "\n" }))
+                let sep = if old.is_empty() || old.ends_with('\n') {
+                    ""
+                } else {
+                    "\n"
+                };
+                Ok(format!(
+                    "{old}{sep}{text}{}",
+                    if text.ends_with('\n') { "" } else { "\n" }
+                ))
             })?;
             Ok(ToolOutput {
                 content: format!("appended to {}", i.path),

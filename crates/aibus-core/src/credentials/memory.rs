@@ -45,14 +45,17 @@ impl Keychain for MemoryKeychain {
 
     fn set(&self, service: &str, user: &str, secret: &Secret<String>) -> Result<(), KeychainError> {
         self.check()?;
-        self.entries()
-            .insert((service.to_owned(), user.to_owned()), secret.expose().clone());
+        self.entries().insert(
+            (service.to_owned(), user.to_owned()),
+            secret.expose().clone(),
+        );
         Ok(())
     }
 
     fn delete(&self, service: &str, user: &str) -> Result<(), KeychainError> {
         self.check()?;
-        self.entries().remove(&(service.to_owned(), user.to_owned()));
+        self.entries()
+            .remove(&(service.to_owned(), user.to_owned()));
         Ok(())
     }
 

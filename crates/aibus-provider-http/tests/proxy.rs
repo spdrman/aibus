@@ -21,7 +21,9 @@ async fn a_request_to_another_host_goes_through_the_proxy_from_the_environment()
 
     let http = Http::new();
     let resp = http
-        .send(&CancellationToken::new(), |c| c.get("http://upstream.example.test/v1/models"))
+        .send(&CancellationToken::new(), |c| {
+            c.get("http://upstream.example.test/v1/models")
+        })
         .await
         .unwrap();
     assert_eq!(resp.text().await.unwrap(), "via proxy");

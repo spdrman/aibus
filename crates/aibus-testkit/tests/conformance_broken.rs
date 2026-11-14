@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use aibus_provider::{
-    AccountInfo, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, Credential, ModelId,
-    ModelInfo, ModelRef, Price, Provider, ProviderConfig, ProviderError, ProviderFactory,
-    ProviderId, StopReason, StreamChunk, AliasTable,
+    AccountInfo, AliasTable, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, Credential,
+    ModelId, ModelInfo, ModelRef, Price, Provider, ProviderConfig, ProviderError, ProviderFactory,
+    ProviderId, StopReason, StreamChunk,
 };
 use aibus_testkit::capture_logs;
 use aibus_testkit::conformance::{check_case, Case, Expect, FakeServer, Fixture, Fixtures};
@@ -62,12 +62,18 @@ impl Provider for Broken {
                 self.inner.stream(creds, req, out, cancel).await
             }
             // A token nobody ever cancels: the call only ends when the server does.
-            Flaw::SwallowsCancel => self.inner.stream(creds, req, out, CancellationToken::new()).await,
+            Flaw::SwallowsCancel => {
+                self.inner
+                    .stream(creds, req, out, CancellationToken::new())
+                    .await
+            }
             Flaw::DropsToolUseEnd => {
                 let (tx, mut rx) = mpsc::channel(256);
                 let forward = async {
                     while let Some(c) = rx.recv().await {
-                        if !matches!(c, StreamChunk::ToolUseEnd { .. }) && out.send(c).await.is_err() {
+                        if !matches!(c, StreamChunk::ToolUseEnd { .. })
+                            && out.send(c).await.is_err()
+                        {
                             break;
                         }
                     }
@@ -76,7 +82,11 @@ impl Provider for Broken {
             }
         }
     }
-    async fn count_tokens(&self, creds: &Credential, req: &ChatRequest) -> Option<Result<u64, ProviderError>> {
+    async fn count_tokens(
+        &self,
+        creds: &Credential,
+        req: &ChatRequest,
+    ) -> Option<Result<u64, ProviderError>> {
         self.inner.count_tokens(creds, req).await
     }
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
@@ -88,7 +98,8 @@ impl Provider for Broken {
 }
 
 fn cassette(name: &str) -> Fixture {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../aibus-provider-anthropic/tests/cassettes");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../aibus-provider-anthropic/tests/cassettes");
     Fixture::load(&dir.join(format!("{name}.http")))
 }
 
@@ -97,13 +108,23 @@ fn case(which: &str) -> Case {
         "tool_use" => Case {
             name: "tool_use",
             fixture: cassette("tool_call"),
-            expect: Expect::Tools { calls: vec![("read_file", json!({"path": "src/main.rs"}))], min_fragments: 2 },
+            expect: Expect::Tools {
+                calls: vec![("read_file", json!({"path": "src/main.rs"}))],
+                min_fragments: 2,
+            },
         },
-        "cancel" => Case { name: "cancel", fixture: cassette("stream_text").hang_after(4), expect: Expect::Cancel },
+        "cancel" => Case {
+            name: "cancel",
+            fixture: cassette("stream_text").hang_after(4),
+            expect: Expect::Cancel,
+        },
         _ => Case {
             name: "text",
             fixture: cassette("stream_text"),
-            expect: Expect::Stream { text: Some("Hello, world"), stop: StopReason::EndTurn },
+            expect: Expect::Stream {
+                text: Some("Hello, world"),
+                stop: StopReason::EndTurn,
+            },
         },
     }
 }
@@ -112,10 +133,19 @@ fn case(which: &str) -> Case {
 async fn goes_red(flaw: Flaw, which: &'static str) -> bool {
     let server = FakeServer::start().await;
     let inner = aibus_provider_anthropic::Factory
-        .build(&ProviderConfig { base_url: Some(server.uri()), ..ProviderConfig::default() })
+        .build(&ProviderConfig {
+            base_url: Some(server.uri()),
+            ..ProviderConfig::default()
+        })
         .unwrap();
     let p: Arc<dyn Provider> = Arc::new(Broken { inner, flaw });
-    let f = Fixtures { model: "claude-sonnet-4-5", kind: AuthMethodKind::ApiKey, auth: Some(("x-api-key", "")), cases: vec![], skipped: vec![] };
+    let f = Fixtures {
+        model: "claude-sonnet-4-5",
+        kind: AuthMethodKind::ApiKey,
+        auth: Some(("x-api-key", "")),
+        cases: vec![],
+        skipped: vec![],
+    };
     // Spawned so the panic of a red case is caught; the capture lives inside the task so a
     // leaked key fails the case there and does not trip the test's own drop check.
     tokio::spawn(async move {

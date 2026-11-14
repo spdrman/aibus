@@ -84,7 +84,9 @@ fn epoch_secs(y: i64, m: i64, d: i64, hh: i64, mm: i64, ss: i64) -> i64 {
 }
 
 fn at_epoch(secs: i64) -> Option<SystemTime> {
-    u64::try_from(secs).ok().map(|s| UNIX_EPOCH + Duration::from_secs(s))
+    u64::try_from(secs)
+        .ok()
+        .map(|s| UNIX_EPOCH + Duration::from_secs(s))
 }
 
 /// An RFC 3339 timestamp (`2026-11-11T10:00:00Z`, optional fraction, `Z` or `+hh:mm`), as
@@ -101,7 +103,12 @@ pub fn parse_rfc3339(value: &str) -> Option<SystemTime> {
     let hh: i64 = c.next()?.parse().ok()?;
     let mm: i64 = c.next()?.parse().ok()?;
     let secs: f64 = c.next()?.parse().ok()?;
-    if !(1..=12).contains(&m) || !(1..=31).contains(&day) || hh > 23 || mm > 59 || !(0.0..61.0).contains(&secs) {
+    if !(1..=12).contains(&m)
+        || !(1..=31).contains(&day)
+        || hh > 23
+        || mm > 59
+        || !(0.0..61.0).contains(&secs)
+    {
         return None;
     }
     let off = match offset.as_bytes().first()? {
@@ -109,7 +116,11 @@ pub fn parse_rfc3339(value: &str) -> Option<SystemTime> {
         sign => {
             let (h, m) = offset[1..].split_once(':')?;
             let n = h.parse::<i64>().ok()? * 3600 + m.parse::<i64>().ok()? * 60;
-            if *sign == b'-' { -n } else { n }
+            if *sign == b'-' {
+                -n
+            } else {
+                n
+            }
         }
     };
     let whole = epoch_secs(y, m, day, hh, mm, secs.trunc() as i64) - off;
@@ -129,10 +140,16 @@ pub fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
             let day: i64 = p.next()?.parse().ok()?;
             let mon = p.next()?;
             let year: i64 = p.next()?.parse().ok()?;
-            let (hh, mm, ss): (i64, i64, i64) = (p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?);
-            let month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                .iter()
-                .position(|m| *m == mon)? as i64
+            let (hh, mm, ss): (i64, i64, i64) = (
+                p.next()?.parse().ok()?,
+                p.next()?.parse().ok()?,
+                p.next()?.parse().ok()?,
+            );
+            let month = [
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            ]
+            .iter()
+            .position(|m| *m == mon)? as i64
                 + 1;
             let then = epoch_secs(year, month, day, hh, mm, ss);
             let now = now.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
@@ -159,7 +176,13 @@ impl ProviderError {
         // The body's own code outranks the status: a spent quota arrives as a 429 and a
         // content filter as a 400, and neither is what its status alone says.
         let quota = status == 402
-            || ["insufficient_quota", "usage_limit_reached", "billing_error", "billing"].contains(&code.as_str())
+            || [
+                "insufficient_quota",
+                "usage_limit_reached",
+                "billing_error",
+                "billing",
+            ]
+            .contains(&code.as_str())
             || (status == 400 && lower.contains("credit balance is too low"));
         let filtered = code.contains("content_filter") || code.contains("content_policy");
         let context = [
@@ -257,14 +280,31 @@ mod tests {
     #[test]
     fn the_message_is_cut_and_never_empty_and_retry_after_parses_seconds() {
         let long = "x".repeat(2_000);
-        assert_eq!(ProviderError::from_http(400, &long, None, None, "").message.len(), 500);
-        assert_eq!(ProviderError::from_http(500, "", None, None, "").message, "HTTP 500");
+        assert_eq!(
+            ProviderError::from_http(400, &long, None, None, "")
+                .message
+                .len(),
+            500
+        );
+        assert_eq!(
+            ProviderError::from_http(500, "", None, None, "").message,
+            "HTTP 500"
+        );
         let now = UNIX_EPOCH;
-        assert_eq!(parse_retry_after(" 12 ", now), Some(Duration::from_secs(12)));
-        assert_eq!(parse_retry_after("1.5", now), Some(Duration::from_millis(1500)));
+        assert_eq!(
+            parse_retry_after(" 12 ", now),
+            Some(Duration::from_secs(12))
+        );
+        assert_eq!(
+            parse_retry_after("1.5", now),
+            Some(Duration::from_millis(1500))
+        );
         assert_eq!(parse_retry_after("-3", now), None);
         assert_eq!(parse_retry_after("soon", now), None);
-        assert_eq!(parse_retry_after("999999", now), Some(Duration::from_secs(3600)));
+        assert_eq!(
+            parse_retry_after("999999", now),
+            Some(Duration::from_secs(3600))
+        );
     }
 
     #[test]
@@ -272,18 +312,42 @@ mod tests {
         // 2026-10-21 07:28:00 UTC is 1_792_567_680 seconds after the epoch.
         let date = "Wed, 21 Oct 2026 07:28:00 GMT";
         let at = UNIX_EPOCH + Duration::from_secs(1_792_567_680);
-        assert_eq!(parse_retry_after(date, at - Duration::from_secs(90)), Some(Duration::from_secs(90)));
-        assert_eq!(parse_retry_after(date, at + Duration::from_secs(5)), Some(Duration::ZERO), "a past date is zero");
-        assert_eq!(parse_retry_after(date, at - Duration::from_secs(86_400)), Some(Duration::from_secs(3600)));
+        assert_eq!(
+            parse_retry_after(date, at - Duration::from_secs(90)),
+            Some(Duration::from_secs(90))
+        );
+        assert_eq!(
+            parse_retry_after(date, at + Duration::from_secs(5)),
+            Some(Duration::ZERO),
+            "a past date is zero"
+        );
+        assert_eq!(
+            parse_retry_after(date, at - Duration::from_secs(86_400)),
+            Some(Duration::from_secs(3600))
+        );
         assert_eq!(parse_retry_after("Wed, 21 Foo 2026 07:28:00 GMT", at), None);
     }
 
     #[test]
     fn rfc3339_timestamps_parse_with_fraction_and_offset() {
-        let t = |s| parse_rfc3339(s).unwrap().duration_since(UNIX_EPOCH).unwrap();
-        assert_eq!(t("2026-10-21T07:28:00Z"), Duration::from_secs(1_792_567_680));
-        assert_eq!(t("2026-10-21T07:28:00.500Z"), Duration::from_millis(1_792_567_680_500));
-        assert_eq!(t("2026-10-21T09:28:00+02:00"), Duration::from_secs(1_792_567_680));
+        let t = |s| {
+            parse_rfc3339(s)
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+        };
+        assert_eq!(
+            t("2026-10-21T07:28:00Z"),
+            Duration::from_secs(1_792_567_680)
+        );
+        assert_eq!(
+            t("2026-10-21T07:28:00.500Z"),
+            Duration::from_millis(1_792_567_680_500)
+        );
+        assert_eq!(
+            t("2026-10-21T09:28:00+02:00"),
+            Duration::from_secs(1_792_567_680)
+        );
         assert_eq!(parse_rfc3339("yesterday"), None);
         assert_eq!(parse_rfc3339("2026-13-01T00:00:00Z"), None);
     }
@@ -301,9 +365,21 @@ mod tests {
         assert_eq!(by_code(402, ""), (Quota, false));
         assert_eq!(by_code(400, "billing_error"), (Quota, false));
         assert_eq!(by_code(400, "content_filter"), (ContentFilter, false));
-        assert_eq!(by_code(400, "content_policy_violation"), (ContentFilter, false));
-        assert_eq!(by_code(400, "invalid_request_error"), (InvalidRequest, false));
-        assert_eq!(kind(400, "Your credit balance is too low to access the Anthropic API"), (Quota, false));
+        assert_eq!(
+            by_code(400, "content_policy_violation"),
+            (ContentFilter, false)
+        );
+        assert_eq!(
+            by_code(400, "invalid_request_error"),
+            (InvalidRequest, false)
+        );
+        assert_eq!(
+            kind(
+                400,
+                "Your credit balance is too low to access the Anthropic API"
+            ),
+            (Quota, false)
+        );
     }
 
     #[test]

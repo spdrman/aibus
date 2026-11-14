@@ -17,11 +17,17 @@ use crate::rig::*;
 async fn max_turns_yields_partial_and_resume_run_continues_with_history_intact() {
     let _clock = FakeClock::new();
     let mut set = Setup::default();
-    set.defs.get_mut(&"explore".parse::<AgentName>().unwrap()).unwrap().max_turns = Some(1);
+    set.defs
+        .get_mut(&"explore".parse::<AgentName>().unwrap())
+        .unwrap()
+        .max_turns = Some(1);
     let lead = script(
         delegate_call("explore", "list it", false)
             .into_iter()
-            .chain(call("resume_run", json!({"run": "explore", "message": "carry on", "background": false})))
+            .chain(call(
+                "resume_run",
+                json!({"run": "explore", "message": "carry on", "background": false}),
+            ))
             .chain([text("fin")]),
     );
     let mut rig = Rig::new(set, lead, |s| {
@@ -51,12 +57,16 @@ async fn max_turns_yields_partial_and_resume_run_continues_with_history_intact()
 
     // The resumed run saw: the task, its `ls` call, the result, and the new message.
     let m = &rig.child_requests(child)[0].request.messages;
-    assert_eq!(m.len(), 3, "{:?}", m.iter().map(|m| m.plain_text()).collect::<Vec<_>>());
+    assert_eq!(
+        m.len(),
+        3,
+        "{:?}",
+        m.iter().map(|m| m.plain_text()).collect::<Vec<_>>()
+    );
     assert!(matches!(m[1].blocks[0], ContentBlock::ToolUse { .. }));
-    assert!(m[2]
-        .blocks
-        .iter()
-        .any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("a.txt"))));
+    assert!(m[2].blocks.iter().any(
+        |b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("a.txt"))
+    ));
     assert!(m[2].plain_text().contains("carry on"));
 }
 
@@ -64,20 +74,37 @@ async fn max_turns_yields_partial_and_resume_run_continues_with_history_intact()
 async fn compaction_writes_an_auto_handoff_and_a_boundary_and_the_next_request_is_shorter() {
     let _clock = FakeClock::new();
     let lead = script(
-        [Step::Usage { input: 500, output: 5 }]
-            .into_iter()
-            .chain(call("ls", json!({"path": "."})))
-            .chain([Step::MatchPrompt {
-                contains: "Summarise the conversation below".into(),
-                then: vec![text("SUMMARY: listed the directory"), end()],
-            }])
-            .chain([text("done after compacting")]),
+        [Step::Usage {
+            input: 500,
+            output: 5,
+        }]
+        .into_iter()
+        .chain(call("ls", json!({"path": "."})))
+        .chain([Step::MatchPrompt {
+            contains: "Summarise the conversation below".into(),
+            then: vec![text("SUMMARY: listed the directory"), end()],
+        }])
+        .chain([text("done after compacting")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |_| script([text("unused")]));
     rig.auto_compact_at = Some(100);
     let layout = Layout::new(&rig.dir, &config::Config::default(), &rig.dir, Some("auth")).unwrap();
-    ledger::update(&layout, "goal", "Move auth to middleware", false, "2026-11-08").unwrap();
-    ledger::update(&layout, "in progress", "run the migration\nadd a test", false, "2026-11-08").unwrap();
+    ledger::update(
+        &layout,
+        "goal",
+        "Move auth to middleware",
+        false,
+        "2026-11-08",
+    )
+    .unwrap();
+    ledger::update(
+        &layout,
+        "in progress",
+        "run the migration\nadd a test",
+        false,
+        "2026-11-08",
+    )
+    .unwrap();
     rig.layout = Some(layout.clone());
     let out = rig.run("a long task").await;
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
@@ -92,14 +119,35 @@ async fn compaction_writes_an_auto_handoff_and_a_boundary_and_the_next_request_i
             _ => None,
         })
         .expect("a HandoffWritten");
-    let compacted = out.position(|m| matches!(m, Msg::Compacted { pre_tokens: 500, .. }));
+    let compacted = out.position(|m| {
+        matches!(
+            m,
+            Msg::Compacted {
+                pre_tokens: 500,
+                ..
+            }
+        )
+    });
     assert!(written < compacted);
     assert_eq!(path.parent().unwrap(), layout.handoff_dir());
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(name.starts_with("auto-handoff-") && name.ends_with(".yaml"), "{name}");
+    assert!(
+        name.starts_with("auto-handoff-") && name.ends_with(".yaml"),
+        "{name}"
+    );
     let h = Handoff::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!((h.goal(), h.now()), ("Move auth to middleware".to_owned(), "run the migration".to_owned()));
-    let latest = rig.app.graph.read_key("model:handoff:latest").expect("model:handoff:latest");
+    assert_eq!(
+        (h.goal(), h.now()),
+        (
+            "Move auth to middleware".to_owned(),
+            "run the migration".to_owned()
+        )
+    );
+    let latest = rig
+        .app
+        .graph
+        .read_key("model:handoff:latest")
+        .expect("model:handoff:latest");
     assert!(format!("{latest:?}").contains(&name), "{latest:?}");
 
     // The request after the boundary is the summary alone, so it is shorter than the history.
@@ -108,7 +156,9 @@ async fn compaction_writes_an_auto_handoff_and_a_boundary_and_the_next_request_i
     let before = reqs[0].request.messages.len() + 2;
     let after = &reqs[2].request.messages;
     assert!(after.len() < before, "{} vs {before}", after.len());
-    assert!(after[0].plain_text().contains("SUMMARY: listed the directory"));
+    assert!(after[0]
+        .plain_text()
+        .contains("SUMMARY: listed the directory"));
 
     // Nothing is lost on disk: one boundary, and both the first message and what came after.
     let saved = conversation(&rig, rig.lead);

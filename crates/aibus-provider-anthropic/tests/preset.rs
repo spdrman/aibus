@@ -20,11 +20,31 @@ async fn the_anthropic_preset_has_its_url_and_sends_the_key_in_x_api_key() {
     let mut def = p.clone();
     def.base_url = Some(server.uri());
     def.headers.insert("x-team".into(), "home".into());
-    let provider = Factory.build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap();
+    let provider = Factory
+        .build(&ProviderConfig {
+            def: Some(def),
+            ..ProviderConfig::default()
+        })
+        .unwrap();
 
-    let text = Fixture::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/stream_text.http"));
-    let fixtures = Fixtures { model: "claude-sonnet-4-5", kind: AuthMethodKind::ApiKey, auth: Some(("x-api-key", "")), cases: vec![], skipped: vec![] };
-    let case = Case { name: "text", fixture: text, expect: Expect::Stream { text: Some("Hello, world"), stop: StopReason::EndTurn } };
+    let text = Fixture::load(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/stream_text.http"),
+    );
+    let fixtures = Fixtures {
+        model: "claude-sonnet-4-5",
+        kind: AuthMethodKind::ApiKey,
+        auth: Some(("x-api-key", "")),
+        cases: vec![],
+        skipped: vec![],
+    };
+    let case = Case {
+        name: "text",
+        fixture: text,
+        expect: Expect::Stream {
+            text: Some("Hello, world"),
+            stop: StopReason::EndTurn,
+        },
+    };
     let _logs = capture_logs();
     check_case(&provider, &server, &fixtures, &case).await;
     let seen = &server.requests()[0];

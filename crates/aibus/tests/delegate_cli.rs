@@ -4,19 +4,27 @@ mod common;
 
 use std::fs;
 
-use common::{aibus, command, ndjson, stderr};
 use aibus_testkit::xdg_temp;
+use common::{aibus, command, ndjson, stderr};
 
 #[test]
 fn an_unknown_agent_exits_3() {
     let home = xdg_temp();
     let out = aibus(home.path(), &["run", "--agent", "nope", "hi"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
-    assert!(stderr(&out).contains("no agent named nope"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("no agent named nope"),
+        "{}",
+        stderr(&out)
+    );
 
     let out = aibus(home.path(), &["run", "@agent-nope look at this"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
-    assert!(stderr(&out).contains("no agent named nope"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("no agent named nope"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]
@@ -31,7 +39,11 @@ fn a_mention_delegates_and_the_lead_answers_with_the_result_in_hand() {
     let home = xdg_temp();
     let script = home.path().join("s.ron");
     // The scripted fake is shared: the child takes the first turn, the lead the second.
-    fs::write(&script, r#"[Text("the child report"), Stop(EndTurn), Text("all done")]"#).unwrap();
+    fs::write(
+        &script,
+        r#"[Text("the child report"), Stop(EndTurn), Text("all done")]"#,
+    )
+    .unwrap();
     let out = command(home.path())
         .args(["run", "--json", "--script"])
         .arg(&script)
@@ -50,11 +62,22 @@ fn a_mention_delegates_and_the_lead_answers_with_the_result_in_hand() {
     let done: Vec<(&str, &str)> = lines
         .iter()
         .filter(|l| l["type"] == "RunFinished")
-        .map(|l| (l["status"].as_str().unwrap(), l["summary"].as_str().unwrap()))
+        .map(|l| {
+            (
+                l["status"].as_str().unwrap(),
+                l["summary"].as_str().unwrap(),
+            )
+        })
         .collect();
-    assert_eq!(done, [("completed", "the child report"), ("completed", "all done")]);
+    assert_eq!(
+        done,
+        [("completed", "the child report"), ("completed", "all done")]
+    );
     // The lead called `delegate`, once, and got the child's report back as its result.
-    let req = lines.iter().find(|l| l["type"] == "ToolCallRequested").unwrap();
+    let req = lines
+        .iter()
+        .find(|l| l["type"] == "ToolCallRequested")
+        .unwrap();
     assert_eq!(req["call"]["name"], "delegate");
     assert_eq!(req["call"]["input"]["agent"], "explore");
     assert_eq!(req["call"]["input"]["prompt"], "map the repo");
@@ -89,7 +112,11 @@ fn agent_submits_its_initial_prompt() {
     assert_eq!(done["summary"], "matched");
 
     // Without `--agent` it is not sent, and an empty prompt is still a usage error.
-    let out = command(home.path()).args(["run", "--json", "--script"]).arg(&script).output().unwrap();
+    let out = command(home.path())
+        .args(["run", "--json", "--script"])
+        .arg(&script)
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
 }
 
@@ -116,7 +143,10 @@ fn a_prompt_on_the_command_line_follows_the_initial_prompt() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let done = ndjson(&out).into_iter().find(|l| l["type"] == "RunFinished").unwrap();
+    let done = ndjson(&out)
+        .into_iter()
+        .find(|l| l["type"] == "RunFinished")
+        .unwrap();
     assert_eq!(done["summary"], "both");
 }
 
@@ -147,6 +177,9 @@ fn a_depth_of_zero_takes_delegate_away_from_the_lead() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let done = ndjson(&out).into_iter().find(|l| l["type"] == "RunFinished").unwrap();
+    let done = ndjson(&out)
+        .into_iter()
+        .find(|l| l["type"] == "RunFinished")
+        .unwrap();
     assert_eq!(done["summary"], "on my own");
 }

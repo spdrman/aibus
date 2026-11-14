@@ -27,14 +27,22 @@ impl Fallback {
     /// `failed` gave `e` before anything reached the user. The account to try next, when `e` is
     /// a kind that moves, and one in the chain has not been `tried` this turn and is not itself
     /// cooling. `failed` is marked cooling only when there is somewhere to go.
-    pub fn next(&self, failed: &AccountName, tried: &[AccountName], e: &ProviderError) -> Option<ModelSwitch> {
+    pub fn next(
+        &self,
+        failed: &AccountName,
+        tried: &[AccountName],
+        e: &ProviderError,
+    ) -> Option<ModelSwitch> {
         let kind = FallbackKind::of(e.kind).filter(|k| self.on.contains(k))?;
-        let to = self
-            .chain
-            .iter()
-            .find(|s| s.account != *failed && !tried.contains(&s.account) && !self.accounts.cooled(&s.account))?;
+        let to = self.chain.iter().find(|s| {
+            s.account != *failed && !tried.contains(&s.account) && !self.accounts.cooled(&s.account)
+        })?;
         self.accounts.cool(failed, kind, e);
-        tracing::info!("account {failed} failed ({:?}), falling back to {}", e.kind, to.account);
+        tracing::info!(
+            "account {failed} failed ({:?}), falling back to {}",
+            e.kind,
+            to.account
+        );
         Some(to.clone())
     }
 }

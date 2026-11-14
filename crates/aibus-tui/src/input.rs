@@ -15,22 +15,25 @@ use std::time::{Duration, Instant};
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{run_key, PERMISSIONS_OPEN, RUNS_ORDER, WORKFLOWS};
 use aibus_core::{
-    Command, Decision, KeyCode, KeyEvent, ModelTarget, Msg, Outcome, Pane, PermissionId, RunId, RunStatus, Screen, Selection, TrOp, UiIntent,
+    Command, Decision, KeyCode, KeyEvent, ModelTarget, Msg, Outcome, Pane, PermissionId, RunId,
+    RunStatus, Screen, Selection, TrOp, UiIntent,
 };
 use aibus_graph::{Graph, Value};
 use aibus_provider::Secret;
 use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
+use crate::commands::{self, Env, Via};
 use crate::hit::{z, HitId, HitKind, Segment};
 use crate::keys::{Action, Ctx, Keymap};
 use crate::layout::{log_for_drag, rail_for_drag};
-use crate::commands::{self, Env, Via};
 use crate::prompt::{Prompt, Sent};
 use crate::screens::{Entry, EntryKind};
 use crate::transcript::Cells;
 use crate::ui::{Chrome, Drawn, Pointer};
 use crate::view::{CARDS, LOG_LINES, MENU_VIEW};
-use crate::views::{ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, PROVIDERS, TRANSCRIPT, WORKFLOWS_VIEW};
+use crate::views::{
+    ACCOUNTS_VIEW, AGENTS, MODELS, PALETTE, PERMISSION, PROVIDERS, TRANSCRIPT, WORKFLOWS_VIEW,
+};
 
 /// Two presses on the same thing this close together are a double click.
 pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -115,33 +118,49 @@ pub struct Context {
 impl Context {
     pub fn read<G: Graph>(g: &G) -> Self {
         let chrome = Chrome::read(g);
-        let run_of = |v: &Value, key: &str| get(v, key).and_then(as_str).and_then(|id| id.parse::<RunId>().ok());
+        let run_of = |v: &Value, key: &str| {
+            get(v, key)
+                .and_then(as_str)
+                .and_then(|id| id.parse::<RunId>().ok())
+        };
         let card_views = g.read_key(CARDS).map_or(&[][..], as_list);
         let cards: Vec<Option<RunId>> = card_views.iter().map(|c| run_of(c, "run_id")).collect();
-        let log_runs: Vec<Option<RunId>> =
-            g.read_key(LOG_LINES).map_or(&[][..], as_list).iter().map(|l| run_of(l, "run")).collect();
-        let menu = g.read_key(MENU_VIEW).filter(|m| !matches!(m, Value::Null)).and_then(|m| {
-            Some(Menu {
-                run: run_of(m, "run_id")?,
-                selected: usize::try_from(get(m, "selected").and_then(as_i64)?).ok()?,
-                items: as_list(get(m, "items")?)
-                    .iter()
-                    .map(|i| {
-                        (
-                            get(i, "id").and_then(as_str).unwrap_or("").to_owned(),
-                            matches!(get(i, "enabled"), Some(Value::Bool(true))),
-                        )
-                    })
-                    .collect(),
-            })
-        });
+        let log_runs: Vec<Option<RunId>> = g
+            .read_key(LOG_LINES)
+            .map_or(&[][..], as_list)
+            .iter()
+            .map(|l| run_of(l, "run"))
+            .collect();
+        let menu = g
+            .read_key(MENU_VIEW)
+            .filter(|m| !matches!(m, Value::Null))
+            .and_then(|m| {
+                Some(Menu {
+                    run: run_of(m, "run_id")?,
+                    selected: usize::try_from(get(m, "selected").and_then(as_i64)?).ok()?,
+                    items: as_list(get(m, "items")?)
+                        .iter()
+                        .map(|i| {
+                            (
+                                get(i, "id").and_then(as_str).unwrap_or("").to_owned(),
+                                matches!(get(i, "enabled"), Some(Value::Bool(true))),
+                            )
+                        })
+                        .collect(),
+                })
+            });
         let selected_run = cards.get(chrome.selected_card).copied().flatten();
         let lead_run = g
             .read_key(RUNS_ORDER)
             .map_or(&[][..], as_list)
             .iter()
             .filter_map(as_str)
-            .find(|id| g.read_key(&run_key(id, "meta")).and_then(|m| get(m, "role")).and_then(as_str) == Some("lead"))
+            .find(|id| {
+                g.read_key(&run_key(id, "meta"))
+                    .and_then(|m| get(m, "role"))
+                    .and_then(as_str)
+                    == Some("lead")
+            })
             .and_then(|id| id.parse().ok());
         let permission = g
             .read_key(PERMISSIONS_OPEN)
@@ -170,12 +189,23 @@ impl Context {
             .iter()
             .filter_map(|i| get(i, "id").and_then(as_str).map(str::to_owned))
             .collect();
-        let palette_text = palette_view.and_then(|p| get(p, "text")).and_then(as_str).unwrap_or("").to_owned();
-        let screen_sel = [PALETTE, AGENTS, ACCOUNTS_VIEW, MODELS, PROVIDERS, WORKFLOWS_VIEW]
-            .iter()
-            .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
-            .unwrap_or(0)
-            .max(0) as usize;
+        let palette_text = palette_view
+            .and_then(|p| get(p, "text"))
+            .and_then(as_str)
+            .unwrap_or("")
+            .to_owned();
+        let screen_sel = [
+            PALETTE,
+            AGENTS,
+            ACCOUNTS_VIEW,
+            MODELS,
+            PROVIDERS,
+            WORKFLOWS_VIEW,
+        ]
+        .iter()
+        .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
+        .unwrap_or(0)
+        .max(0) as usize;
         let agent_rows = view(AGENTS)
             .and_then(|a| get(a, "rows"))
             .map_or(&[][..], as_list)
@@ -205,7 +235,10 @@ impl Context {
             .iter()
             .filter_map(|r| get(r, "id").and_then(as_str).map(str::to_owned))
             .collect();
-        let models_target = view(MODELS).and_then(|a| get(a, "target")).and_then(as_str).and_then(ModelTarget::parse);
+        let models_target = view(MODELS)
+            .and_then(|a| get(a, "target"))
+            .and_then(as_str)
+            .and_then(ModelTarget::parse);
         let account_names = g
             .read_key(aibus_core::state::ACCOUNTS)
             .map_or(&[][..], as_list)
@@ -219,7 +252,10 @@ impl Context {
             .filter_map(|d| get(d, "name").and_then(as_str).map(str::to_owned))
             .collect();
         let workflow_values = g.read_key(WORKFLOWS).map_or(&[][..], as_list);
-        let workflow_rows = workflow_values.iter().filter_map(|w| get(w, "name").and_then(as_str).map(str::to_owned)).collect();
+        let workflow_rows = workflow_values
+            .iter()
+            .filter_map(|w| get(w, "name").and_then(as_str).map(str::to_owned))
+            .collect();
         let workflows = workflow_values
             .iter()
             .filter(|w| matches!(get(w, "error"), None | Some(Value::Null)))
@@ -231,20 +267,32 @@ impl Context {
             .iter()
             .filter_map(as_str)
             .filter_map(|id| {
-                let agent = g.read_key(&run_key(id, "meta")).and_then(|m| get(m, "agent")).and_then(as_str)?;
+                let agent = g
+                    .read_key(&run_key(id, "meta"))
+                    .and_then(|m| get(m, "agent"))
+                    .and_then(as_str)?;
                 Some((id.parse().ok()?, agent.to_owned()))
             })
             .collect();
         let states: Vec<(RunId, RunStatus)> = runs
             .iter()
             .filter_map(|(id, _)| {
-                let status = g.read_key(&run_key(id, "status")).and_then(as_str).and_then(RunStatus::parse)?;
+                let status = g
+                    .read_key(&run_key(id, "status"))
+                    .and_then(as_str)
+                    .and_then(RunStatus::parse)?;
                 Some((*id, status))
             })
             .collect();
         let any_runs = !g.read_key(RUNS_ORDER).map_or(&[][..], as_list).is_empty();
-        let permission_always = view(PERMISSION).and_then(|p| get(p, "always")).is_none_or(|a| matches!(a, Value::Bool(true)));
-        let permission_summary = view(PERMISSION).and_then(|p| get(p, "summary")).and_then(as_str).unwrap_or("").to_owned();
+        let permission_always = view(PERMISSION)
+            .and_then(|p| get(p, "always"))
+            .is_none_or(|a| matches!(a, Value::Bool(true)));
+        let permission_summary = view(PERMISSION)
+            .and_then(|p| get(p, "summary"))
+            .and_then(as_str)
+            .unwrap_or("")
+            .to_owned();
         Self {
             chrome,
             selected_run,
@@ -281,7 +329,9 @@ impl Context {
             agents: &self.agents,
             workflows,
             lead: self.lead_run,
-            focused: (self.chrome.focus == Pane::Cards).then_some(self.selected_run).flatten(),
+            focused: (self.chrome.focus == Pane::Cards)
+                .then_some(self.selected_run)
+                .flatten(),
             runs: &self.runs,
             states: &self.states,
             accounts: true,
@@ -292,7 +342,10 @@ impl Context {
 
     /// The run of the log line Enter and the menu key mean: the selected one, else the newest.
     pub fn log_run(&self) -> Option<RunId> {
-        let at = self.chrome.selected_log.unwrap_or(self.log_runs.len().saturating_sub(1));
+        let at = self
+            .chrome
+            .selected_log
+            .unwrap_or(self.log_runs.len().saturating_sub(1));
         self.log_runs.get(at).copied().flatten()
     }
 
@@ -331,7 +384,10 @@ pub enum Job {
     /// Write a template for a new agent and open it.
     NewAgent(String),
     /// Run the agent validator over the definition and report.
-    Validate { name: String, path: Option<PathBuf> },
+    Validate {
+        name: String,
+        path: Option<PathBuf>,
+    },
     Account(AccountOp),
 }
 
@@ -339,13 +395,20 @@ pub enum AccountOp {
     Test(String),
     /// The key was typed into a masked field and stays a `Secret` until the worker thread feeds
     /// it to the same code as `aibus account add`.
-    Add { name: String, provider: String, key: Secret<String> },
+    Add {
+        name: String,
+        provider: String,
+        key: Secret<String>,
+    },
     Disable(String),
     /// `/logout`: deletes the keychain entry when it is ours and the account from the config.
     Remove(String),
     /// The browser login of a provider whose definition carries a flow. What the flow says comes
     /// back as `Msg::AccountPrompt`, the end as `Msg::AccountOpDone`.
-    AddOauth { name: String, provider: String },
+    AddOauth {
+        name: String,
+        provider: String,
+    },
     /// `o` in the login modal: the address, which the worker starts the platform opener on.
     OpenUrl(String),
     /// `Esc` in the login modal: cancels the flow's token.
@@ -356,14 +419,32 @@ pub enum AccountOp {
 impl PartialEq for AccountOp {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (AccountOp::Add { name: a, provider: p, key: k }, AccountOp::Add { name: b, provider: q, key: l }) => {
-                a == b && p == q && k.expose() == l.expose()
-            }
+            (
+                AccountOp::Add {
+                    name: a,
+                    provider: p,
+                    key: k,
+                },
+                AccountOp::Add {
+                    name: b,
+                    provider: q,
+                    key: l,
+                },
+            ) => a == b && p == q && k.expose() == l.expose(),
             (AccountOp::Test(a), AccountOp::Test(b))
             | (AccountOp::Disable(a), AccountOp::Disable(b))
             | (AccountOp::Remove(a), AccountOp::Remove(b))
             | (AccountOp::OpenUrl(a), AccountOp::OpenUrl(b)) => a == b,
-            (AccountOp::AddOauth { name: a, provider: p }, AccountOp::AddOauth { name: b, provider: q }) => a == b && p == q,
+            (
+                AccountOp::AddOauth {
+                    name: a,
+                    provider: p,
+                },
+                AccountOp::AddOauth {
+                    name: b,
+                    provider: q,
+                },
+            ) => a == b && p == q,
             (AccountOp::CancelOauth, AccountOp::CancelOauth) => true,
             _ => false,
         }
@@ -408,15 +489,24 @@ enum Drag {
     Rail,
     Log,
     /// The scrollbar thumb: where the press was and where the thumb's top was then.
-    Thumb { row: u16, top: u16 },
+    Thumb {
+        row: u16,
+        top: u16,
+    },
     /// The transcript's scrollbar thumb.
-    TrThumb { row: u16, top: u16 },
+    TrThumb {
+        row: u16,
+        top: u16,
+    },
     /// Selecting transcript text.
     Text,
     /// Selecting prompt text.
     Prompt,
     /// Panning the card row from empty canvas: where the press was and which card was first then.
-    Pan { col: u16, first: usize },
+    Pan {
+        col: u16,
+        first: usize,
+    },
 }
 
 /// The screens' own actions: a key and a button with the same meaning both come here.
@@ -507,7 +597,10 @@ pub struct Input {
 
 /// Only these have anything to say in a tooltip.
 fn tippable(id: HitId) -> bool {
-    matches!(id, HitId::Card(_) | HitId::LogRow(_) | HitId::Status(Segment::Ledger | Segment::Alert))
+    matches!(
+        id,
+        HitId::Card(_) | HitId::LogRow(_) | HitId::Status(Segment::Ledger | Segment::Alert)
+    )
 }
 
 fn ui(i: UiIntent) -> Msg {
@@ -558,11 +651,25 @@ pub fn selected_text(lines: &[String], sel: Cells) -> String {
     let ((r0, c0), (r1, c1)) = sel;
     let mut out = Vec::new();
     for row in r0..=r1 {
-        let Some(line) = lines.get(usize::from(row)) else { break };
+        let Some(line) = lines.get(usize::from(row)) else {
+            break;
+        };
         let chars: Vec<char> = line.chars().collect();
         let from = if row == r0 { usize::from(c0) } else { 0 };
-        let to = if row == r1 { usize::from(c1) + 1 } else { chars.len() };
-        out.push(chars.iter().skip(from).take(to.saturating_sub(from)).collect::<String>().trim_end().to_owned());
+        let to = if row == r1 {
+            usize::from(c1) + 1
+        } else {
+            chars.len()
+        };
+        out.push(
+            chars
+                .iter()
+                .skip(from)
+                .take(to.saturating_sub(from))
+                .collect::<String>()
+                .trim_end()
+                .to_owned(),
+        );
     }
     out.join("\n")
 }
@@ -606,14 +713,23 @@ impl Input {
             (Some(sel), Some(g)) => Some(selected_text(&g.lines, sel)),
             _ => prompt.selected_text(),
         };
-        let Some(text) = text.filter(|t| !t.is_empty()) else { return false };
+        let Some(text) = text.filter(|t| !t.is_empty()) else {
+            return false;
+        };
         out.copy = Some(Clip::Text(text));
         self.copied = true;
         out.redraw = true;
         true
     }
 
-    pub fn mouse(&mut self, ev: MouseEvent, now: Instant, drawn: &Drawn, cx: &Context, prompt: &mut Prompt) -> Out {
+    pub fn mouse(
+        &mut self,
+        ev: MouseEvent,
+        now: Instant,
+        drawn: &Drawn,
+        cx: &Context,
+        prompt: &mut Prompt,
+    ) -> Out {
         let mut out = Out::default();
         let (col, row) = (ev.column, ev.row);
         let hit = drawn.hits.at(col, row).map(|r| (r.id, r.kind));
@@ -665,10 +781,24 @@ impl Input {
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let sideways = ev.modifiers.contains(KeyModifiers::SHIFT);
-                self.wheel(hit, ev.kind == MouseEventKind::ScrollUp, sideways, cx, prompt, &mut out);
+                self.wheel(
+                    hit,
+                    ev.kind == MouseEventKind::ScrollUp,
+                    sideways,
+                    cx,
+                    prompt,
+                    &mut out,
+                );
             }
             MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
-                self.wheel(hit, ev.kind == MouseEventKind::ScrollLeft, true, cx, prompt, &mut out);
+                self.wheel(
+                    hit,
+                    ev.kind == MouseEventKind::ScrollLeft,
+                    true,
+                    cx,
+                    prompt,
+                    &mut out,
+                );
             }
             _ => {}
         }
@@ -681,18 +811,29 @@ impl Input {
     /// looks through the menu and its backdrop at what is under the pointer: a card or row there
     /// gets the menu instead (it moves), anything else just closes it. Otherwise every other right
     /// click would only dismiss the menu the one before left open (#199).
-    fn context(&mut self, hit: Option<(HitId, HitKind)>, (col, row): (u16, u16), drawn: &Drawn, cx: &Context, out: &mut Out) {
+    fn context(
+        &mut self,
+        hit: Option<(HitId, HitKind)>,
+        (col, row): (u16, u16),
+        drawn: &Drawn,
+        cx: &Context,
+        out: &mut Out,
+    ) {
         let mut id = hit.map(|h| h.0);
         if cx.menu.is_some() {
             // The backdrop and the menu sit above the dashboard, so `hit` is not the card under them.
             id = match id {
-                Some(HitId::Backdrop | HitId::MenuBox | HitId::MenuItem(_)) if cx.chrome.modal.is_none() => drawn
-                    .hits
-                    .regions()
-                    .iter()
-                    .filter(|r| r.z < z::BACKDROP && r.rect.contains((col, row).into()))
-                    .max_by_key(|r| r.z)
-                    .map(|r| r.id),
+                Some(HitId::Backdrop | HitId::MenuBox | HitId::MenuItem(_))
+                    if cx.chrome.modal.is_none() =>
+                {
+                    drawn
+                        .hits
+                        .regions()
+                        .iter()
+                        .filter(|r| r.z < z::BACKDROP && r.rect.contains((col, row).into()))
+                        .max_by_key(|r| r.z)
+                        .map(|r| r.id)
+                }
                 _ => None,
             };
         } else if cx.chrome.modal.is_some() {
@@ -709,7 +850,8 @@ impl Input {
             }
         };
         out.msgs.push(ui(UiIntent::Focus(pane)));
-        out.msgs.push(ui(UiIntent::Select(pane, Selection::Index(i as i64))));
+        out.msgs
+            .push(ui(UiIntent::Select(pane, Selection::Index(i as i64))));
         match run {
             Some(run) => out.msgs.push(ui(UiIntent::OpenMenu { run, col, row })),
             None if cx.menu.is_some() => out.msgs.push(ui(UiIntent::CloseMenu)),
@@ -727,17 +869,36 @@ impl Input {
         out.msgs.push(ui(UiIntent::CloseMenu));
     }
 
-    fn wheel(&self, hit: Option<(HitId, HitKind)>, up: bool, sideways: bool, cx: &Context, prompt: &mut Prompt, out: &mut Out) {
+    fn wheel(
+        &self,
+        hit: Option<(HitId, HitKind)>,
+        up: bool,
+        sideways: bool,
+        cx: &Context,
+        prompt: &mut Prompt,
+        out: &mut Out,
+    ) {
         let notch = if up { WHEEL_LINES } else { -WHEEL_LINES };
         match cx.keys() {
             Ctx::Transcript => return out.msgs.push(tr(TrOp::Scroll(notch))),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows => {
-                return out.msgs.push(ui(UiIntent::Pick(if up { Selection::Prev } else { Selection::Next })));
+            Ctx::Palette
+            | Ctx::Agents
+            | Ctx::Accounts
+            | Ctx::Models
+            | Ctx::Providers
+            | Ctx::Workflows => {
+                return out.msgs.push(ui(UiIntent::Pick(if up {
+                    Selection::Prev
+                } else {
+                    Selection::Next
+                })));
             }
             _ if cx.chrome.modal.is_some() => return,
             _ => {}
         }
-        let Some(pane) = hit.and_then(|h| pane_under(h.0)) else { return };
+        let Some(pane) = hit.and_then(|h| pane_under(h.0)) else {
+            return;
+        };
         if pane == Pane::Input {
             // A long prompt scrolls under the wheel: the cursor moves a row, the view follows it.
             if up {
@@ -748,7 +909,11 @@ impl Input {
             out.redraw = true;
             return;
         }
-        out.msgs.push(ui(UiIntent::Scroll { pane, lines: notch, sideways }));
+        out.msgs.push(ui(UiIntent::Scroll {
+            pane,
+            lines: notch,
+            sideways,
+        }));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -780,7 +945,12 @@ impl Input {
         // A modal's backdrop catches the click so it never reaches the dashboard. Only a
         // dismissible one closes on it: an outside click must not be an unintended deny.
         if matches!(id, HitId::Backdrop) {
-            if !cx.chrome.modal.as_deref().is_some_and(|m| matches!(m, "permission" | "outcome") || m.starts_with("confirm:")) {
+            if !cx
+                .chrome
+                .modal
+                .as_deref()
+                .is_some_and(|m| matches!(m, "permission" | "outcome") || m.starts_with("confirm:"))
+            {
                 self.entry = None;
                 out.msgs.push(Msg::Command(Command::CloseModal));
             }
@@ -796,12 +966,22 @@ impl Input {
         self.pointer.pressed = Some(id);
         out.redraw = true;
         let (double, count) = match self.last_click {
-            Some((last, at, n)) if last == id && now.saturating_duration_since(at) <= DOUBLE_CLICK => (true, (n + 1).min(3)),
+            Some((last, at, n))
+                if last == id && now.saturating_duration_since(at) <= DOUBLE_CLICK =>
+            {
+                (true, (n + 1).min(3))
+            }
             _ => (false, 1),
         };
-        self.last_click = if count >= 3 { None } else { Some((id, now, count)) };
+        self.last_click = if count >= 3 {
+            None
+        } else {
+            Some((id, now, count))
+        };
         // Anything that is not text drops the selection.
-        if !matches!(id, HitId::TrRow(_) | HitId::CopyHint | HitId::PromptRow(_)) && self.sel.take().is_some() {
+        if !matches!(id, HitId::TrRow(_) | HitId::CopyHint | HitId::PromptRow(_))
+            && self.sel.take().is_some()
+        {
             out.redraw = true;
         }
         match id {
@@ -809,17 +989,30 @@ impl Input {
                 out.msgs.push(ui(UiIntent::Focus(p)));
                 // Empty canvas between the cards: a drag from here pans the row, a card at a time.
                 if p == Pane::Cards {
-                    self.drag = Some(Drag::Pan { col, first: cx.chrome.cards_x });
+                    self.drag = Some(Drag::Pan {
+                        col,
+                        first: cx.chrome.cards_x,
+                    });
                 }
             }
             HitId::PromptRow(i) => {
                 out.msgs.push(ui(UiIntent::Focus(Pane::Input)));
                 if let Some((rect, start)) = drawn.prompt_rows.get(i) {
-                    let line = prompt.lines().get(prompt.pos(*start).0).map_or(0, |l| l.chars().count());
+                    let line = prompt
+                        .lines()
+                        .get(prompt.pos(*start).0)
+                        .map_or(0, |l| l.chars().count());
                     let x = usize::from(col.saturating_sub(rect.x + drawn.prompt_indent));
                     let at = start + x.min(line);
                     if double {
-                        let (a, b) = word_at(prompt.lines().get(prompt.pos(*start).0).copied().unwrap_or(""), x);
+                        let (a, b) = word_at(
+                            prompt
+                                .lines()
+                                .get(prompt.pos(*start).0)
+                                .copied()
+                                .unwrap_or(""),
+                            x,
+                        );
                         prompt.go(start + a, false);
                         prompt.go(start + b + 1, true);
                     } else {
@@ -837,20 +1030,26 @@ impl Input {
             }
             HitId::Card(i) => {
                 out.msgs.push(ui(UiIntent::Focus(Pane::Cards)));
-                out.msgs.push(ui(UiIntent::Select(Pane::Cards, Selection::Index(i as i64))));
+                out.msgs.push(ui(UiIntent::Select(
+                    Pane::Cards,
+                    Selection::Index(i as i64),
+                )));
                 if double {
                     out.msgs.push(ui(UiIntent::Open(Pane::Cards)));
                 }
             }
             HitId::LogRow(i) => {
                 out.msgs.push(ui(UiIntent::Focus(Pane::Log)));
-                out.msgs.push(ui(UiIntent::Select(Pane::Log, Selection::Index(i as i64))));
+                out.msgs
+                    .push(ui(UiIntent::Select(Pane::Log, Selection::Index(i as i64))));
                 if let (true, Some(run)) = (double, cx.log_runs.get(i).copied().flatten()) {
                     out.msgs.push(Msg::Command(Command::OpenTranscript(run)));
                 }
             }
             HitId::Status(seg) => match seg {
-                Segment::Swarm | Segment::Subagents => out.msgs.push(ui(UiIntent::Focus(Pane::Cards))),
+                Segment::Swarm | Segment::Subagents => {
+                    out.msgs.push(ui(UiIntent::Focus(Pane::Cards)))
+                }
                 Segment::Advisor => {
                     out.msgs.push(ui(UiIntent::Focus(Pane::Advisor)));
                     out.msgs.push(ui(UiIntent::Open(Pane::Advisor)));
@@ -876,7 +1075,11 @@ impl Input {
                 if let Some(t) = thumb {
                     // Above the thumb is towards older rows.
                     let lines = if row < t.y { page } else { -page };
-                    out.msgs.push(ui(UiIntent::Scroll { pane, lines, sideways: false }));
+                    out.msgs.push(ui(UiIntent::Scroll {
+                        pane,
+                        lines,
+                        sideways: false,
+                    }));
                 }
             }
             HitId::Thumb(_) => {
@@ -887,8 +1090,11 @@ impl Input {
                 if let (Some(t), Some(g)) = (cx.transcript.as_ref(), drawn.transcript.as_ref()) {
                     let thumb = g.track.map(|(_, t)| t);
                     if let Some(th) = thumb {
-                        let page = i32::try_from(t.height.saturating_sub(1)).unwrap_or(10).max(1);
-                        out.msgs.push(tr(TrOp::Scroll(if row < th.y { page } else { -page })));
+                        let page = i32::try_from(t.height.saturating_sub(1))
+                            .unwrap_or(10)
+                            .max(1);
+                        out.msgs
+                            .push(tr(TrOp::Scroll(if row < th.y { page } else { -page })));
                     }
                 }
             }
@@ -907,7 +1113,15 @@ impl Input {
                 self.copied = false;
                 self.tool_press = None;
                 match count {
-                    3 => self.sel = Some(((i as u16, 0), (i as u16, u16::try_from(line.chars().count().saturating_sub(1)).unwrap_or(0)))),
+                    3 => {
+                        self.sel = Some((
+                            (i as u16, 0),
+                            (
+                                i as u16,
+                                u16::try_from(line.chars().count().saturating_sub(1)).unwrap_or(0),
+                            ),
+                        ))
+                    }
                     2 => {
                         let (a, b) = word_at(line, usize::from(c));
                         self.sel = Some(((i as u16, a as u16), (i as u16, b as u16)));
@@ -922,7 +1136,8 @@ impl Input {
                 }
             }
             HitId::ListRow(i) => {
-                out.msgs.push(ui(UiIntent::Pick(Selection::Index(i as i64))));
+                out.msgs
+                    .push(ui(UiIntent::Pick(Selection::Index(i as i64))));
                 if double {
                     // The row's default action: run it, edit it, test it.
                     let default = match cx.keys() {
@@ -935,7 +1150,10 @@ impl Input {
                         _ => None,
                     };
                     if let Some(a) = default {
-                        let cx2 = Context { screen_sel: i, ..cx.clone() };
+                        let cx2 = Context {
+                            screen_sel: i,
+                            ..cx.clone()
+                        };
                         self.screen(a, &cx2, prompt, out);
                     }
                 }
@@ -946,7 +1164,14 @@ impl Input {
     }
 
     /// A click on a button does what its key does.
-    fn button(&mut self, name: &str, cx: &Context, drawn: &Drawn, prompt: &mut Prompt, out: &mut Out) {
+    fn button(
+        &mut self,
+        name: &str,
+        cx: &Context,
+        drawn: &Drawn,
+        prompt: &mut Prompt,
+        out: &mut Out,
+    ) {
         let action = match (cx.keys(), name) {
             (Ctx::Permission, "allow") => Some(Action::Allow),
             (Ctx::Permission, "always") => Some(Action::AllowAlways),
@@ -970,17 +1195,34 @@ impl Input {
         }
     }
 
-    fn dragged(&mut self, col: u16, row: u16, drawn: &Drawn, cx: &Context, prompt: &mut Prompt, out: &mut Out) {
+    fn dragged(
+        &mut self,
+        col: u16,
+        row: u16,
+        drawn: &Drawn,
+        cx: &Context,
+        prompt: &mut Prompt,
+        out: &mut Out,
+    ) {
         let Some(drag) = self.drag else { return };
         let cols = drawn.areas.status.width;
         match drag {
-            Drag::Rail => out.msgs.push(ui(UiIntent::SetRailWidth(rail_for_drag(&drawn.areas, col, cols)))),
-            Drag::Log => out.msgs.push(ui(UiIntent::SetLogRows(log_for_drag(&drawn.areas, row)))),
+            Drag::Rail => out.msgs.push(ui(UiIntent::SetRailWidth(rail_for_drag(
+                &drawn.areas,
+                col,
+                cols,
+            )))),
+            Drag::Log => out
+                .msgs
+                .push(ui(UiIntent::SetLogRows(log_for_drag(&drawn.areas, row)))),
             Drag::Thumb { row: down, top } => {
                 let Some(track) = drawn.hits.find(HitId::Track(Pane::Log)).map(|r| r.rect) else {
                     return;
                 };
-                let thumb_h = drawn.hits.find(HitId::Thumb(Pane::Log)).map_or(1, |r| r.rect.height);
+                let thumb_h = drawn
+                    .hits
+                    .find(HitId::Thumb(Pane::Log))
+                    .map_or(1, |r| r.rect.height);
                 let (total, visible) = (drawn.log.total, drawn.log.visible);
                 let max_scroll = total.saturating_sub(visible);
                 let travel = usize::from(track.height.saturating_sub(thumb_h));
@@ -992,12 +1234,20 @@ impl Input {
                 let target = max_scroll - from_top * max_scroll / travel;
                 let lines = target as i64 - cx.chrome.scroll_log.min(max_scroll) as i64;
                 if lines != 0 {
-                    out.msgs.push(ui(UiIntent::Scroll { pane: Pane::Log, lines: i32::try_from(lines).unwrap_or(0), sideways: false }));
+                    out.msgs.push(ui(UiIntent::Scroll {
+                        pane: Pane::Log,
+                        lines: i32::try_from(lines).unwrap_or(0),
+                        sideways: false,
+                    }));
                 }
             }
             Drag::TrThumb { row: down, top } => {
-                let (Some(g), Some(t)) = (drawn.transcript.as_ref(), cx.transcript.as_ref()) else { return };
-                let Some((track, thumb)) = g.track else { return };
+                let (Some(g), Some(t)) = (drawn.transcript.as_ref(), cx.transcript.as_ref()) else {
+                    return;
+                };
+                let Some((track, thumb)) = g.track else {
+                    return;
+                };
                 let travel = usize::from(track.height.saturating_sub(thumb.height));
                 let wanted = i64::from(top) - i64::from(track.y) + i64::from(row) - i64::from(down);
                 if travel == 0 {
@@ -1012,7 +1262,8 @@ impl Input {
                 let now = usize::from(thumb.y - track.y) * max_top / travel;
                 let lines = now as i64 - target as i64;
                 if lines != 0 {
-                    out.msgs.push(tr(TrOp::Scroll(i32::try_from(lines).unwrap_or(0))));
+                    out.msgs
+                        .push(tr(TrOp::Scroll(i32::try_from(lines).unwrap_or(0))));
                 }
             }
             Drag::Pan { col: down, first } => {
@@ -1024,7 +1275,11 @@ impl Input {
                 let target = (i64::try_from(first).unwrap_or(0) + moved).clamp(0, last);
                 let lines = target - i64::try_from(cx.chrome.cards_x).unwrap_or(0).min(last);
                 if lines != 0 {
-                    out.msgs.push(ui(UiIntent::Scroll { pane: Pane::Cards, lines: i32::try_from(lines).unwrap_or(0), sideways: true }));
+                    out.msgs.push(ui(UiIntent::Scroll {
+                        pane: Pane::Cards,
+                        lines: i32::try_from(lines).unwrap_or(0),
+                        sideways: true,
+                    }));
                 }
             }
             Drag::Text => {
@@ -1038,10 +1293,19 @@ impl Input {
             }
             Drag::Prompt => {
                 if let Some(anchor) = self.prompt_anchor {
-                    let hit = drawn.hits.at(col, row.clamp(drawn.areas.prompt.y, drawn.areas.prompt.bottom().saturating_sub(1)));
+                    let hit = drawn.hits.at(
+                        col,
+                        row.clamp(
+                            drawn.areas.prompt.y,
+                            drawn.areas.prompt.bottom().saturating_sub(1),
+                        ),
+                    );
                     if let Some(HitId::PromptRow(i)) = hit.map(|h| h.id) {
                         if let Some((rect, start)) = drawn.prompt_rows.get(i) {
-                            let line = prompt.lines().get(prompt.pos(*start).0).map_or(0, |l| l.chars().count());
+                            let line = prompt
+                                .lines()
+                                .get(prompt.pos(*start).0)
+                                .map_or(0, |l| l.chars().count());
                             let x = usize::from(col.saturating_sub(rect.x + drawn.prompt_indent));
                             prompt.anchor = Some(anchor);
                             prompt.cursor = start + x.min(line);
@@ -1056,7 +1320,10 @@ impl Input {
     /// Bracketed paste: into the field that has the keyboard. A dropped file path is inserted as
     /// a path and is never submitted.
     pub fn paste(&mut self, text: &str, cx: &Context, prompt: &mut Prompt) -> Out {
-        let mut out = Out { redraw: true, ..Out::default() };
+        let mut out = Out {
+            redraw: true,
+            ..Out::default()
+        };
         if let Some(e) = &mut self.entry {
             let line = text.lines().next().unwrap_or("");
             if e.key.is_some() {
@@ -1072,7 +1339,14 @@ impl Input {
     }
 
     /// A key press. `prompt` is the prompt line, edited in place.
-    pub fn key(&mut self, ev: KeyEvent, cx: &Context, keys: &Keymap, drawn: &Drawn, prompt: &mut Prompt) -> Out {
+    pub fn key(
+        &mut self,
+        ev: KeyEvent,
+        cx: &Context,
+        keys: &Keymap,
+        drawn: &Drawn,
+        prompt: &mut Prompt,
+    ) -> Out {
         let mut out = Out::default();
         // A key ends any tooltip, whether the pointer or `Space` brought it up.
         self.tip_was_up = self.pinned.take().is_some() || self.pointer.tip.is_some();
@@ -1082,7 +1356,8 @@ impl Input {
             out.redraw = true;
         }
         // Ctrl+C with something selected copies it; without, it keeps its meaning.
-        if ev.ctrl && ev.code == KeyCode::Char('c') && self.copy_selection(drawn, prompt, &mut out) {
+        if ev.ctrl && ev.code == KeyCode::Char('c') && self.copy_selection(drawn, prompt, &mut out)
+        {
             return out;
         }
         if ev.code != KeyCode::Char('c') || !ev.ctrl {
@@ -1108,7 +1383,8 @@ impl Input {
                 KeyCode::Enter => self.filter_edit = false,
                 KeyCode::Esc => {
                     self.filter_edit = false;
-                    out.msgs.push(Msg::Command(Command::LogFilter(String::new())));
+                    out.msgs
+                        .push(Msg::Command(Command::LogFilter(String::new())));
                 }
                 KeyCode::Backspace => {
                     text.pop();
@@ -1125,13 +1401,29 @@ impl Input {
         }
         let ctx = cx.keys();
         if let (Ctx::Transcript, KeyCode::PageUp | KeyCode::PageDown) = (ctx, ev.code) {
-            let page = cx.transcript.as_ref().map_or(10, |t| i32::try_from(t.height.saturating_sub(1)).unwrap_or(10).max(1));
-            out.msgs.push(tr(TrOp::Scroll(if ev.code == KeyCode::PageUp { page } else { -page })));
+            let page = cx.transcript.as_ref().map_or(10, |t| {
+                i32::try_from(t.height.saturating_sub(1))
+                    .unwrap_or(10)
+                    .max(1)
+            });
+            out.msgs
+                .push(tr(TrOp::Scroll(if ev.code == KeyCode::PageUp {
+                    page
+                } else {
+                    -page
+                })));
             return out;
         }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows | Ctx::Outcome | Ctx::Confirm => {
+            Ctx::Palette
+            | Ctx::Agents
+            | Ctx::Accounts
+            | Ctx::Models
+            | Ctx::Providers
+            | Ctx::Workflows
+            | Ctx::Outcome
+            | Ctx::Confirm => {
                 self.screen_key(ev, ctx, cx, prompt, &mut out);
             }
             _ => {
@@ -1150,7 +1442,15 @@ impl Input {
 
     /// The prompt has the keyboard: editing, history, completion, Enter. Keys with a meaning of
     /// their own (the global ones) still go through the key map when they are not text.
-    fn prompt_key(&mut self, ev: KeyEvent, cx: &Context, keys: &Keymap, drawn: &Drawn, prompt: &mut Prompt, out: &mut Out) {
+    fn prompt_key(
+        &mut self,
+        ev: KeyEvent,
+        cx: &Context,
+        keys: &Keymap,
+        drawn: &Drawn,
+        prompt: &mut Prompt,
+        out: &mut Out,
+    ) {
         let shift = ev.shift;
         prompt.notice = None;
         match (ev.code, ev.ctrl, ev.alt) {
@@ -1204,7 +1504,14 @@ impl Input {
     }
 
     /// Keys of the screens that have their own letters (named on their buttons).
-    fn screen_key(&mut self, ev: KeyEvent, ctx: Ctx, cx: &Context, prompt: &mut Prompt, out: &mut Out) {
+    fn screen_key(
+        &mut self,
+        ev: KeyEvent,
+        ctx: Ctx,
+        cx: &Context,
+        prompt: &mut Prompt,
+        out: &mut Out,
+    ) {
         let c = match ev.code {
             KeyCode::Char(c) if !ev.ctrl && !ev.alt => Some(c),
             _ => None,
@@ -1224,19 +1531,30 @@ impl Input {
                 }
                 _ => {
                     if let Some(c) = c {
-                        out.msgs.push(Msg::Command(Command::PaletteText(format!("{}{c}", cx.palette_text))));
+                        out.msgs.push(Msg::Command(Command::PaletteText(format!(
+                            "{}{c}",
+                            cx.palette_text
+                        ))));
                     }
                 }
             },
             Ctx::Agents | Ctx::Accounts => {
                 let a = match (ctx, ev.code, c) {
-                    (_, KeyCode::Up, _) | (_, _, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
-                    (_, KeyCode::Down, _) | (_, _, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
-                    (Ctx::Agents, KeyCode::Enter, _) | (Ctx::Agents, _, Some('e')) => Scr::AgentEdit,
+                    (_, KeyCode::Up, _) | (_, _, Some('k')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Prev)))
+                    }
+                    (_, KeyCode::Down, _) | (_, _, Some('j')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Next)))
+                    }
+                    (Ctx::Agents, KeyCode::Enter, _) | (Ctx::Agents, _, Some('e')) => {
+                        Scr::AgentEdit
+                    }
                     (Ctx::Agents, _, Some('n')) => Scr::AgentNew,
                     (Ctx::Agents, _, Some('v')) => Scr::AgentValidate,
                     (Ctx::Agents, _, Some('d')) => Scr::AgentDelegate,
-                    (Ctx::Accounts, KeyCode::Enter, _) | (Ctx::Accounts, _, Some('t')) => Scr::AcctTest,
+                    (Ctx::Accounts, KeyCode::Enter, _) | (Ctx::Accounts, _, Some('t')) => {
+                        Scr::AcctTest
+                    }
                     (Ctx::Accounts, _, Some('a')) => Scr::AcctAdd,
                     (Ctx::Accounts, _, Some('d')) => Scr::AcctDisable,
                     _ => return,
@@ -1245,8 +1563,12 @@ impl Input {
             }
             Ctx::Providers => {
                 let a = match (ev.code, c) {
-                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
-                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Up, _) | (_, Some('k')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Prev)))
+                    }
+                    (KeyCode::Down, _) | (_, Some('j')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Next)))
+                    }
                     (KeyCode::Enter, _) => Scr::ProviderPick,
                     _ => return,
                 };
@@ -1254,8 +1576,12 @@ impl Input {
             }
             Ctx::Models => {
                 let a = match (ev.code, c) {
-                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
-                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Up, _) | (_, Some('k')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Prev)))
+                    }
+                    (KeyCode::Down, _) | (_, Some('j')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Next)))
+                    }
                     (KeyCode::Enter, _) => Scr::ModelUse,
                     (_, Some('a')) => Scr::ModelSeat(ModelTarget::Advisor),
                     (_, Some('r')) => Scr::ModelSeat(ModelTarget::Router),
@@ -1267,8 +1593,12 @@ impl Input {
             }
             Ctx::Workflows => {
                 let a = match (ev.code, c) {
-                    (KeyCode::Up, _) | (_, Some('k')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Prev))),
-                    (KeyCode::Down, _) | (_, Some('j')) => return out.msgs.push(ui(UiIntent::Pick(Selection::Next))),
+                    (KeyCode::Up, _) | (_, Some('k')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Prev)))
+                    }
+                    (KeyCode::Down, _) | (_, Some('j')) => {
+                        return out.msgs.push(ui(UiIntent::Pick(Selection::Next)))
+                    }
                     (KeyCode::Enter, _) => Scr::WorkflowRun,
                     _ => return,
                 };
@@ -1305,10 +1635,14 @@ impl Input {
                 out.msgs.push(cmd(Command::CloseModal));
             }
             Scr::Run => {
-                let Some(id) = cx.palette.get(sel) else { return };
+                let Some(id) = cx.palette.get(sel) else {
+                    return;
+                };
                 let close = cmd(Command::CloseModal);
                 match id.split_once(':') {
-                    Some(("cmd", name)) => commands::pick(name, Via::Palette, None, &cx.env(&cx.workflows), out),
+                    Some(("cmd", name)) => {
+                        commands::pick(name, Via::Palette, None, &cx.env(&cx.workflows), out)
+                    }
                     Some(("agent", name)) => {
                         out.msgs.extend([close, ui(UiIntent::Focus(Pane::Input))]);
                         prompt.set(&format!("@agent-{name} "));
@@ -1326,17 +1660,23 @@ impl Input {
             }
             Scr::AgentEdit => match cx.agent_rows.get(sel) {
                 Some((_, Some(path))) => out.jobs.push(Job::EditFile(path.clone())),
-                Some((name, None)) => self.note = format!("{name} is built in: copy it with n to change it"),
+                Some((name, None)) => {
+                    self.note = format!("{name} is built in: copy it with n to change it")
+                }
                 None => {}
             },
             Scr::AgentValidate => {
                 if let Some((name, path)) = cx.agent_rows.get(sel) {
-                    out.jobs.push(Job::Validate { name: name.clone(), path: path.clone() });
+                    out.jobs.push(Job::Validate {
+                        name: name.clone(),
+                        path: path.clone(),
+                    });
                 }
             }
             Scr::AgentDelegate => {
                 if let Some((name, _)) = cx.agent_rows.get(sel) {
-                    out.msgs.extend([cmd(Command::CloseModal), ui(UiIntent::Focus(Pane::Input))]);
+                    out.msgs
+                        .extend([cmd(Command::CloseModal), ui(UiIntent::Focus(Pane::Input))]);
                     prompt.set(&format!("/delegate {name} "));
                 }
             }
@@ -1348,16 +1688,21 @@ impl Input {
             }
             Scr::AcctAdd => out.msgs.push(cmd(Command::OpenScreen(Screen::Providers))),
             Scr::ProviderPick => {
-                let Some(provider) = cx.provider_rows.get(sel) else { return };
+                let Some(provider) = cx.provider_rows.get(sel) else {
+                    return;
+                };
                 self.begin_login(provider, out);
             }
             Scr::AcctDisable => {
                 if let Some(name) = cx.account_rows.get(sel) {
-                    out.jobs.push(Job::Account(AccountOp::Disable(name.clone())));
+                    out.jobs
+                        .push(Job::Account(AccountOp::Disable(name.clone())));
                 }
             }
             Scr::ModelUse | Scr::ModelSeat(_) | Scr::ModelThisRun => {
-                let Some(opened) = cx.models_target else { return };
+                let Some(opened) = cx.models_target else {
+                    return;
+                };
                 let target = match a {
                     Scr::ModelSeat(seat) => seat,
                     Scr::ModelThisRun if !matches!(opened, ModelTarget::Run(_)) => {
@@ -1366,23 +1711,38 @@ impl Input {
                     }
                     _ => opened,
                 };
-                let Some(model) = cx.model_refs.get(sel) else { return };
-                out.msgs.push(cmd(Command::SetModel { target, model: model.clone() }));
+                let Some(model) = cx.model_refs.get(sel) else {
+                    return;
+                };
+                out.msgs.push(cmd(Command::SetModel {
+                    target,
+                    model: model.clone(),
+                }));
                 out.msgs.push(cmd(Command::CloseModal));
             }
             Scr::ModelFilter => {
-                self.entry = Some(Entry::plain(EntryKind::ModelFilter, "filter", &cx.palette_text));
+                self.entry = Some(Entry::plain(
+                    EntryKind::ModelFilter,
+                    "filter",
+                    &cx.palette_text,
+                ));
             }
             Scr::WorkflowRun => match cx.workflow_rows.get(sel) {
                 Some(name) if cx.workflows.contains(name) => {
-                    out.msgs.extend([cmd(Command::CloseModal), ui(UiIntent::Focus(Pane::Input))]);
+                    out.msgs
+                        .extend([cmd(Command::CloseModal), ui(UiIntent::Focus(Pane::Input))]);
                     prompt.set(&format!("/workflow run {name} "));
                 }
-                Some(name) => self.note = format!("{name} does not parse, /workflow show {name} says why"),
+                Some(name) => {
+                    self.note = format!("{name} does not parse, /workflow show {name} says why")
+                }
                 None => {}
             },
             Scr::Outcome(o) => {
-                out.msgs.extend([cmd(Command::CreateHandoff { outcome: Some(o) }), cmd(Command::Quit { force: false })]);
+                out.msgs.extend([
+                    cmd(Command::CreateHandoff { outcome: Some(o) }),
+                    cmd(Command::Quit { force: false }),
+                ]);
             }
             Scr::QuitNow => out.msgs.push(cmd(Command::Quit { force: true })),
             Scr::ConfirmYes => {
@@ -1390,11 +1750,16 @@ impl Input {
                 let modal = cx.chrome.modal.as_deref().unwrap_or("");
                 if let Some(account) = modal.strip_prefix("confirm:logout:") {
                     self.note = format!("logging out of {account}...");
-                    out.jobs.push(Job::Account(AccountOp::Remove(account.to_owned())));
+                    out.jobs
+                        .push(Job::Account(AccountOp::Remove(account.to_owned())));
                     out.msgs.push(cmd(Command::OpenScreen(Screen::Accounts)));
                 } else {
-                    let run = modal.strip_prefix("confirm:cancel:").and_then(|r| r.parse().ok());
-                    out.msgs.push(cmd(run.map_or(Command::Clear, |run| Command::Cancel { run })));
+                    let run = modal
+                        .strip_prefix("confirm:cancel:")
+                        .and_then(|r| r.parse().ok());
+                    out.msgs.push(cmd(
+                        run.map_or(Command::Clear, |run| Command::Cancel { run })
+                    ));
                     out.msgs.push(cmd(Command::CloseModal));
                 }
             }
@@ -1416,8 +1781,13 @@ impl Input {
                     out.jobs.push(Job::Account(AccountOp::CancelOauth));
                 }
                 KeyCode::Char('o') if !ev.ctrl && !ev.alt => {
-                    if let Some(url) = e.text.split_whitespace().find(|w| w.starts_with("https://") || w.starts_with("http://")) {
-                        out.jobs.push(Job::Account(AccountOp::OpenUrl(url.to_owned())));
+                    if let Some(url) = e
+                        .text
+                        .split_whitespace()
+                        .find(|w| w.starts_with("https://") || w.starts_with("http://"))
+                    {
+                        out.jobs
+                            .push(Job::Account(AccountOp::OpenUrl(url.to_owned())));
                     }
                 }
                 _ => {}
@@ -1433,44 +1803,79 @@ impl Input {
             KeyCode::Backspace => {
                 e.text.pop();
             }
-            KeyCode::Char(c) if !ev.ctrl && !ev.alt && e.key.is_some() => e.edit_key(4, |k| k.push(c)),
+            KeyCode::Char(c) if !ev.ctrl && !ev.alt && e.key.is_some() => {
+                e.edit_key(4, |k| k.push(c))
+            }
             KeyCode::Char(c) if !ev.ctrl && !ev.alt => e.text.push(c),
             _ => {}
         }
         // The picker's rows are narrowed by the graph, so the text goes there as it is typed.
-        if let Some(Entry { kind: EntryKind::ModelFilter, text, .. }) = &self.entry {
+        if let Some(Entry {
+            kind: EntryKind::ModelFilter,
+            text,
+            ..
+        }) = &self.entry
+        {
             if matches!(ev.code, KeyCode::Backspace | KeyCode::Char(_)) {
-                out.msgs.push(Msg::Command(Command::PaletteText(text.clone())));
+                out.msgs
+                    .push(Msg::Command(Command::PaletteText(text.clone())));
             }
         }
     }
 
     /// Enter in a text field: the next step of adding an account, or the result.
     fn finish_entry(&mut self, cx: &Context, _prompt: &mut Prompt, out: &mut Out) {
-        let Some(mut e) = self.entry.take() else { return };
+        let Some(mut e) = self.entry.take() else {
+            return;
+        };
         // A secret field has no text to read: its dots are not the content.
-        let text = if e.key.is_some() { String::new() } else { e.text.trim().to_owned() };
+        let text = if e.key.is_some() {
+            String::new()
+        } else {
+            e.text.trim().to_owned()
+        };
         let cmd = |c: Command| Msg::Command(c);
         match e.kind {
             EntryKind::EditInput => {
                 // The run has not been told: the edited call goes back as a message and this one
                 // is denied, so the run proposes it again (see the PR for why).
                 if let Some(id) = cx.permission {
-                    out.msgs.push(cmd(Command::Permission { id, decision: Decision::Deny }));
+                    out.msgs.push(cmd(Command::Permission {
+                        id,
+                        decision: Decision::Deny,
+                    }));
                     if let Some(run) = self.edit_run(cx) {
-                        out.msgs.push(cmd(Command::SendMessage { run, text: format!("Run this instead: {text}") }));
+                        out.msgs.push(cmd(Command::SendMessage {
+                            run,
+                            text: format!("Run this instead: {text}"),
+                        }));
                     }
                 }
             }
-            EntryKind::Message(run) if !text.is_empty() => out.msgs.push(cmd(Command::SendMessage { run, text })),
-            EntryKind::Resume(run) if !text.is_empty() => out.msgs.push(cmd(Command::Resume { run, message: text, parent: None })),
+            EntryKind::Message(run) if !text.is_empty() => {
+                out.msgs.push(cmd(Command::SendMessage { run, text }))
+            }
+            EntryKind::Resume(run) if !text.is_empty() => out.msgs.push(cmd(Command::Resume {
+                run,
+                message: text,
+                parent: None,
+            })),
             EntryKind::ModelFilter => {}
             EntryKind::AgentName if !text.is_empty() => out.jobs.push(Job::NewAgent(text)),
-            EntryKind::AccountName(provider) if !text.is_empty() && self.oauth_providers.contains(&provider) => {
+            EntryKind::AccountName(provider)
+                if !text.is_empty() && self.oauth_providers.contains(&provider) =>
+            {
                 // The provider has a browser login: it replaces the key step.
                 self.note.clear();
-                self.entry = Some(Entry::plain(EntryKind::Oauth(text.clone()), &format!("log in to {provider}"), ""));
-                out.jobs.push(Job::Account(AccountOp::AddOauth { name: text, provider }));
+                self.entry = Some(Entry::plain(
+                    EntryKind::Oauth(text.clone()),
+                    &format!("log in to {provider}"),
+                    "",
+                ));
+                out.jobs.push(Job::Account(AccountOp::AddOauth {
+                    name: text,
+                    provider,
+                }));
             }
             EntryKind::AccountName(provider) if !text.is_empty() => {
                 let label = format!("{provider} key");
@@ -1482,9 +1887,18 @@ impl Input {
                 match key {
                     Some(key) => {
                         self.note = format!("verifying {name}...");
-                        out.jobs.push(Job::Account(AccountOp::Add { name, provider, key }));
+                        out.jobs.push(Job::Account(AccountOp::Add {
+                            name,
+                            provider,
+                            key,
+                        }));
                     }
-                    None => self.entry = Some(Entry::secret(EntryKind::AccountKey(name, provider.clone()), &format!("{provider} key"))),
+                    None => {
+                        self.entry = Some(Entry::secret(
+                            EntryKind::AccountKey(name, provider.clone()),
+                            &format!("{provider} key"),
+                        ))
+                    }
                 }
             }
             _ => {}
@@ -1495,8 +1909,13 @@ impl Input {
     /// open, which asks for the key next.
     fn begin_login(&mut self, provider: &str, out: &mut Out) {
         self.note.clear();
-        out.msgs.push(Msg::Command(Command::OpenScreen(Screen::Accounts)));
-        self.entry = Some(Entry::plain(EntryKind::AccountName(provider.to_owned()), &format!("{provider} account name"), ""));
+        out.msgs
+            .push(Msg::Command(Command::OpenScreen(Screen::Accounts)));
+        self.entry = Some(Entry::plain(
+            EntryKind::AccountName(provider.to_owned()),
+            &format!("{provider} account name"),
+            "",
+        ));
     }
 
     /// What the loop tells the input about a message that came from outside the keyboard. The end
@@ -1505,13 +1924,24 @@ impl Input {
         match m {
             Msg::AccountOpDone { text, .. } => {
                 self.note = text.clone();
-                if matches!(self.entry, Some(Entry { kind: EntryKind::Oauth(..), .. })) {
+                if matches!(
+                    self.entry,
+                    Some(Entry {
+                        kind: EntryKind::Oauth(..),
+                        ..
+                    })
+                ) {
                     self.entry = None;
                 }
             }
             // What the flow says goes under the modal's title, a line at a time.
             Msg::AccountPrompt { line, .. } => {
-                if let Some(Entry { kind: EntryKind::Oauth(..), text, .. }) = &mut self.entry {
+                if let Some(Entry {
+                    kind: EntryKind::Oauth(..),
+                    text,
+                    ..
+                }) = &mut self.entry
+                {
                     if !text.is_empty() {
                         text.push('\n');
                     }
@@ -1527,7 +1957,14 @@ impl Input {
     }
 
     /// An action of the key map, from a key or a button.
-    fn act(&mut self, action: Action, cx: &Context, drawn: &Drawn, prompt: &mut Prompt, out: &mut Out) {
+    fn act(
+        &mut self,
+        action: Action,
+        cx: &Context,
+        drawn: &Drawn,
+        prompt: &mut Prompt,
+        out: &mut Out,
+    ) {
         use Action::*;
         let focus = cx.chrome.focus;
         let cmd = |c: Command| Msg::Command(c);
@@ -1566,7 +2003,8 @@ impl Input {
             OpenTranscript => out.msgs.push(ui(UiIntent::Open(focus))),
             ShowAdvice => out.msgs.push(ui(UiIntent::Open(Pane::Advisor))),
             MoveUp | MoveDown if in_transcript => {
-                out.msgs.push(tr(TrOp::Scroll(if action == MoveUp { 1 } else { -1 })));
+                out.msgs
+                    .push(tr(TrOp::Scroll(if action == MoveUp { 1 } else { -1 })));
             }
             NextTool => out.msgs.push(tr(TrOp::Tool(Selection::Next))),
             PrevTool => out.msgs.push(tr(TrOp::Tool(Selection::Prev))),
@@ -1575,7 +2013,9 @@ impl Input {
                 if let Some(menu) = &cx.menu {
                     let n = menu.items.len();
                     let by = if action == MoveUp { n - 1 } else { 1 };
-                    let next = (1..=n).map(|k| (menu.selected + k * by) % n).find(|i| menu.items[*i].1);
+                    let next = (1..=n)
+                        .map(|k| (menu.selected + k * by) % n)
+                        .find(|i| menu.items[*i].1);
                     if let Some(i) = next {
                         out.msgs.push(ui(UiIntent::MenuSelect(i as i64)));
                     }
@@ -1585,20 +2025,31 @@ impl Input {
                 let up = action == MoveUp;
                 match focus {
                     Pane::Cards => out.msgs.push(step(if up { -1 } else { 1 })),
-                    pane => out.msgs.push(ui(UiIntent::Scroll { pane, lines: if up { 1 } else { -1 }, sideways: false })),
+                    pane => out.msgs.push(ui(UiIntent::Scroll {
+                        pane,
+                        lines: if up { 1 } else { -1 },
+                        sideways: false,
+                    })),
                 }
             }
             CardPrev => out.msgs.push(step(-1)),
             CardNext => out.msgs.push(step(1)),
             StopRun | CancelRun => {
-                let run = if in_transcript { cx.transcript.as_ref().map(|t| t.run) } else { cx.selected_run };
+                let run = if in_transcript {
+                    cx.transcript.as_ref().map(|t| t.run)
+                } else {
+                    cx.selected_run
+                };
                 if let Some(run) = run {
                     out.msgs.push(cmd(Command::Cancel { run }));
                 }
             }
             RetryRun => {
                 let run = if in_transcript {
-                    cx.transcript.as_ref().filter(|t| t.retryable).map(|t| t.run)
+                    cx.transcript
+                        .as_ref()
+                        .filter(|t| t.retryable)
+                        .map(|t| t.run)
                 } else {
                     cx.selected_run
                 };
@@ -1612,15 +2063,31 @@ impl Input {
                 }
             }
             MessageRun => {
-                let run = if in_transcript { cx.transcript.as_ref().map(|t| t.run) } else { cx.selected_run };
+                let run = if in_transcript {
+                    cx.transcript.as_ref().map(|t| t.run)
+                } else {
+                    cx.selected_run
+                };
                 if let Some(run) = run {
-                    self.entry = Some(Entry::plain(EntryKind::Message(run), "message to the run", ""));
+                    self.entry = Some(Entry::plain(
+                        EntryKind::Message(run),
+                        "message to the run",
+                        "",
+                    ));
                 }
             }
             ResumeRun => {
-                let run = if in_transcript { cx.transcript.as_ref().filter(|t| t.partial).map(|t| t.run) } else { cx.selected_run };
+                let run = if in_transcript {
+                    cx.transcript.as_ref().filter(|t| t.partial).map(|t| t.run)
+                } else {
+                    cx.selected_run
+                };
                 if let Some(run) = run {
-                    self.entry = Some(Entry::plain(EntryKind::Resume(run), "resume with", "continue"));
+                    self.entry = Some(Entry::plain(
+                        EntryKind::Resume(run),
+                        "resume with",
+                        "continue",
+                    ));
                 }
             }
             ToggleBackground | BackgroundWait => {
@@ -1636,7 +2103,9 @@ impl Input {
             FocusRail => {
                 out.msgs.push(ui(UiIntent::Focus(Pane::Advisor)));
                 // On a narrow terminal `a` also opens the full rail over the strip.
-                if drawn.areas.rail_open.is_none() && drawn.areas.rail.width < crate::layout::RAIL_FULL {
+                if drawn.areas.rail_open.is_none()
+                    && drawn.areas.rail.width < crate::layout::RAIL_FULL
+                {
                     out.msgs.push(ui(UiIntent::ToggleRail));
                 }
             }
@@ -1655,7 +2124,10 @@ impl Input {
             }
             EditInput => {
                 if cx.permission.is_some() {
-                    let text = cx.permission_summary.split_once(": ").map_or(cx.permission_summary.clone(), |(_, rest)| rest.to_owned());
+                    let text = cx
+                        .permission_summary
+                        .split_once(": ")
+                        .map_or(cx.permission_summary.clone(), |(_, rest)| rest.to_owned());
                     self.entry = Some(Entry::plain(EntryKind::EditInput, "run instead", &text));
                 }
             }
@@ -1664,9 +2136,14 @@ impl Input {
             OpenAgents => out.msgs.push(cmd(Command::OpenScreen(Screen::Agents))),
             OpenAccounts => out.msgs.push(cmd(Command::OpenScreen(Screen::Accounts))),
             OpenRunStatus => {
-                let run = if in_transcript { cx.transcript.as_ref().map(|t| t.run) } else { cx.selected_run.or(cx.lead_run) };
+                let run = if in_transcript {
+                    cx.transcript.as_ref().map(|t| t.run)
+                } else {
+                    cx.selected_run.or(cx.lead_run)
+                };
                 if let Some(run) = run {
-                    out.msgs.push(cmd(Command::OpenScreen(Screen::RunStatus(run))));
+                    out.msgs
+                        .push(cmd(Command::OpenScreen(Screen::RunStatus(run))));
                 }
             }
             OpenCost => out.msgs.push(cmd(Command::OpenScreen(Screen::Cost))),
@@ -1682,19 +2159,30 @@ impl Input {
                 let (id, run) = match focus {
                     Pane::Cards => (HitId::Card(cx.chrome.selected_card), cx.selected_run),
                     _ => {
-                        let at = cx.chrome.selected_log.unwrap_or(cx.log_runs.len().saturating_sub(1));
+                        let at = cx
+                            .chrome
+                            .selected_log
+                            .unwrap_or(cx.log_runs.len().saturating_sub(1));
                         (HitId::LogRow(at), cx.log_run())
                     }
                 };
                 if let (Some(r), Some(run)) = (drawn.hits.find(id), run) {
-                    out.msgs.push(ui(UiIntent::OpenMenu { run, col: r.rect.x + 1, row: r.rect.y + 1 }));
+                    out.msgs.push(ui(UiIntent::OpenMenu {
+                        run,
+                        col: r.rect.x + 1,
+                        row: r.rect.y + 1,
+                    }));
                 }
             }
             ShowTooltip => {
                 // Pins the tooltip of the selection; pressing it again closes it.
                 let id = match focus {
                     Pane::Cards => Some(HitId::Card(cx.chrome.selected_card)),
-                    Pane::Log => Some(HitId::LogRow(cx.chrome.selected_log.unwrap_or(cx.log_runs.len().saturating_sub(1)))),
+                    Pane::Log => Some(HitId::LogRow(
+                        cx.chrome
+                            .selected_log
+                            .unwrap_or(cx.log_runs.len().saturating_sub(1)),
+                    )),
                     _ => None,
                 };
                 if let (Some(id), false) = (id, self.tip_was_up) {
@@ -1708,7 +2196,8 @@ impl Input {
             }
             ToggleFollow if in_transcript => {
                 let stepped = cx.transcript.as_ref().is_some_and(|t| t.stepped);
-                out.msgs.push(tr(if stepped { TrOp::Live } else { TrOp::Bottom }));
+                out.msgs
+                    .push(tr(if stepped { TrOp::Live } else { TrOp::Bottom }));
             }
             ToggleFollow if focus == Pane::Log => out.msgs.push(ui(UiIntent::ToggleFollow)),
             TimeBack if in_transcript => out.msgs.push(tr(TrOp::Back)),
@@ -1775,7 +2264,11 @@ pub fn mouse_switch(from: MouseMode, to: MouseMode) -> String {
     if from == MouseMode::Off {
         s.push_str("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
     }
-    s.push_str(if to == MouseMode::Hover { "\x1b[?1003h" } else { "\x1b[?1003l" });
+    s.push_str(if to == MouseMode::Hover {
+        "\x1b[?1003h"
+    } else {
+        "\x1b[?1003l"
+    });
     s
 }
 
@@ -1790,7 +2283,12 @@ mod tests {
     use crossterm::event::{KeyEventKind, KeyEventState};
 
     fn mouse(kind: MouseEventKind, column: u16, row: u16) -> Event {
-        Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })
+        Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
     }
 
     #[test]

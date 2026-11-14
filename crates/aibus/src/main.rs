@@ -99,8 +99,14 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Workflow(WorkflowCmd::Validate { target })) => {
             commands::workflow_validate(&cli.global, target.as_deref())
         }
-        Some(Command::Workflow(WorkflowCmd::Show { name })) => commands::workflow_show(&cli.global, &name),
-        Some(Command::Workflow(WorkflowCmd::Run { name, input, script })) => {
+        Some(Command::Workflow(WorkflowCmd::Show { name })) => {
+            commands::workflow_show(&cli.global, &name)
+        }
+        Some(Command::Workflow(WorkflowCmd::Run {
+            name,
+            input,
+            script,
+        })) => {
             // The same session as `aibus run --workflow <name> <input>`.
             let args = RunArgs {
                 prompt: Some(input),
@@ -112,9 +118,12 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         }
         Some(Command::Mcp(args)) => mcp_cmd::mcp(&cli.global, &args, redactor),
         Some(Command::Init) => commands::init(&cli.global),
-        Some(Command::Doctor { session }) => {
-            doctor::doctor(&cli.global, session.as_deref(), redactor, &keychain::OsKeychain)
-        }
+        Some(Command::Doctor { session }) => doctor::doctor(
+            &cli.global,
+            session.as_deref(),
+            redactor,
+            &keychain::OsKeychain,
+        ),
         Some(Command::Demo { text }) => aibus_tui::demo::print(text, std::io::stdout().lock())
             .map(|()| 0)
             .map_err(|e| AibusError::Io(std::io::Error::other(e))),

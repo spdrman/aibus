@@ -18,6 +18,11 @@ fn two_hundred_renders_of_one_state_hash_to_one_value() {
             (&f.text, &f.styles).hash(&mut h);
             hashes.insert(h.finish());
         }
-        assert_eq!(hashes.len(), 1, "{size:?} rendered {} different frames", hashes.len());
+        assert_eq!(
+            hashes.len(),
+            1,
+            "{size:?} rendered {} different frames",
+            hashes.len()
+        );
     }
 }

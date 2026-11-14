@@ -88,12 +88,22 @@ pub fn sources(layout: &Layout) -> Vec<Source> {
         match scope {
             MemoryScope::User => add(layout.data.join("agent-memory"), "md", *scope, None),
             MemoryScope::Project => {
-                add(layout.project.join(".aibus/agent-memory"), "md", *scope, None);
+                add(
+                    layout.project.join(".aibus/agent-memory"),
+                    "md",
+                    *scope,
+                    None,
+                );
                 add(layout.ledgers(), "md", *scope, Some("ledger"));
                 add(layout.handoffs(), "yaml", *scope, Some("handoff"));
             }
             MemoryScope::Local => {
-                add(layout.project.join(".aibus/agent-memory-local"), "md", *scope, None);
+                add(
+                    layout.project.join(".aibus/agent-memory-local"),
+                    "md",
+                    *scope,
+                    None,
+                );
             }
         }
     }
@@ -103,18 +113,29 @@ pub fn sources(layout: &Layout) -> Vec<Source> {
 /// `scope IN (...) AND (user, or under this project)` with `?1` the length of the project
 /// prefix in characters and `?2` the prefix. The scope names are constants, never user text.
 fn domain(layout: &Layout) -> String {
-    let scopes: Vec<String> = layout.scopes.iter().map(|s| format!("'{}'", s.as_str())).collect();
-    format!("scope IN ({}) AND (scope = 'user' OR substr(path, 1, ?1) = ?2)", scopes.join(", "))
+    let scopes: Vec<String> = layout
+        .scopes
+        .iter()
+        .map(|s| format!("'{}'", s.as_str()))
+        .collect();
+    format!(
+        "scope IN ({}) AND (scope = 'user' OR substr(path, 1, ?1) = ?2)",
+        scopes.join(", ")
+    )
 }
 
 fn prefix(layout: &Layout) -> (i64, String) {
-    let p = format!("{}/", layout.project.to_string_lossy().trim_end_matches('/'));
+    let p = format!(
+        "{}/",
+        layout.project.to_string_lossy().trim_end_matches('/')
+    );
     (p.chars().count() as i64, p)
 }
 
 fn mtime_ms(path: &Path) -> io::Result<i64> {
     let t = fs::metadata(path)?.modified()?;
-    Ok(t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64))
+    Ok(t.duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64))
 }
 
 /// FTS5 `MATCH` text for free text: each word quoted, any of them may match, content only.
@@ -139,40 +160,58 @@ impl MemoryIndex for Index {
         let mut known: HashMap<String, (i64, String)> = HashMap::new();
         {
             let mut stmt = tx
-                .prepare(&format!("SELECT path, mtime, hash FROM memory_files WHERE {}", domain(layout)))
+                .prepare(&format!(
+                    "SELECT path, mtime, hash FROM memory_files WHERE {}",
+                    domain(layout)
+                ))
                 .map_err(io_err)?;
             let rows = stmt
-                .query_map(params![n, pre], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?))))
+                .query_map(params![n, pre], |r| {
+                    Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?)))
+                })
                 .map_err(io_err)?;
             for row in rows {
                 let (path, state) = row.map_err(io_err)?;
                 known.insert(path, state);
             }
         }
-        let live: HashSet<String> = found.iter().map(|s| s.path.to_string_lossy().into_owned()).collect();
+        let live: HashSet<String> = found
+            .iter()
+            .map(|s| s.path.to_string_lossy().into_owned())
+            .collect();
         for path in known.keys().filter(|p| !live.contains(*p)) {
-            tx.execute("DELETE FROM memory_fts WHERE path = ?1", [path]).map_err(io_err)?;
-            tx.execute("DELETE FROM memory_files WHERE path = ?1", [path]).map_err(io_err)?;
+            tx.execute("DELETE FROM memory_fts WHERE path = ?1", [path])
+                .map_err(io_err)?;
+            tx.execute("DELETE FROM memory_files WHERE path = ?1", [path])
+                .map_err(io_err)?;
             stats.removed += 1;
         }
         for s in &found {
             let path = s.path.to_string_lossy().into_owned();
-            let Ok(mtime) = mtime_ms(&s.path) else { continue };
+            let Ok(mtime) = mtime_ms(&s.path) else {
+                continue;
+            };
             let old = known.get(&path);
             if old.is_some_and(|(m, _)| *m == mtime) {
                 stats.unchanged += 1;
                 continue;
             }
-            let Ok(bytes) = fs::read(&s.path) else { continue };
+            let Ok(bytes) = fs::read(&s.path) else {
+                continue;
+            };
             let hash = content_hash(&bytes);
             if old.is_some_and(|(_, h)| *h == hash) {
-                tx.execute("UPDATE memory_files SET mtime = ?2 WHERE path = ?1", params![path, mtime])
-                    .map_err(io_err)?;
+                tx.execute(
+                    "UPDATE memory_files SET mtime = ?2 WHERE path = ?1",
+                    params![path, mtime],
+                )
+                .map_err(io_err)?;
                 stats.unchanged += 1;
                 continue;
             }
             let text = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_INDEXED)]).into_owned();
-            tx.execute("DELETE FROM memory_fts WHERE path = ?1", [&path]).map_err(io_err)?;
+            tx.execute("DELETE FROM memory_fts WHERE path = ?1", [&path])
+                .map_err(io_err)?;
             tx.execute(
                 "INSERT INTO memory_fts (path, scope, kind, content) VALUES (?1, ?2, ?3, ?4)",
                 params![path, s.scope.as_str(), s.kind, text],
@@ -209,7 +248,11 @@ impl MemoryIndex for Index {
                 Ok(Hit {
                     path: r.get(0)?,
                     score: r.get(1)?,
-                    snippet: r.get::<_, String>(2)?.split_whitespace().collect::<Vec<_>>().join(" "),
+                    snippet: r
+                        .get::<_, String>(2)?
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
                 })
             })
             .map_err(io_err)?;
@@ -236,7 +279,11 @@ mod tests {
         cfg.memory.scopes = vec!["user".into(), "project".into(), "local".into()];
         let layout = Layout::new(&project, &cfg, &data, Some("auth")).unwrap();
         let index = Index::open(&data.join("index.sqlite")).unwrap();
-        Fixture { _dir: dir, layout, index }
+        Fixture {
+            _dir: dir,
+            layout,
+            index,
+        }
     }
 
     fn put(path: PathBuf, text: &str) -> PathBuf {
@@ -249,20 +296,59 @@ mod tests {
     fn everything_in_scope_is_indexed_and_ranked() {
         let mut f = fixture();
         let l = &f.layout;
-        put(l.data.join("agent-memory/lead/LEARNINGS.md"), "- [fact, high] the cache key is the file hash\n");
-        put(l.project.join(".aibus/agent-memory/lead/MEMORY.md"), "notes about databases\n");
-        put(l.project.join(".aibus/agent-memory-local/lead/me.md"), "my private cache notes\n");
-        put(l.ledger(), "# Continuity: auth\n\n## Goal\nspeed up the cache\n");
-        put(l.handoff_dir().join("2026-11-08_09-15_x.yaml"), "goal: warm the cache\nnow: measure\n");
-        put(l.project.join("README.md"), "cache in the readme, which is not indexed\n");
+        put(
+            l.data.join("agent-memory/lead/LEARNINGS.md"),
+            "- [fact, high] the cache key is the file hash\n",
+        );
+        put(
+            l.project.join(".aibus/agent-memory/lead/MEMORY.md"),
+            "notes about databases\n",
+        );
+        put(
+            l.project.join(".aibus/agent-memory-local/lead/me.md"),
+            "my private cache notes\n",
+        );
+        put(
+            l.ledger(),
+            "# Continuity: auth\n\n## Goal\nspeed up the cache\n",
+        );
+        put(
+            l.handoff_dir().join("2026-11-08_09-15_x.yaml"),
+            "goal: warm the cache\nnow: measure\n",
+        );
+        put(
+            l.project.join("README.md"),
+            "cache in the readme, which is not indexed\n",
+        );
         let synced = f.index.sync(&f.layout).unwrap();
-        assert_eq!(synced, Synced { added: 5, ..Synced::default() });
+        assert_eq!(
+            synced,
+            Synced {
+                added: 5,
+                ..Synced::default()
+            }
+        );
 
         let hits = f.index.recall(&f.layout, "cache", 10).unwrap();
-        let names: Vec<_> = hits.iter().map(|h| Path::new(&h.path).file_name().unwrap().to_string_lossy().into_owned()).collect();
+        let names: Vec<_> = hits
+            .iter()
+            .map(|h| {
+                Path::new(&h.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
         assert_eq!(hits.len(), 4, "{names:?}");
-        assert!(!names.contains(&"README.md".to_owned()) && !names.contains(&"MEMORY.md".to_owned()));
-        assert!(hits.iter().all(|h| h.score > 0.0 && h.snippet.to_lowercase().contains("[cache]")), "{hits:?}");
+        assert!(
+            !names.contains(&"README.md".to_owned()) && !names.contains(&"MEMORY.md".to_owned())
+        );
+        assert!(
+            hits.iter()
+                .all(|h| h.score > 0.0 && h.snippet.to_lowercase().contains("[cache]")),
+            "{hits:?}"
+        );
         assert_eq!(f.index.recall(&f.layout, "cache", 2).unwrap().len(), 2);
         // Best first.
         assert!(hits.windows(2).all(|w| w[0].score >= w[1].score));
@@ -271,10 +357,22 @@ mod tests {
     #[test]
     fn stemming_and_awkward_queries() {
         let mut f = fixture();
-        put(f.layout.data.join("agent-memory/lead/a.md"), "the tests were running slowly\n");
+        put(
+            f.layout.data.join("agent-memory/lead/a.md"),
+            "the tests were running slowly\n",
+        );
         f.index.sync(&f.layout).unwrap();
         assert_eq!(f.index.recall(&f.layout, "run test", 5).unwrap().len(), 1);
-        for q in ["", "   ", "\"unbalanced", "a AND OR (", "NEAR(x", "c++ -d *", "content:x", "🙂"] {
+        for q in [
+            "",
+            "   ",
+            "\"unbalanced",
+            "a AND OR (",
+            "NEAR(x",
+            "c++ -d *",
+            "content:x",
+            "🙂",
+        ] {
             assert!(f.index.recall(&f.layout, q, 5).is_ok(), "{q:?}");
         }
         assert!(f.index.recall(&f.layout, "slowly", 0).unwrap().is_empty());
@@ -286,18 +384,38 @@ mod tests {
         let a = put(f.layout.data.join("agent-memory/lead/a.md"), "alpha one\n");
         let b = put(f.layout.data.join("agent-memory/lead/b.md"), "beta two\n");
         f.index.sync(&f.layout).unwrap();
-        assert_eq!(f.index.sync(&f.layout).unwrap(), Synced { unchanged: 2, ..Synced::default() });
+        assert_eq!(
+            f.index.sync(&f.layout).unwrap(),
+            Synced {
+                unchanged: 2,
+                ..Synced::default()
+            }
+        );
 
         // Same bytes, new mtime: untouched.
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(&a, "alpha one\n").unwrap();
-        assert_eq!(f.index.sync(&f.layout).unwrap(), Synced { unchanged: 2, ..Synced::default() });
+        assert_eq!(
+            f.index.sync(&f.layout).unwrap(),
+            Synced {
+                unchanged: 2,
+                ..Synced::default()
+            }
+        );
 
         // New bytes: re-read, and the old words are gone.
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(&a, "gamma three\n").unwrap();
         fs::remove_file(&b).unwrap();
-        assert_eq!(f.index.sync(&f.layout).unwrap(), Synced { updated: 1, removed: 1, unchanged: 0, added: 0 });
+        assert_eq!(
+            f.index.sync(&f.layout).unwrap(),
+            Synced {
+                updated: 1,
+                removed: 1,
+                unchanged: 0,
+                added: 0
+            }
+        );
         assert!(f.index.recall(&f.layout, "alpha", 5).unwrap().is_empty());
         assert!(f.index.recall(&f.layout, "beta", 5).unwrap().is_empty());
         assert_eq!(f.index.recall(&f.layout, "gamma", 5).unwrap().len(), 1);
@@ -306,8 +424,14 @@ mod tests {
     #[test]
     fn another_project_and_unconfigured_scopes_stay_out() {
         let mut f = fixture();
-        put(f.layout.project.join(".aibus/agent-memory/lead/m.md"), "shared word\n");
-        put(f.layout.data.join("agent-memory/lead/u.md"), "shared word\n");
+        put(
+            f.layout.project.join(".aibus/agent-memory/lead/m.md"),
+            "shared word\n",
+        );
+        put(
+            f.layout.data.join("agent-memory/lead/u.md"),
+            "shared word\n",
+        );
         f.index.sync(&f.layout).unwrap();
 
         // The same index file, seen from a sibling project with the project scope only.
@@ -332,7 +456,10 @@ mod tests {
     #[test]
     fn the_index_is_a_cache_that_a_rebuild_restores() {
         let mut f = fixture();
-        put(f.layout.data.join("agent-memory/lead/a.md"), "remember the milk\n");
+        put(
+            f.layout.data.join("agent-memory/lead/a.md"),
+            "remember the milk\n",
+        );
         f.index.sync(&f.layout).unwrap();
         let path = f.layout.index();
         // The index is not read again from here; the files are.

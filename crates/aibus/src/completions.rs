@@ -11,8 +11,16 @@ use crate::cli::{Cli, Shell};
 /// helper that lists them).
 const POSITIONAL: [(&str, &[&str], &str); 4] = [
     ("agent", &["show"], "agent"),
-    ("account", &["show", "test", "remove", "enable", "disable"], "account"),
-    ("session", &["show", "resume", "export", "log", "replay"], "session"),
+    (
+        "account",
+        &["show", "test", "remove", "enable", "disable"],
+        "account",
+    ),
+    (
+        "session",
+        &["show", "resume", "export", "log", "replay"],
+        "session",
+    ),
     ("workflow", &["run", "show", "validate"], "workflow"),
 ];
 
@@ -74,12 +82,16 @@ fn zsh() -> String {
         .replace("_aibus", "_aibus_static");
     let mut flags = String::new();
     for (flag, kind) in FLAGS {
-        flags.push_str(&format!("        --{flag}) _aibus_names {kind}; return ;;\n"));
+        flags.push_str(&format!(
+            "        --{flag}) _aibus_names {kind}; return ;;\n"
+        ));
     }
     let mut pairs = String::new();
     for (sub, verbs, kind) in POSITIONAL {
         for v in verbs {
-            pairs.push_str(&format!("            \"{sub} {v}\") _aibus_names {kind}; return ;;\n"));
+            pairs.push_str(&format!(
+                "            \"{sub} {v}\") _aibus_names {kind}; return ;;\n"
+            ));
         }
     }
     format!(
@@ -110,7 +122,8 @@ fi
 }
 
 fn fish() -> String {
-    let mut extra = String::from("\n# Names come from the hidden `aibus <kind> list --names` helpers.\n");
+    let mut extra =
+        String::from("\n# Names come from the hidden `aibus <kind> list --names` helpers.\n");
     for (flag, kind) in FLAGS {
         extra.push_str(&format!(
             "complete -c aibus -l {flag} -x -a '(aibus {kind} list --names 2>/dev/null)'\n"
@@ -193,7 +206,10 @@ mod tests {
                 assert!(text.contains(&wanted), "{shell:?} misses {wanted}");
             }
             for (flag, _) in FLAGS {
-                assert!(text.contains(&format!("--{flag}")) || text.contains(&format!("-l {flag}")), "{shell:?} {flag}");
+                assert!(
+                    text.contains(&format!("--{flag}")) || text.contains(&format!("-l {flag}")),
+                    "{shell:?} {flag}"
+                );
             }
         }
     }

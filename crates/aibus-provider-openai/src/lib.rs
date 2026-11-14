@@ -17,10 +17,10 @@ use std::time::SystemTime;
 use aibus_provider::models::ModelTable;
 use aibus_provider::presets::resolve;
 use aibus_provider::{
-    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse, CompatFlag,
-    ConfigError, Credential, ModelId, ModelInfo, ModelRef, ModelTableSpec, Price, Provider,
-    ProviderConfig, ProviderDef, ProviderError, ProviderFactory, ProviderId,
-    StreamChunk, SystemRole,
+    AccountInfo, AliasTable, Api, AuthMethodKind, Capabilities, ChatRequest, ChatResponse,
+    CompatFlag, ConfigError, Credential, ModelId, ModelInfo, ModelRef, ModelTableSpec, Price,
+    Provider, ProviderConfig, ProviderDef, ProviderError, ProviderFactory, ProviderId, StreamChunk,
+    SystemRole,
 };
 use aibus_provider_http::reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE,
@@ -56,7 +56,9 @@ impl Factory {
 
     /// Needs a `base_url` on the account; `auth = none` is allowed.
     pub fn compatible() -> Self {
-        Self { id: "openai-compatible" }
+        Self {
+            id: "openai-compatible",
+        }
     }
 
     /// The definition to build from: the one the registry resolved, or this factory's preset
@@ -65,12 +67,19 @@ impl Factory {
         if let Some(def) = &cfg.def {
             return Ok(def.clone());
         }
-        let mut user = ProviderDef { id: self.id.into(), base_url: cfg.base_url.clone(), ..ProviderDef::default() };
+        let mut user = ProviderDef {
+            id: self.id.into(),
+            base_url: cfg.base_url.clone(),
+            ..ProviderDef::default()
+        };
         match cfg.api.as_deref() {
             None | Some("chat") => {}
             Some("responses") => user.api = Some(Api::OpenaiResponses),
             Some(other) => {
-                return Err(ConfigError::Invalid(self.id.into(), format!("api \"{other}\" is not \"chat\" or \"responses\"")))
+                return Err(ConfigError::Invalid(
+                    self.id.into(),
+                    format!("api \"{other}\" is not \"chat\" or \"responses\""),
+                ))
             }
         }
         resolve(self.id, Some(&user))
@@ -90,9 +99,18 @@ impl ProviderFactory for Factory {
 
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
         if self.id == "openai-compatible" {
-            &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env, AuthMethodKind::None]
+            &[
+                AuthMethodKind::ApiKey,
+                AuthMethodKind::Bearer,
+                AuthMethodKind::Env,
+                AuthMethodKind::None,
+            ]
         } else {
-            &[AuthMethodKind::ApiKey, AuthMethodKind::Bearer, AuthMethodKind::Env]
+            &[
+                AuthMethodKind::ApiKey,
+                AuthMethodKind::Bearer,
+                AuthMethodKind::Env,
+            ]
         }
     }
 
@@ -133,9 +151,17 @@ impl OpenAi {
             Some(Api::OpenaiChat) => Wire::Chat,
             Some(Api::OpenaiResponses) if def.responses.unwrap_or(true) => Wire::Responses,
             Some(Api::OpenaiResponses) => {
-                return Err(ConfigError::Invalid(id.into(), format!("{id} has no Responses API; use api = \"chat\"")))
+                return Err(ConfigError::Invalid(
+                    id.into(),
+                    format!("{id} has no Responses API; use api = \"chat\""),
+                ))
             }
-            other => return Err(ConfigError::Invalid(id.into(), format!("api {other:?} is not an OpenAI api"))),
+            other => {
+                return Err(ConfigError::Invalid(
+                    id.into(),
+                    format!("api {other:?} is not an OpenAI api"),
+                ))
+            }
         };
         let base = def
             .base_url
@@ -148,26 +174,42 @@ impl OpenAi {
             })?
             .trim_end_matches('/');
         if !(base.starts_with("https://") || base.starts_with("http://")) {
-            return Err(ConfigError::Invalid(id.into(), "base_url must start with https:// or http://".into()));
+            return Err(ConfigError::Invalid(
+                id.into(),
+                "base_url must start with https:// or http://".into(),
+            ));
         }
         let bad = |what: &str, e: String| ConfigError::Invalid(id.into(), format!("{what}: {e}"));
         let mut extra_headers = HeaderMap::new();
         for (k, v) in &def.headers {
-            let name = HeaderName::from_bytes(k.as_bytes()).map_err(|e| bad("headers", format!("{k}: {e}")))?;
-            extra_headers.insert(name, HeaderValue::from_str(v).map_err(|e| bad("headers", format!("{k}: {e}")))?);
+            let name = HeaderName::from_bytes(k.as_bytes())
+                .map_err(|e| bad("headers", format!("{k}: {e}")))?;
+            extra_headers.insert(
+                name,
+                HeaderValue::from_str(v).map_err(|e| bad("headers", format!("{k}: {e}")))?,
+            );
         }
         let auth_header = def
             .auth_header
             .as_deref()
-            .map(|h| HeaderName::from_bytes(h.as_bytes()).map_err(|e| bad("auth_header", e.to_string())))
+            .map(|h| {
+                HeaderName::from_bytes(h.as_bytes()).map_err(|e| bad("auth_header", e.to_string()))
+            })
             .transpose()?;
-        let query = def.query.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&");
+        let query = def
+            .query
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("&");
         let builtin = match &def.model_table {
             Some(ModelTableSpec::Inline(v)) => v.to_string(),
             Some(ModelTableSpec::Named(n)) => aibus_provider::catalog::table(n)
                 .ok_or_else(|| bad("model_table", format!("no built-in table called {n}")))?
                 .to_owned(),
-            None => aibus_provider::catalog::table("empty").unwrap_or_default().to_owned(),
+            None => aibus_provider::catalog::table("empty")
+                .unwrap_or_default()
+                .to_owned(),
         };
         let prefixes: Vec<&str> = def.prefixes.iter().map(String::as_str).collect();
         Ok(Self {
@@ -177,7 +219,13 @@ impl OpenAi {
             extra_headers,
             query,
             auth_header,
-            table: Mutex::new(ModelTable::load(id, &builtin, cfg, &prefixes, open_aliases)?),
+            table: Mutex::new(ModelTable::load(
+                id,
+                &builtin,
+                cfg,
+                &prefixes,
+                open_aliases,
+            )?),
             base_caps: Capabilities {
                 tools: true,
                 parallel_tool_calls: true,
@@ -230,7 +278,10 @@ impl OpenAi {
         Ok(h)
     }
 
-    async fn list_models(&self, creds: &Credential) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
+    async fn list_models(
+        &self,
+        creds: &Credential,
+    ) -> Result<(Vec<ModelId>, Option<String>), ProviderError> {
         let url = self.url("models");
         let headers = self.headers(creds)?;
         let resp = self
@@ -245,7 +296,12 @@ impl OpenAi {
         let body = json(resp).await?;
         let ids = body["data"]
             .as_array()
-            .map(|a| a.iter().filter_map(|m| m["id"].as_str()).map(|id| ModelId(id.into())).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|m| m["id"].as_str())
+                    .map(|id| ModelId(id.into()))
+                    .collect()
+            })
             .unwrap_or_default();
         Ok((ids, org))
     }
@@ -262,7 +318,9 @@ impl Provider for OpenAi {
     }
 
     fn capabilities_for(&self, model: &ModelId) -> Capabilities {
-        self.table().capabilities_for(self.base_caps.clone(), model).with_compat(&self.compat)
+        self.table()
+            .capabilities_for(self.base_caps.clone(), model)
+            .with_compat(&self.compat)
     }
 
     fn models(&self) -> Vec<ModelInfo> {
@@ -273,7 +331,11 @@ impl Provider for OpenAi {
         let (ids, _) = self.list_models(creds).await?;
         // A local server lists what it has and says nothing of sizes; these are only a start,
         // and `providers/<id>/models.json` is where to put the real numbers.
-        let (context_window, max_output) = if self.open_aliases { (32_768, 4_096) } else { (128_000, 8_192) };
+        let (context_window, max_output) = if self.open_aliases {
+            (32_768, 4_096)
+        } else {
+            (128_000, 8_192)
+        };
         Ok(self.table().refreshed(
             self.id,
             ids,
@@ -308,12 +370,22 @@ impl Provider for OpenAi {
             // table says so for the ones it lists (`reasoning`, or the older `effort`), the
             // name for the ones released since.
             let reasoning = t.entry(&req.model).map_or_else(
-                || ["gpt-5", "o1", "o3", "o4"].iter().any(|p| req.model.0.starts_with(p)),
+                || {
+                    ["gpt-5", "o1", "o3", "o4"]
+                        .iter()
+                        .any(|p| req.model.0.starts_with(p))
+                },
                 |e| e.reasoning.unwrap_or(e.effort),
             );
             (t.price(&req.model), reasoning)
         };
-        let opts = wire::Opts { reasoning, user: self.send_user, logprobs: req.logprobs, include_cost: self.reports_cost, compat: &self.compat };
+        let opts = wire::Opts {
+            reasoning,
+            user: self.send_user,
+            logprobs: req.logprobs,
+            include_cost: self.reports_cost,
+            compat: &self.compat,
+        };
         let (path, body) = match self.wire {
             Wire::Chat => ("chat/completions", wire::chat_body(&req, opts)),
             Wire::Responses => ("responses", wire::responses_body(&req, opts)),
@@ -368,7 +440,12 @@ impl Provider for OpenAi {
 
     async fn verify(&self, creds: &Credential) -> Result<AccountInfo, ProviderError> {
         let (models, org) = self.list_models(creds).await?;
-        Ok(AccountInfo { label: creds.account.to_string(), org, models, cost_usd: None })
+        Ok(AccountInfo {
+            label: creds.account.to_string(),
+            org,
+            models,
+            cost_usd: None,
+        })
     }
 
     fn price(&self, model: &ModelId) -> Option<Price> {

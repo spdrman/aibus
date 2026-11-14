@@ -16,9 +16,9 @@ use aibus_graph::Graph;
 use aibus_provider::fake::{FakeProvider, RecordedRequest, Script, Step};
 use aibus_provider::{ContentBlock, MessageRole, StopReason};
 use aibus_testkit::{fake_credential, FakeClock};
+use aibus_testkit::{xdg_temp, Xdg};
 use common::{app, A};
 use serde_json::{json, Value};
-use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -201,7 +201,13 @@ impl Rig {
         std::fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let orch = Orchestrator::new(set.limits.clone(), tx.clone());
-        let bash = Arc::new(Bash::new(20, vec![], path_env(), dir.path().to_path_buf(), "s".into()));
+        let bash = Arc::new(Bash::new(
+            20,
+            vec![],
+            path_env(),
+            dir.path().to_path_buf(),
+            "s".into(),
+        ));
         let mut registry = ToolRegistry::standard(bash);
         registry.register(Arc::new(Delegate::new(orch.clone())));
         let gate = Gate {
@@ -220,7 +226,8 @@ impl Rig {
             fakes: Mutex::default(),
         });
         let mut app = app();
-        app.effects = Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
+        app.effects =
+            Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
         app.set_limits(&set.limits).unwrap();
         let all: Vec<AgentDef> = set.defs.values().cloned().collect();
         app.step(Msg::AgentsReloaded {
@@ -277,7 +284,10 @@ impl Rig {
                 background: false,
                 max_spawn_depth: 3,
                 forced: forced.map(|(a, r)| {
-                    ("delegate".into(), json!({"agent": a, "prompt": r, "background": false}))
+                    (
+                        "delegate".into(),
+                        json!({"agent": a, "prompt": r, "background": false}),
+                    )
                 }),
                 start: Start::New,
                 worktree: None,
@@ -401,17 +411,26 @@ async fn a_background_delegate_answers_at_once_and_the_report_arrives_wrapped_an
     // The tool result is the run id and nothing else, long before the child is done.
     let answer: Value = serde_json::from_str(&results(&reqs[1])[0]).unwrap();
     assert_eq!(answer, json!({ "run_id": child.to_string() }));
-    assert!(!user_text(&reqs[1]).iter().any(|t| t.contains("sub-agent's report")));
+    assert!(!user_text(&reqs[1])
+        .iter()
+        .any(|t| t.contains("sub-agent's report")));
 
     // The report is in the next request: wrapped, and capped with a pointer to the full text.
     let report = user_text(&reqs[2])
         .into_iter()
         .find(|t| t.contains("sub-agent's report"))
         .expect("the report was injected");
-    assert!(report.starts_with("The following is the sub-agent's report."), "{report}");
-    assert!(report.contains(&format!("[run {child} · explore · completed · 1 turns")), "{report}");
+    assert!(
+        report.starts_with("The following is the sub-agent's report."),
+        "{report}"
+    );
+    assert!(
+        report.contains(&format!("[run {child} · explore · completed · 1 turns")),
+        "{report}"
+    );
     assert!(report.contains("summary cut at 64 bytes"), "{report}");
-    let full = std::fs::read_to_string(rig.dir.path().join(format!("runs/{child}/result.md"))).unwrap();
+    let full =
+        std::fs::read_to_string(rig.dir.path().join(format!("runs/{child}/result.md"))).unwrap();
     assert_eq!(full.len(), 200);
     assert!(report.contains(&full[..64]));
     assert!(!report.contains(&full[..65]));
@@ -425,19 +444,31 @@ async fn a_foreground_delegate_blocks_the_parents_tool_call_until_the_child_ends
             .into_iter()
             .chain([text("thanks")]),
     );
-    let mut rig = Rig::new(Setup::default(), lead, |_| script([delay(5), text("child says hi")]));
+    let mut rig = Rig::new(Setup::default(), lead, |_| {
+        script([delay(5), text("child says hi")])
+    });
     let out = rig.run("go").await;
 
-    assert!(clock.elapsed() >= Duration::from_secs(5), "the lead waited for the child");
+    assert!(
+        clock.elapsed() >= Duration::from_secs(5),
+        "the lead waited for the child"
+    );
     let child = rig.launched()[0].run;
     let child_done = out.position(|m| matches!(m, Msg::RunFinished { run, .. } if *run == child));
-    let call_done = out.position(|m| matches!(m, Msg::ToolCallFinished { run, .. } if *run == rig.lead));
-    assert!(child_done < call_done, "the tool call ended after the child did");
+    let call_done =
+        out.position(|m| matches!(m, Msg::ToolCallFinished { run, .. } if *run == rig.lead));
+    assert!(
+        child_done < call_done,
+        "the tool call ended after the child did"
+    );
 
     let reqs = rig.lead_requests();
     assert_eq!(reqs.len(), 2);
     let result = &results(&reqs[1])[0];
-    assert!(result.starts_with("The following is the sub-agent's report."), "{result}");
+    assert!(
+        result.starts_with("The following is the sub-agent's report."),
+        "{result}"
+    );
     assert!(result.contains("child says hi"));
     assert!(result.contains(&format!("[run {child} · explore · completed")));
     assert_eq!(out.finished(rig.lead).turns, 2);
@@ -447,7 +478,10 @@ async fn a_foreground_delegate_blocks_the_parents_tool_call_until_the_child_ends
 async fn a_definition_with_background_true_overrides_a_caller_who_says_false() {
     let clock = FakeClock::new();
     let mut set = Setup::default();
-    set.defs.get_mut(&"explore".parse::<AgentName>().unwrap()).unwrap().background = true;
+    set.defs
+        .get_mut(&"explore".parse::<AgentName>().unwrap())
+        .unwrap()
+        .background = true;
     let lead = script(
         delegate_call("explore", "find it", false)
             .into_iter()
@@ -460,7 +494,10 @@ async fn a_definition_with_background_true_overrides_a_caller_who_says_false() {
     assert!(launched[0].background, "the spec says background");
     let answer: Value = serde_json::from_str(&results(&rig.lead_requests()[1])[0]).unwrap();
     assert_eq!(answer, json!({ "run_id": launched[0].run.to_string() }));
-    assert!(clock.elapsed() < Duration::from_secs(60), "the lead did not wait");
+    assert!(
+        clock.elapsed() < Duration::from_secs(60),
+        "the lead did not wait"
+    );
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
 }
 
@@ -472,7 +509,9 @@ async fn ctrl_b_moves_a_foreground_wait_to_the_background() {
             .into_iter()
             .chain([delay(10), text("moved on"), end(), text("final")]),
     );
-    let mut rig = Rig::new(Setup::default(), lead, |_| script([delay(5), text("child report")]));
+    let mut rig = Rig::new(Setup::default(), lead, |_| {
+        script([delay(5), text("child report")])
+    });
     rig.start_lead("go", None);
     let lead = rig.lead;
     let mut pressed = false;
@@ -481,7 +520,8 @@ async fn ctrl_b_moves_a_foreground_wait_to_the_background() {
             if let Msg::RunStarted { run, parent, .. } = msg {
                 if *parent == Some(lead) && !pressed {
                     pressed = true;
-                    app.step(Msg::Command(Command::Background { run: *run })).unwrap();
+                    app.step(Msg::Command(Command::Background { run: *run }))
+                        .unwrap();
                 }
             }
         })
@@ -492,20 +532,27 @@ async fn ctrl_b_moves_a_foreground_wait_to_the_background() {
     let reqs = rig.lead_requests();
     assert_eq!(reqs.len(), 3);
     let answer: Value = serde_json::from_str(&results(&reqs[1])[0]).unwrap();
-    assert_eq!(answer, json!({ "run_id": child.to_string(), "background": true }));
+    assert_eq!(
+        answer,
+        json!({ "run_id": child.to_string(), "background": true })
+    );
     let report = user_text(&reqs[2]).join("\n");
-    assert!(report.contains("child report"), "the result still came back: {report}");
+    assert!(
+        report.contains("child report"),
+        "the result still came back: {report}"
+    );
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
 }
 
 #[tokio::test]
 async fn a_background_runs_permission_prompt_names_the_run_and_a_deny_lets_it_carry_on() {
     let _clock = FakeClock::new();
-    let lead = script(
-        delegate_call("general", "run it", true)
-            .into_iter()
-            .chain([delay(20), text("waiting"), end(), text("ok")]),
-    );
+    let lead = script(delegate_call("general", "run it", true).into_iter().chain([
+        delay(20),
+        text("waiting"),
+        end(),
+        text("ok"),
+    ]));
     let set = Setup {
         tty: true,
         ..Setup::default()
@@ -551,9 +598,16 @@ async fn a_background_runs_permission_prompt_names_the_run_and_a_deny_lets_it_ca
         })
         .expect("the bash call ended");
     assert!(finished.is_error);
-    assert!(finished.content.starts_with("denied:"), "{}", finished.content);
+    assert!(
+        finished.content.starts_with("denied:"),
+        "{}",
+        finished.content
+    );
     let r = out.finished(child);
-    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Completed, "done"));
+    assert_eq!(
+        (r.status, r.summary.as_str()),
+        (RunStatus::Completed, "done")
+    );
 
     // A background run is not offered the interactive tools.
     assert!(rig.launched()[0].background);
@@ -632,11 +686,18 @@ async fn nesting_stops_at_depth_3_and_delegate_is_not_offered_there() {
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
 
     let launched = rig.launched();
-    assert_eq!(launched.iter().map(|s| s.depth).collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(
+        launched.iter().map(|s| s.depth).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
     let offered = |i: usize| tool_names(&rig.child_requests(launched[i].run)[0]);
     assert!(offered(0).contains(&"delegate".to_owned()), "depth 1");
     assert!(offered(1).contains(&"delegate".to_owned()), "depth 2");
-    assert!(!offered(2).contains(&"delegate".to_owned()), "depth 3: {:?}", offered(2));
+    assert!(
+        !offered(2).contains(&"delegate".to_owned()),
+        "depth 3: {:?}",
+        offered(2)
+    );
     assert!(tool_names(&rig.lead_requests()[0]).contains(&"delegate".to_owned()));
 
     // Each level hears only from the one below it.
@@ -644,7 +705,10 @@ async fn nesting_stops_at_depth_3_and_delegate_is_not_offered_there() {
     assert!(deepest.contains("three done"));
     let lead_saw = results(&rig.lead_requests()[1]).join("\n");
     assert!(lead_saw.contains("one done"));
-    assert!(!lead_saw.contains("three done"), "results do not bubble past one level");
+    assert!(
+        !lead_saw.contains("three done"),
+        "results do not bubble past one level"
+    );
 }
 
 #[tokio::test]
@@ -686,7 +750,9 @@ async fn a_run_that_cannot_be_built_ends_failed_and_the_waiting_parent_hears_it(
 #[tokio::test]
 async fn spawn_run_is_idempotent_and_moves_queued_to_starting() {
     let _clock = FakeClock::new();
-    let mut rig = Rig::new(Setup::default(), Script::new(), |_| script([delay(100), text("x")]));
+    let mut rig = Rig::new(Setup::default(), Script::new(), |_| {
+        script([delay(100), text("x")])
+    });
     rig.lead_started();
     rig.orch
         .adopt(rig.lead, mpsc::channel(8).0, CancellationToken::new());
@@ -704,7 +770,11 @@ async fn spawn_run_is_idempotent_and_moves_queued_to_starting() {
         }))
         .unwrap();
     assert_eq!(rig.status(child), "queued");
-    assert_eq!(rig.launched().len(), 1, "started by the commit that listed it");
+    assert_eq!(
+        rig.launched().len(),
+        1,
+        "started by the commit that listed it"
+    );
 
     // Reading the same listing again, or asking for the same id, starts nothing.
     rig.app.step(Msg::Tick).unwrap();
@@ -761,7 +831,10 @@ async fn a_mention_opens_the_lead_with_a_delegate_and_the_lead_still_gets_the_re
     let mut rig = Rig::new(Setup::default(), script([text("thanks")]), |_| {
         script([text("the report")])
     });
-    rig.start_lead("@agent-explore map the repo", Some(("explore", "map the repo")));
+    rig.start_lead(
+        "@agent-explore map the repo",
+        Some(("explore", "map the repo")),
+    );
     let out = rig.pump(|_, _, _| {}).await;
 
     let reqs = rig.lead_requests();
@@ -779,11 +852,17 @@ async fn a_mention_opens_the_lead_with_a_delegate_and_the_lead_still_gets_the_re
     assert_eq!(input["prompt"], "map the repo");
     assert_eq!(input["background"], false);
     let report = &results(&reqs[0])[0];
-    assert!(report.contains("the report") && report.contains("· explore · completed"), "{report}");
+    assert!(
+        report.contains("the report") && report.contains("· explore · completed"),
+        "{report}"
+    );
 
     let child = rig.launched()[0].run;
     assert_eq!(rig.launched()[0].parent, Some(rig.lead));
     assert_eq!(out.finished(child).summary, "the report");
     let lead = out.finished(rig.lead);
-    assert_eq!((lead.status, lead.turns, lead.summary.as_str()), (RunStatus::Completed, 1, "thanks"));
+    assert_eq!(
+        (lead.status, lead.turns, lead.summary.as_str()),
+        (RunStatus::Completed, 1, "thanks")
+    );
 }

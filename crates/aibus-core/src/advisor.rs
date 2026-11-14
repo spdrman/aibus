@@ -77,9 +77,8 @@ impl Triggers {
     /// `specs` are the advisor definition's `checkpoints`, `enabled` the built-in names
     /// `[advisor] checkpoints` leaves on. A spec with an `on` and a `matcher` is a custom one.
     pub fn new(specs: &[CheckpointSpec], enabled: &[String]) -> Self {
-        let on = |name: &str| {
-            specs.iter().any(|s| s.name == name) && enabled.iter().any(|e| e == name)
-        };
+        let on =
+            |name: &str| specs.iter().any(|s| s.name == name) && enabled.iter().any(|e| e == name);
         let custom = specs
             .iter()
             .filter(|s| s.on.as_deref() == Some("tool_result"))
@@ -101,11 +100,16 @@ impl Triggers {
         let plan = self.plan.as_ref()?;
         for b in &msg.blocks {
             match b {
-                ContentBlock::ToolUse { name, .. } if name == "plan" || name == "enter_plan_mode" => {
+                ContentBlock::ToolUse { name, .. }
+                    if name == "plan" || name == "enter_plan_mode" =>
+                {
                     return Some((Checkpoint::BeforePlan, format!("the lead called {name}")));
                 }
                 ContentBlock::Text(t) if plan.is_match(t) => {
-                    return Some((Checkpoint::BeforePlan, "the lead's text opens a plan".into()));
+                    return Some((
+                        Checkpoint::BeforePlan,
+                        "the lead's text opens a plan".into(),
+                    ));
                 }
                 _ => {}
             }
@@ -137,7 +141,10 @@ impl Triggers {
         }
         for (name, matcher) in &self.custom {
             if matcher.is_match(tool) || matcher.is_match(content) {
-                hit.push((Checkpoint::Custom(name.clone()), format!("{tool} matched {name}")));
+                hit.push((
+                    Checkpoint::Custom(name.clone()),
+                    format!("{tool} matched {name}"),
+                ));
             }
         }
         hit
@@ -150,7 +157,10 @@ impl Triggers {
             return None;
         }
         self.done_at = workers_done;
-        Some((Checkpoint::BeforeDone, format!("{workers_done} worker run(s) completed")))
+        Some((
+            Checkpoint::BeforeDone,
+            format!("{workers_done} worker run(s) completed"),
+        ))
     }
 }
 
@@ -213,9 +223,17 @@ impl RunLog {
                     self.push(seq, Kind::Text(text));
                 }
                 for b in &msg.blocks {
-                    if let ContentBlock::ToolUse { id, name, input, .. } = b {
+                    if let ContentBlock::ToolUse {
+                        id, name, input, ..
+                    } = b
+                    {
                         let args = head(&input.to_string(), ARGS_HEAD);
-                        let call = Kind::Call { id: *id, name: name.clone(), args, result: None };
+                        let call = Kind::Call {
+                            id: *id,
+                            name: name.clone(),
+                            args,
+                            result: None,
+                        };
                         self.push(seq, call);
                     }
                 }
@@ -227,11 +245,21 @@ impl RunLog {
                             let text = cut(t.clone());
                             self.push(seq, Kind::User(text));
                         }
-                        ContentBlock::ToolResult { id, content, is_error } => {
-                            let found = self.entries.iter_mut().rev().find_map(|e| match &mut e.kind {
-                                Kind::Call { id: got, result, .. } if got == id => Some(result),
-                                _ => None,
-                            });
+                        ContentBlock::ToolResult {
+                            id,
+                            content,
+                            is_error,
+                        } => {
+                            let found =
+                                self.entries
+                                    .iter_mut()
+                                    .rev()
+                                    .find_map(|e| match &mut e.kind {
+                                        Kind::Call {
+                                            id: got, result, ..
+                                        } if got == id => Some(result),
+                                        _ => None,
+                                    });
                             if let Some(result) = found {
                                 *result = Some((head(content, RESULT_HEAD), *is_error));
                             }
@@ -277,7 +305,11 @@ impl Ledger {
             entries: Vec::new(),
             synced,
         };
-        let text = if role == Role::Lead { task.to_owned() } else { head(task, RESULT_HEAD) };
+        let text = if role == Role::Lead {
+            task.to_owned()
+        } else {
+            head(task, RESULT_HEAD)
+        };
         log.push(&mut g.seq, Kind::User(text));
         g.runs.push(log);
     }
@@ -338,14 +370,26 @@ impl Ledger {
                 let (text, result) = match &e.kind {
                     Kind::User(t) => (format!("user: {t}"), None),
                     Kind::Text(t) => (format!("assistant: {t}"), None),
-                    Kind::Call { name, args, result, .. } => (
+                    Kind::Call {
+                        name, args, result, ..
+                    } => (
                         format!("tool {name} {args}"),
                         result.as_ref().map(|(r, bad)| {
-                            if *bad { format!("-> ERROR: {r}") } else { format!("-> {r}") }
+                            if *bad {
+                                format!("-> ERROR: {r}")
+                            } else {
+                                format!("-> {r}")
+                            }
                         }),
                     ),
                 };
-                lines.push(Line { run, seq: e.seq, text, result, gone: false });
+                lines.push(Line {
+                    run,
+                    seq: e.seq,
+                    text,
+                    result,
+                    gone: false,
+                });
             }
         }
         const ELIDED: &str = "-> [result elided]";

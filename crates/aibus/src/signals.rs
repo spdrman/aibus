@@ -33,7 +33,11 @@ impl Signals {
         std::thread::spawn(move || {
             // `forever` ends when the handle is closed.
             for sig in signals.forever() {
-                let kind = if sig == SIGWINCH { Signal::Resize } else { Signal::Stop };
+                let kind = if sig == SIGWINCH {
+                    Signal::Resize
+                } else {
+                    Signal::Stop
+                };
                 if tx.send(kind).is_err() {
                     break;
                 }

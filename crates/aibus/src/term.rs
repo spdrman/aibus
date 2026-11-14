@@ -26,7 +26,10 @@ pub fn check_tui(term: Option<&str>) -> Result<(), AibusError> {
 /// Removes ANSI escape sequences (CSI and OSC) and other C0 controls except tab and newline,
 /// from text that is about to be printed for a person whose output is not a colour terminal.
 pub fn strip_ansi(text: &str) -> Cow<'_, str> {
-    if !text.bytes().any(|b| (b < 0x20 && b != b'\n' && b != b'\t') || b == 0x7f) {
+    if !text
+        .bytes()
+        .any(|b| (b < 0x20 && b != b'\n' && b != b'\t') || b == 0x7f)
+    {
         return Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len());
@@ -109,8 +112,14 @@ mod tests {
     #[test]
     fn escapes_and_controls_are_stripped_and_plain_text_is_not_copied() {
         assert!(matches!(strip_ansi("plain\ttext\n"), Cow::Borrowed(_)));
-        assert_eq!(strip_ansi("\u{1b}[31mred\u{1b}[0m and \u{1b}[1;32mgreen\u{1b}[m"), "red and green");
-        assert_eq!(strip_ansi("a\u{1b}]0;title\u{7}b\u{1b}]8;;http://x\u{1b}\\c"), "abc");
+        assert_eq!(
+            strip_ansi("\u{1b}[31mred\u{1b}[0m and \u{1b}[1;32mgreen\u{1b}[m"),
+            "red and green"
+        );
+        assert_eq!(
+            strip_ansi("a\u{1b}]0;title\u{7}b\u{1b}]8;;http://x\u{1b}\\c"),
+            "abc"
+        );
         assert_eq!(strip_ansi("bell\u{7}\r\nline"), "bell\nline");
         assert_eq!(strip_ansi("é\u{1b}Mü"), "éü");
     }

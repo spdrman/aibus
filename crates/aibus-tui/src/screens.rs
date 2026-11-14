@@ -40,12 +40,22 @@ pub struct Entry {
 impl Entry {
     /// A plain field.
     pub fn plain(kind: EntryKind, label: &str, text: &str) -> Self {
-        Self { kind, label: label.to_owned(), text: text.to_owned(), key: None }
+        Self {
+            kind,
+            label: label.to_owned(),
+            text: text.to_owned(),
+            key: None,
+        }
     }
 
     /// A field whose content is a secret: it starts empty.
     pub fn secret(kind: EntryKind, label: &str) -> Self {
-        Self { kind, label: label.to_owned(), text: String::new(), key: Some(Secret::new(String::new())) }
+        Self {
+            kind,
+            label: label.to_owned(),
+            text: String::new(),
+            key: Some(Secret::new(String::new())),
+        }
     }
 
     /// The typed key with `edit` applied, which may add up to `room` bytes. The result is a new buffer sized so that it never grows
@@ -71,14 +81,23 @@ impl PartialEq for Entry {
 // A copy is for drawing: it has the dots and never the key.
 impl Clone for Entry {
     fn clone(&self) -> Self {
-        Self { kind: self.kind.clone(), label: self.label.clone(), text: self.text.clone(), key: None }
+        Self {
+            kind: self.kind.clone(),
+            label: self.label.clone(),
+            text: self.text.clone(),
+            key: None,
+        }
     }
 }
 
 // A key typed here must not reach a log through Debug.
 impl std::fmt::Debug for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let shown = if self.key.is_some() { "<hidden>" } else { self.text.as_str() };
+        let shown = if self.key.is_some() {
+            "<hidden>"
+        } else {
+            self.text.as_str()
+        };
         write!(f, "Entry({:?}, {:?}, {shown})", self.kind, self.label)
     }
 }
@@ -104,11 +123,24 @@ pub enum EntryKind {
 
 pub fn centred(full: Rect, w: u16, h: u16) -> Rect {
     let (w, h) = (w.min(full.width), h.min(full.height));
-    Rect { x: full.x + (full.width - w) / 2, y: full.y + (full.height - h) / 2, width: w, height: h }
+    Rect {
+        x: full.x + (full.width - w) / 2,
+        y: full.y + (full.height - h) / 2,
+        width: w,
+        height: h,
+    }
 }
 
 /// A button: `[key] label`, lit under the pointer, darker while pressed, dim when it does not apply.
-pub fn button(buf: &mut Buffer, at: Rect, key: &str, label: &str, th: &Theme, state: Option<Interact>, enabled: bool) {
+pub fn button(
+    buf: &mut Buffer,
+    at: Rect,
+    key: &str,
+    label: &str,
+    th: &Theme,
+    state: Option<Interact>,
+    enabled: bool,
+) {
     let style = match (enabled, state) {
         (false, _) if th.mono => Style::new().add_modifier(Modifier::DIM),
         (false, _) => Style::new().fg(th.dim_text).bg(th.highlight),
@@ -117,7 +149,11 @@ pub fn button(buf: &mut Buffer, at: Rect, key: &str, label: &str, th: &Theme, st
         (true, None) => Style::new().fg(th.fg).bg(th.highlight),
     };
     buf.set_style(at, style);
-    let line = if key.is_empty() { format!(" {label} ") } else { format!(" [{key}] {label} ") };
+    let line = if key.is_empty() {
+        format!(" {label} ")
+    } else {
+        format!(" [{key}] {label} ")
+    };
     // A mono button shows its edge with brackets of its own, since there is no fill to see.
     put(buf, at, 0, 0, &clip(&line, usize::from(at.width)), style);
     if th.mono {
@@ -138,12 +174,18 @@ pub fn buttons(
     let mut out = Vec::new();
     let (mut x, mut y) = (0u16, 0u16);
     for (id, key, label, enabled) in items {
-        let w = (label.chars().count() + key.chars().count() + if key.is_empty() { 2 } else { 5 }) as u16;
+        let w = (label.chars().count() + key.chars().count() + if key.is_empty() { 2 } else { 5 })
+            as u16;
         if x > 0 && x + w > area.width {
             x = 0;
             y += 1;
         }
-        let r = Rect { x: area.x + x, y: area.y + y0 + y, width: w.min(area.width), height: 1 };
+        let r = Rect {
+            x: area.x + x,
+            y: area.y + y0 + y,
+            width: w.min(area.width),
+            height: 1,
+        };
         if r.bottom() > area.bottom() {
             break;
         }
@@ -165,7 +207,14 @@ pub fn buttons(
 /// The text field open over a modal: its label, then the text (dots for a secret) and a cursor.
 pub fn entry_line(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
     let shown = e.text.clone();
-    let x = put(buf, area, 0, y, &format!("{}: ", e.label), Style::new().fg(th.dim_text));
+    let x = put(
+        buf,
+        area,
+        0,
+        y,
+        &format!("{}: ", e.label),
+        Style::new().fg(th.dim_text),
+    );
     let room = usize::from(area.width.saturating_sub(x + 2));
     let skip = shown.chars().count().saturating_sub(room);
     let tail: String = shown.chars().skip(skip).collect();
@@ -176,12 +225,26 @@ pub fn entry_line(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
 /// The browser login: its title, what the flow said (the address wraps over the rows it needs, a
 /// device code is a line of its own) and the two keys. Before the flow has said anything it waits.
 pub fn oauth_modal(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) {
-    put(buf, area, 0, y, &e.label, Style::new().fg(th.router).add_modifier(Modifier::BOLD));
+    put(
+        buf,
+        area,
+        0,
+        y,
+        &e.label,
+        Style::new().fg(th.router).add_modifier(Modifier::BOLD),
+    );
     let width = usize::from(area.width).max(1);
     let mut row = y + 1;
     let last = area.height.saturating_sub(2);
     if e.text.is_empty() {
-        put(buf, area, 0, row, "waiting for the authorization address...", Style::new().fg(th.dim_text));
+        put(
+            buf,
+            area,
+            0,
+            row,
+            "waiting for the authorization address...",
+            Style::new().fg(th.dim_text),
+        );
         row += 1;
     }
     for line in e.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
@@ -190,16 +253,38 @@ pub fn oauth_modal(buf: &mut Buffer, area: Rect, y: u16, e: &Entry, th: &Theme) 
             if row >= last {
                 break;
             }
-            put(buf, area, 0, row, &chunk.iter().collect::<String>(), Style::new().fg(th.fg));
+            put(
+                buf,
+                area,
+                0,
+                row,
+                &chunk.iter().collect::<String>(),
+                Style::new().fg(th.fg),
+            );
             row += 1;
         }
     }
-    put(buf, area, 0, area.height.saturating_sub(1), "[o] open in the browser   [Esc] cancel", Style::new().fg(th.dim_text));
+    put(
+        buf,
+        area,
+        0,
+        area.height.saturating_sub(1),
+        "[o] open in the browser   [Esc] cancel",
+        Style::new().fg(th.dim_text),
+    );
 }
 
 /// The permission modal (05 section 5): 60 columns, yellow, the tool, what it would do, who asked
 /// and four buttons. `1 of N` in the title when several wait; a run other than the lead is named.
-pub fn permission(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, entry: Option<&Entry>, cwd: &str) -> Placed {
+pub fn permission(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+    entry: Option<&Entry>,
+    cwd: &str,
+) -> Placed {
     let agent = text(v, "agent");
     let run = text(v, "run_short");
     let of = int(v, "of");
@@ -209,32 +294,72 @@ pub fn permission(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: 
     }
     let w = 60.min(full.width);
     let inner_w = usize::from(w.saturating_sub(4)).max(1);
-    let summary: Vec<String> = aibus_core::state::store::wrap_text(text(v, "summary"), inner_w.saturating_sub(2)).into_iter().take(4).collect();
+    let summary: Vec<String> =
+        aibus_core::state::store::wrap_text(text(v, "summary"), inner_w.saturating_sub(2))
+            .into_iter()
+            .take(4)
+            .collect();
     let h = (summary.len() as u16 + 8).min(full.height);
     let area = centred(full, w, h);
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, &title, th.warn, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
-    put(buf, inner, 0, 0, text(v, "tool"), Style::new().fg(th.fg).add_modifier(Modifier::BOLD));
+    put(
+        buf,
+        inner,
+        0,
+        0,
+        text(v, "tool"),
+        Style::new().fg(th.fg).add_modifier(Modifier::BOLD),
+    );
     for (i, l) in summary.iter().enumerate() {
-        put(buf, inner, 0, 1 + i as u16, &format!("{} {l}", if i == 0 { "$" } else { " " }), Style::new().fg(th.fg));
+        put(
+            buf,
+            inner,
+            0,
+            1 + i as u16,
+            &format!("{} {l}", if i == 0 { "$" } else { " " }),
+            Style::new().fg(th.fg),
+        );
     }
     let y = 1 + summary.len() as u16;
-    let who = if flag(v, "background") { format!("background run {agent} {run}  ·  cwd {cwd}") } else { format!("cwd {cwd}") };
+    let who = if flag(v, "background") {
+        format!("background run {agent} {run}  ·  cwd {cwd}")
+    } else {
+        format!("cwd {cwd}")
+    };
     put(buf, inner, 0, y, &who, Style::new().fg(th.dim_text));
     let mut hits = Vec::new();
     if let Some(e) = entry {
         entry_line(buf, inner, y + 2, e, th);
-        let (b, _) = buttons(buf, inner, y + 4, &[("send_edit", "Enter", "Allow edited", true), ("cancel", "Esc", "Back", true)], th, pointer);
+        let (b, _) = buttons(
+            buf,
+            inner,
+            y + 4,
+            &[
+                ("send_edit", "Enter", "Allow edited", true),
+                ("cancel", "Esc", "Back", true),
+            ],
+            th,
+            pointer,
+        );
         hits.extend(b);
     } else {
         let mut items = vec![("allow", "y", "Allow once", true)];
         if flag(v, "always") {
             items.push(("always", "a", "Allow always", true));
         }
-        items.extend([("deny", "n", "Deny", true), ("edit", "e", "Edit", true), ("cancel", "Esc", "Cancel", true)]);
+        items.extend([
+            ("deny", "n", "Deny", true),
+            ("edit", "e", "Edit", true),
+            ("cancel", "Esc", "Cancel", true),
+        ]);
         let (b, _) = buttons(buf, inner, y + 2, &items, th, pointer);
         hits.extend(b);
     }
@@ -245,12 +370,18 @@ pub fn permission(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: 
 pub fn palette(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
     let items = as_list(get(v, "items").unwrap_or(&NULL));
     let w = 70.min(full.width.saturating_sub(2)).max(30.min(full.width));
-    let rows = items.len().clamp(1, usize::from(full.height.saturating_sub(8)).clamp(1, 14));
+    let rows = items
+        .len()
+        .clamp(1, usize::from(full.height.saturating_sub(8)).clamp(1, 14));
     let area = centred(full, w, rows as u16 + 6);
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "palette", th.focus, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let x = put(buf, inner, 0, 0, ": ", Style::new().fg(th.dim_text));
     let x = put(buf, inner, x, 0, text(v, "text"), Style::new().fg(th.fg));
@@ -259,10 +390,21 @@ pub fn palette(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Po
     let first = sel.saturating_sub(rows - 1);
     let mut hits = Vec::new();
     if items.is_empty() {
-        put(buf, inner, 0, 2, "nothing matches", Style::new().fg(th.dim_text));
+        put(
+            buf,
+            inner,
+            0,
+            2,
+            "nothing matches",
+            Style::new().fg(th.dim_text),
+        );
     }
     for (k, item) in items.iter().skip(first).take(rows).enumerate() {
-        let r = Rect { y: inner.y + 2 + k as u16, height: 1, ..inner };
+        let r = Rect {
+            y: inner.y + 2 + k as u16,
+            height: 1,
+            ..inner
+        };
         let i = first + k;
         let hit = HitId::ListRow(i);
         let state = if pointer.pressed == Some(hit) {
@@ -278,14 +420,38 @@ pub fn palette(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Po
             buf.set_style(r, th.interact(s));
         }
         let kind = text(item, "kind");
-        put(buf, r, 0, 0, &format!("{kind:<8}"), Style::new().fg(th.dim_text));
-        put(buf, r, 9, 0, &clip(text(item, "label"), usize::from(r.width).saturating_sub(24)), Style::new().fg(th.fg));
+        put(
+            buf,
+            r,
+            0,
+            0,
+            &format!("{kind:<8}"),
+            Style::new().fg(th.dim_text),
+        );
+        put(
+            buf,
+            r,
+            9,
+            0,
+            &clip(text(item, "label"), usize::from(r.width).saturating_sub(24)),
+            Style::new().fg(th.fg),
+        );
         let hint = text(item, "hint");
         let hx = r.width.saturating_sub(hint.chars().count() as u16 + 1);
         put(buf, r, hx, 0, hint, Style::new().fg(th.dim_text));
         hits.push((hit, r));
     }
-    let (b, _) = buttons(buf, inner, 2 + rows as u16 + 1, &[("run", "Enter", "Run", !items.is_empty()), ("cancel", "Esc", "Cancel", true)], th, pointer);
+    let (b, _) = buttons(
+        buf,
+        inner,
+        2 + rows as u16 + 1,
+        &[
+            ("run", "Enter", "Run", !items.is_empty()),
+            ("cancel", "Esc", "Cancel", true),
+        ],
+        th,
+        pointer,
+    );
     hits.extend(b);
     Placed { area, hits }
 }
@@ -295,12 +461,24 @@ fn column(buf: &mut Buffer, r: Rect, x: u16, w: u16, s: &str, style: Style) {
 }
 
 /// The agents screen: every definition with scope, model and tools, and a preview of the body.
-pub fn agents(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, entry: Option<&Entry>, note: &str) -> Placed {
+pub fn agents(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+    entry: Option<&Entry>,
+    note: &str,
+) -> Placed {
     let area = full;
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "agents", th.swarm, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
     let sel = int(v, "sel") as usize;
@@ -312,7 +490,14 @@ pub fn agents(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
     column(buf, head, name_w + 1, 9, "scope", dim);
     column(buf, head, name_w + 11, 10, "role", dim);
     column(buf, head, name_w + 22, 18, "model", dim);
-    column(buf, head, name_w + 41, inner.width.saturating_sub(name_w + 41), "tools", dim);
+    column(
+        buf,
+        head,
+        name_w + 41,
+        inner.width.saturating_sub(name_w + 41),
+        "tools",
+        dim,
+    );
     let shown = usize::from(list_h - 1);
     let first = sel.saturating_sub(shown.saturating_sub(1));
     let mut hits = Vec::new();
@@ -320,7 +505,11 @@ pub fn agents(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
         put(buf, inner, 0, 1, "no agent definitions found", dim);
     }
     for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
-        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let r = Rect {
+            y: inner.y + 1 + k as u16,
+            height: 1,
+            ..inner
+        };
         let i = first + k;
         let hit = HitId::ListRow(i);
         let state = if pointer.pressed == Some(hit) {
@@ -340,30 +529,82 @@ pub fn agents(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
         column(buf, r, name_w + 1, 9, text(row, "scope"), dim);
         column(buf, r, name_w + 11, 10, text(row, "role"), dim);
         column(buf, r, name_w + 22, 18, text(row, "model"), fg);
-        column(buf, r, name_w + 41, inner.width.saturating_sub(name_w + 41), text(row, "tools"), dim);
+        column(
+            buf,
+            r,
+            name_w + 41,
+            inner.width.saturating_sub(name_w + 41),
+            text(row, "tools"),
+            dim,
+        );
         hits.push((hit, r));
     }
     // The preview of the selected definition's body.
     let preview_top = inner.y + list_h;
-    let rule = Rect { y: preview_top, height: 1, ..inner };
+    let rule = Rect {
+        y: preview_top,
+        height: 1,
+        ..inner
+    };
     let name = rows.get(sel).map_or("", |r| text(r, "name"));
-    put(buf, rule, 0, 0, &format!("── {name} {}", "─".repeat(usize::from(inner.width).saturating_sub(name.chars().count() + 4))), dim);
+    put(
+        buf,
+        rule,
+        0,
+        0,
+        &format!(
+            "── {name} {}",
+            "─".repeat(usize::from(inner.width).saturating_sub(name.chars().count() + 4))
+        ),
+        dim,
+    );
     let preview = as_list(get(v, "preview").unwrap_or(&NULL));
     let room = usize::from(inner.bottom().saturating_sub(preview_top + 1 + 3));
     for (k, l) in preview.iter().take(room).enumerate() {
-        let r = Rect { y: preview_top + 1 + k as u16, height: 1, ..inner };
-        put(buf, r, 0, 0, &clip(l.as_str_or(""), usize::from(r.width)), Style::new().fg(th.fg));
+        let r = Rect {
+            y: preview_top + 1 + k as u16,
+            height: 1,
+            ..inner
+        };
+        put(
+            buf,
+            r,
+            0,
+            0,
+            &clip(l.as_str_or(""), usize::from(r.width)),
+            Style::new().fg(th.fg),
+        );
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(3), height: 3, ..inner };
+    let bottom = Rect {
+        y: inner.bottom().saturating_sub(3),
+        height: 3,
+        ..inner
+    };
     let warn = int(v, "warnings");
     let status = if !note.is_empty() {
         note.to_owned()
     } else if warn > 0 {
-        format!("{warn} warning(s): {}", get(v, "first_warning").and_then(|w| w.as_text()).unwrap_or(""))
+        format!(
+            "{warn} warning(s): {}",
+            get(v, "first_warning")
+                .and_then(|w| w.as_text())
+                .unwrap_or("")
+        )
     } else {
         String::new()
     };
-    put(buf, bottom, 0, 0, &clip(&status, usize::from(bottom.width)), Style::new().fg(if note.starts_with("invalid") { th.error } else { th.dim_text }));
+    put(
+        buf,
+        bottom,
+        0,
+        0,
+        &clip(&status, usize::from(bottom.width)),
+        Style::new().fg(if note.starts_with("invalid") {
+            th.error
+        } else {
+            th.dim_text
+        }),
+    );
     if let Some(e) = entry {
         entry_line(buf, bottom, 1, e, th);
     } else {
@@ -371,7 +612,13 @@ pub fn agents(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
             buf,
             bottom,
             1,
-            &[("new", "n", "New", true), ("edit", "e", "Edit", !rows.is_empty()), ("validate", "v", "Validate", !rows.is_empty()), ("delegate", "d", "Delegate now", !rows.is_empty()), ("cancel", "Esc", "Close", true)],
+            &[
+                ("new", "n", "New", true),
+                ("edit", "e", "Edit", !rows.is_empty()),
+                ("validate", "v", "Validate", !rows.is_empty()),
+                ("delegate", "d", "Delegate now", !rows.is_empty()),
+                ("cancel", "Esc", "Close", true),
+            ],
             th,
             pointer,
         );
@@ -381,12 +628,24 @@ pub fn agents(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
 }
 
 /// The accounts screen: name, provider, model and whether a key is set.
-pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, entry: Option<&Entry>, note: &str) -> Placed {
+pub fn accounts(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+    entry: Option<&Entry>,
+    note: &str,
+) -> Placed {
     let area = full;
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "accounts", th.router, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
     let sel = int(v, "sel") as usize;
@@ -406,7 +665,11 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
         put(buf, inner, 0, 1, "no accounts yet: add one with a", dim);
     }
     for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
-        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let r = Rect {
+            y: inner.y + 1 + k as u16,
+            height: 1,
+            ..inner
+        };
         let i = first + k;
         let hit = HitId::ListRow(i);
         let state = if pointer.pressed == Some(hit) {
@@ -427,11 +690,29 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
         column(buf, r, 32, 28, row_model(row), fg);
         column(buf, r, 61, 10, text(row, "key_source"), dim);
         let ready = text(row, "status") == "ready";
-        column(buf, r, 72, 10, text(row, "status"), Style::new().fg(if ready { th.ok } else { th.warn }));
+        column(
+            buf,
+            r,
+            72,
+            10,
+            text(row, "status"),
+            Style::new().fg(if ready { th.ok } else { th.warn }),
+        );
         hits.push((hit, r));
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(rows_below), height: rows_below, ..inner };
-    put(buf, bottom, 0, 0, &clip(note, usize::from(bottom.width)), dim);
+    let bottom = Rect {
+        y: inner.bottom().saturating_sub(rows_below),
+        height: rows_below,
+        ..inner
+    };
+    put(
+        buf,
+        bottom,
+        0,
+        0,
+        &clip(note, usize::from(bottom.width)),
+        dim,
+    );
     if let Some(e) = login {
         oauth_modal(buf, bottom, 1, e, th);
     } else if let Some(e) = entry {
@@ -441,7 +722,12 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
             buf,
             bottom,
             1,
-            &[("test", "t", "Test", !rows.is_empty()), ("add", "a", "Add", true), ("disable", "d", "Disable", !rows.is_empty()), ("cancel", "Esc", "Close", true)],
+            &[
+                ("test", "t", "Test", !rows.is_empty()),
+                ("add", "a", "Add", true),
+                ("disable", "d", "Disable", !rows.is_empty()),
+                ("cancel", "Esc", "Close", true),
+            ],
             th,
             pointer,
         );
@@ -454,15 +740,34 @@ pub fn accounts(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &P
 /// window, what a million tokens cost in and out (`n/a` when the table has no price) and four
 /// capability letters (T tools, R reasoning, I images, C cache). The row the target runs on now
 /// is marked; the columns share what the width leaves after the fixed ones.
-pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, entry: Option<&Entry>, note: &str) -> Placed {
+pub fn models(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+    entry: Option<&Entry>,
+    note: &str,
+) -> Placed {
     let area = full;
     Clear.render(area, buf);
-    let target = get(v, "target").and_then(|t| t.as_text()).unwrap_or("lead").to_owned();
+    let target = get(v, "target")
+        .and_then(|t| t.as_text())
+        .unwrap_or("lead")
+        .to_owned();
     let for_run = target.starts_with("run ");
-    let title = if for_run { "models for this run".to_owned() } else { format!("models for the {target}") };
+    let title = if for_run {
+        "models for this run".to_owned()
+    } else {
+        format!("models for the {target}")
+    };
     let inner = {
         let i = panel(buf, area, &title, th.router, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
     let sel = int(v, "sel") as usize;
@@ -485,7 +790,11 @@ pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
     let x_acct = x_model + w_model + 1;
     let x_ctx = x_acct + w_acct + 1;
     let (x_in, x_out, x_caps) = (x_ctx + 6, x_ctx + 13, x_ctx + 20);
-    let head = Rect { y: inner.y + 1, height: 1, ..inner };
+    let head = Rect {
+        y: inner.y + 1,
+        height: 1,
+        ..inner
+    };
     column(buf, head, 2, 8, "alias", dim);
     column(buf, head, x_model, w_model, "model", dim);
     column(buf, head, x_acct, w_acct, "account", dim);
@@ -508,7 +817,11 @@ pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
         put(buf, inner, 0, 2, &why, dim);
     }
     for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
-        let r = Rect { y: inner.y + 2 + k as u16, height: 1, ..inner };
+        let r = Rect {
+            y: inner.y + 2 + k as u16,
+            height: 1,
+            ..inner
+        };
         let i = first + k;
         let hit = HitId::ListRow(i);
         let state = if pointer.pressed == Some(hit) {
@@ -523,11 +836,23 @@ pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
         if let Some(s) = state {
             buf.set_style(r, th.interact(s));
         }
-        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let word = |k: &str| {
+            get(row, k)
+                .and_then(|x| x.as_text())
+                .unwrap_or("")
+                .to_owned()
+        };
         let faded = matches!(get(row, "dim"), Some(Value::Bool(true)));
         let main = if faded { dim } else { fg };
         let current = matches!(get(row, "current"), Some(Value::Bool(true)));
-        column(buf, r, 0, 2, if current { th.g("●") } else { "" }, Style::new().fg(th.ok));
+        column(
+            buf,
+            r,
+            0,
+            2,
+            if current { th.g("●") } else { "" },
+            Style::new().fg(th.ok),
+        );
         column(buf, r, 2, 8, &word("alias"), dim);
         column(buf, r, x_model, w_model, &word("id"), main);
         column(buf, r, x_acct, w_acct, &word("account"), dim);
@@ -537,8 +862,19 @@ pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
         column(buf, r, x_caps, 4, &word("caps"), dim);
         hits.push((hit, r));
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(3), height: 3, ..inner };
-    put(buf, bottom, 0, 0, &clip(note, usize::from(bottom.width)), dim);
+    let bottom = Rect {
+        y: inner.bottom().saturating_sub(3),
+        height: 3,
+        ..inner
+    };
+    put(
+        buf,
+        bottom,
+        0,
+        0,
+        &clip(note, usize::from(bottom.width)),
+        dim,
+    );
     let any = !rows.is_empty();
     let (b, _) = buttons(
         buf,
@@ -559,14 +895,17 @@ pub fn models(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Poi
     Placed { area, hits }
 }
 
-
 /// The `/login` provider picker: the presets, one row each.
 pub fn providers(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
     let area = centred(full, 78, full.height.min(22));
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "log in to a provider", th.router, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
     let sel = int(v, "sel") as usize;
@@ -581,7 +920,11 @@ pub fn providers(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
     let first = sel.saturating_sub(shown.saturating_sub(1));
     let mut hits = Vec::new();
     for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
-        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let r = Rect {
+            y: inner.y + 1 + k as u16,
+            height: 1,
+            ..inner
+        };
         let i = first + k;
         let hit = HitId::ListRow(i);
         let state = if pointer.pressed == Some(hit) {
@@ -596,15 +939,34 @@ pub fn providers(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
         if let Some(s) = state {
             buf.set_style(r, th.interact(s));
         }
-        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let word = |k: &str| {
+            get(row, k)
+                .and_then(|x| x.as_text())
+                .unwrap_or("")
+                .to_owned()
+        };
         column(buf, r, 0, 18, &word("id"), fg);
         column(buf, r, 19, 24, &word("api"), dim);
         column(buf, r, 44, 5, &word("auth"), dim);
         column(buf, r, 50, 24, &word("url"), dim);
         hits.push((hit, r));
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
-    let (b, _) = buttons(buf, bottom, 0, &[("provider_pick", "Enter", "Choose", !rows.is_empty()), ("cancel", "Esc", "Close", true)], th, pointer);
+    let bottom = Rect {
+        y: inner.bottom().saturating_sub(2),
+        height: 2,
+        ..inner
+    };
+    let (b, _) = buttons(
+        buf,
+        bottom,
+        0,
+        &[
+            ("provider_pick", "Enter", "Choose", !rows.is_empty()),
+            ("cancel", "Esc", "Close", true),
+        ],
+        th,
+        pointer,
+    );
     hits.extend(b);
     Placed { area, hits }
 }
@@ -619,9 +981,20 @@ pub fn outcome(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer) -> P
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "how did this session go?", th.advisor, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
-    put(buf, inner, 0, 0, "The answer goes into the handoff.", Style::new().fg(th.dim_text));
+    put(
+        buf,
+        inner,
+        0,
+        0,
+        "The answer goes into the handoff.",
+        Style::new().fg(th.dim_text),
+    );
     let items = [
         ("outcome:1", "1", "Succeeded", true),
         ("outcome:2", "2", "Partial, mostly there", true),
@@ -630,55 +1003,139 @@ pub fn outcome(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer) -> P
     ];
     let mut hits = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let (b, _) = buttons(buf, Rect { y: inner.y + 2 + i as u16, height: 1, ..inner }, 0, std::slice::from_ref(item), th, pointer);
+        let (b, _) = buttons(
+            buf,
+            Rect {
+                y: inner.y + 2 + i as u16,
+                height: 1,
+                ..inner
+            },
+            0,
+            std::slice::from_ref(item),
+            th,
+            pointer,
+        );
         hits.extend(b);
     }
-    let (b, _) = buttons(buf, inner, 7, &[("quit_now", "!", "Quit without recording", true), ("cancel", "Esc", "Cancel", true)], th, pointer);
+    let (b, _) = buttons(
+        buf,
+        inner,
+        7,
+        &[
+            ("quit_now", "!", "Quit without recording", true),
+            ("cancel", "Esc", "Cancel", true),
+        ],
+        th,
+        pointer,
+    );
     hits.extend(b);
     Placed { area, hits }
 }
 
 /// `/clear` and `/cancel @lead` ask first: a title, the question and the id of the yes button.
-pub fn confirm(buf: &mut Buffer, full: Rect, th: &Theme, pointer: &Pointer, title: &str, question: &str, yes: (&'static str, &str)) -> Placed {
+pub fn confirm(
+    buf: &mut Buffer,
+    full: Rect,
+    th: &Theme,
+    pointer: &Pointer,
+    title: &str,
+    question: &str,
+    yes: (&'static str, &str),
+) -> Placed {
     let area = centred(full, 44, 6);
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, title, th.warn, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     put(buf, inner, 0, 0, question, Style::new().fg(th.fg));
-    let (hits, _) = buttons(buf, inner, 2, &[(yes.0, "y", yes.1, true), ("cancel", "n", "Cancel", true)], th, pointer);
+    let (hits, _) = buttons(
+        buf,
+        inner,
+        2,
+        &[(yes.0, "y", yes.1, true), ("cancel", "n", "Cancel", true)],
+        th,
+        pointer,
+    );
     Placed { area, hits }
 }
 
 /// The `/status` modal: label and value rows from `view:run_status`.
-pub fn run_status(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+pub fn run_status(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+) -> Placed {
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
     let area = centred(full, 46, rows.len() as u16 + 5);
     Clear.render(area, buf);
-    let title = get(v, "title").and_then(|t| t.as_text()).unwrap_or("status");
+    let title = get(v, "title")
+        .and_then(|t| t.as_text())
+        .unwrap_or("status");
     let inner = {
         let i = panel(buf, area, title, th.router, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     for (i, row) in rows.iter().enumerate() {
-        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
-        let x = put(buf, inner, 0, i as u16, &format!("{:<14}", word("k")), Style::new().fg(th.dim_text));
-        put(buf, inner, x, i as u16, &clip(&word("v"), usize::from(inner.width.saturating_sub(x))), Style::new().fg(th.fg));
+        let word = |k: &str| {
+            get(row, k)
+                .and_then(|x| x.as_text())
+                .unwrap_or("")
+                .to_owned()
+        };
+        let x = put(
+            buf,
+            inner,
+            0,
+            i as u16,
+            &format!("{:<14}", word("k")),
+            Style::new().fg(th.dim_text),
+        );
+        put(
+            buf,
+            inner,
+            x,
+            i as u16,
+            &clip(&word("v"), usize::from(inner.width.saturating_sub(x))),
+            Style::new().fg(th.fg),
+        );
     }
-    let (hits, _) = buttons(buf, inner, rows.len() as u16 + 1, &[("close", "Esc", "Close", true)], th, pointer);
+    let (hits, _) = buttons(
+        buf,
+        inner,
+        rows.len() as u16 + 1,
+        &[("close", "Esc", "Close", true)],
+        th,
+        pointer,
+    );
     Placed { area, hits }
 }
 
 /// The `/cost` modal: one row per run, dearest first, and the session total under them.
 pub fn cost(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
-    let shown = rows.len().min(usize::from(full.height.saturating_sub(8)).max(1));
+    let shown = rows
+        .len()
+        .min(usize::from(full.height.saturating_sub(8)).max(1));
     let area = centred(full, 56, shown as u16 + 7);
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "cost", th.router, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let dim = Style::new().fg(th.dim_text);
     let fg = Style::new().fg(th.fg);
@@ -688,16 +1145,42 @@ pub fn cost(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
     column(buf, head, 28, 14, "status", dim);
     column(buf, head, 43, 10, "cost", dim);
     for (i, row) in rows.iter().take(shown).enumerate() {
-        let r = Rect { y: inner.y + 1 + i as u16, height: 1, ..inner };
-        let word = |k: &str| get(row, k).and_then(|x| x.as_text()).unwrap_or("").to_owned();
+        let r = Rect {
+            y: inner.y + 1 + i as u16,
+            height: 1,
+            ..inner
+        };
+        let word = |k: &str| {
+            get(row, k)
+                .and_then(|x| x.as_text())
+                .unwrap_or("")
+                .to_owned()
+        };
         column(buf, r, 0, 16, &word("agent"), fg);
         column(buf, r, 17, 10, &word("run"), fg);
         column(buf, r, 28, 14, &word("status"), dim);
         column(buf, r, 43, 10, &word("cost"), fg);
     }
-    let total = get(v, "total").and_then(|x| x.as_text()).unwrap_or("").to_owned();
-    put(buf, inner, 0, shown as u16 + 1, &format!("{:<43}{total}", "session total"), fg.add_modifier(Modifier::BOLD));
-    let (hits, _) = buttons(buf, inner, shown as u16 + 3, &[("close", "Esc", "Close", true)], th, pointer);
+    let total = get(v, "total")
+        .and_then(|x| x.as_text())
+        .unwrap_or("")
+        .to_owned();
+    put(
+        buf,
+        inner,
+        0,
+        shown as u16 + 1,
+        &format!("{:<43}{total}", "session total"),
+        fg.add_modifier(Modifier::BOLD),
+    );
+    let (hits, _) = buttons(
+        buf,
+        inner,
+        shown as u16 + 3,
+        &[("close", "Esc", "Close", true)],
+        th,
+        pointer,
+    );
     Placed { area, hits }
 }
 
@@ -708,7 +1191,11 @@ pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
     Clear.render(area, buf);
     let inner = {
         let i = panel(buf, area, "workflows", th.swarm, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
     let sel = int(v, "sel") as usize;
@@ -716,15 +1203,33 @@ pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
     let head = Rect { height: 1, ..inner };
     column(buf, head, 0, 18, "name", dim);
     column(buf, head, 19, 8, "scope", dim);
-    column(buf, head, 28, inner.width.saturating_sub(28), "steps and description", dim);
+    column(
+        buf,
+        head,
+        28,
+        inner.width.saturating_sub(28),
+        "steps and description",
+        dim,
+    );
     let shown = usize::from(inner.height.saturating_sub(4)).max(1);
     let first = sel.saturating_sub(shown - 1);
     let mut hits = Vec::new();
     if rows.is_empty() {
-        put(buf, inner, 0, 1, "no workflows yet: /workflow new <goal> drafts one, /workflow save keeps it", dim);
+        put(
+            buf,
+            inner,
+            0,
+            1,
+            "no workflows yet: /workflow new <goal> drafts one, /workflow save keeps it",
+            dim,
+        );
     }
     for (k, row) in rows.iter().skip(first).take(shown).enumerate() {
-        let r = Rect { y: inner.y + 1 + k as u16, height: 1, ..inner };
+        let r = Rect {
+            y: inner.y + 1 + k as u16,
+            height: 1,
+            ..inner
+        };
         let i = first + k;
         let hit = HitId::ListRow(i);
         let state = if pointer.pressed == Some(hit) {
@@ -743,41 +1248,115 @@ pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
         column(buf, r, 19, 8, text(row, "scope"), dim);
         let rest = inner.width.saturating_sub(28);
         match get(row, "error").and_then(|e| e.as_text()) {
-            Some(why) => column(buf, r, 28, rest, &format!("broken: {why}"), Style::new().fg(th.error)),
+            Some(why) => column(
+                buf,
+                r,
+                28,
+                rest,
+                &format!("broken: {why}"),
+                Style::new().fg(th.error),
+            ),
             None => {
-                let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
-                column(buf, r, 28, rest, &format!("{}  {}", agents.join(" > "), text(row, "description")), fg);
+                let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL))
+                    .iter()
+                    .filter_map(|a| a.as_text())
+                    .collect();
+                column(
+                    buf,
+                    r,
+                    28,
+                    rest,
+                    &format!("{}  {}", agents.join(" > "), text(row, "description")),
+                    fg,
+                );
             }
         }
         hits.push((hit, r));
     }
-    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
-    let ok = rows.get(sel).is_some_and(|r| get(r, "error").is_none_or(|e| matches!(e, Value::Null)));
-    let (b, _) = buttons(buf, bottom, 0, &[("wf_run", "Enter", "Run", ok), ("cancel", "Esc", "Close", true)], th, pointer);
+    let bottom = Rect {
+        y: inner.bottom().saturating_sub(2),
+        height: 2,
+        ..inner
+    };
+    let ok = rows
+        .get(sel)
+        .is_some_and(|r| get(r, "error").is_none_or(|e| matches!(e, Value::Null)));
+    let (b, _) = buttons(
+        buf,
+        bottom,
+        0,
+        &[
+            ("wf_run", "Enter", "Run", ok),
+            ("cancel", "Esc", "Close", true),
+        ],
+        th,
+        pointer,
+    );
     hits.extend(b);
     Placed { area, hits }
 }
 
 /// `/workflow show <name>` and a refused `/workflow save`: the text as data, and one summary line
 /// under it.
-pub fn workflow_show(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+pub fn workflow_show(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+) -> Placed {
     let area = centred(full, 100, full.height.saturating_sub(4).max(8));
     Clear.render(area, buf);
-    let title = get(v, "name").and_then(|t| t.as_text()).unwrap_or("workflow");
+    let title = get(v, "name")
+        .and_then(|t| t.as_text())
+        .unwrap_or("workflow");
     let inner = {
         let i = panel(buf, area, title, th.swarm, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let lines = as_list(get(v, "lines").unwrap_or(&NULL));
     let room = usize::from(inner.height.saturating_sub(4));
     for (k, l) in lines.iter().take(room).enumerate() {
-        let r = Rect { y: inner.y + k as u16, height: 1, ..inner };
-        put(buf, r, 0, 0, &clip(l.as_str_or(""), usize::from(r.width)), Style::new().fg(th.fg));
+        let r = Rect {
+            y: inner.y + k as u16,
+            height: 1,
+            ..inner
+        };
+        put(
+            buf,
+            r,
+            0,
+            0,
+            &clip(l.as_str_or(""), usize::from(r.width)),
+            Style::new().fg(th.fg),
+        );
     }
     let summary = get(v, "summary").and_then(|t| t.as_text()).unwrap_or("");
-    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
-    put(buf, bottom, 0, 0, &clip(summary, usize::from(bottom.width)), Style::new().fg(th.dim_text));
-    let (hits, _) = buttons(buf, bottom, 1, &[("cancel", "Esc", "Close", true)], th, pointer);
+    let bottom = Rect {
+        y: inner.bottom().saturating_sub(2),
+        height: 2,
+        ..inner
+    };
+    put(
+        buf,
+        bottom,
+        0,
+        0,
+        &clip(summary, usize::from(bottom.width)),
+        Style::new().fg(th.dim_text),
+    );
+    let (hits, _) = buttons(
+        buf,
+        bottom,
+        1,
+        &[("cancel", "Esc", "Close", true)],
+        th,
+        pointer,
+    );
     Placed { area, hits }
 }
 

@@ -52,7 +52,10 @@ pub fn xdg_temp() -> Xdg {
     Xdg {
         dir,
         paths,
-        forbidden: std::iter::once(FAKE_KEY).chain(crate::CREDENTIAL_KINDS.iter().map(|k| k.1)).map(str::to_owned).collect(),
+        forbidden: std::iter::once(FAKE_KEY)
+            .chain(crate::CREDENTIAL_KINDS.iter().map(|k| k.1))
+            .map(str::to_owned)
+            .collect(),
         _logs: crate::capture_unless_live(),
     }
 }
@@ -73,14 +76,18 @@ impl Xdg {
     pub fn assert_no_secret_on_disk(&self) {
         let mut todo: Vec<PathBuf> = vec![self.dir.path().to_path_buf()];
         while let Some(p) = todo.pop() {
-            let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&p) else {
+                continue;
+            };
             if meta.is_dir() {
                 if let Ok(rd) = std::fs::read_dir(&p) {
                     todo.extend(rd.flatten().map(|e| e.path()));
                 }
                 continue;
             }
-            let Ok(mut bytes) = std::fs::read(&p) else { continue };
+            let Ok(mut bytes) = std::fs::read(&p) else {
+                continue;
+            };
             if p.extension().is_some_and(|e| e == "zst") {
                 if let Ok(plain) = zstd::decode_all(bytes.as_slice()) {
                     bytes = plain;
@@ -140,7 +147,8 @@ pub fn big_session<G: Graph>(mk: fn() -> G) -> (App<G>, Vec<RunId>) {
     for i in 0..100_000 {
         chunk.push_str(&line(i));
         if chunk.len() >= 4096 {
-            app.step(stream(runs[0], std::mem::take(&mut chunk))).unwrap();
+            app.step(stream(runs[0], std::mem::take(&mut chunk)))
+                .unwrap();
         }
     }
     app.step(stream(runs[0], chunk)).unwrap();

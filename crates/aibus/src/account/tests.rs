@@ -27,7 +27,9 @@ impl ProviderFactory for Strict {
         ProviderId("fake")
     }
     fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
-        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", KEY)))
+        Ok(Arc::new(
+            FakeProvider::new(Script::new()).with_account("work", KEY),
+        ))
     }
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
         &[AuthMethodKind::ApiKey]
@@ -42,7 +44,9 @@ impl ProviderFactory for Oauthy {
         ProviderId("fake")
     }
     fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
-        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", TOKEN)))
+        Ok(Arc::new(
+            FakeProvider::new(Script::new()).with_account("work", TOKEN),
+        ))
     }
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
         &[AuthMethodKind::ApiKey, AuthMethodKind::OAuth]
@@ -61,7 +65,9 @@ impl ProviderFactory for Router {
         ProviderId("openrouter")
     }
     fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
-        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", OR_KEY)))
+        Ok(Arc::new(
+            FakeProvider::new(Script::new()).with_account("work", OR_KEY),
+        ))
     }
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
         &[AuthMethodKind::ApiKey, AuthMethodKind::OAuth]
@@ -77,7 +83,11 @@ impl ProviderFactory for Priced {
         ProviderId("fake")
     }
     fn build(&self, _: &ProviderConfig) -> Result<Arc<dyn Provider>, ConfigError> {
-        Ok(Arc::new(FakeProvider::new(Script::new()).with_account("work", KEY).with_verify_cost(0.0004)))
+        Ok(Arc::new(
+            FakeProvider::new(Script::new())
+                .with_account("work", KEY)
+                .with_verify_cost(0.0004),
+        ))
     }
     fn auth_methods(&self) -> &'static [AuthMethodKind] {
         &[AuthMethodKind::ApiKey]
@@ -151,7 +161,9 @@ impl Rig {
             oauth: self.oauth.clone(),
             cancel: None,
             stdin: &mut input,
-            prompt: asked.as_ref().map(|f| f as &dyn Fn() -> std::io::Result<String>),
+            prompt: asked
+                .as_ref()
+                .map(|f| f as &dyn Fn() -> std::io::Result<String>),
             out: &mut out,
         };
         let result = run(cmd, json, &mut io);
@@ -242,7 +254,9 @@ fn add_with_key_stdin_stores_in_the_keychain_and_writes_no_key_anywhere() {
 
     // What `config show` prints, and every file under the temporary home.
     let loaded = config::load(&rig.config(), None).unwrap();
-    assert!(!toml::to_string_pretty(&loaded.config).unwrap().contains(KEY));
+    assert!(!toml::to_string_pretty(&loaded.config)
+        .unwrap()
+        .contains(KEY));
     assert_eq!(rig.secret_in_files(KEY), Vec::<PathBuf>::new());
 }
 
@@ -294,7 +308,10 @@ fn add_with_env_records_the_variable_and_stores_nothing() {
     assert_eq!(rig.secret_in_files(KEY), Vec::<PathBuf>::new());
 
     let unset = Rig::new().run(&add_cmd(|a| a.env = Some("NOT_SET".into())), "", None);
-    assert!(matches!(unset.result, Err(AibusError::Auth(CredentialError::Missing(_)))));
+    assert!(matches!(
+        unset.result,
+        Err(AibusError::Auth(CredentialError::Missing(_)))
+    ));
 }
 
 #[cfg(unix)]
@@ -310,28 +327,41 @@ fn add_with_file_refuses_a_file_others_can_read_and_says_how_to_fix_it() {
     let ran = rig.run(&cmd, "", None);
     assert_eq!(exit(&ran.result), 4);
     let msg = ran.result.unwrap_err().to_string();
-    assert!(msg.contains(&format!("chmod 600 {}", key.display())), "{msg}");
+    assert!(
+        msg.contains(&format!("chmod 600 {}", key.display())),
+        "{msg}"
+    );
     assert!(!rig.config().exists());
 
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
     let ran = rig.run(&cmd, "", None);
     assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
     let text = std::fs::read_to_string(rig.config()).unwrap();
-    assert!(text.contains(&format!("file = \"{}\"", key.display())), "{text}");
+    assert!(
+        text.contains(&format!("file = \"{}\"", key.display())),
+        "{text}"
+    );
 }
 
 #[test]
 fn add_refuses_a_second_account_with_the_name_and_an_unknown_provider() {
     let rig = Rig::new();
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let again = rig.run(&stdin_cmd(), &format!("{KEY}\n"), None);
     assert!(matches!(again.result, Err(AibusError::Usage(_))));
 
-    let other = rig.run(&add_cmd(|a| {
-        a.name = "x".into();
-        a.provider = "nope".into();
-        a.key_stdin = true;
-    }), "k\n", None);
+    let other = rig.run(
+        &add_cmd(|a| {
+            a.name = "x".into();
+            a.provider = "nope".into();
+            a.key_stdin = true;
+        }),
+        "k\n",
+        None,
+    );
     assert_eq!(exit(&other.result), 3);
 
     let bad = rig.run(&add_cmd(|a| a.name = "has space".into()), "", None);
@@ -346,7 +376,10 @@ fn add_keeps_the_comments_and_the_other_accounts_in_the_file() {
         "# my config\n[defaults]\nmodel = \"sonnet\" # the usual\n\n[[account]]\nname = \"old\"\nprovider = \"fake\"\nauth = { none = true }\n",
     )
     .unwrap();
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let text = std::fs::read_to_string(rig.config()).unwrap();
     assert!(text.starts_with("# my config\n"));
     assert!(text.contains("model = \"sonnet\" # the usual"));
@@ -383,13 +416,26 @@ auth = { none = true }
     .unwrap();
 
     let text = rig.run(&AccountCmd::List { names: false }, "", None).out;
-    let rows: Vec<Vec<&str>> = text.lines().map(|l| l.split("  ").filter(|c| !c.is_empty()).map(str::trim).collect()).collect();
+    let rows: Vec<Vec<&str>> = text
+        .lines()
+        .map(|l| {
+            l.split("  ")
+                .filter(|c| !c.is_empty())
+                .map(str::trim)
+                .collect()
+        })
+        .collect();
     assert_eq!(rows[0], ["a-ok", "fake", "Fine", "env", "-", "ok"]);
     assert_eq!(rows[1][5], "missing credential");
     assert_eq!(rows[2][5], "disabled");
 
     let json = rig.json(&AccountCmd::List { names: false });
-    let statuses: Vec<&str> = json.as_array().unwrap().iter().map(|r| r["status"].as_str().unwrap()).collect();
+    let statuses: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["status"].as_str().unwrap())
+        .collect();
     assert_eq!(statuses, ["ok", "missing credential", "disabled"]);
     assert!(!json.to_string().contains(KEY));
     assert_eq!(json[1]["key_ref"], "keyring:aibus/b-missing");
@@ -398,9 +444,16 @@ auth = { none = true }
 #[test]
 fn show_prints_where_the_key_lives_and_exits_4_for_an_unknown_account() {
     let rig = Rig::new();
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let ran = rig.run(&name_cmd(|name| AccountCmd::Show { name }), "", None);
-    assert!(ran.out.contains("key_ref: keyring:aibus/work"), "{}", ran.out);
+    assert!(
+        ran.out.contains("key_ref: keyring:aibus/work"),
+        "{}",
+        ran.out
+    );
     assert!(ran.out.contains("status: ok"));
     assert!(!ran.out.contains(KEY));
 
@@ -408,21 +461,34 @@ fn show_prints_where_the_key_lives_and_exits_4_for_an_unknown_account() {
     assert_eq!(json["auth"], "keyring");
     assert_eq!(json["rate"]["max_concurrent"], 4);
 
-    let missing = rig.run(&AccountCmd::Show { name: "ghost".into() }, "", None);
+    let missing = rig.run(
+        &AccountCmd::Show {
+            name: "ghost".into(),
+        },
+        "",
+        None,
+    );
     assert_eq!(exit(&missing.result), 4);
 }
 
 #[test]
 fn test_reports_latency_as_json_and_exits_4_for_a_key_the_provider_rejects() {
     let rig = Rig::new();
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let ok = rig.json(&name_cmd(|name| AccountCmd::Test { name }));
     assert_eq!(ok["ok"], true);
     assert!(ok["latency_ms"].is_u64(), "{ok}");
 
     // The keychain now holds a different key than the provider accepts.
     rig.keychain
-        .set("aibus", "account:work", &Secret::new("sk-rotated-and-wrong".into()))
+        .set(
+            "aibus",
+            "account:work",
+            &Secret::new("sk-rotated-and-wrong".into()),
+        )
         .unwrap();
     let bad = rig.run(&name_cmd(|name| AccountCmd::Test { name }), "", None);
     assert_eq!(exit(&bad.result), 4);
@@ -435,25 +501,52 @@ fn test_reports_latency_as_json_and_exits_4_for_a_key_the_provider_rejects() {
 fn remove_deletes_the_keychain_entry_and_the_table_only() {
     let rig = Rig::new();
     std::fs::write(rig.config(), "# keep me\n").unwrap();
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let ran = rig.run(&name_cmd(|name| AccountCmd::Remove { name }), "", None);
     assert_eq!(ran.out, "removed work\n");
     assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none());
-    assert_eq!(std::fs::read_to_string(rig.config()).unwrap(), "# keep me\n");
-    assert_eq!(exit(&rig.run(&name_cmd(|name| AccountCmd::Remove { name }), "", None).result), 4);
+    assert_eq!(
+        std::fs::read_to_string(rig.config()).unwrap(),
+        "# keep me\n"
+    );
+    assert_eq!(
+        exit(
+            &rig.run(&name_cmd(|name| AccountCmd::Remove { name }), "", None)
+                .result
+        ),
+        4
+    );
 }
 
 #[test]
 fn disable_and_enable_flip_the_flag_in_the_file() {
     let rig = Rig::new();
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let enabled = || config::load(&rig.config(), None).unwrap().config.accounts[0].enabled;
     assert!(enabled());
     rig.run(&name_cmd(|name| AccountCmd::Disable { name }), "", None);
     assert!(!enabled());
     rig.run(&name_cmd(|name| AccountCmd::Enable { name }), "", None);
     assert!(enabled());
-    assert_eq!(exit(&rig.run(&AccountCmd::Enable { name: "ghost".into() }, "", None).result), 4);
+    assert_eq!(
+        exit(
+            &rig.run(
+                &AccountCmd::Enable {
+                    name: "ghost".into()
+                },
+                "",
+                None
+            )
+            .result
+        ),
+        4
+    );
 }
 
 fn oauth_rig() -> Rig {
@@ -473,17 +566,25 @@ fn add_oauth_logs_in_verifies_and_keeps_tokens_only_in_the_keychain() {
     let rig = oauth_rig();
     let ran = rig.run(&oauth_cmd(), "", None);
     assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
-    assert!(ran.out.contains("enter code ABCD-1234") && ran.out.ends_with("added work\n"), "{}", ran.out);
+    assert!(
+        ran.out.contains("enter code ABCD-1234") && ran.out.ends_with("added work\n"),
+        "{}",
+        ran.out
+    );
     assert!(!ran.out.contains("oauth-access"));
 
     let kept = rig.keychain.get("aibus", "account:work").unwrap().unwrap();
     assert!(kept.expose().contains(TOKEN) && kept.expose().contains("oauth-refresh-1-abcdef"));
-    assert!(std::fs::read_to_string(rig.config()).unwrap().contains("auth = { oauth = true }"));
+    assert!(std::fs::read_to_string(rig.config())
+        .unwrap()
+        .contains("auth = { oauth = true }"));
     // Neither token is in any file under the home, nor in what `account show --json` prints.
     for needle in [TOKEN, "oauth-refresh-1-abcdef"] {
         assert_eq!(rig.secret_in_files(needle), Vec::<PathBuf>::new());
     }
-    let shown = rig.json(&AccountCmd::Show { name: "work".into() });
+    let shown = rig.json(&AccountCmd::Show {
+        name: "work".into(),
+    });
     assert_eq!(shown["auth"], "oauth");
     assert!(!shown.to_string().contains("oauth-"));
     assert_eq!(shown["status"], "ok");
@@ -491,23 +592,40 @@ fn add_oauth_logs_in_verifies_and_keeps_tokens_only_in_the_keychain() {
 
 #[test]
 fn add_oauth_is_refused_for_a_provider_that_does_not_offer_it() {
-    let rig = Rig { oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))), ..Rig::new() };
+    let rig = Rig {
+        oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))),
+        ..Rig::new()
+    };
     let ran = rig.run(&oauth_cmd(), "", None);
-    assert!(matches!(&ran.result, Err(AibusError::Usage(m)) if m.contains("no OAuth login")), "{:?}", ran.result);
+    assert!(
+        matches!(&ran.result, Err(AibusError::Usage(m)) if m.contains("no OAuth login")),
+        "{:?}",
+        ran.result
+    );
     assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none());
     assert!(!rig.config().exists());
 
     // And with no flow at all, as in the shipped binary.
-    let none = Rig { offers_oauth: true, ..Rig::new() }.run(&oauth_cmd(), "", None);
+    let none = Rig {
+        offers_oauth: true,
+        ..Rig::new()
+    }
+    .run(&oauth_cmd(), "", None);
     assert!(matches!(none.result, Err(AibusError::Usage(_))));
 }
 
 #[test]
 fn a_rejected_oauth_token_is_not_stored_or_written() {
-    let rig = Rig { oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))), offers_oauth: true, ..Rig::new() };
+    let rig = Rig {
+        oauth: Some(Arc::new(FakeOAuth::new(1_000, 3_600))),
+        offers_oauth: true,
+        ..Rig::new()
+    };
     // Burn the first token so the login hands out `-2`, which the provider does not accept.
     let flow = rig.oauth.clone().unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
     let _ = rt.block_on(flow.authorize(&|_| {}, &tokio_util::sync::CancellationToken::new()));
     let ran = rig.run(&oauth_cmd(), "", None);
     assert_eq!(exit(&ran.result), 4, "{:?}", ran.result);
@@ -520,11 +638,18 @@ fn add_oauth_for_a_login_that_returns_a_key_stores_it_as_a_plain_keyring_account
     // OpenRouter-style: the login is only the way to get a durable key, nothing to refresh.
     let mut flow = FakeOAuth::new(1_000, 3_600);
     flow.yields_key = true;
-    let rig = Rig { oauth: Some(Arc::new(flow)), offers_oauth: true, ..Rig::new() };
+    let rig = Rig {
+        oauth: Some(Arc::new(flow)),
+        offers_oauth: true,
+        ..Rig::new()
+    };
     let ran = rig.run(&oauth_cmd(), "", None);
     assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
     let cfg = std::fs::read_to_string(rig.config()).unwrap();
-    assert!(cfg.contains("auth = { keyring = true }") && !cfg.contains("oauth"), "{cfg}");
+    assert!(
+        cfg.contains("auth = { keyring = true }") && !cfg.contains("oauth"),
+        "{cfg}"
+    );
     let kept = rig.keychain.get("aibus", "account:work").unwrap().unwrap();
     assert_eq!(kept.expose(), TOKEN, "the key itself, not a JSON token set");
     assert_eq!(rig.secret_in_files(TOKEN), Vec::<PathBuf>::new());
@@ -533,15 +658,28 @@ fn add_oauth_for_a_login_that_returns_a_key_stores_it_as_a_plain_keyring_account
 
 #[test]
 fn test_shows_what_the_one_request_cost_and_says_nothing_when_the_provider_has_no_cost() {
-    let rig = Rig { priced: true, ..Rig::new() };
-    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    let rig = Rig {
+        priced: true,
+        ..Rig::new()
+    };
+    assert_eq!(
+        exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let ran = rig.run(&name_cmd(|name| AccountCmd::Test { name }), "", None);
-    assert!(ran.out.starts_with("ok work ") && ran.out.contains("cost $0.0004"), "{}", ran.out);
+    assert!(
+        ran.out.starts_with("ok work ") && ran.out.contains("cost $0.0004"),
+        "{}",
+        ran.out
+    );
     let json = rig.json(&name_cmd(|name| AccountCmd::Test { name }));
     assert_eq!(json["cost_usd"], 0.0004);
 
     let plain = Rig::new();
-    assert_eq!(exit(&plain.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert_eq!(
+        exit(&plain.run(&stdin_cmd(), &format!("{KEY}\n"), None).result),
+        0
+    );
     let ran = plain.run(&name_cmd(|name| AccountCmd::Test { name }), "", None);
     assert!(!ran.out.contains("cost"), "{}", ran.out);
     assert!(plain.json(&name_cmd(|name| AccountCmd::Test { name }))["cost_usd"].is_null());
@@ -557,9 +695,15 @@ fn add_writes_the_region_and_project_it_was_given() {
     });
     assert_eq!(exit(&rig.run(&cmd, &format!("{KEY}\n"), None).result), 0);
     let text = std::fs::read_to_string(rig.config()).unwrap();
-    assert!(text.contains("region = \"us-east5\"") && text.contains("project = \"my-project\""), "{text}");
+    assert!(
+        text.contains("region = \"us-east5\"") && text.contains("project = \"my-project\""),
+        "{text}"
+    );
     let acct = &config::load(&rig.config(), None).unwrap().config.accounts[0];
-    assert_eq!((acct.region.as_deref(), acct.project.as_deref()), (Some("us-east5"), Some("my-project")));
+    assert_eq!(
+        (acct.region.as_deref(), acct.project.as_deref()),
+        (Some("us-east5"), Some("my-project"))
+    );
 }
 
 /// #186: `aibus account add NAME --provider openrouter --oauth` with the real OpenRouter login
@@ -574,17 +718,32 @@ async fn add_oauth_for_openrouter_runs_the_real_login_against_a_fake_authorizati
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let auth = FakeAuthServer::start().await;
-    auth.token_status(200, serde_json::json!({ "key": OR_KEY })).await;
+    auth.token_status(200, serde_json::json!({ "key": OR_KEY }))
+        .await;
     let real = crate::oauth::definition("openrouter", None).unwrap();
-    assert_eq!((real.authorize_url.as_str(), real.token_url.as_str()), ("https://openrouter.ai/auth", "https://openrouter.ai/api/v1/auth/keys"));
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    assert_eq!(
+        (real.authorize_url.as_str(), real.token_url.as_str()),
+        (
+            "https://openrouter.ai/auth",
+            "https://openrouter.ai/api/v1/auth/keys"
+        )
+    );
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let def = crate::oauth::Def {
         authorize_url: auth.url("/auth"),
         token_url: auth.url("/api/v1/auth/keys"),
         callback_port: Some(port),
         ..real
     };
-    let rig = Rig { oauth: Some(Arc::new(crate::oauth::Login::new(def))), openrouter: true, ..Rig::new() };
+    let rig = Rig {
+        oauth: Some(Arc::new(crate::oauth::Login::new(def))),
+        openrouter: true,
+        ..Rig::new()
+    };
     let cmd = add_cmd(|a| {
         a.provider = "openrouter".into();
         a.oauth = true;
@@ -614,22 +773,54 @@ async fn add_oauth_for_openrouter_runs_the_real_login_against_a_fake_authorizati
         .await
         .expect("the browser never reached the callback")
         .unwrap();
-    assert!(page.starts_with("HTTP/1.1 200") && page.contains("logged in"), "{page}");
-    let challenge = ran.out.split("code_challenge=").nth(1).and_then(|r| r.split(['&', '\n']).next()).expect("the printed address carries a challenge");
+    assert!(
+        page.starts_with("HTTP/1.1 200") && page.contains("logged in"),
+        "{page}"
+    );
+    let challenge = ran
+        .out
+        .split("code_challenge=")
+        .nth(1)
+        .and_then(|r| r.split(['&', '\n']).next())
+        .expect("the printed address carries a challenge");
     assert!(!ran.out.contains("state="), "{}", ran.out);
-    assert!(ran.out.contains("code_challenge_method=S256") && ran.out.contains(&format!("callback_url=http%3A%2F%2F127.0.0.1%3A{port}%2Fcallback")), "{}", ran.out);
+    assert!(
+        ran.out.contains("code_challenge_method=S256")
+            && ran.out.contains(&format!(
+                "callback_url=http%3A%2F%2F127.0.0.1%3A{port}%2Fcallback"
+            )),
+        "{}",
+        ran.out
+    );
 
     let sent = auth.bodies().await;
-    let [exchange] = &sent[..] else { panic!("one exchange, got {sent:?}") };
+    let [exchange] = &sent[..] else {
+        panic!("one exchange, got {sent:?}")
+    };
     assert_eq!(exchange["code"], "the-code");
     let verifier = exchange["code_verifier"].as_str().unwrap();
-    assert_eq!(URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())), challenge);
+    assert_eq!(
+        URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+        challenge
+    );
     assert!(!ran.out.contains(verifier));
 
     // The key is an ordinary keychain key afterwards, in no file and not on the screen.
-    assert_eq!(rig.keychain.get("aibus", "account:work").unwrap().unwrap().expose(), OR_KEY);
+    assert_eq!(
+        rig.keychain
+            .get("aibus", "account:work")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        OR_KEY
+    );
     let cfg = std::fs::read_to_string(rig.config()).unwrap();
-    assert!(cfg.contains("provider = \"openrouter\"") && cfg.contains("auth = { keyring = true }") && !cfg.contains("oauth"), "{cfg}");
+    assert!(
+        cfg.contains("provider = \"openrouter\"")
+            && cfg.contains("auth = { keyring = true }")
+            && !cfg.contains("oauth"),
+        "{cfg}"
+    );
     assert_eq!(rig.secret_in_files(OR_KEY), Vec::<PathBuf>::new());
     assert!(!ran.out.contains(OR_KEY));
 }

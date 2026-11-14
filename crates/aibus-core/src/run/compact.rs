@@ -8,9 +8,7 @@
 use std::fmt::Write;
 use std::sync::Arc;
 
-use aibus_provider::{
-    CacheHint, ChatRequest, Provider, RequestMetadata, StreamChunk, ToolChoice,
-};
+use aibus_provider::{CacheHint, ChatRequest, Provider, RequestMetadata, StreamChunk, ToolChoice};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -53,21 +51,33 @@ pub struct AutoHandoff {
 
 fn clip(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
-        Some((end, _)) => format!("{}... [{} more characters]", &s[..end], s[end..].chars().count()),
+        Some((end, _)) => format!(
+            "{}... [{} more characters]",
+            &s[..end],
+            s[end..].chars().count()
+        ),
         None => s.to_owned(),
     }
 }
 
 /// One message as text. Thinking is left out, images are named.
 fn render(m: &Message) -> String {
-    let who = if m.role == MessageRole::User { "user" } else { "assistant" };
+    let who = if m.role == MessageRole::User {
+        "user"
+    } else {
+        "assistant"
+    };
     let mut out = format!("{who}:");
     for b in &m.blocks {
         let _ = match b {
             ContentBlock::Text(t) => write!(out, "\n{t}"),
             ContentBlock::Thinking { .. } => Ok(()),
             ContentBlock::ToolUse { name, input, .. } => {
-                write!(out, "\n[call {name} {}]", clip(&input.to_string(), TOOL_CHARS))
+                write!(
+                    out,
+                    "\n[call {name} {}]",
+                    clip(&input.to_string(), TOOL_CHARS)
+                )
             }
             ContentBlock::ToolResult {
                 content, is_error, ..
@@ -116,7 +126,11 @@ impl ModelCompactor {
         conv: &Conversation,
         cancel: &CancellationToken,
     ) -> Result<(String, Usage), String> {
-        let info = self.provider.models().into_iter().find(|m| m.id == self.model);
+        let info = self
+            .provider
+            .models()
+            .into_iter()
+            .find(|m| m.id == self.model);
         let window = info.as_ref().map_or(100_000, |m| m.context_window as usize);
         let max_output = info.as_ref().map_or(4_096, |m| m.max_output.min(4_096));
         let budget = (window / 2).saturating_mul(CHARS_PER_TOKEN);
@@ -189,7 +203,10 @@ impl Compactor for ModelCompactor {
         conv.usage.cost_usd += u.cost_usd;
         conv.messages = vec![Message::text(
             MessageRole::User,
-            &format!("Summary of the conversation so far, written when the context was compacted:\n\n{}", summary.trim()),
+            &format!(
+                "Summary of the conversation so far, written when the context was compacted:\n\n{}",
+                summary.trim()
+            ),
         )];
         conv.compact_boundary = Some(0);
         Ok(())
@@ -229,7 +246,11 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
-                    let role = if i % 2 == 0 { MessageRole::User } else { MessageRole::Assistant };
+                    let role = if i % 2 == 0 {
+                        MessageRole::User
+                    } else {
+                        MessageRole::Assistant
+                    };
                     Message::text(role, t)
                 })
                 .collect(),
@@ -241,7 +262,10 @@ mod tests {
     fn what_does_not_fit_is_cut_from_the_front_and_said_so() {
         let c = conv(&["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc", "dddddddddd"]);
         let text = flatten(&c, 40);
-        assert!(text.starts_with("[the first 2 messages are left out]"), "{text}");
+        assert!(
+            text.starts_with("[the first 2 messages are left out]"),
+            "{text}"
+        );
         assert!(text.contains("cccccccccc") && text.contains("dddddddddd"));
         assert!(!text.contains("aaaaaaaaaa"));
         let all = flatten(&c, 10_000);
@@ -267,6 +291,10 @@ mod tests {
             at: std::time::SystemTime::UNIX_EPOCH,
         };
         let text = render(&m);
-        assert!(text.len() < 1_200 && text.contains("4000 more characters"), "{}", text.len());
+        assert!(
+            text.len() < 1_200 && text.contains("4000 more characters"),
+            "{}",
+            text.len()
+        );
     }
 }

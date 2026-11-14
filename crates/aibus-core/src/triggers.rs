@@ -51,7 +51,11 @@ impl Triggers {
         let mut out = Vec::new();
         for (i, t) in file.triggers.into_iter().enumerate() {
             let n = i + 1;
-            if t.agents.is_empty() || t.agents.iter().any(|a| crate::ids::AgentName::new(a).is_err()) {
+            if t.agents.is_empty()
+                || t.agents
+                    .iter()
+                    .any(|a| crate::ids::AgentName::new(a).is_err())
+            {
                 return Err(format!("trigger {n}: agents wants a list of agent names"));
             }
             if t.keywords.is_empty() && t.patterns.is_empty() {
@@ -82,7 +86,9 @@ impl Triggers {
         let mut all = Vec::new();
         let mut warnings = Vec::new();
         for path in files {
-            let Ok(text) = std::fs::read_to_string(path) else { continue };
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
             match Self::parse(&text) {
                 Ok(t) => all.extend(t.0),
                 Err(e) => warnings.push(format!("{}: {e}", path.display())),
@@ -141,18 +147,39 @@ keywords = ["flaky"]
     #[test]
     fn keywords_ignore_case_and_patterns_are_regexes() {
         let t = Triggers::parse(FILE).unwrap();
-        assert_eq!(t.hint("the app CRASHES on start").as_deref(), Some("[hint] matching agents: sleuth, scout"));
-        assert_eq!(t.hint("login fails silently").as_deref(), Some("[hint] matching agents: sleuth, scout"));
-        assert_eq!(t.hint("a flaky crash").as_deref(), Some("[hint] matching agents: sleuth, scout, arbiter"));
+        assert_eq!(
+            t.hint("the app CRASHES on start").as_deref(),
+            Some("[hint] matching agents: sleuth, scout")
+        );
+        assert_eq!(
+            t.hint("login fails silently").as_deref(),
+            Some("[hint] matching agents: sleuth, scout")
+        );
+        assert_eq!(
+            t.hint("a flaky crash").as_deref(),
+            Some("[hint] matching agents: sleuth, scout, arbiter")
+        );
         assert_eq!(t.hint("rename a variable"), None);
     }
 
     #[test]
     fn a_bad_entry_is_named() {
-        assert!(Triggers::parse("[[trigger]]\nagents = []\nkeywords = [\"a\"]").unwrap_err().contains("trigger 1"));
-        assert!(Triggers::parse("[[trigger]]\nagents = [\"a\"]").unwrap_err().contains("keywords or patterns"));
-        assert!(Triggers::parse("[[trigger]]\nagents = [\"a\"]\npatterns = [\"(\"]").unwrap_err().contains("pattern"));
-        assert!(Triggers::parse("[[trigger]]\nagents = [\"a\"]\nkeywords = [\"k\"]\nwhen = 1").is_err());
+        assert!(
+            Triggers::parse("[[trigger]]\nagents = []\nkeywords = [\"a\"]")
+                .unwrap_err()
+                .contains("trigger 1")
+        );
+        assert!(Triggers::parse("[[trigger]]\nagents = [\"a\"]")
+            .unwrap_err()
+            .contains("keywords or patterns"));
+        assert!(
+            Triggers::parse("[[trigger]]\nagents = [\"a\"]\npatterns = [\"(\"]")
+                .unwrap_err()
+                .contains("pattern")
+        );
+        assert!(
+            Triggers::parse("[[trigger]]\nagents = [\"a\"]\nkeywords = [\"k\"]\nwhen = 1").is_err()
+        );
     }
 
     #[test]

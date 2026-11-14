@@ -24,7 +24,11 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn new(per_minute: u32, now: Instant) -> Self {
-        Self { per_minute, tokens: f64::from(per_minute), at: now }
+        Self {
+            per_minute,
+            tokens: f64::from(per_minute),
+            at: now,
+        }
     }
 
     /// Takes a token, or says in how many whole seconds there will be one.

@@ -20,7 +20,8 @@ struct RedactWriter<W> {
 impl<W: io::Write> io::Write for RedactWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let text = String::from_utf8_lossy(buf);
-        self.inner.write_all(self.redactor.redact(&text).as_bytes())?;
+        self.inner
+            .write_all(self.redactor.redact(&text).as_bytes())?;
         Ok(buf.len())
     }
 

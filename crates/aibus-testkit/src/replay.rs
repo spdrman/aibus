@@ -64,7 +64,8 @@ pub fn assert_replays<G: Graph>(fx: &Fixture, mk: fn() -> G) {
     let mut app = App::new(mk(), || 0);
     replay_into(&mut app, &fx.msgs).unwrap_or_else(|e| panic!("{}: {e}", fx.name));
     let hash = snapshot_hash(&app.graph);
-    let views = aibus_tui::replay_views(mk(), &fx.msgs).unwrap_or_else(|e| panic!("{}: {e}", fx.name));
+    let views =
+        aibus_tui::replay_views(mk(), &fx.msgs).unwrap_or_else(|e| panic!("{}: {e}", fx.name));
     let took = start.elapsed();
     assert_eq!(hash, fx.hash, "{}: the snapshot hash moved", fx.name);
     assert_eq!(views, fx.views, "{}: a view: node moved", fx.name);
@@ -93,5 +94,10 @@ pub fn assert_same_on_both<A: Graph, B: Graph>(fx: &Fixture, a: fn() -> A, b: fn
         "{}: the commit logs differ",
         fx.name
     );
-    assert_eq!(left.graph.now(), right.graph.now(), "{}: graph time differs", fx.name);
+    assert_eq!(
+        left.graph.now(),
+        right.graph.now(),
+        "{}: graph time differs",
+        fx.name
+    );
 }

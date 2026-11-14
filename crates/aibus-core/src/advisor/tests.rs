@@ -4,7 +4,11 @@ use crate::msg::Checkpoint as C;
 fn all() -> Triggers {
     let specs: Vec<CheckpointSpec> = ["before_plan", "same_error_x2", "before_done"]
         .into_iter()
-        .map(|n| CheckpointSpec { name: n.into(), on: None, matcher: None })
+        .map(|n| CheckpointSpec {
+            name: n.into(),
+            on: None,
+            matcher: None,
+        })
         .collect();
     let on: Vec<String> = specs.iter().map(|s| s.name.to_string()).collect();
     Triggers::new(&specs, &on)
@@ -29,14 +33,23 @@ fn errors_normalise_whitespace_digits_and_paths() {
     let b = normalise_error("open /home/me/y.rs:99:1 failed after 7 ms (pid 2)");
     assert_eq!(a, b);
     assert_eq!(a, "open <path> failed after # ms (pid #)");
-    assert_ne!(normalise_error("no such file"), normalise_error("permission denied"));
+    assert_ne!(
+        normalise_error("no such file"),
+        normalise_error("permission denied")
+    );
 }
 
 #[test]
 fn before_plan_fires_on_the_plan_tool_the_heading_and_plan_mode() {
     let mut t = all();
-    assert!(matches!(t.on_assistant(&call("plan")), Some((C::BeforePlan, _))));
-    assert!(matches!(t.on_assistant(&call("enter_plan_mode")), Some((C::BeforePlan, _))));
+    assert!(matches!(
+        t.on_assistant(&call("plan")),
+        Some((C::BeforePlan, _))
+    ));
+    assert!(matches!(
+        t.on_assistant(&call("enter_plan_mode")),
+        Some((C::BeforePlan, _))
+    ));
     let text = |s: &str| Message::text(MessageRole::Assistant, s);
     assert!(t.on_assistant(&text("ok\n## Plan\n1. x")).is_some());
     assert!(t.on_assistant(&text("# PLAN: split it")).is_some());
@@ -78,7 +91,11 @@ fn custom_checkpoints_match_the_tool_or_the_result_and_builtins_can_be_left_off(
             on: Some("tool_result".into()),
             matcher: Some("password|^bash$".into()),
         },
-        CheckpointSpec { name: "before_done".into(), on: None, matcher: None },
+        CheckpointSpec {
+            name: "before_done".into(),
+            on: None,
+            matcher: None,
+        },
     ];
     let mut t = Triggers::new(&specs, &["before_done".to_owned()]);
     let hit = t.on_result("read", "the password is", false);
@@ -94,7 +111,13 @@ fn custom_checkpoints_match_the_tool_or_the_result_and_builtins_can_be_left_off(
 fn session(l: &Ledger, big: usize) -> (RunId, RunId) {
     let (lead, worker) = (RunId::new(), RunId::new());
     l.begin(lead, &"lead".parse().unwrap(), Role::Lead, "fix it", 1);
-    l.begin(worker, &"search".parse().unwrap(), Role::Worker, &"w".repeat(900), 1);
+    l.begin(
+        worker,
+        &"search".parse().unwrap(),
+        Role::Worker,
+        &"w".repeat(900),
+        1,
+    );
     let id = ToolCallId(ulid::Ulid::new());
     let mut msgs = vec![
         Message::text(MessageRole::User, "task"),
@@ -102,13 +125,22 @@ fn session(l: &Ledger, big: usize) -> (RunId, RunId) {
             role: MessageRole::Assistant,
             blocks: vec![
                 ContentBlock::Text("L".repeat(1000)),
-                ContentBlock::ToolUse { id, name: "grep".into(), input: serde_json::json!({"p": "x"}), signature: None },
+                ContentBlock::ToolUse {
+                    id,
+                    name: "grep".into(),
+                    input: serde_json::json!({"p": "x"}),
+                    signature: None,
+                },
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         },
         Message {
             role: MessageRole::User,
-            blocks: vec![ContentBlock::ToolResult { id, content: "R".repeat(big), is_error: false }],
+            blocks: vec![ContentBlock::ToolResult {
+                id,
+                content: "R".repeat(big),
+                is_error: false,
+            }],
             at: std::time::SystemTime::UNIX_EPOCH,
         },
     ];
@@ -123,8 +155,14 @@ fn the_packet_keeps_the_leads_text_whole_and_cuts_results_and_worker_text() {
     let l = Ledger::default();
     session(&l, 5000);
     let p = l.packet(400_000);
-    assert!(p.text.contains(&"L".repeat(1000)), "the lead's text is whole");
-    assert!(!p.text.contains(&"Z".repeat(1000)), "a worker's text is cut");
+    assert!(
+        p.text.contains(&"L".repeat(1000)),
+        "the lead's text is whole"
+    );
+    assert!(
+        !p.text.contains(&"Z".repeat(1000)),
+        "a worker's text is cut"
+    );
     assert!(p.text.contains(&"Z".repeat(400)));
     assert!(p.text.contains("tool grep {\"p\":\"x\"}"));
     assert!(p.text.contains(&"R".repeat(400)) && !p.text.contains(&"R".repeat(401)));

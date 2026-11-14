@@ -96,7 +96,10 @@ async fn tool_call_streams_start_input_end_and_stops_with_tool_use() {
 
     assert_eq!(res.stop, StopReason::ToolUse);
     assert_eq!((res.usage.input_tokens, res.usage.output_tokens), (15, 5));
-    let ContentBlock::ToolUse { id, name, input, .. } = &res.message.blocks[1] else {
+    let ContentBlock::ToolUse {
+        id, name, input, ..
+    } = &res.message.blocks[1]
+    else {
         panic!("{:?}", res.message)
     };
     assert_eq!(name, "read");

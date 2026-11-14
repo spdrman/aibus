@@ -64,15 +64,24 @@ actions! {
 
 impl Action {
     pub fn name(self) -> &'static str {
-        ACTIONS.iter().find(|(a, ..)| *a == self).map_or("", |(_, n, _)| n)
+        ACTIONS
+            .iter()
+            .find(|(a, ..)| *a == self)
+            .map_or("", |(_, n, _)| n)
     }
 
     pub fn parse(name: &str) -> Option<Self> {
-        ACTIONS.iter().find(|(_, n, _)| *n == name).map(|(a, ..)| *a)
+        ACTIONS
+            .iter()
+            .find(|(_, n, _)| *n == name)
+            .map(|(a, ..)| *a)
     }
 
     pub fn help(self) -> &'static str {
-        ACTIONS.iter().find(|(a, ..)| *a == self).map_or("", |(_, _, h)| h)
+        ACTIONS
+            .iter()
+            .find(|(a, ..)| *a == self)
+            .map_or("", |(_, _, h)| h)
     }
 }
 
@@ -241,7 +250,12 @@ pub fn parse_key(text: &str) -> Result<KeyEvent, String> {
         None if text == "+" => ("", "+"),
         None => text.rsplit_once('+').unwrap_or(("", text)),
     };
-    let mut ev = KeyEvent { code: KeyCode::Esc, ctrl: false, alt: false, shift: false };
+    let mut ev = KeyEvent {
+        code: KeyCode::Esc,
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
     for m in mods.split('+').filter(|m| !m.is_empty()) {
         match m.to_ascii_lowercase().as_str() {
             "ctrl" | "control" => ev.ctrl = true,
@@ -410,7 +424,14 @@ impl Keymap {
             map.bindings.retain(|b| b.action != action);
             // In front, so that on a clash the user's choice is the one found first.
             for (i, key) in parsed.into_iter().enumerate() {
-                map.bindings.insert(i, Binding { action, key, scopes: scopes.clone() });
+                map.bindings.insert(
+                    i,
+                    Binding {
+                        action,
+                        key,
+                        scopes: scopes.clone(),
+                    },
+                );
             }
         }
         warnings.extend(map.conflicts());
@@ -419,8 +440,10 @@ impl Keymap {
 
     /// The `[keys]` table of the config, then `keys.toml` on top of it.
     pub fn load(config: &BTreeMap<String, String>, keys_toml: Option<&str>) -> (Self, Vec<String>) {
-        let mut overrides: Vec<(String, Vec<String>)> =
-            config.iter().map(|(a, k)| (a.clone(), vec![k.clone()])).collect();
+        let mut overrides: Vec<(String, Vec<String>)> = config
+            .iter()
+            .map(|(a, k)| (a.clone(), vec![k.clone()]))
+            .collect();
         let mut warnings = Vec::new();
         if let Some(text) = keys_toml {
             match parse_keys_toml(text) {
@@ -467,13 +490,13 @@ impl Keymap {
     /// printable key is text, so only bindings aimed at the prompt (or non-printable keys) match.
     pub fn lookup(&self, ev: KeyEvent, ctx: Ctx) -> Option<Action> {
         let ev = normalize(ev);
-        let typing = ctx == Ctx::Prompt
-            && matches!(ev.code, KeyCode::Char(_))
-            && !ev.ctrl
-            && !ev.alt;
+        let typing =
+            ctx == Ctx::Prompt && matches!(ev.code, KeyCode::Char(_)) && !ev.ctrl && !ev.alt;
         self.bindings
             .iter()
-            .find(|b| b.key == ev && b.covers(ctx) && (!typing || b.scopes.contains(&Scope::Prompt)))
+            .find(|b| {
+                b.key == ev && b.covers(ctx) && (!typing || b.scopes.contains(&Scope::Prompt))
+            })
             .map(|b| b.action)
     }
 
@@ -482,8 +505,11 @@ impl Keymap {
         ACTIONS
             .iter()
             .filter_map(|(action, _, text)| {
-                let bound: Vec<&Binding> =
-                    self.bindings.iter().filter(|b| b.action == *action).collect();
+                let bound: Vec<&Binding> = self
+                    .bindings
+                    .iter()
+                    .filter(|b| b.action == *action)
+                    .collect();
                 if bound.is_empty() {
                     return None;
                 }
@@ -500,7 +526,11 @@ impl Keymap {
                         }
                     }
                 }
-                Some(HelpRow { keys: keys.join(" "), text, scope: scopes.join(", ") })
+                Some(HelpRow {
+                    keys: keys.join(" "),
+                    text,
+                    scope: scopes.join(", "),
+                })
             })
             .collect()
     }
@@ -582,12 +612,23 @@ mod tests {
         for c in [Ctx::Cards, Ctx::Log, Ctx::Rail] {
             assert_eq!(at("space", c), Some(ShowTooltip));
         }
-        assert_eq!(at("space", Ctx::Prompt), None, "a space in the prompt is a space");
+        assert_eq!(
+            at("space", Ctx::Prompt),
+            None,
+            "a space in the prompt is a space"
+        );
         assert_eq!(at("m", Ctx::Prompt), None);
         assert_eq!(at("enter", Ctx::Menu), Some(PickMenuItem));
         assert_eq!(at("esc", Ctx::Menu), Some(CloseModal));
-        assert_eq!((at("j", Ctx::Menu), at("up", Ctx::Menu)), (Some(MoveDown), Some(MoveUp)));
-        assert_eq!(at("m", Ctx::Menu), None, "the menu key does nothing inside the menu");
+        assert_eq!(
+            (at("j", Ctx::Menu), at("up", Ctx::Menu)),
+            (Some(MoveDown), Some(MoveUp))
+        );
+        assert_eq!(
+            at("m", Ctx::Menu),
+            None,
+            "the menu key does nothing inside the menu"
+        );
         assert_eq!(at("R", Ctx::Cards), Some(ResumeRun));
         assert_eq!(at("b", Ctx::Cards), Some(ToggleBackground));
         assert_eq!(at("ctrl+b", Ctx::Log), Some(BackgroundWait));
@@ -611,7 +652,11 @@ mod tests {
         assert_eq!(at("i", Ctx::Transcript), Some(OpenRunStatus));
         assert_eq!(at("$", Ctx::Cards), Some(OpenCost));
         assert_eq!(at("$", Ctx::Transcript), Some(OpenCost));
-        assert_eq!(at("$", Ctx::Prompt), None, "a dollar sign in the prompt is typing");
+        assert_eq!(
+            at("$", Ctx::Prompt),
+            None,
+            "a dollar sign in the prompt is typing"
+        );
         assert_eq!(at("A", Ctx::Cards), Some(OpenAgents));
         assert_eq!(at("K", Ctx::Cards), Some(OpenAccounts));
         assert_eq!(at("?", Ctx::Cards), Some(OpenHelp));
@@ -645,8 +690,18 @@ mod tests {
     #[test]
     fn shifted_letters_match_either_way_a_terminal_reports_them() {
         let m = Keymap::default();
-        let upper = KeyEvent { code: KeyCode::Char('R'), ctrl: false, alt: false, shift: true };
-        let lower = KeyEvent { code: KeyCode::Char('r'), ctrl: false, alt: false, shift: true };
+        let upper = KeyEvent {
+            code: KeyCode::Char('R'),
+            ctrl: false,
+            alt: false,
+            shift: true,
+        };
+        let lower = KeyEvent {
+            code: KeyCode::Char('r'),
+            ctrl: false,
+            alt: false,
+            shift: true,
+        };
         assert_eq!(m.lookup(upper, Ctx::Cards), Some(ResumeRun));
         assert_eq!(m.lookup(lower, Ctx::Cards), Some(ResumeRun));
         assert_eq!(m.lookup(press("r"), Ctx::Cards), Some(RetryRun));
@@ -714,10 +769,17 @@ mod tests {
             ("open_help".to_owned(), vec!["x".to_owned()]),
         ];
         let (m, w) = Keymap::with_overrides(&ov);
-        assert!(w.iter().any(|s| s.contains("unknown action `nonsense`")), "{w:?}");
-        assert!(w.iter().any(|s| s.contains("cannot read key `hyper+q`")), "{w:?}");
         assert!(
-            w.iter().any(|s| s.contains("`x` is bound to both open_help and stop_run")),
+            w.iter().any(|s| s.contains("unknown action `nonsense`")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter().any(|s| s.contains("cannot read key `hyper+q`")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter()
+                .any(|s| s.contains("`x` is bound to both open_help and stop_run")),
             "{w:?}"
         );
         assert_eq!(m.lookup(press("x"), Ctx::Cards), Some(OpenHelp));
@@ -734,7 +796,11 @@ mod tests {
         let up = rows.iter().find(|r| r.text == "up / scroll").unwrap();
         assert_eq!(up.keys, "Up k");
         let (m, _) = Keymap::with_overrides(&[("open_help".into(), vec!["F1".into()])]);
-        let help = m.help_rows().into_iter().find(|r| r.text == "this help").unwrap();
+        let help = m
+            .help_rows()
+            .into_iter()
+            .find(|r| r.text == "this help")
+            .unwrap();
         assert_eq!(help.keys, "F1");
     }
 }

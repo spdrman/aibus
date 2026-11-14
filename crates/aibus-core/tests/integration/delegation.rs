@@ -49,8 +49,14 @@ async fn lead_delegates_to_a_background_worker_and_the_result_arrives_wrapped_an
         .into_iter()
         .find(|t| t.contains("sub-agent's report"))
         .expect("the report was injected");
-    assert!(report.starts_with("The following is the sub-agent's report."), "{report}");
-    assert!(report.contains(&format!("[run {child} · explore · completed")), "{report}");
+    assert!(
+        report.starts_with("The following is the sub-agent's report."),
+        "{report}"
+    );
+    assert!(
+        report.contains(&format!("[run {child} · explore · completed")),
+        "{report}"
+    );
     assert!(report.contains("summary cut at 64 bytes"), "{report}");
     let full = std::fs::read_to_string(rig.dir.join(format!("runs/{child}/result.md"))).unwrap();
     assert_eq!(full.len(), 200);
@@ -60,42 +66,77 @@ async fn lead_delegates_to_a_background_worker_and_the_result_arrives_wrapped_an
 #[tokio::test]
 async fn a_foreground_delegate_blocks_the_parents_tool_call_until_the_child_ends() {
     let clock = FakeClock::new();
-    let lead = script(delegate_call("explore", "find it", false).into_iter().chain([text("thanks")]));
-    let mut rig = Rig::new(Setup::default(), lead, |_| script([delay(5), text("child says hi")]));
+    let lead = script(
+        delegate_call("explore", "find it", false)
+            .into_iter()
+            .chain([text("thanks")]),
+    );
+    let mut rig = Rig::new(Setup::default(), lead, |_| {
+        script([delay(5), text("child says hi")])
+    });
     let out = rig.run("go").await;
 
-    assert!(clock.elapsed() >= Duration::from_secs(5), "the lead waited for the child");
+    assert!(
+        clock.elapsed() >= Duration::from_secs(5),
+        "the lead waited for the child"
+    );
     let child = rig.launched()[0].run;
     let child_done = out.position(|m| matches!(m, Msg::RunFinished { run, .. } if *run == child));
-    let call_done = out.position(|m| matches!(m, Msg::ToolCallFinished { run, .. } if *run == rig.lead));
-    assert!(child_done < call_done, "the tool call ended after the child did");
+    let call_done =
+        out.position(|m| matches!(m, Msg::ToolCallFinished { run, .. } if *run == rig.lead));
+    assert!(
+        child_done < call_done,
+        "the tool call ended after the child did"
+    );
 
     let reqs = rig.lead_requests();
     assert_eq!(reqs.len(), 2);
     let result = &results(&reqs[1])[0];
-    assert!(result.starts_with("The following is the sub-agent's report."), "{result}");
+    assert!(
+        result.starts_with("The following is the sub-agent's report."),
+        "{result}"
+    );
     assert!(result.contains("child says hi"));
 }
 
 #[tokio::test]
 async fn nesting_stops_at_max_spawn_depth_and_delegate_is_absent_from_the_tool_list_there() {
     let _clock = FakeClock::new();
-    let lead = script(delegate_call("general", "level 1", false).into_iter().chain([text("all done")]));
+    let lead = script(
+        delegate_call("general", "level 1", false)
+            .into_iter()
+            .chain([text("all done")]),
+    );
     let mut rig = Rig::new(Setup::default(), lead, |spec| match spec.depth {
-        1 => script(delegate_call("general", "level 2", false).into_iter().chain([text("one done")])),
-        2 => script(delegate_call("general", "level 3", false).into_iter().chain([text("two done")])),
+        1 => script(
+            delegate_call("general", "level 2", false)
+                .into_iter()
+                .chain([text("one done")]),
+        ),
+        2 => script(
+            delegate_call("general", "level 3", false)
+                .into_iter()
+                .chain([text("two done")]),
+        ),
         _ => script([text("three done")]),
     });
     let out = rig.run("go").await;
     assert_eq!(out.finished(rig.lead).status, RunStatus::Completed);
 
     let launched = rig.launched();
-    assert_eq!(launched.iter().map(|s| s.depth).collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(
+        launched.iter().map(|s| s.depth).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
     let offered = |i: usize| tool_names(&rig.child_requests(launched[i].run)[0]);
     assert!(tool_names(&rig.lead_requests()[0]).contains(&"delegate".to_owned()));
     assert!(offered(0).contains(&"delegate".to_owned()), "depth 1");
     assert!(offered(1).contains(&"delegate".to_owned()), "depth 2");
-    assert!(!offered(2).contains(&"delegate".to_owned()), "depth 3: {:?}", offered(2));
+    assert!(
+        !offered(2).contains(&"delegate".to_owned()),
+        "depth 3: {:?}",
+        offered(2)
+    );
 }
 
 fn wired() -> (A, Rc<RefCell<Vec<Effect>>>) {
@@ -120,18 +161,30 @@ fn started(a: &mut A, run: RunId) {
 
 fn runnable(a: &A) -> Vec<String> {
     let v = a.graph.read_key("model:orchestrator:runnable").unwrap();
-    as_list(v).iter().map(|r| as_str(get(r, "run").unwrap()).unwrap().to_owned()).collect()
+    as_list(v)
+        .iter()
+        .map(|r| as_str(get(r, "run").unwrap()).unwrap().to_owned())
+        .collect()
 }
 
 fn status(a: &A, run: RunId) -> String {
-    as_str(a.graph.read_key(&format!("model:run:{run}:status")).unwrap()).unwrap().to_owned()
+    as_str(
+        a.graph
+            .read_key(&format!("model:run:{run}:status"))
+            .unwrap(),
+    )
+    .unwrap()
+    .to_owned()
 }
 
 #[test]
 fn the_ninth_run_stays_queued_until_one_finishes_and_runnable_says_so() {
     let (mut a, log) = wired();
     let spawns = |log: &Rc<RefCell<Vec<Effect>>>| {
-        log.borrow().iter().filter(|e| matches!(e, Effect::Spawn(_))).count()
+        log.borrow()
+            .iter()
+            .filter(|e| matches!(e, Effect::Spawn(_)))
+            .count()
     };
     started(&mut a, R());
     // Eight asks on top of the lead: the lead plus seven are the eight allowed, the last waits.
@@ -158,7 +211,10 @@ fn the_ninth_run_stays_queued_until_one_finishes_and_runnable_says_so() {
     let counts = a.graph.read_key("model:orchestrator:counts").unwrap();
     assert_eq!(as_i64(get(counts, "running").unwrap()), Some(8));
     assert_eq!(status(&a, kids[7]), "queued");
-    assert!(runnable(&a).is_empty(), "model:orchestrator:runnable excludes the ninth");
+    assert!(
+        runnable(&a).is_empty(),
+        "model:orchestrator:runnable excludes the ninth"
+    );
     assert_eq!(spawns(&log), 7, "nothing more was handed to the spawner");
 
     a.step(Msg::RunFinished {
@@ -177,7 +233,11 @@ fn the_ninth_run_stays_queued_until_one_finishes_and_runnable_says_so() {
         },
     })
     .unwrap();
-    assert_eq!(runnable(&a), [kids[7].to_string()], "a slot freed up and the ninth is runnable");
+    assert_eq!(
+        runnable(&a),
+        [kids[7].to_string()],
+        "a slot freed up and the ninth is runnable"
+    );
     assert_eq!(spawns(&log), 8);
 }
 
@@ -189,7 +249,12 @@ async fn a_delegate_past_the_concurrency_cap_returns_the_error_to_the_lead() {
         name: "delegate".into(),
         input: json!({"agent": "explore", "prompt": prompt}),
     };
-    let lead = script([ask("a"), ask("b"), Step::Stop(StopReason::ToolUse), text("both asked")]);
+    let lead = script([
+        ask("a"),
+        ask("b"),
+        Step::Stop(StopReason::ToolUse),
+        text("both asked"),
+    ]);
     let set = Setup {
         limits: Limits {
             max_concurrent_runs: 2,

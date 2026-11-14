@@ -5,8 +5,8 @@ mod common;
 use std::fs;
 use std::path::Path;
 
-use common::{aibus, command, ndjson, stderr};
 use aibus_testkit::xdg_temp;
+use common::{aibus, command, ndjson, stderr};
 
 fn user_config(home: &Path, text: &str) {
     let dir = home.join(".config/aibus");
@@ -41,7 +41,10 @@ fn zero_is_a_completed_run_and_an_empty_session_list() {
 #[test]
 fn one_is_an_io_error() {
     let home = xdg_temp();
-    let out = aibus(home.path(), &["run", "--script", "/no/such/script.ron", "hi"]);
+    let out = aibus(
+        home.path(),
+        &["run", "--script", "/no/such/script.ron", "hi"],
+    );
     assert_eq!(code(&out), 1, "{}", stderr(&out));
 }
 
@@ -74,19 +77,35 @@ fn four_is_a_missing_credential_and_a_rejected_one() {
     assert_eq!(code(&out), 4, "{}", stderr(&out));
 
     // The provider says 401 mid-run: the run fails with the account banner, and that is 4 too.
-    let s = script(home.path(), r#"[Error((kind: Auth, retryable: false, message: "401"))]"#);
-    let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "--script", &s, "hi"]);
+    let s = script(
+        home.path(),
+        r#"[Error((kind: Auth, retryable: false, message: "401"))]"#,
+    );
+    let out = aibus(
+        home.path(),
+        &["run", "--json", "--agent", "explore", "--script", &s, "hi"],
+    );
     assert_eq!(code(&out), 4, "{}", stderr(&out));
     let lines = ndjson(&out);
     assert_eq!(lines.last().unwrap()["exit_code"], 4);
-    assert!(stderr(&out).contains("run aibus account test fake"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("run aibus account test fake"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]
 fn five_is_a_provider_that_failed_after_retries() {
     let home = xdg_temp();
-    let s = script(home.path(), r#"[Error((kind: Server, retryable: false, message: "down"))]"#);
-    let out = aibus(home.path(), &["run", "--agent", "explore", "--script", &s, "hi"]);
+    let s = script(
+        home.path(),
+        r#"[Error((kind: Server, retryable: false, message: "down"))]"#,
+    );
+    let out = aibus(
+        home.path(),
+        &["run", "--agent", "explore", "--script", &s, "hi"],
+    );
     assert_eq!(code(&out), 5, "{}", stderr(&out));
 }
 
@@ -114,7 +133,11 @@ fn seven_is_an_interrupt() {
         .spawn()
         .unwrap();
     let mut first = String::new();
-    std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.as_mut().unwrap()), &mut first).unwrap();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(child.stdout.as_mut().unwrap()),
+        &mut first,
+    )
+    .unwrap();
     assert!(first.contains("RunStarted"), "{first}");
     assert!(std::process::Command::new("kill")
         .args(["-INT", &child.id().to_string()])
@@ -133,7 +156,10 @@ fn eight_is_a_budget_and_ten_is_everything_else_that_ended_early() {
         home.path(),
         r#"[Text("looking"), Usage(input: 600, output: 500), ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse), Text("never")]"#,
     );
-    let out = aibus(home.path(), &["run", "--json", "--agent", "explore", "--script", &s, "hi"]);
+    let out = aibus(
+        home.path(),
+        &["run", "--json", "--agent", "explore", "--script", &s, "hi"],
+    );
     assert_eq!(code(&out), 8, "{}", stderr(&out));
     let lines = ndjson(&out);
     let done = lines.iter().find(|l| l["type"] == "RunFinished").unwrap();
@@ -146,7 +172,10 @@ fn eight_is_a_budget_and_ten_is_everything_else_that_ended_early() {
         home.path(),
         r#"[ToolCall(name: "ls", input: {"path": "."}), Stop(ToolUse), Text("never")]"#,
     );
-    let out = aibus(home.path(), &["run", "--agent", "explore", "--script", &s, "hi"]);
+    let out = aibus(
+        home.path(),
+        &["run", "--agent", "explore", "--script", &s, "hi"],
+    );
     assert_eq!(code(&out), 10, "{}", stderr(&out));
 }
 
@@ -154,7 +183,13 @@ fn eight_is_a_budget_and_ten_is_everything_else_that_ended_early() {
 fn eleven_is_doctor_finding_a_problem_and_twelve_is_agent_validate() {
     let home = xdg_temp();
     let ok = aibus(home.path(), &["doctor"]);
-    assert_eq!(code(&ok), 0, "{}{}", String::from_utf8_lossy(&ok.stdout), stderr(&ok));
+    assert_eq!(
+        code(&ok),
+        0,
+        "{}{}",
+        String::from_utf8_lossy(&ok.stdout),
+        stderr(&ok)
+    );
 
     // A file where the data directory should be.
     fs::create_dir_all(home.path().join(".local/share")).unwrap();
@@ -176,12 +211,25 @@ fn workflow_validate_exits_twelve_on_errors_and_zero_on_warnings() {
     let dir = home.path().join("proj/.aibus/workflows");
     fs::create_dir_all(&dir).unwrap();
     // A gate is a warning: the exit code stays 0.
-    fs::write(dir.join("gated.toml"), "[[step]]\nagent = \"explore\"\nprompt = \"a\"\ngate = \"true\"\n").unwrap();
+    fs::write(
+        dir.join("gated.toml"),
+        "[[step]]\nagent = \"explore\"\nprompt = \"a\"\ngate = \"true\"\n",
+    )
+    .unwrap();
     let warned = aibus(home.path(), &["workflow", "validate"]);
-    assert_eq!(code(&warned), 0, "{}", String::from_utf8_lossy(&warned.stdout));
+    assert_eq!(
+        code(&warned),
+        0,
+        "{}",
+        String::from_utf8_lossy(&warned.stdout)
+    );
     assert!(String::from_utf8_lossy(&warned.stdout).contains("warning"));
 
-    fs::write(dir.join("bad.toml"), "[[step]]\nagent = \"ghost\"\nprompt = \"a\"\n").unwrap();
+    fs::write(
+        dir.join("bad.toml"),
+        "[[step]]\nagent = \"ghost\"\nprompt = \"a\"\n",
+    )
+    .unwrap();
     let bad = aibus(home.path(), &["workflow", "validate"]);
     assert_eq!(code(&bad), 12, "{}", String::from_utf8_lossy(&bad.stdout));
     let one = aibus(home.path(), &["workflow", "validate", "gated"]);
@@ -198,15 +246,31 @@ fn mcp_run_status_exit_codes_follow_06_section_3() {
     let home = xdg_temp();
     let dir = home.path().join("proj/.aibus/workflows");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("ship.toml"), "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n").unwrap();
+    fs::write(
+        dir.join("ship.toml"),
+        "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n",
+    )
+    .unwrap();
     let mut c = McpClient::start(home.path(), Protocol::V2026_07_28, &["--allow", "run"]);
-    let started = c.call("workflow_run", json!({ "name": "ship", "scope": "project", "input": "look" })).unwrap();
-    let run = started["structuredContent"]["run"].as_str().unwrap().to_owned();
+    let started = c
+        .call(
+            "workflow_run",
+            json!({ "name": "ship", "scope": "project", "input": "look" }),
+        )
+        .unwrap();
+    let run = started["structuredContent"]["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     for _ in 0..120 {
-        let r = c.call("run_status", json!({ "run": run, "wait_ms": 5000 })).unwrap();
+        let r = c
+            .call("run_status", json!({ "run": run, "wait_ms": 5000 }))
+            .unwrap();
         let body = &r["structuredContent"];
         // The exit code comes off the child's last event, a moment before the status settles.
-        if !body["exit_code"].is_null() && !matches!(body["status"].as_str(), Some("starting" | "running")) {
+        if !body["exit_code"].is_null()
+            && !matches!(body["status"].as_str(), Some("starting" | "running"))
+        {
             assert_eq!(body["exit_code"], 0, "{body}");
             assert_eq!(body["status"], "completed", "{body}");
             return;

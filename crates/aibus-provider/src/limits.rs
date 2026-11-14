@@ -261,7 +261,8 @@ impl Provider for Gated {
                 if let Some(info) = &r.rate_limit {
                     self.limiter.observe(info);
                 }
-                self.limiter.spend(r.usage.input_tokens + r.usage.output_tokens);
+                self.limiter
+                    .spend(r.usage.input_tokens + r.usage.output_tokens);
             }
         }
         drop(permit);
@@ -308,7 +309,9 @@ mod tests {
 
     /// Polls `fut` once on the paused clock: `Some` when it is already done.
     async fn ready<T>(fut: impl std::future::Future<Output = T>) -> Option<T> {
-        tokio::time::timeout(Duration::from_millis(1), fut).await.ok()
+        tokio::time::timeout(Duration::from_millis(1), fut)
+            .await
+            .ok()
     }
 
     #[tokio::test(start_paused = true)]
@@ -316,10 +319,18 @@ mod tests {
         let lim = Limiter::new(acct("work"), limits(4));
         let mut held = Vec::new();
         for _ in 0..4 {
-            held.push(ready(lim.acquire(|_| panic!("the first four do not wait"))).await.unwrap());
+            held.push(
+                ready(lim.acquire(|_| panic!("the first four do not wait")))
+                    .await
+                    .unwrap(),
+            );
         }
         let said = Mutex::new(Vec::new());
-        assert!(ready(lim.acquire(|t| said.lock().unwrap().push(t.to_owned()))).await.is_none());
+        assert!(
+            ready(lim.acquire(|t| said.lock().unwrap().push(t.to_owned())))
+                .await
+                .is_none()
+        );
         assert_eq!(*said.lock().unwrap(), ["waiting for work slot"]);
 
         let fifth = tokio::spawn({
@@ -343,10 +354,15 @@ mod tests {
 
         // 4 / 2 = 2 slots while tight; one is taken already.
         let _q = ready(lim.acquire(|_| {})).await.expect("second slot");
-        assert!(ready(lim.acquire(|_| {})).await.is_none(), "third is over the halved limit");
+        assert!(
+            ready(lim.acquire(|_| {})).await.is_none(),
+            "third is over the halved limit"
+        );
 
         tokio::time::sleep_until(t0 + MINUTE).await;
-        let _r = ready(lim.acquire(|_| {})).await.expect("tightening is over");
+        let _r = ready(lim.acquire(|_| {}))
+            .await
+            .expect("tightening is over");
         let _s = ready(lim.acquire(|_| {})).await.expect("full limit again");
     }
 
@@ -364,7 +380,11 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(20)).await;
         drop(lim.acquire(|_| {}).await);
         drop(lim.acquire(|_| {}).await);
-        assert_eq!(Instant::now() - t0, MINUTE, "the third waits for the first to age out");
+        assert_eq!(
+            Instant::now() - t0,
+            MINUTE,
+            "the third waits for the first to age out"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -397,7 +417,11 @@ mod tests {
         // Not a 429: all four slots are there again straight away.
         let mut held = Vec::new();
         for _ in 0..3 {
-            held.push(ready(lim.acquire(|_| {})).await.expect("full limit, not halved"));
+            held.push(
+                ready(lim.acquire(|_| {}))
+                    .await
+                    .expect("full limit, not halved"),
+            );
         }
     }
 
@@ -416,7 +440,11 @@ mod tests {
             ..RateLimitInfo::default()
         });
         drop(lim.acquire(|_| {}).await);
-        assert_eq!(Instant::now() - t0, Duration::from_secs(30), "the shorter reset does not shorten the block");
+        assert_eq!(
+            Instant::now() - t0,
+            Duration::from_secs(30),
+            "the shorter reset does not shorten the block"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -444,10 +472,16 @@ mod tests {
             ..RateLimitInfo::default()
         }));
         let limiter = Limiter::new(acct("work"), limits(4));
-        let gated = Gated::new(Arc::new(FakeProvider::new(Script::new().then(Step::Error(err)))), limiter.clone());
+        let gated = Gated::new(
+            Arc::new(FakeProvider::new(Script::new().then(Step::Error(err)))),
+            limiter.clone(),
+        );
         let (tx, _rx) = mpsc::channel(8);
         let t0 = Instant::now();
-        gated.stream(&creds(), request(), tx, CancellationToken::new()).await.unwrap_err();
+        gated
+            .stream(&creds(), request(), tx, CancellationToken::new())
+            .await
+            .unwrap_err();
         drop(limiter.acquire(|_| {}).await);
         assert_eq!(Instant::now() - t0, Duration::from_secs(20));
     }
@@ -491,7 +525,9 @@ mod tests {
         ));
         let go = |g: Arc<Gated>| async move {
             let (tx, mut rx) = mpsc::channel(64);
-            let r = g.stream(&creds(), request(), tx, CancellationToken::new()).await;
+            let r = g
+                .stream(&creds(), request(), tx, CancellationToken::new())
+                .await;
             let mut chunks = Vec::new();
             while let Ok(c) = rx.try_recv() {
                 chunks.push(c);

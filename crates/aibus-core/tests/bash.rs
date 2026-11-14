@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use aibus_core::tools::Bash;
 use aibus_core::*;
-use serde_json::{json, Value};
 use aibus_testkit::xdg_temp;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -41,9 +41,18 @@ fn host_env() -> Vec<(String, String)> {
         .collect()
 }
 
-fn rig(dir: &Path, timeout: u32, pass_env: &[&str], extra_env: &[(&str, &str)]) -> (ToolExecutor, Arc<Bash>) {
+fn rig(
+    dir: &Path,
+    timeout: u32,
+    pass_env: &[&str],
+    extra_env: &[(&str, &str)],
+) -> (ToolExecutor, Arc<Bash>) {
     let mut env = host_env();
-    env.extend(extra_env.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
+    env.extend(
+        extra_env
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned())),
+    );
     let bash = Arc::new(Bash::new(
         timeout,
         pass_env.iter().map(|s| (*s).to_owned()).collect(),
@@ -51,7 +60,10 @@ fn rig(dir: &Path, timeout: u32, pass_env: &[&str], extra_env: &[(&str, &str)]) 
         dir.to_path_buf(),
         "sess-1".into(),
     ));
-    (ToolExecutor::new(ToolRegistry::standard(bash.clone())), bash)
+    (
+        ToolExecutor::new(ToolRegistry::standard(bash.clone())),
+        bash,
+    )
 }
 
 async fn run(
@@ -60,8 +72,10 @@ async fn run(
     c: &ToolCx,
     input: Value,
 ) -> Result<ToolOutput, ToolError> {
-    ex.call_gated(e, c, PermissionMode::Bypass, "bash", input, |_| async { Decision::Deny })
-        .await
+    ex.call_gated(e, c, PermissionMode::Bypass, "bash", input, |_| async {
+        Decision::Deny
+    })
+    .await
 }
 
 fn denied_with(r: &Result<ToolOutput, ToolError>, needle: &str) -> bool {
@@ -113,7 +127,10 @@ async fn compound_commands_cannot_smuggle_a_denied_part_past_an_allow_glob() {
     for cmd in smuggled {
         let r = run(&ex, &e, &cx(dir.path()), json!({ "command": cmd })).await;
         assert!(denied_with(&r, "not in allow-list"), "{cmd:?}: {r:?}");
-        assert!(!dir.path().join("PWN").exists(), "{cmd:?} ran its second part");
+        assert!(
+            !dir.path().join("PWN").exists(),
+            "{cmd:?} ran its second part"
+        );
     }
 }
 
@@ -209,7 +226,13 @@ async fn a_deny_specifier_catches_any_part_and_the_destructive_list_comes_first(
         "dd if=/dev/zero of=/dev/sda",
     ];
     for cmd in destructive {
-        let r = run(&ex, &eff(&["bash"]), &cx(dir.path()), json!({ "command": cmd })).await;
+        let r = run(
+            &ex,
+            &eff(&["bash"]),
+            &cx(dir.path()),
+            json!({ "command": cmd }),
+        )
+        .await;
         assert!(denied_with(&r, "shell deny pattern"), "{cmd:?}: {r:?}");
     }
     // The list is checked before the prompt too, so even a call the user would approve is refused.
@@ -229,7 +252,13 @@ async fn a_deny_specifier_catches_any_part_and_the_destructive_list_comes_first(
 #[tokio::test]
 async fn config_deny_patterns_extend_the_list() {
     let dir = xdg_temp();
-    let bash = Arc::new(Bash::new(20, vec![], host_env(), dir.path().into(), "s".into()));
+    let bash = Arc::new(Bash::new(
+        20,
+        vec![],
+        host_env(),
+        dir.path().into(),
+        "s".into(),
+    ));
     let ex = ToolExecutor::with_gate(
         ToolRegistry::standard(bash),
         Gate {
@@ -238,9 +267,21 @@ async fn config_deny_patterns_extend_the_list() {
         },
     )
     .unwrap();
-    let r = run(&ex, &eff(&["bash"]), &cx(dir.path()), json!({"command": "echo secret1"})).await;
+    let r = run(
+        &ex,
+        &eff(&["bash"]),
+        &cx(dir.path()),
+        json!({"command": "echo secret1"}),
+    )
+    .await;
     assert!(denied_with(&r, "no-echo-secret"), "{r:?}");
-    let ok = run(&ex, &eff(&["bash"]), &cx(dir.path()), json!({"command": "echo fine"})).await;
+    let ok = run(
+        &ex,
+        &eff(&["bash"]),
+        &cx(dir.path()),
+        json!({"command": "echo fine"}),
+    )
+    .await;
     assert_eq!(ok.unwrap().content.trim_end(), "fine");
 
     let bad = Gate {
@@ -272,14 +313,35 @@ async fn the_environment_is_scrubbed_and_the_aibus_variables_are_set() {
         ],
     );
     let c = cx(dir.path());
-    let out = run(&ex, &eff(&["bash"]), &c, json!({"command": "env"})).await.unwrap().content;
-    for gone in ["val-openai", "val-github", "val-dbsecret", "val-dbpass", "val-lower", "val-token", "val-acct-key", "val-acct-bare"] {
-        assert!(!out.contains(gone), "{gone} leaked into the environment:\n{out}");
+    let out = run(&ex, &eff(&["bash"]), &c, json!({"command": "env"}))
+        .await
+        .unwrap()
+        .content;
+    for gone in [
+        "val-openai",
+        "val-github",
+        "val-dbsecret",
+        "val-dbpass",
+        "val-lower",
+        "val-token",
+        "val-acct-key",
+        "val-acct-bare",
+    ] {
+        assert!(
+            !out.contains(gone),
+            "{gone} leaked into the environment:\n{out}"
+        );
     }
-    for kept in ["PASS_ME_KEY=kept", "KEEP_ME=kept-too", "KEYBOARD=kept-as-well"] {
+    for kept in [
+        "PASS_ME_KEY=kept",
+        "KEEP_ME=kept-too",
+        "KEYBOARD=kept-as-well",
+    ] {
         assert!(out.lines().any(|l| l == kept), "{kept} missing:\n{out}");
     }
-    assert!(out.lines().any(|l| l == format!("AIBUS_PROJECT_DIR={}", dir.path().display())));
+    assert!(out
+        .lines()
+        .any(|l| l == format!("AIBUS_PROJECT_DIR={}", dir.path().display())));
     assert!(out.lines().any(|l| l == "AIBUS_SESSION_ID=sess-1"));
     assert!(out.lines().any(|l| l == format!("AIBUS_RUN_ID={}", c.run)));
 }
@@ -290,10 +352,15 @@ async fn the_working_directory_is_the_runs_and_both_streams_are_captured() {
     std::fs::create_dir(dir.path().join("sub")).unwrap();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let wt = dir.path().join("sub");
-    let out = run(&ex, &eff(&["bash"]), &cx(&wt), json!({"command": "pwd; echo out; echo err 1>&2; exit 3"}))
-        .await
-        .unwrap()
-        .content;
+    let out = run(
+        &ex,
+        &eff(&["bash"]),
+        &cx(&wt),
+        json!({"command": "pwd; echo out; echo err 1>&2; exit 3"}),
+    )
+    .await
+    .unwrap()
+    .content;
     let canon = wt.canonicalize().unwrap();
     assert!(out.starts_with(&format!("{}\n", canon.display())), "{out}");
     assert!(out.contains("out") && out.contains("err"), "{out}");
@@ -312,18 +379,33 @@ async fn the_timeout_arg_and_the_config_default_end_a_slow_command() {
 
     let (ex, _) = rig(dir.path(), 60, &[], &[]);
     let t0 = Instant::now();
-    let r = run(&ex, &e, &cx(dir.path()), json!({"command": "sleep 30", "timeout": 1})).await;
+    let r = run(
+        &ex,
+        &e,
+        &cx(dir.path()),
+        json!({"command": "sleep 30", "timeout": 1}),
+    )
+    .await;
     assert!(matches!(r, Err(ToolError::Timeout)), "{r:?}");
     assert!(t0.elapsed() < Duration::from_secs(5));
 
-    let r = run(&ex, &e, &cx(dir.path()), json!({"command": "echo hi", "timeout": 0})).await;
+    let r = run(
+        &ex,
+        &e,
+        &cx(dir.path()),
+        json!({"command": "echo hi", "timeout": 0}),
+    )
+    .await;
     assert!(matches!(r, Err(ToolError::Invalid(_))), "{r:?}");
 }
 
 /// Running and not a zombie (an orphan nobody has reaped yet is already dead).
 fn alive(pid: &str) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .is_ok_and(|s| s.rsplit(')').next().is_some_and(|rest| !rest.trim_start().starts_with('Z')))
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| {
+        s.rsplit(')')
+            .next()
+            .is_some_and(|rest| !rest.trim_start().starts_with('Z'))
+    })
 }
 
 #[tokio::test]
@@ -342,10 +424,18 @@ async fn cancelling_kills_the_process_group_including_grandchildren() {
         _ = &mut call => panic!("should still be running"),
         () = async { while !pid_file.exists() { tokio::time::sleep(Duration::from_millis(20)).await } } => {}
     }
-    let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
-    assert!(alive(&pid), "the grandchild should be running before the cancel");
+    let pid = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert!(
+        alive(&pid),
+        "the grandchild should be running before the cancel"
+    );
     cancel.cancel();
-    let r = tokio::time::timeout(Duration::from_secs(2), call).await.expect("returned in time");
+    let r = tokio::time::timeout(Duration::from_secs(2), call)
+        .await
+        .expect("returned in time");
     assert!(matches!(r, Err(ToolError::Cancelled)), "{r:?}");
     let t0 = Instant::now();
     while alive(&pid) && t0.elapsed() < Duration::from_secs(3) {
@@ -361,10 +451,18 @@ async fn dropping_the_call_kills_the_group_too() {
     let c = cx(dir.path());
     let e = eff(&["bash"]);
     let pid_file = dir.path().join("p.pid");
-    let call = run(&ex, &e, &c, json!({"command": "sleep 60 & echo $! > p.pid; wait"}));
+    let call = run(
+        &ex,
+        &e,
+        &c,
+        json!({"command": "sleep 60 & echo $! > p.pid; wait"}),
+    );
     // The executor drops the future when it loses the race with a cancel; dropping is all it does.
     let _ = tokio::time::timeout(Duration::from_millis(600), call).await;
-    let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+    let pid = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .to_owned();
     let t0 = Instant::now();
     while alive(&pid) && t0.elapsed() < Duration::from_secs(3) {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -377,9 +475,14 @@ async fn a_foreground_call_does_not_wait_for_a_backgrounded_child() {
     let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 120, &[], &[]);
     let t0 = Instant::now();
-    let out = run(&ex, &eff(&["bash"]), &cx(dir.path()), json!({"command": "sleep 30 & echo started"}))
-        .await
-        .unwrap();
+    let out = run(
+        &ex,
+        &eff(&["bash"]),
+        &cx(dir.path()),
+        json!({"command": "sleep 30 & echo started"}),
+    )
+    .await
+    .unwrap();
     assert_eq!(out.content.trim_end(), "started");
     assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
 }
@@ -390,14 +493,18 @@ async fn output_is_capped_to_its_tail() {
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let mut c = cx(dir.path());
     c.limits.bash_max_output_bytes = 1000;
-    let out = run(&ex, &eff(&["bash"]), &c, json!({"command": "seq 1 100000"})).await.unwrap();
+    let out = run(&ex, &eff(&["bash"]), &c, json!({"command": "seq 1 100000"}))
+        .await
+        .unwrap();
     assert!(out.truncated);
     assert!(out.content.len() <= 1000, "{}", out.content.len());
     assert!(out.content.starts_with("[... "), "{}", &out.content[..40]);
     assert!(out.content.trim_end().ends_with("100000"));
     assert_eq!(out.content.matches("bytes truncated").count(), 1);
 
-    let small = run(&ex, &eff(&["bash"]), &c, json!({"command": "echo hi"})).await.unwrap();
+    let small = run(&ex, &eff(&["bash"]), &c, json!({"command": "echo hi"}))
+        .await
+        .unwrap();
     assert!(!small.truncated);
 }
 
@@ -406,9 +513,14 @@ async fn background_returns_a_handle_and_the_job_can_be_read_and_stopped() {
     let dir = xdg_temp();
     let (ex, bash) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash"]);
-    let started = run(&ex, &e, &cx(dir.path()), json!({"command": "echo bg-out; sleep 0.3", "background": true}))
-        .await
-        .unwrap();
+    let started = run(
+        &ex,
+        &e,
+        &cx(dir.path()),
+        json!({"command": "echo bg-out; sleep 0.3", "background": true}),
+    )
+    .await
+    .unwrap();
     let handle = serde_json::from_str::<Value>(&started.content).unwrap()["handle"]
         .as_str()
         .unwrap()
@@ -429,15 +541,26 @@ async fn background_returns_a_handle_and_the_job_can_be_read_and_stopped() {
 
     // A long job survives the call that started it and dies on stop_job.
     let pid_file = dir.path().join("long.pid");
-    let started = run(&ex, &e, &cx(dir.path()), json!({"command": "sleep 60 & echo $! > long.pid; wait", "background": true}))
-        .await
-        .unwrap();
-    let handle = serde_json::from_str::<Value>(&started.content).unwrap()["handle"].as_str().unwrap().to_owned();
+    let started = run(
+        &ex,
+        &e,
+        &cx(dir.path()),
+        json!({"command": "sleep 60 & echo $! > long.pid; wait", "background": true}),
+    )
+    .await
+    .unwrap();
+    let handle = serde_json::from_str::<Value>(&started.content).unwrap()["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let t0 = Instant::now();
     while !pid_file.exists() && t0.elapsed() < Duration::from_secs(3) {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+    let pid = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .to_owned();
     assert!(alive(&pid));
     assert!(bash.job(&handle).unwrap().running);
     assert!(bash.stop_job(&handle));
@@ -455,15 +578,23 @@ async fn dropping_the_tool_stops_background_jobs() {
     let pid_file = dir.path().join("d.pid");
     {
         let (ex, _bash) = rig(dir.path(), 20, &[], &[]);
-        run(&ex, &eff(&["bash"]), &cx(dir.path()), json!({"command": "sleep 60 & echo $! > d.pid; wait", "background": true}))
-            .await
-            .unwrap();
+        run(
+            &ex,
+            &eff(&["bash"]),
+            &cx(dir.path()),
+            json!({"command": "sleep 60 & echo $! > d.pid; wait", "background": true}),
+        )
+        .await
+        .unwrap();
         let t0 = Instant::now();
         while !pid_file.exists() && t0.elapsed() < Duration::from_secs(3) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
-    let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+    let pid = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .to_owned();
     let t0 = Instant::now();
     while alive(&pid) && t0.elapsed() < Duration::from_secs(3) {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -476,7 +607,12 @@ async fn bad_input_is_invalid_not_a_panic() {
     let dir = xdg_temp();
     let (ex, _) = rig(dir.path(), 20, &[], &[]);
     let e = eff(&["bash"]);
-    for input in [json!({}), json!({"command": 5}), json!({"command": "   "}), json!({"command": "ls", "bogus": 1})] {
+    for input in [
+        json!({}),
+        json!({"command": 5}),
+        json!({"command": "   "}),
+        json!({"command": "ls", "bogus": 1}),
+    ] {
         let r = run(&ex, &e, &cx(dir.path()), input.clone()).await;
         assert!(matches!(r, Err(ToolError::Invalid(_))), "{input}: {r:?}");
     }

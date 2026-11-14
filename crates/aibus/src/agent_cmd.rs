@@ -29,7 +29,10 @@ impl Env {
     pub(crate) fn load(g: &Global) -> Result<Self, AibusError> {
         let cwd = g.project_dir()?;
         let paths = g.paths()?;
-        let loaded = config::load(&paths.config_file(), Some(&project_dir(&cwd).join("settings.toml")))?;
+        let loaded = config::load(
+            &paths.config_file(),
+            Some(&project_dir(&cwd).join("settings.toml")),
+        )?;
         for w in &loaded.warnings {
             eprintln!("aibus: warning: {w}");
         }
@@ -112,7 +115,10 @@ fn import(env: &Env, g: &Global, dir: &Path) -> Result<u8, AibusError> {
             Outcome::Skipped(why) => println!("skipped {}: {why}", i.file.display()),
         }
         for h in &i.hooks {
-            let matcher = h.matcher.as_deref().map_or(String::new(), |m| format!(" [{m}]"));
+            let matcher = h
+                .matcher
+                .as_deref()
+                .map_or(String::new(), |m| format!(" [{m}]"));
             println!("  hook DISABLED {}{matcher}: {}", h.event, h.text);
         }
     }
@@ -250,7 +256,11 @@ fn new(env: &Env, name: &str) -> Result<u8, AibusError> {
 fn check(env: &Env, path: &Path) -> Result<Report, AibusError> {
     let cfg = &env.config;
     let mut accounts = vec![AccountName("fake".into())];
-    accounts.extend(cfg.accounts.iter().map(|a| AccountName(a.name.as_str().into())));
+    accounts.extend(
+        cfg.accounts
+            .iter()
+            .map(|a| AccountName(a.name.as_str().into())),
+    );
 
     // "Resolves on some account": the fake account and every enabled one. A provider this
     // build does not have cannot be asked, so its accounts give the benefit of the doubt.
@@ -266,9 +276,10 @@ fn check(env: &Env, path: &Path) -> Result<Report, AibusError> {
     );
     let providers: Vec<_> = ids.iter().map(|id| registry.get(id).ok()).collect();
     let resolves = |r: &ModelRef| {
-        providers
-            .iter()
-            .any(|p| p.as_ref().is_none_or(|p| p.resolve_model(r, &cfg.models).is_some()))
+        providers.iter().any(|p| {
+            p.as_ref()
+                .is_none_or(|p| p.resolve_model(r, &cfg.models).is_some())
+        })
     };
     let project = project_root(&env.cwd).unwrap_or(&env.cwd);
     let cx = ValidateCx {
@@ -294,7 +305,10 @@ fn validate(env: &Env, g: &Global, path: Option<&Path>) -> Result<u8, AibusError
         }
     };
     if g.json {
-        println!("{}", serde_json::to_string(&report).map_err(std::io::Error::other)?);
+        println!(
+            "{}",
+            serde_json::to_string(&report).map_err(std::io::Error::other)?
+        );
     } else {
         print_report(&report);
     }
@@ -304,7 +318,10 @@ fn validate(env: &Env, g: &Global, path: Option<&Path>) -> Result<u8, AibusError
 fn print_report(report: &Report) {
     for (kind, list) in [("error", &report.errors), ("warning", &report.warnings)] {
         for f in list {
-            let path = f.path.as_deref().map_or("-".into(), |p| p.display().to_string());
+            let path = f
+                .path
+                .as_deref()
+                .map_or("-".into(), |p| p.display().to_string());
             println!("{kind}: {path}: {}: {}", f.field, f.message);
         }
     }

@@ -25,7 +25,13 @@ pub enum Kind {
     PkceLoopback,
     // No vendor publishes a device-code login for third parties yet, so no `Def` in the binary
     // uses this; the tests do (docs/DECISIONS.md, "F7 follow-up").
-    #[cfg_attr(not(test), expect(dead_code, reason = "kept for the first vendor that documents a device login"))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "kept for the first vendor that documents a device login"
+        )
+    )]
     DeviceCode,
 }
 
@@ -40,7 +46,13 @@ pub enum StateMode {
 /// What the login hands back: OAuth tokens to refresh, or one durable API key.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Outcome {
-    #[cfg_attr(not(test), expect(dead_code, reason = "kept for the first vendor whose login returns tokens to refresh"))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "kept for the first vendor whose login returns tokens to refresh"
+        )
+    )]
     Tokens,
     ApiKey,
 }
@@ -71,7 +83,9 @@ pub struct Def {
 /// and returns a durable key. It matches the `openrouter` id, and `openai-compatible` pointed
 /// at openrouter.ai until the provider list carries its own entry.
 pub fn definition(provider: &str, base_url: Option<&str>) -> Option<Def> {
-    let host = base_url.and_then(|u| Url::parse(u).ok()).and_then(|u| u.host_str().map(str::to_owned));
+    let host = base_url
+        .and_then(|u| Url::parse(u).ok())
+        .and_then(|u| u.host_str().map(str::to_owned));
     let openrouter = provider == "openrouter"
         || (provider == "openai-compatible" && host.as_deref() == Some("openrouter.ai"));
     openrouter.then(|| Def {
@@ -103,7 +117,11 @@ pub struct Login {
 
 /// The names the flow's short-lived secrets are registered under: the PKCE verifier, the
 /// authorization code and the device code.
-const FLOW_SECRETS: &[&str] = &["oauth-flow:verifier", "oauth-flow:code", "oauth-flow:device-code"];
+const FLOW_SECRETS: &[&str] = &[
+    "oauth-flow:verifier",
+    "oauth-flow:code",
+    "oauth-flow:device-code",
+];
 
 impl Login {
     /// Registers `secret` under one of `FLOW_SECRETS` until the flow ends.
@@ -119,13 +137,29 @@ impl Login {
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_default();
-        Self { def, http, open_browser: false, paste: false, redactor: Redactor::new() }
+        Self {
+            def,
+            http,
+            open_browser: false,
+            paste: false,
+            redactor: Redactor::new(),
+        }
     }
 
     /// A POST to the token or device endpoint. The answer is cut off at 64 KiB, and only the
     /// parsed JSON leaves this function, never the raw text.
-    async fn post(&self, url: &str, body: String, json: bool, cancel: &CancellationToken) -> Result<(u16, Value), String> {
-        let ctype = if json { "application/json" } else { "application/x-www-form-urlencoded" };
+    async fn post(
+        &self,
+        url: &str,
+        body: String,
+        json: bool,
+        cancel: &CancellationToken,
+    ) -> Result<(u16, Value), String> {
+        let ctype = if json {
+            "application/json"
+        } else {
+            "application/x-www-form-urlencoded"
+        };
         let send = self
             .http
             .post(url)
@@ -139,8 +173,12 @@ impl Login {
             r = send => r.map_err(|e| format!("could not reach the authorization server: {}", e.without_url()))?,
         };
         let status = resp.status().as_u16();
-        let bytes = resp.bytes().await.map_err(|e| e.without_url().to_string())?;
-        let value = serde_json::from_slice(&bytes[..bytes.len().min(64 * 1024)]).unwrap_or(Value::Null);
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| e.without_url().to_string())?;
+        let value =
+            serde_json::from_slice(&bytes[..bytes.len().min(64 * 1024)]).unwrap_or(Value::Null);
         Ok((status, value))
     }
 
@@ -151,10 +189,19 @@ impl Login {
             let why = body["error"].as_str().unwrap_or("no error code");
             return Err(format!("the token endpoint answered {status}: {why}"));
         }
-        let secret = |k: &str| body[k].as_str().filter(|s| !s.is_empty()).map(|s| Secret::new(s.to_owned()));
+        let secret = |k: &str| {
+            body[k]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| Secret::new(s.to_owned()))
+        };
         if self.def.result == Outcome::ApiKey {
             let key = secret("key").ok_or("the token endpoint sent no key")?;
-            return Ok(OAuthTokens { access: key, refresh: None, expires_at: None });
+            return Ok(OAuthTokens {
+                access: key,
+                refresh: None,
+                expires_at: None,
+            });
         }
         let access = secret("access_token").ok_or("the token endpoint sent no access token")?;
         let now = std::time::SystemTime::now()
@@ -195,15 +242,27 @@ impl OAuthFlow for Login {
         done
     }
 
-    async fn refresh(&self, refresh_token: &str, cancel: &CancellationToken) -> Result<OAuthTokens, String> {
+    async fn refresh(
+        &self,
+        refresh_token: &str,
+        cancel: &CancellationToken,
+    ) -> Result<OAuthTokens, String> {
         if self.def.result == Outcome::ApiKey {
-            return Err("this login returns a key that does not expire, so there is nothing to refresh".into());
+            return Err(
+                "this login returns a key that does not expire, so there is nothing to refresh"
+                    .into(),
+            );
         }
-        let mut pairs = vec![("grant_type", "refresh_token"), ("refresh_token", refresh_token)];
+        let mut pairs = vec![
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ];
         if let Some(id) = &self.def.client_id {
             pairs.push(("client_id", id));
         }
-        let (status, body) = self.post(&self.def.token_url, form(&pairs), false, cancel).await?;
+        let (status, body) = self
+            .post(&self.def.token_url, form(&pairs), false, cancel)
+            .await?;
         self.tokens(status, &body)
     }
 

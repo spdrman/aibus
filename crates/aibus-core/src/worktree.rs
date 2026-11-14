@@ -45,19 +45,31 @@ pub fn create(project: &Path, at: &Path) -> Result<WorktreeInfo, String> {
     );
     if !at.exists() {
         // The remote's default branch, else `main` or `master`, else wherever HEAD is.
-        let branch = git(&repo, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-            .ok()
-            .or_else(|| {
-                ["main", "master"]
-                    .into_iter()
-                    .find(|b| git(&repo, &["rev-parse", "--verify", "--quiet", b]).is_ok())
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| "HEAD".to_owned());
+        let branch = git(
+            &repo,
+            &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        )
+        .ok()
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|b| git(&repo, &["rev-parse", "--verify", "--quiet", b]).is_ok())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "HEAD".to_owned());
         if let Some(parent) = at.parent() {
             create_private_dir(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
-        git(&repo, &["worktree", "add", "--detach", &at.to_string_lossy(), &branch])?;
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                &at.to_string_lossy(),
+                &branch,
+            ],
+        )?;
     }
     let inside = project
         .canonicalize()
@@ -76,8 +88,11 @@ pub fn create(project: &Path, at: &Path) -> Result<WorktreeInfo, String> {
 /// commits no branch has.
 fn dirty(path: &Path) -> bool {
     let changed = git(path, &["status", "--porcelain"]).map_or(true, |s| !s.is_empty());
-    let unique = git(path, &["rev-list", "HEAD", "--not", "--branches", "--remotes"])
-        .map_or(true, |s| !s.is_empty());
+    let unique = git(
+        path,
+        &["rev-list", "HEAD", "--not", "--branches", "--remotes"],
+    )
+    .map_or(true, |s| !s.is_empty());
     changed || unique
 }
 
@@ -101,12 +116,21 @@ pub fn release(info: WorktreeInfo) -> Option<WorktreeInfo> {
 /// got to) and returns the ones that stay.
 pub fn sweep(session_dir: &Path) -> Vec<WorktreeInfo> {
     let mut kept = Vec::new();
-    for entry in std::fs::read_dir(session_dir).into_iter().flatten().flatten() {
+    for entry in std::fs::read_dir(session_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let path = entry.path();
-        let Ok(common) = git(&path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]) else {
+        let Ok(common) = git(
+            &path,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        ) else {
             continue;
         };
-        let repo = Path::new(&common).parent().map_or_else(|| path.clone(), Path::to_path_buf);
+        let repo = Path::new(&common)
+            .parent()
+            .map_or_else(|| path.clone(), Path::to_path_buf);
         let info = WorktreeInfo {
             cwd: path.clone(),
             path,

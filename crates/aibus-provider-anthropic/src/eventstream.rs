@@ -17,14 +17,21 @@ pub fn crc32(data: &[u8]) -> u32 {
     for &b in data {
         crc ^= u32::from(b);
         for _ in 0..8 {
-            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
 }
 
 fn bad(what: &str) -> ProviderError {
-    ProviderError::new(ProviderErrorKind::Unknown, format!("malformed event stream: {what}"))
+    ProviderError::new(
+        ProviderErrorKind::Unknown,
+        format!("malformed event stream: {what}"),
+    )
 }
 
 fn be32(b: &[u8]) -> u32 {
@@ -101,11 +108,18 @@ impl Frames {
                 return Ok(None);
             }
             let frame: Vec<u8> = self.buf.drain(..total).collect();
-            if crc32(&frame[..8]) != be32(&frame[8..]) || crc32(&frame[..total - 4]) != be32(&frame[total - 4..]) {
+            if crc32(&frame[..8]) != be32(&frame[8..])
+                || crc32(&frame[..total - 4]) != be32(&frame[total - 4..])
+            {
                 return Err(bad("checksum mismatch"));
             }
             let headers = string_headers(&frame[12..12 + hlen])?;
-            let header = |n: &str| headers.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+            let header = |n: &str| {
+                headers
+                    .iter()
+                    .find(|(k, _)| k == n)
+                    .map(|(_, v)| v.as_str())
+            };
             let payload = &frame[12 + hlen..total - 4];
             if header(":message-type") == Some("exception") {
                 let text = String::from_utf8_lossy(payload);
@@ -114,17 +128,31 @@ impl Frames {
                     .and_then(|v| v["message"].as_str().map(str::to_owned))
                     .unwrap_or_else(|| text.into_owned());
                 let status = status_of(header(":exception-type").unwrap_or(""));
-                return Err(ProviderError::from_http(status, &message, None, None, header(":exception-type").unwrap_or("")));
+                return Err(ProviderError::from_http(
+                    status,
+                    &message,
+                    None,
+                    None,
+                    header(":exception-type").unwrap_or(""),
+                ));
             }
             if header(":event-type") != Some("chunk") {
                 continue;
             }
-            let v: serde_json::Value = serde_json::from_slice(payload).map_err(|e| bad(&e.to_string()))?;
+            let v: serde_json::Value =
+                serde_json::from_slice(payload).map_err(|e| bad(&e.to_string()))?;
             let inner = base64::engine::general_purpose::STANDARD
-                .decode(v["bytes"].as_str().ok_or_else(|| bad("chunk without bytes"))?)
+                .decode(
+                    v["bytes"]
+                        .as_str()
+                        .ok_or_else(|| bad("chunk without bytes"))?,
+                )
                 .map_err(|e| bad(&e.to_string()))?;
             let data = String::from_utf8(inner).map_err(|_| bad("event is not UTF-8"))?;
-            return Ok(Some(SseEvent { event: String::new(), data }));
+            return Ok(Some(SseEvent {
+                event: String::new(),
+                data,
+            }));
         }
     }
 
@@ -165,7 +193,10 @@ mod tests {
     #[test]
     fn a_chunk_frame_split_across_reads_gives_its_event() {
         let payload = br#"{"bytes":"eyJ0eXBlIjoicGluZyJ9"}"#;
-        let f = frame(&[(":event-type", "chunk"), (":message-type", "event")], payload);
+        let f = frame(
+            &[(":event-type", "chunk"), (":message-type", "event")],
+            payload,
+        );
         let mut frames = Frames::default();
         frames.push(&f[..10]);
         assert!(frames.next().unwrap().is_none() && frames.is_partial());
@@ -177,7 +208,10 @@ mod tests {
     #[test]
     fn an_exception_frame_maps_like_its_http_status() {
         let f = frame(
-            &[(":exception-type", "throttlingException"), (":message-type", "exception")],
+            &[
+                (":exception-type", "throttlingException"),
+                (":message-type", "exception"),
+            ],
             br#"{"message":"Too many requests"}"#,
         );
         let mut frames = Frames::default();

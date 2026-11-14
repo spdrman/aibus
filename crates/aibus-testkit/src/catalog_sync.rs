@@ -28,7 +28,12 @@ pub const SOURCES: [(&str, &str); 17] = [
     ("gemini", "google"),
 ];
 
-const BUCKETS: [&str; 4] = ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"];
+const BUCKETS: [&str; 4] = [
+    "input_per_mtok",
+    "output_per_mtok",
+    "cache_read_per_mtok",
+    "cache_write_per_mtok",
+];
 
 /// What `snapshot` (the models.dev `api.json`) says about the models already in each catalog file
 /// (`catalog` maps a file stem to its text). Returns the new text of every file that changed and
@@ -43,13 +48,21 @@ pub fn plan(
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
     let (mut files, mut notes, mut losses) = (BTreeMap::new(), Vec::new(), Vec::new());
     for (name, text) in catalog {
-        let source = SOURCES.iter().find(|(n, _)| n == name).map_or(name.as_str(), |(_, s)| s);
+        let source = SOURCES
+            .iter()
+            .find(|(n, _)| n == name)
+            .map_or(name.as_str(), |(_, s)| s);
         let Some(theirs) = snapshot[source]["models"].as_object() else {
-            notes.push(format!("{name}: no \"{source}\" provider in the snapshot, left alone"));
+            notes.push(format!(
+                "{name}: no \"{source}\" provider in the snapshot, left alone"
+            ));
             continue;
         };
-        let mut file: Value = serde_json::from_str(text).map_err(|e| format!("catalog/{name}.json: {e}"))?;
-        let rows = file["models"].as_array_mut().ok_or_else(|| format!("catalog/{name}.json: no models"))?;
+        let mut file: Value =
+            serde_json::from_str(text).map_err(|e| format!("catalog/{name}.json: {e}"))?;
+        let rows = file["models"]
+            .as_array_mut()
+            .ok_or_else(|| format!("catalog/{name}.json: no models"))?;
         for row in rows.iter_mut().filter(|r| r.get("price_from").is_none()) {
             let id = row["id"].as_str().unwrap_or_default().to_owned();
             let Some(m) = theirs.get(&id) else { continue };
@@ -59,10 +72,15 @@ pub fn plan(
                 notes.push(format!("{name}: {id} changed: {}", describe(&before, row)));
             }
         }
-        let known: Vec<String> = rows.iter().filter_map(|r| r["id"].as_str().map(str::to_owned)).collect();
+        let known: Vec<String> = rows
+            .iter()
+            .filter_map(|r| r["id"].as_str().map(str::to_owned))
+            .collect();
         for (id, m) in theirs.iter().filter(|(id, _)| !known.contains(id)) {
             if !add_new {
-                notes.push(format!("{name}: {id} is in the snapshot but not the catalog (--add-new adds it)"));
+                notes.push(format!(
+                    "{name}: {id} is in the snapshot but not the catalog (--add-new adds it)"
+                ));
                 continue;
             }
             let mut row = serde_json::json!({
@@ -88,7 +106,14 @@ pub fn plan(
 }
 
 /// Copies the sizes, the capabilities and the price from the snapshot's model `m` onto `row`.
-fn update_row(row: &mut Value, m: &Value, losses: &mut Vec<String>, file: &str, id: &str, allow_loss: bool) {
+fn update_row(
+    row: &mut Value,
+    m: &Value,
+    losses: &mut Vec<String>,
+    file: &str,
+    id: &str,
+    allow_loss: bool,
+) {
     if let Some(n) = m["limit"]["context"].as_u64().filter(|n| *n > 0) {
         row["context_window"] = n.into();
     }
@@ -120,11 +145,18 @@ fn update_row(row: &mut Value, m: &Value, losses: &mut Vec<String>, file: &str, 
     }
 
     let cost = &m["cost"];
-    let theirs = |k: &str| cost[k].as_f64().and_then(Number::from_f64).map(Value::Number);
+    let theirs = |k: &str| {
+        cost[k]
+            .as_f64()
+            .and_then(Number::from_f64)
+            .map(Value::Number)
+    };
     let old = row["price"].as_object().cloned();
     let (Some(input), Some(output)) = (theirs("input"), theirs("output")) else {
         if old.is_some() {
-            losses.push(format!("{file}: {id} has a price and the snapshot has none"));
+            losses.push(format!(
+                "{file}: {id} has a price and the snapshot has none"
+            ));
             if allow_loss {
                 row.as_object_mut().map(|o| o.remove("price"));
             }
@@ -138,12 +170,23 @@ fn update_row(row: &mut Value, m: &Value, losses: &mut Vec<String>, file: &str, 
         ("cache_write_per_mtok", theirs("cache_write")),
     ];
     for (k, v) in &new {
-        if v.is_none() && old.as_ref().is_some_and(|o| !o.get(*k).is_none_or(Value::is_null)) {
+        if v.is_none()
+            && old
+                .as_ref()
+                .is_some_and(|o| !o.get(*k).is_none_or(Value::is_null))
+        {
             losses.push(format!("{file}: {id} loses {k}"));
         }
     }
-    if allow_loss || !losses.iter().any(|l| l.starts_with(&format!("{file}: {id} "))) {
-        let price: Map<String, Value> = new.into_iter().map(|(k, v)| (k.into(), v.unwrap_or(Value::Null))).collect();
+    if allow_loss
+        || !losses
+            .iter()
+            .any(|l| l.starts_with(&format!("{file}: {id} ")))
+    {
+        let price: Map<String, Value> = new
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.unwrap_or(Value::Null)))
+            .collect();
         row["price"] = price.into();
     }
 }
@@ -160,7 +203,11 @@ fn describe(a: &Value, b: &Value) -> String {
                 }
             }
         } else if a.get(k) != Some(v) {
-            out.push(format!("{k} {} -> {}", a.get(k).map_or("none".into(), compact), compact(v)));
+            out.push(format!(
+                "{k} {} -> {}",
+                a.get(k).map_or("none".into(), compact),
+                compact(v)
+            ));
         }
     }
     out.join(", ")
@@ -172,7 +219,10 @@ fn compact(v: &Value) -> String {
         Value::Object(m) => {
             let mut keys: Vec<&String> = m.keys().collect();
             keys.sort();
-            let body: Vec<String> = keys.iter().map(|k| format!("{}: {}", Value::from(k.as_str()), compact(&m[*k]))).collect();
+            let body: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{}: {}", Value::from(k.as_str()), compact(&m[*k])))
+                .collect();
             format!("{{{}}}", body.join(", "))
         }
         Value::Array(a) => format!("[{}]", a.iter().map(compact).collect::<Vec<_>>().join(", ")),
@@ -184,27 +234,56 @@ fn compact(v: &Value) -> String {
 /// all four buckets (`null` for one the provider does not charge separately), `families` last.
 /// Hand edits that keep this layout round-trip unchanged, so `catalog-sync` diffs stay small.
 pub fn render(file: &Value) -> String {
-    const ORDER: [&str; 9] =
-        ["id", "context_window", "max_output", "family", "deprecated", "effort", "price_from", "reasoning", "capabilities"];
+    const ORDER: [&str; 9] = [
+        "id",
+        "context_window",
+        "max_output",
+        "family",
+        "deprecated",
+        "effort",
+        "price_from",
+        "reasoning",
+        "capabilities",
+    ];
     let rows: Vec<String> = file["models"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|row| {
             let obj = row.as_object().unwrap();
-            let mut keys: Vec<&str> = ORDER.iter().copied().filter(|k| obj.contains_key(*k)).collect();
-            let mut rest: Vec<&str> = obj.keys().map(String::as_str).filter(|k| !ORDER.contains(k) && *k != "price").collect();
+            let mut keys: Vec<&str> = ORDER
+                .iter()
+                .copied()
+                .filter(|k| obj.contains_key(*k))
+                .collect();
+            let mut rest: Vec<&str> = obj
+                .keys()
+                .map(String::as_str)
+                .filter(|k| !ORDER.contains(k) && *k != "price")
+                .collect();
             rest.sort_unstable();
             keys.extend(rest);
-            let fields: Vec<String> = keys.iter().map(|k| format!("\"{k}\": {}", compact(&obj[*k]))).collect();
+            let fields: Vec<String> = keys
+                .iter()
+                .map(|k| format!("\"{k}\": {}", compact(&obj[*k])))
+                .collect();
             let mut line = format!("    {{{}", fields.join(", "));
             if let Some(p) = obj.get("price").and_then(Value::as_object) {
-                let buckets: Vec<String> = BUCKETS.iter().map(|b| format!("\"{b}\": {}", compact(p.get(*b).unwrap_or(&Value::Null)))).collect();
+                let buckets: Vec<String> = BUCKETS
+                    .iter()
+                    .map(|b| format!("\"{b}\": {}", compact(p.get(*b).unwrap_or(&Value::Null))))
+                    .collect();
                 line.push_str(&format!(",\n     \"price\": {{{}}}", buckets.join(", ")));
             }
             line + "}"
         })
         .collect();
-    let families = file.get("families").filter(|f| f.as_object().is_some_and(|o| !o.is_empty())).map_or("{}".into(), compact);
-    format!("{{\n  \"models\": [\n{}\n  ],\n  \"families\": {families}\n}}\n", rows.join(",\n"))
+    let families = file
+        .get("families")
+        .filter(|f| f.as_object().is_some_and(|o| !o.is_empty()))
+        .map_or("{}".into(), compact);
+    format!(
+        "{{\n  \"models\": [\n{}\n  ],\n  \"families\": {families}\n}}\n",
+        rows.join(",\n")
+    )
 }

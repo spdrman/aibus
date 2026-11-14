@@ -12,14 +12,18 @@ use aibus_core::persist::session::{load, write_snapshot, SessionWriter, MSGS};
 use aibus_core::replay::{msg_from_json, replay_hash};
 use aibus_core::{AccountName, App, Msg, Redactor, RunId};
 use aibus_graph::mini::MiniGraph;
-use aibus_testkit::xdg_temp;
 use aibus_graph::Graph;
 use aibus_provider::StreamChunk;
+use aibus_testkit::xdg_temp;
 
 fn fixture(file: &str) -> String {
-    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../../tests/replay/explore-fake", file]
-        .iter()
-        .collect();
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "../../tests/replay/explore-fake",
+        file,
+    ]
+    .iter()
+    .collect();
     std::fs::read_to_string(path).unwrap()
 }
 
@@ -49,7 +53,10 @@ fn lines(path: &Path) -> Vec<serde_json::Value> {
 }
 
 fn run_dir(dir: &Path) -> PathBuf {
-    let runs: Vec<_> = std::fs::read_dir(dir.join("runs")).unwrap().flatten().collect();
+    let runs: Vec<_> = std::fs::read_dir(dir.join("runs"))
+        .unwrap()
+        .flatten()
+        .collect();
     assert_eq!(runs.len(), 1);
     runs[0].path()
 }
@@ -67,7 +74,10 @@ fn the_last_snapshot_plus_the_logged_commits_rebuild_the_session() {
     let dir = xdg_temp();
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
-    let resizes = (0..70).map(|i| Msg::Resize { cols: 80 + i, rows: 24 });
+    let resizes = (0..70).map(|i| Msg::Resize {
+        cols: 80 + i,
+        rows: 24,
+    });
     drive(&mut w, &mut a, recorded().into_iter().chain(resizes));
     // A snapshot was taken when 64 messages had gone by; the rest lives only in the log.
     assert!(dir.path().join("graph.snapshot.json.zst").is_file());
@@ -92,11 +102,17 @@ fn the_shutdown_snapshot_alone_is_the_whole_session() {
 
     let (snap, tail) = load(dir.path()).unwrap();
     // `Persisted` itself is logged after the snapshot was taken.
-    assert_eq!(tail.iter().map(|r| r.intent.as_str()).collect::<Vec<_>>(), ["Persisted"]);
+    assert_eq!(
+        tail.iter().map(|r| r.intent.as_str()).collect::<Vec<_>>(),
+        ["Persisted"]
+    );
     let mut b = App::new(MiniGraph::new(), || 5_000);
     b.hydrate(snap, &tail).unwrap();
     assert_eq!(b.graph.snapshot().inputs, a.graph.snapshot().inputs);
-    assert_eq!(commits::read_all(dir.path()).unwrap().len(), a.graph.commit_log().len());
+    assert_eq!(
+        commits::read_all(dir.path()).unwrap().len(),
+        a.graph.commit_log().len()
+    );
 }
 
 #[test]
@@ -120,7 +136,9 @@ fn a_transcript_has_the_07_line_types_and_meta_json() {
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     let msgs = recorded();
-    let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
+    let Msg::RunStarted { run, .. } = &msgs[0] else {
+        panic!()
+    };
     let run = *run;
     drive(&mut w, &mut a, msgs[..1].to_vec());
     w.prompt(run, SystemTime::now(), "map this repo").unwrap();
@@ -174,10 +192,17 @@ fn a_registered_secret_never_reaches_the_transcript_or_msgs() {
     let mut a = app();
     let mut w = writer(dir.path(), redactor, &Persist::default());
     let msgs = recorded();
-    let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
+    let Msg::RunStarted { run, .. } = &msgs[0] else {
+        panic!()
+    };
     let run = *run;
     drive(&mut w, &mut a, msgs[..1].to_vec());
-    w.prompt(run, SystemTime::now(), "use sk-test-SECRET-0123456789 please").unwrap();
+    w.prompt(
+        run,
+        SystemTime::now(),
+        "use sk-test-SECRET-0123456789 please",
+    )
+    .unwrap();
     drive(
         &mut w,
         &mut a,
@@ -207,17 +232,26 @@ fn every_credential_kind_stays_out_of_the_transcript_msgs_and_every_file() {
     let dir = xdg_temp();
     let redactor = Redactor::new();
     register_credential_kinds(&redactor);
-    let planted: String = CREDENTIAL_KINDS.iter().map(|k| format!("{} {} ", k.0, k.1)).collect();
+    let planted: String = CREDENTIAL_KINDS
+        .iter()
+        .map(|k| format!("{} {} ", k.0, k.1))
+        .collect();
     // The control: a redactor that was not told about the registered kinds lets them through,
     // so the file check below has something to catch.
     let blind = Redactor::new().redact(&planted).into_owned();
     for (kind, value, pattern) in CREDENTIAL_KINDS {
-        assert_eq!(blind.contains(value), pattern.is_none(), "{kind}: the control does not tell the layers apart");
+        assert_eq!(
+            blind.contains(value),
+            pattern.is_none(),
+            "{kind}: the control does not tell the layers apart"
+        );
     }
     let mut a = app();
     let mut w = writer(dir.path(), redactor, &Persist::default());
     let msgs = recorded();
-    let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
+    let Msg::RunStarted { run, .. } = &msgs[0] else {
+        panic!()
+    };
     let run = *run;
     drive(&mut w, &mut a, msgs[..1].to_vec());
     w.prompt(run, SystemTime::now(), &planted).unwrap();
@@ -226,13 +260,20 @@ fn every_credential_kind_stays_out_of_the_transcript_msgs_and_every_file() {
         &mut a,
         [Msg::Stream {
             run,
-            chunks: vec![StreamChunk::TextDelta(planted.clone()), StreamChunk::Done(aibus_provider::StopReason::EndTurn)],
+            chunks: vec![
+                StreamChunk::TextDelta(planted.clone()),
+                StreamChunk::Done(aibus_provider::StopReason::EndTurn),
+            ],
         }],
     );
     w.finish(&mut a).unwrap();
     let t = std::fs::read_to_string(run_dir(dir.path()).join("transcript.jsonl")).unwrap();
     let mut files = vec![t, read_lines(&dir.path().join(MSGS)).unwrap().join("\n")];
-    files.extend(walk(dir.path()).iter().map(|f| String::from_utf8_lossy(&std::fs::read(f).unwrap()).into_owned()));
+    files.extend(
+        walk(dir.path())
+            .iter()
+            .map(|f| String::from_utf8_lossy(&std::fs::read(f).unwrap()).into_owned()),
+    );
     for text in files {
         for (kind, value, _) in CREDENTIAL_KINDS {
             assert!(!text.contains(value), "{kind} reached a file");
@@ -258,8 +299,15 @@ fn a_result_over_the_cap_is_cut_and_the_whole_text_goes_to_a_side_file() {
     let mut a = app();
     let mut w = writer(dir.path(), Redactor::new(), &Persist::default());
     let msgs = recorded();
-    let Some(Msg::ToolCallFinished { run, call_id, duration, .. }) =
-        msgs.iter().find(|m| matches!(m, Msg::ToolCallFinished { .. })).cloned()
+    let Some(Msg::ToolCallFinished {
+        run,
+        call_id,
+        duration,
+        ..
+    }) = msgs
+        .iter()
+        .find(|m| matches!(m, Msg::ToolCallFinished { .. }))
+        .cloned()
     else {
         panic!("the fixture has a tool call")
     };
@@ -271,7 +319,10 @@ fn a_result_over_the_cap_is_cut_and_the_whole_text_goes_to_a_side_file() {
         [Msg::ToolCallFinished {
             run,
             call_id,
-            result: aibus_core::ToolResult { content: big.clone(), ..Default::default() },
+            result: aibus_core::ToolResult {
+                content: big.clone(),
+                ..Default::default()
+            },
             duration,
         }],
     );
@@ -293,10 +344,15 @@ fn thinking_is_stored_only_when_store_thinking_is_on() {
     let thinking_in = |on: bool| {
         let dir = xdg_temp();
         let mut a = app();
-        let persist = Persist { store_thinking: on, ..Persist::default() };
+        let persist = Persist {
+            store_thinking: on,
+            ..Persist::default()
+        };
         let mut w = writer(dir.path(), Redactor::new(), &persist);
         let msgs = recorded();
-        let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
+        let Msg::RunStarted { run, .. } = &msgs[0] else {
+            panic!()
+        };
         let run: RunId = *run;
         drive(&mut w, &mut a, msgs[..1].to_vec());
         drive(
@@ -321,8 +377,15 @@ fn thinking_is_stored_only_when_store_thinking_is_on() {
 fn a_snapshot_survives_a_write_and_a_read() {
     let dir = xdg_temp();
     let mut a = app();
-    a.step(Msg::Resize { cols: 100, rows: 30 }).unwrap();
+    a.step(Msg::Resize {
+        cols: 100,
+        rows: 30,
+    })
+    .unwrap();
     let snap = a.graph.snapshot();
     write_snapshot(dir.path(), &snap).unwrap();
-    assert_eq!(aibus_core::persist::session::read_snapshot(dir.path()).unwrap(), snap);
+    assert_eq!(
+        aibus_core::persist::session::read_snapshot(dir.path()).unwrap(),
+        snap
+    );
 }

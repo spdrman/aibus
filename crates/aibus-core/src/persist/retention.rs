@@ -50,7 +50,9 @@ pub fn prune(paths: &Paths, now: SystemTime, older_than: Duration) -> io::Result
         let Some(started) = ulid::Ulid::from_string(&name).ok().map(|u| u.datetime()) else {
             continue;
         };
-        let old = now.duration_since(started).is_ok_and(|age| age > older_than);
+        let old = now
+            .duration_since(started)
+            .is_ok_and(|age| age > older_than);
         let pinned = SessionMeta::read(&entry.path()).is_ok_and(|m| m.pinned);
         if !old || pinned {
             continue;
@@ -145,12 +147,22 @@ mod tests {
         let id = SessionId(ulid::Ulid::from_parts(ms, 1)).to_string();
         let dir = p.state.join("sessions").join(&id);
         fs::create_dir_all(dir.join("runs")).unwrap();
-        let mut m = SessionMeta::new(SessionId::new(), "2026-01-01T00:00:00.000Z".into(), None, "/p".into(), "lead");
+        let mut m = SessionMeta::new(
+            SessionId::new(),
+            "2026-01-01T00:00:00.000Z".into(),
+            None,
+            "/p".into(),
+            "lead",
+        );
         m.id = id.clone();
         m.pinned = pinned;
         m.write(&dir).unwrap();
         fs::create_dir_all(p.state.join("logs/hooks").join(&id)).unwrap();
-        fs::write(p.state.join("logs/hooks").join(&id).join("stop-1-0.log"), "x").unwrap();
+        fs::write(
+            p.state.join("logs/hooks").join(&id).join("stop-1-0.log"),
+            "x",
+        )
+        .unwrap();
         id
     }
 
@@ -175,7 +187,12 @@ mod tests {
         assert!(p.state.join("logs/hooks").join(&pinned).is_dir());
         assert!(p.state.join("sessions").join(&fresh).is_dir());
         assert!(p.state.join("sessions/not-a-session").is_dir());
-        let ids: Vec<_> = idx.list().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_owned()).collect();
+        let ids: Vec<_> = idx
+            .list()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_owned())
+            .collect();
         assert!(!ids.contains(&old) && ids.len() == 2);
     }
 
@@ -188,7 +205,10 @@ mod tests {
         let age = Duration::from_secs(30 * 86_400);
         assert_eq!(prune_if_due(&p, now, age).unwrap(), Some(vec![old]));
         let again = make(&p, 40, false, now);
-        assert_eq!(prune_if_due(&p, now + Duration::from_secs(3_600), age).unwrap(), None);
+        assert_eq!(
+            prune_if_due(&p, now + Duration::from_secs(3_600), age).unwrap(),
+            None
+        );
         assert!(p.state.join("sessions").join(&again).is_dir());
         let later = now + DAY + Duration::from_secs(1);
         assert_eq!(prune_if_due(&p, later, age).unwrap(), Some(vec![again]));
@@ -226,7 +246,10 @@ mod tests {
         fs::create_dir_all(p.cache.join("worktrees/S1/R1")).unwrap();
         assert_eq!(
             worktrees(&p, "S1"),
-            [p.cache.join("worktrees/S1/R1"), p.cache.join("worktrees/S1/R2")]
+            [
+                p.cache.join("worktrees/S1/R1"),
+                p.cache.join("worktrees/S1/R2")
+            ]
         );
         assert!(worktrees(&p, "S2").is_empty());
     }

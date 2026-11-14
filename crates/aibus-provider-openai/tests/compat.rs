@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use aibus_provider::presets::{preset, presets, CompatFlag};
 use aibus_provider::{
-    Api, CacheHint, ChatRequest, ContentBlock, Effort, Message, MessageRole, ModelId, ProviderConfig,
-    ProviderDef, ProviderFactory, RequestMetadata, ToolChoice, ToolSpec,
+    Api, CacheHint, ChatRequest, ContentBlock, Effort, Message, MessageRole, ModelId,
+    ProviderConfig, ProviderDef, ProviderFactory, RequestMetadata, ToolChoice, ToolSpec,
 };
 use aibus_provider_openai::Factory;
 use aibus_testkit::conformance::{FakeServer, Fixture};
@@ -18,9 +18,18 @@ use tokio_util::sync::CancellationToken;
 
 /// The twelve flags, by the name the fixture file carries.
 const FLAGS: [&str; 12] = [
-    "no_strict_tools", "no_developer_role", "max_tokens_field", "reasoning_field", "reasoning_content_replay",
-    "no_usage_in_stream", "no_tool_choice", "no_named_tool_choice", "no_store", "no_sampling_params",
-    "no_system_role", "strip_images",
+    "no_strict_tools",
+    "no_developer_role",
+    "max_tokens_field",
+    "reasoning_field",
+    "reasoning_content_replay",
+    "no_usage_in_stream",
+    "no_tool_choice",
+    "no_named_tool_choice",
+    "no_store",
+    "no_sampling_params",
+    "no_system_role",
+    "strip_images",
 ];
 
 fn dir() -> PathBuf {
@@ -53,7 +62,10 @@ fn request(model: &str) -> ChatRequest {
                 role: MessageRole::User,
                 blocks: vec![
                     ContentBlock::Text("hi".into()),
-                    ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") },
+                    ContentBlock::Image {
+                        media_type: "image/png".into(),
+                        data: bytes::Bytes::from_static(b"\x89PNG"),
+                    },
                 ],
                 at,
             },
@@ -61,13 +73,21 @@ fn request(model: &str) -> ChatRequest {
             Message {
                 role: MessageRole::Assistant,
                 blocks: vec![
-                    ContentBlock::Thinking { text: "hmm".into(), redacted: false, signature: None },
+                    ContentBlock::Thinking {
+                        text: "hmm".into(),
+                        redacted: false,
+                        signature: None,
+                    },
                     ContentBlock::Text("ok".into()),
                 ],
                 at,
             },
         ],
-        tools: vec![ToolSpec { name: "read".into(), description: "Read".into(), schema: json!({"type": "object"}) }],
+        tools: vec![ToolSpec {
+            name: "read".into(),
+            description: "Read".into(),
+            schema: json!({"type": "object"}),
+        }],
         tool_choice: ToolChoice::Named("read".into()),
         max_output_tokens: 1024,
         temperature: Some(0.5),
@@ -94,13 +114,27 @@ async fn body_for(mut def: ProviderDef, fx: &Value) -> Value {
         _ => (Api::OpenaiChat, "oa_stream_text"),
     };
     def.api = Some(api);
-    server.script(Fixture::load(&dir().join("cassettes").join(format!("{cassette}.http"))));
-    let provider = Factory::openai().build(&ProviderConfig { def: Some(def), ..ProviderConfig::default() }).unwrap();
+    server.script(Fixture::load(
+        &dir().join("cassettes").join(format!("{cassette}.http")),
+    ));
+    let provider = Factory::openai()
+        .build(&ProviderConfig {
+            def: Some(def),
+            ..ProviderConfig::default()
+        })
+        .unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
     let model = fx["model"].as_str().unwrap_or("gpt-4.1");
     // The answer does not matter, only the request.
-    let _ = provider.stream(&fake_credential(), request(model), tx, CancellationToken::new()).await;
+    let _ = provider
+        .stream(
+            &fake_credential(),
+            request(model),
+            tx,
+            CancellationToken::new(),
+        )
+        .await;
     drain.await.unwrap();
     serde_json::from_slice(&server.requests()[0].body).unwrap()
 }
@@ -109,7 +143,9 @@ fn check(name: &str, body: &Value, want: &Value) {
     for (pointer, expected) in want.as_object().unwrap() {
         match (body.pointer(pointer), expected.as_str()) {
             (None, Some("<absent>")) => {}
-            (got, Some("<absent>")) => panic!("{name}: {pointer} should be absent, got {got:?}\n{body}"),
+            (got, Some("<absent>")) => {
+                panic!("{name}: {pointer} should be absent, got {got:?}\n{body}")
+            }
             (Some(got), _) => assert_eq!(got, expected, "{name}: {pointer}\n{body}"),
             (None, _) => panic!("{name}: {pointer} is missing\n{body}"),
         }
@@ -126,9 +162,13 @@ fn def_with(flag: &Value) -> ProviderDef {
 fn every_flag_has_a_fixture_that_names_it() {
     for name in FLAGS {
         let fx = shape(name);
-        let flag: CompatFlag = serde_json::from_value(fx["flag"].clone()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let flag: CompatFlag =
+            serde_json::from_value(fx["flag"].clone()).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(flag_name(&flag), name);
-        assert!(fx["with"].is_object() && fx["without"].is_object(), "{name} needs both shapes");
+        assert!(
+            fx["with"].is_object() && fx["without"].is_object(),
+            "{name} needs both shapes"
+        );
     }
 }
 
@@ -136,17 +176,28 @@ fn every_flag_has_a_fixture_that_names_it() {
 async fn each_flag_changes_the_request_the_way_its_fixture_records() {
     for name in FLAGS {
         let fx = shape(name);
-        check(&format!("{name} on"), &body_for(def_with(&fx["flag"]), &fx).await, &fx["with"]);
+        check(
+            &format!("{name} on"),
+            &body_for(def_with(&fx["flag"]), &fx).await,
+            &fx["with"],
+        );
         let mut off = def_with(&fx["flag"]);
         off.compat = Some(vec![]);
-        check(&format!("{name} off"), &body_for(off, &fx).await, &fx["without"]);
+        check(
+            &format!("{name} off"),
+            &body_for(off, &fx).await,
+            &fx["without"],
+        );
     }
 }
 
 #[tokio::test]
 async fn a_preset_that_claims_a_flag_sends_the_recorded_shape() {
     let mut claimed = 0;
-    for p in presets().iter().filter(|p| matches!(p.api, Some(Api::OpenaiChat | Api::OpenaiResponses))) {
+    for p in presets()
+        .iter()
+        .filter(|p| matches!(p.api, Some(Api::OpenaiChat | Api::OpenaiResponses)))
+    {
         for flag in p.compat.as_deref().unwrap_or_default() {
             let name = flag_name(flag);
             let fx = shape(&name);
@@ -158,5 +209,8 @@ async fn a_preset_that_claims_a_flag_sends_the_recorded_shape() {
             claimed += 1;
         }
     }
-    assert!(claimed >= 2, "openai and azure-openai claim max_tokens_field, kimi claims reasoning_content_replay");
+    assert!(
+        claimed >= 2,
+        "openai and azure-openai claim max_tokens_field, kimi claims reasoning_content_replay"
+    );
 }

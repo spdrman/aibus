@@ -144,7 +144,9 @@ fn field<'a>(v: &'a Value, k: &str) -> Result<&'a Value, String> {
 }
 
 fn text<'a>(v: &'a Value, k: &str) -> Result<&'a str, String> {
-    field(v, k)?.as_str().ok_or_else(|| format!("{k}: not a string"))
+    field(v, k)?
+        .as_str()
+        .ok_or_else(|| format!("{k}: not a string"))
 }
 
 fn run_id(v: &Value, k: &str) -> Result<RunId, String> {
@@ -194,7 +196,9 @@ pub fn msg_from_json(v: &Value) -> Result<Msg, String> {
     Ok(match text(v, "msg")? {
         "RunStarted" => Msg::RunStarted {
             run: run()?,
-            agent: text(v, "agent")?.parse().map_err(|e| format!("agent: {e}"))?,
+            agent: text(v, "agent")?
+                .parse()
+                .map_err(|e| format!("agent: {e}"))?,
             role: Role::parse(text(v, "role")?).ok_or("role")?,
             parent: match field(v, "parent")? {
                 Value::Null => None,
@@ -251,7 +255,9 @@ pub fn msg_from_json(v: &Value) -> Result<Msg, String> {
         "PermissionNeeded" => Msg::PermissionNeeded {
             request: PermissionRequest {
                 id: permission_id(v)?,
-                agent: text(v, "agent")?.parse().map_err(|e| format!("agent: {e}"))?,
+                agent: text(v, "agent")?
+                    .parse()
+                    .map_err(|e| format!("agent: {e}"))?,
                 run: run()?,
                 call: call_id(v, "call")?,
                 tool: text(v, "tool")?.into(),

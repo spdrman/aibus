@@ -54,12 +54,20 @@ fn redactor_for(c: &Case) -> Redactor {
 /// The secrets of a row that `redact` left in its body. Empty is a pass.
 fn survivors(c: &Case, redact: impl Fn(&str) -> String) -> Vec<&str> {
     let out = redact(&c.body);
-    c.secrets.iter().map(String::as_str).filter(|s| out.contains(s)).collect()
+    c.secrets
+        .iter()
+        .map(String::as_str)
+        .filter(|s| out.contains(s))
+        .collect()
 }
 
 fn cassettes() -> Vec<(PathBuf, String)> {
     let mut all = Vec::new();
-    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini"] {
+    for krate in [
+        "aibus-provider-anthropic",
+        "aibus-provider-openai",
+        "aibus-provider-gemini",
+    ] {
         let dir = root().join("crates").join(krate).join("tests/cassettes");
         for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
             let path = entry.unwrap().path();
@@ -76,7 +84,11 @@ fn cassettes() -> Vec<(PathBuf, String)> {
 fn recorded_provider_responses_come_back_unchanged() {
     let r = Redactor::new();
     let all = cassettes();
-    assert!(all.len() > 40, "found {} cassettes, the corpus moved?", all.len());
+    assert!(
+        all.len() > 40,
+        "found {} cassettes, the corpus moved?",
+        all.len()
+    );
     for (path, text) in all {
         assert_eq!(r.redact(&text), text, "{} changed", path.display());
     }
@@ -89,8 +101,17 @@ fn echoed_credentials_are_gone_from_every_provider_error_shape() {
     for c in &cases.case {
         let r = redactor_for(c);
         let left = survivors(c, |t| r.redact(t).into_owned());
-        assert!(left.is_empty(), "{}: {left:?} survived in {}", c.name, r.redact(&c.body));
-        assert!(r.redact(&c.body).contains("[redacted:"), "{}: nothing was marked", c.name);
+        assert!(
+            left.is_empty(),
+            "{}: {left:?} survived in {}",
+            c.name,
+            r.redact(&c.body)
+        );
+        assert!(
+            r.redact(&c.body).contains("[redacted:"),
+            "{}: nothing was marked",
+            c.name
+        );
     }
 }
 
@@ -98,12 +119,21 @@ fn echoed_credentials_are_gone_from_every_provider_error_shape() {
 fn every_row_turns_red_when_the_redactor_misses_its_secret() {
     for c in &corpus().case {
         // A redactor that does nothing misses every row.
-        assert_eq!(survivors(c, str::to_owned).len(), c.secrets.len(), "{}: the row cannot fail", c.name);
+        assert_eq!(
+            survivors(c, str::to_owned).len(),
+            c.secrets.len(),
+            "{}: the row cannot fail",
+            c.name
+        );
         // A secret listed as registered is only caught by registration: without it, it stays.
         let bare = Redactor::new();
         for s in &c.registered {
             let left = survivors(c, |t| bare.redact(t).into_owned());
-            assert!(left.contains(&s.as_str()), "{}: {s} is caught by a pattern, so it is not a `registered` row", c.name);
+            assert!(
+                left.contains(&s.as_str()),
+                "{}: {s} is caught by a pattern, so it is not a `registered` row",
+                c.name
+            );
         }
     }
 }
@@ -112,16 +142,32 @@ fn every_row_turns_red_when_the_redactor_misses_its_secret() {
 fn every_credential_kind_the_code_can_hold_has_a_row_and_the_right_layer_catches_it() {
     let cases = corpus();
     for (kind, value, pattern) in aibus_testkit::CREDENTIAL_KINDS {
-        let rows: Vec<&Case> = cases.case.iter().filter(|c| c.secrets.iter().any(|s| s == value)).collect();
-        assert!(!rows.is_empty(), "{kind}: no row in provider-errors.toml plants it");
+        let rows: Vec<&Case> = cases
+            .case
+            .iter()
+            .filter(|c| c.secrets.iter().any(|s| s == value))
+            .collect();
+        assert!(
+            !rows.is_empty(),
+            "{kind}: no row in provider-errors.toml plants it"
+        );
         match pattern {
             // Known by shape: a bare redactor has to catch it, and the row must not lean on registration.
             Some(name) => {
                 let out = Redactor::new().redact(value).into_owned();
-                assert!(out.contains(&format!("[redacted:pattern:{name}]")), "{kind}: pattern {name} misses it: {out}");
-                assert!(rows.iter().all(|c| c.registered.is_empty()), "{kind}: a pattern kind with a registered row");
+                assert!(
+                    out.contains(&format!("[redacted:pattern:{name}]")),
+                    "{kind}: pattern {name} misses it: {out}"
+                );
+                assert!(
+                    rows.iter().all(|c| c.registered.is_empty()),
+                    "{kind}: a pattern kind with a registered row"
+                );
             }
-            None => assert!(rows.iter().any(|c| c.registered.iter().any(|s| s == value)), "{kind}: no pattern knows it, so its row must register it"),
+            None => assert!(
+                rows.iter().any(|c| c.registered.iter().any(|s| s == value)),
+                "{kind}: no pattern knows it, so its row must register it"
+            ),
         }
     }
 }
@@ -142,5 +188,8 @@ fn a_registered_key_is_replaced_in_a_body_even_when_no_pattern_knows_its_shape()
     r.register(&AccountName("work".into()), FAKE_KEY);
     let body = format!(r#"{{"error":{{"message":"bad key {FAKE_KEY}"}}}}"#);
     let out = r.redact(&body);
-    assert!(!out.contains(FAKE_KEY) && out.contains("[redacted:work]"), "{out}");
+    assert!(
+        !out.contains(FAKE_KEY) && out.contains("[redacted:work]"),
+        "{out}"
+    );
 }

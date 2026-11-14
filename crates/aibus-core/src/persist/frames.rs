@@ -94,7 +94,11 @@ mod tests {
         for i in 0..99 {
             w.append(&format!("{{\"i\":{i}}}"), t0).unwrap();
         }
-        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0, "99 lines stay buffered");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            0,
+            "99 lines stay buffered"
+        );
         w.append("{\"i\":99}", t0).unwrap();
         assert_eq!(read_lines(&path).unwrap().len(), 100);
 

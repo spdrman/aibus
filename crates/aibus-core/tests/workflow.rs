@@ -17,9 +17,9 @@ use aibus_core::*;
 use aibus_provider::fake::{FakeProvider, RecordedRequest, Script, Step};
 use aibus_provider::{ContentBlock, MessageRole, StopReason};
 use aibus_testkit::fake_credential;
+use aibus_testkit::{xdg_temp, Xdg};
 use common::{app, A};
 use serde_json::{json, Value};
-use aibus_testkit::{xdg_temp, Xdg};
 use tokio::sync::mpsc;
 
 fn path_env() -> Vec<(String, String)> {
@@ -73,7 +73,10 @@ impl Launcher for ChainLauncher {
             .and_then(VecDeque::pop_front)
             .unwrap_or_else(|| "(nothing scripted)".into());
         let fake = Arc::new(FakeProvider::new(script(&[&answer])));
-        self.launched.lock().unwrap().push((spec.agent.clone(), spec.run));
+        self.launched
+            .lock()
+            .unwrap()
+            .push((spec.agent.clone(), spec.run));
         self.fakes.lock().unwrap().insert(spec.run, fake.clone());
         Ok((
             RunConfig {
@@ -144,12 +147,25 @@ impl Rig {
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let limits = Limits::default();
         let orch = Orchestrator::new(limits.clone(), tx.clone());
-        let mut hooks = HookRunner::new(&Hooks::default(), path_env(), dir.path().to_path_buf(), "s".into(), None, None);
+        let mut hooks = HookRunner::new(
+            &Hooks::default(),
+            path_env(),
+            dir.path().to_path_buf(),
+            "s".into(),
+            None,
+            None,
+        );
         if let Some(t) = triggers {
             hooks = hooks.with_triggers(Triggers::parse(t).unwrap());
         }
         let hooks = Arc::new(hooks);
-        let bash = Arc::new(Bash::new(20, vec![], path_env(), dir.path().to_path_buf(), "s".into()));
+        let bash = Arc::new(Bash::new(
+            20,
+            vec![],
+            path_env(),
+            dir.path().to_path_buf(),
+            "s".into(),
+        ));
         let mut registry = ToolRegistry::standard(bash);
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(RunWorkflow::new(
@@ -174,10 +190,15 @@ impl Rig {
             fakes: Mutex::default(),
         });
         let mut app = app();
-        app.effects = Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
+        app.effects =
+            Effects::orchestrated(orch.clone(), launcher.clone(), app.store.clone(), |_| {});
         app.set_limits(&limits).unwrap();
         let all: Vec<AgentDef> = defs.values().cloned().collect();
-        app.step(Msg::AgentsReloaded { defs: all.clone(), warnings: vec![] }).unwrap();
+        app.step(Msg::AgentsReloaded {
+            defs: all.clone(),
+            warnings: vec![],
+        })
+        .unwrap();
         orch.set_roster(Roster::of(all.iter()));
         Self {
             app,
@@ -235,7 +256,8 @@ impl Rig {
                 fallback: None,
             },
         );
-        self.orch.adopt(self.lead, handle.mailbox.clone(), handle.cancel.clone());
+        self.orch
+            .adopt(self.lead, handle.mailbox.clone(), handle.cancel.clone());
     }
 
     /// Runs the lead to its end and returns its final status.
@@ -255,7 +277,13 @@ impl Rig {
     }
 
     fn agents(&self) -> Vec<String> {
-        self.launcher.launched.lock().unwrap().iter().map(|(a, _)| a.to_string()).collect()
+        self.launcher
+            .launched
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(a, _)| a.to_string())
+            .collect()
     }
 
     fn lead_requests(&self) -> Vec<RecordedRequest> {
@@ -319,21 +347,42 @@ async fn fix_runs_the_chain_with_each_step_seeing_the_ones_before_it() {
         rig.child_prompt(0),
         "Diagnose this problem and say where the cause is (file paths and line numbers): login fails"
     );
-    assert!(rig.child_prompt(1).contains("Risks of fixing it this way: cause is in a.txt line 1"));
+    assert!(rig
+        .child_prompt(1)
+        .contains("Risks of fixing it this way: cause is in a.txt line 1"));
     let make = rig.child_prompt(2);
-    assert!(make.contains("Diagnosis: cause is in a.txt line 1"), "{make}");
-    assert!(make.contains("Risks to keep in mind: small change.\nRISK: LOW"), "{make}");
+    assert!(
+        make.contains("Diagnosis: cause is in a.txt line 1"),
+        "{make}"
+    );
+    assert!(
+        make.contains("Risks to keep in mind: small change.\nRISK: LOW"),
+        "{make}"
+    );
     assert!(rig.child_prompt(3).contains("Problem: login fails"));
 
     // The lead made no model request until the chain was over, and then it saw every report.
     let reqs = rig.lead_requests();
     assert_eq!(reqs.len(), 1);
     let report = &results(&reqs[0])[0];
-    assert!(report.starts_with("workflow fix: completed, 4 steps"), "{report}");
-    for want in ["cause is in a.txt line 1", "RISK: LOW", "patched a.txt", "tests pass"] {
+    assert!(
+        report.starts_with("workflow fix: completed, 4 steps"),
+        "{report}"
+    );
+    for want in [
+        "cause is in a.txt line 1",
+        "RISK: LOW",
+        "patched a.txt",
+        "tests pass",
+    ] {
         assert!(report.contains(want), "{want} missing from {report}");
     }
-    assert_eq!(report.matches("The following is the sub-agent's report.").count(), 4);
+    assert_eq!(
+        report
+            .matches("The following is the sub-agent's report.")
+            .count(),
+        4
+    );
 }
 
 #[tokio::test]
@@ -377,38 +426,67 @@ on_fail = "retry:2"
 #[tokio::test]
 async fn on_fail_runs_the_failing_pair_again_with_the_reason() {
     let mut rig = Rig::new(
-        &[("explore", &["first look", "second look"]), ("general", &["first try", "second try"])],
+        &[
+            ("explore", &["first look", "second look"]),
+            ("general", &["first try", "second try"]),
+        ],
         &["fixed on the second go"],
         &[("retry", RETRY)],
         None,
     );
-    rig.start_lead("/retry thing", Some(("workflow", json!({"name": "retry", "input": "thing"}))));
+    rig.start_lead(
+        "/retry thing",
+        Some(("workflow", json!({"name": "retry", "input": "thing"}))),
+    );
     assert_eq!(rig.finish().await, RunStatus::Completed);
 
     assert_eq!(rig.agents(), ["explore", "general", "explore", "general"]);
     assert!(!rig.child_prompt(0).contains("did not pass"));
     // Both of the pair were told why the last attempt failed.
-    assert!(rig.child_prompt(2).contains("The previous attempt did not pass: gate blocked: not yet"));
-    assert!(rig.child_prompt(3).contains("The previous attempt did not pass: gate blocked: not yet"));
+    assert!(rig
+        .child_prompt(2)
+        .contains("The previous attempt did not pass: gate blocked: not yet"));
+    assert!(rig
+        .child_prompt(3)
+        .contains("The previous attempt did not pass: gate blocked: not yet"));
     // The second general step saw the second look, not the first.
     assert!(rig.child_prompt(3).contains("do: second look"));
     let report = results(&rig.lead_requests()[0]).remove(0);
-    assert!(report.starts_with("workflow retry: completed, 2 steps"), "{report}");
-    assert_eq!(std::fs::read_to_string(rig.dir.path().join("count")).unwrap().trim(), "2");
+    assert!(
+        report.starts_with("workflow retry: completed, 2 steps"),
+        "{report}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(rig.dir.path().join("count"))
+            .unwrap()
+            .trim(),
+        "2"
+    );
 }
 
 #[tokio::test]
 async fn a_gate_that_never_passes_is_run_at_most_one_plus_the_retries_times() {
     let always = RETRY.replace("[ \"$n\" -ge 1 ] || ", "false || ");
     let mut rig = Rig::new(&[], &["giving up"], &[("retry", &always)], None);
-    rig.start_lead("go", Some(("workflow", json!({"name": "retry", "input": "t"}))));
+    rig.start_lead(
+        "go",
+        Some(("workflow", json!({"name": "retry", "input": "t"}))),
+    );
     assert_eq!(rig.finish().await, RunStatus::Completed);
 
     // The pair ran three times (the first go and two retries), and the gate three times too.
     assert_eq!(rig.agents().len(), 6);
-    assert_eq!(std::fs::read_to_string(rig.dir.path().join("count")).unwrap().trim(), "3");
+    assert_eq!(
+        std::fs::read_to_string(rig.dir.path().join("count"))
+            .unwrap()
+            .trim(),
+        "3"
+    );
     let report = results(&rig.lead_requests()[0]).remove(0);
-    assert!(report.contains("stopped at step 2 of 2 (general): gate blocked: not yet"), "{report}");
+    assert!(
+        report.contains("stopped at step 2 of 2 (general): gate blocked: not yet"),
+        "{report}"
+    );
 }
 
 #[tokio::test]
@@ -419,7 +497,10 @@ async fn an_unknown_workflow_or_agent_is_an_error_the_lead_reads() {
         &[("ghost", "[[step]]\nagent = \"not-here\"\nprompt = \"hi\"\n")],
         None,
     );
-    rig.start_lead("go", Some(("workflow", json!({"name": "nope", "input": "t"}))));
+    rig.start_lead(
+        "go",
+        Some(("workflow", json!({"name": "nope", "input": "t"}))),
+    );
     assert_eq!(rig.finish().await, RunStatus::Completed);
     assert!(results(&rig.lead_requests()[0])[0].contains("no workflow named nope"));
     assert!(rig.agents().is_empty());
@@ -430,9 +511,13 @@ async fn an_unknown_workflow_or_agent_is_an_error_the_lead_reads() {
         &[("ghost", "[[step]]\nagent = \"not-here\"\nprompt = \"hi\"\n")],
         None,
     );
-    rig.start_lead("go", Some(("workflow", json!({"name": "ghost", "input": "t"}))));
+    rig.start_lead(
+        "go",
+        Some(("workflow", json!({"name": "ghost", "input": "t"}))),
+    );
     assert_eq!(rig.finish().await, RunStatus::Completed);
-    assert!(results(&rig.lead_requests()[0])[0].contains("names the agent not-here, which is not defined"));
+    assert!(results(&rig.lead_requests()[0])[0]
+        .contains("names the agent not-here, which is not defined"));
     assert!(rig.agents().is_empty());
 }
 
@@ -450,7 +535,11 @@ async fn a_trigger_adds_a_hint_to_the_leads_turn_and_nothing_is_delegated() {
 
     let reqs = rig.lead_requests();
     let seen = user_text(&reqs[0]);
-    assert!(seen.iter().any(|t| t == "[hint] matching agents: explore, plan"), "{seen:?}");
+    assert!(
+        seen.iter()
+            .any(|t| t == "[hint] matching agents: explore, plan"),
+        "{seen:?}"
+    );
     // The hint is in front of the prompt, which is still the last block.
     assert_eq!(seen.last().unwrap(), "the app crashes on start");
     // The model did not ask for a delegate, so none happened, whatever the hint said.
@@ -463,12 +552,23 @@ async fn a_prompt_that_matches_nothing_gets_no_hint() {
     let mut rig = Rig::new(&[], &["fine"], &[], Some(TRIGGERS));
     rig.start_lead("rename a variable", None);
     assert_eq!(rig.finish().await, RunStatus::Completed);
-    assert!(!user_text(&rig.lead_requests()[0]).iter().any(|t| t.starts_with("[hint]")));
+    assert!(!user_text(&rig.lead_requests()[0])
+        .iter()
+        .any(|t| t.starts_with("[hint]")));
 }
 
 #[tokio::test]
 async fn the_lead_can_be_handed_a_workflow_while_it_runs() {
-    let mut rig = Rig::new(&[("explore", &["cause"]), ("plan", &["RISK: LOW"]), ("general", &["a", "b"])], &["after"], &[], None);
+    let mut rig = Rig::new(
+        &[
+            ("explore", &["cause"]),
+            ("plan", &["RISK: LOW"]),
+            ("general", &["a", "b"]),
+        ],
+        &["after"],
+        &[],
+        None,
+    );
     rig.start_lead("hello", None);
     let mailbox = rig.orch.mailbox(rig.lead).unwrap();
     mailbox

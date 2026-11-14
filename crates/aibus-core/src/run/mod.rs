@@ -29,8 +29,8 @@ use smol_str::SmolStr;
 pub use aibus_provider::{ContentBlock, Message, MessageRole, Usage};
 
 use crate::agent::{Isolation, Role};
-use crate::worktree::WorktreeInfo;
 use crate::ids::{AccountName, AgentName, ModelId, PermissionId, RunId, SessionId};
+use crate::worktree::WorktreeInfo;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum RunStatus {

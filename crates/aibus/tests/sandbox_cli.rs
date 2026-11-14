@@ -18,8 +18,17 @@ fn doctor(home: &std::path::Path, config: &str, path: &std::path::Path) -> (Opti
         .output()
         .unwrap();
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let row = v["checks"].as_array().unwrap().iter().find(|c| c["name"] == "shell sandbox").unwrap().clone();
-    (out.status.code(), row["detail"].as_str().unwrap().to_owned())
+    let row = v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "shell sandbox")
+        .unwrap()
+        .clone();
+    (
+        out.status.code(),
+        row["detail"].as_str().unwrap().to_owned(),
+    )
 }
 
 #[test]
@@ -44,7 +53,11 @@ fn doctor_names_the_active_sandbox_and_fails_when_its_program_is_missing() {
     let (code, detail) = doctor(home.path(), "[tools]\nsandbox = \"bwrap\"\n", &bin);
     assert_eq!((code, detail.as_str()), (Some(0), "bwrap"));
 
-    let (code, detail) = doctor(home.path(), "[tools]\nsandbox = \"bwrap\"\nsandbox_network = false\n", &bin);
+    let (code, detail) = doctor(
+        home.path(),
+        "[tools]\nsandbox = \"bwrap\"\nsandbox_network = false\n",
+        &bin,
+    );
     assert_eq!((code, detail.as_str()), (Some(0), "bwrap, network off"));
 }
 
@@ -53,9 +66,22 @@ fn an_unknown_sandbox_name_is_a_config_error() {
     let home = xdg_temp();
     let cfg = home.path().join("config.toml");
     std::fs::write(&cfg, "[tools]\nsandbox = \"docker\"\n").unwrap();
-    let out = command(home.path()).env("AIBUS_CONFIG", &cfg).args(["config", "show"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("sandbox"), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = command(home.path())
+        .env("AIBUS_CONFIG", &cfg)
+        .args(["config", "show"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("sandbox"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]

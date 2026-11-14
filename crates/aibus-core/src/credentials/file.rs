@@ -15,10 +15,17 @@ pub(super) fn read_key(path: &Path) -> Result<String, CredentialError> {
 /// `aws_secret_access_key` and, when there is one, `aws_session_token`), from a file only the
 /// owner can read. `None` when the profile or one of its two keys is missing. No SSO, no
 /// `credential_process`: those lines are not read.
-pub(super) fn aws_profile(path: &Path, profile: &str) -> Result<Option<(String, String, Option<String>)>, CredentialError> {
+pub(super) fn aws_profile(
+    path: &Path,
+    profile: &str,
+) -> Result<Option<(String, String, Option<String>)>, CredentialError> {
     let text = read_private(path)?;
     let (mut inside, mut id, mut secret, mut token) = (false, None, None, None);
-    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with(['#', ';'])) {
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with(['#', ';']))
+    {
         if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
             inside = name.trim() == profile;
         } else if let (true, Some((k, v))) = (inside, line.split_once('=')) {
@@ -42,7 +49,10 @@ fn read_private(path: &Path) -> Result<String, CredentialError> {
     {
         use std::os::unix::fs::MetadataExt;
         if meta.mode() & 0o077 != 0 {
-            return Err(CredentialError::FileMode(path.to_owned(), meta.mode() & 0o777));
+            return Err(CredentialError::FileMode(
+                path.to_owned(),
+                meta.mode() & 0o777,
+            ));
         }
         if meta.uid() != rustix::process::geteuid().as_raw() {
             return Err(CredentialError::FileOwner(path.to_owned()));
@@ -83,8 +93,13 @@ mod tests {
         for mode in [0o640, 0o604, 0o644, 0o660] {
             let (_d, p) = key_file(mode, "k");
             let e = read_key(&p).unwrap_err();
-            assert!(matches!(e, CredentialError::FileMode(_, m) if m == mode), "{mode:o}");
-            assert!(e.to_string().contains(&format!("chmod 600 {}", p.display())));
+            assert!(
+                matches!(e, CredentialError::FileMode(_, m) if m == mode),
+                "{mode:o}"
+            );
+            assert!(e
+                .to_string()
+                .contains(&format!("chmod 600 {}", p.display())));
         }
     }
 

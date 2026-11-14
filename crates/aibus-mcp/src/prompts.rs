@@ -4,14 +4,20 @@
 
 use aibus_core::run::result::escape_markers;
 use aibus_core::workflow;
-use rmcp::model::{ContentBlock, GetPromptResult, JsonObject, Prompt, PromptArgument, PromptMessage, Role};
+use rmcp::model::{
+    ContentBlock, GetPromptResult, JsonObject, Prompt, PromptArgument, PromptMessage, Role,
+};
 use rmcp::ErrorData;
 use serde_json::json;
 
 use crate::Server;
 
 pub fn list() -> Vec<Prompt> {
-    let arg = |name: &str, what: &str, required: bool| PromptArgument::new(name).with_description(what).with_required(required);
+    let arg = |name: &str, what: &str, required: bool| {
+        PromptArgument::new(name)
+            .with_description(what)
+            .with_required(required)
+    };
     vec![
         Prompt::new(
             "author_workflow",
@@ -44,7 +50,9 @@ fn fill(template: &str, slots: &[(&str, String)]) -> String {
     while let Some(open) = rest.find("{{") {
         out.push_str(&rest[..open]);
         let tail = &rest[open..];
-        let hit = slots.iter().find(|(k, _)| tail.starts_with(&format!("{{{{{k}}}}}")));
+        let hit = slots
+            .iter()
+            .find(|(k, _)| tail.starts_with(&format!("{{{{{k}}}}}")));
         match hit {
             Some((k, v)) => {
                 out.push_str(v);
@@ -61,7 +69,11 @@ fn fill(template: &str, slots: &[(&str, String)]) -> String {
 }
 
 impl Server {
-    pub fn get_prompt_text(&self, name: &str, args: &JsonObject) -> Result<GetPromptResult, ErrorData> {
+    pub fn get_prompt_text(
+        &self,
+        name: &str,
+        args: &JsonObject,
+    ) -> Result<GetPromptResult, ErrorData> {
         let bad = |why: &str| ErrorData::invalid_params(format!("{name}: {why}"), None);
         let allowed: &[&str] = match name {
             "author_workflow" => &["goal", "scope"],
@@ -75,10 +87,17 @@ impl Server {
         let get = |k: &str| -> Result<Option<&str>, ErrorData> {
             match args.get(k) {
                 None => Ok(None),
-                Some(v) => v.as_str().map(Some).ok_or_else(|| bad(&format!("{k} must be a string"))),
+                Some(v) => v
+                    .as_str()
+                    .map(Some)
+                    .ok_or_else(|| bad(&format!("{k} must be a string"))),
             }
         };
-        let need = |k: &str| get(k)?.filter(|v| !v.trim().is_empty()).ok_or_else(|| bad(&format!("{k} is required")));
+        let need = |k: &str| {
+            get(k)?
+                .filter(|v| !v.trim().is_empty())
+                .ok_or_else(|| bad(&format!("{k} is required")))
+        };
         let scope = get("scope")?;
         let text = match name {
             "author_workflow" => {
@@ -91,20 +110,37 @@ impl Server {
                     .agent_rows()
                     .iter()
                     .map(|a| {
-                        let description = a["description"].as_str().unwrap_or_default().replace('\n', " ");
-                        format!("- {} ({}): {}\n", a["name"].as_str().unwrap_or_default(), a["scope"].as_str().unwrap_or_default(), description)
+                        let description = a["description"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .replace('\n', " ");
+                        format!(
+                            "- {} ({}): {}\n",
+                            a["name"].as_str().unwrap_or_default(),
+                            a["scope"].as_str().unwrap_or_default(),
+                            description
+                        )
                     })
                     .collect();
                 let examples: Vec<String> = workflow::EXAMPLES
                     .iter()
-                    .map(|(n, toml)| self.as_data(&format!("the shipped example workflow `{n}`"), toml, Some("toml")))
+                    .map(|(n, toml)| {
+                        self.as_data(
+                            &format!("the shipped example workflow `{n}`"),
+                            toml,
+                            Some("toml"),
+                        )
+                    })
                     .collect();
                 fill(
                     include_str!("../prompts/author_workflow.md"),
                     &[
                         ("goal", escape_markers(&self.redactor.redact(need("goal")?))),
                         ("scope", target.to_owned()),
-                        ("agents", self.as_data("the agent roster", &roster, Some("text"))),
+                        (
+                            "agents",
+                            self.as_data("the agent roster", &roster, Some("text")),
+                        ),
                         ("examples", examples.join("\n\n")),
                     ],
                 )
@@ -114,17 +150,32 @@ impl Server {
                 let Some((_, path, file)) = self.workflow_file(wanted, scope)? else {
                     return Err(bad("no such workflow"));
                 };
-                let roster: Vec<_> = self.agent_rows().iter().filter_map(|r| r["name"].as_str()?.parse().ok()).collect();
+                let roster: Vec<_> = self
+                    .agent_rows()
+                    .iter()
+                    .filter_map(|r| r["name"].as_str()?.parse().ok())
+                    .collect();
                 let checked = workflow::validate(&file, wanted, &roster);
                 let shown = self.shorten(&path.to_string_lossy().replace('\\', "/"));
                 fill(
                     include_str!("../prompts/review_workflow.md"),
                     &[
                         ("name", wanted.to_owned()),
-                        ("file", self.as_data(&format!("the workflow file {shown}"), &file, Some("toml"))),
+                        (
+                            "file",
+                            self.as_data(
+                                &format!("the workflow file {shown}"),
+                                &file,
+                                Some("toml"),
+                            ),
+                        ),
                         (
                             "findings",
-                            self.as_data("the result of checking that file", &json!(checked).to_string(), Some("json")),
+                            self.as_data(
+                                "the result of checking that file",
+                                &json!(checked).to_string(),
+                                Some("json"),
+                            ),
                         ),
                     ],
                 )
@@ -133,13 +184,21 @@ impl Server {
                 let run = need("run")?;
                 if !self.caps.run {
                     "Runs are not enabled on this server. It was started without `--allow run`, so there is no run to explain.".to_owned()
-                } else if run.len() > 40 || !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                } else if run.len() > 40
+                    || !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                {
                     return Err(bad("run is a handle from this server"));
                 } else {
-                    fill(include_str!("../prompts/explain_run.md"), &[("run", run.to_owned())])
+                    fill(
+                        include_str!("../prompts/explain_run.md"),
+                        &[("run", run.to_owned())],
+                    )
                 }
             }
         };
-        Ok(GetPromptResult::new(vec![PromptMessage::new(Role::User, ContentBlock::text(text))]))
+        Ok(GetPromptResult::new(vec![PromptMessage::new(
+            Role::User,
+            ContentBlock::text(text),
+        )]))
     }
 }

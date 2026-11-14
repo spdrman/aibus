@@ -14,8 +14,14 @@ const MAX_TEXT: usize = 1 << 20;
 
 #[derive(PartialEq, Debug)]
 pub enum Control {
-    Permission { id: PermissionId, decision: Decision },
-    SendMessage { run: RunId, text: String },
+    Permission {
+        id: PermissionId,
+        decision: Decision,
+    },
+    SendMessage {
+        run: RunId,
+        text: String,
+    },
 }
 
 /// What the reader hands over.
@@ -43,7 +49,11 @@ pub fn parse(line: &str) -> Result<Control, String> {
                 "allow" => Decision::Allow,
                 "allow_session" => Decision::AllowSession,
                 "deny" => Decision::Deny,
-                other => return Err(format!("decision {other:?}: want allow, allow_session or deny")),
+                other => {
+                    return Err(format!(
+                        "decision {other:?}: want allow, allow_session or deny"
+                    ))
+                }
             };
             Ok(Control::Permission { id, decision })
         }
@@ -58,7 +68,9 @@ pub fn parse(line: &str) -> Result<Control, String> {
                 text: text.to_owned(),
             })
         }
-        other => Err(format!("unknown type {other:?}: want Permission or SendMessage")),
+        other => Err(format!(
+            "unknown type {other:?}: want Permission or SendMessage"
+        )),
     }
 }
 
@@ -92,16 +104,31 @@ mod tests {
         let id = PermissionId::new();
         let run = RunId::new();
         assert_eq!(
-            parse(&format!(r#"{{"type":"Permission","id":"{id}","decision":"allow"}}"#)),
-            Ok(Control::Permission { id, decision: Decision::Allow })
+            parse(&format!(
+                r#"{{"type":"Permission","id":"{id}","decision":"allow"}}"#
+            )),
+            Ok(Control::Permission {
+                id,
+                decision: Decision::Allow
+            })
         );
         assert_eq!(
-            parse(&format!(r#"{{"type":"Permission","id":"{id}","decision":"deny","note":1}}"#)),
-            Ok(Control::Permission { id, decision: Decision::Deny })
+            parse(&format!(
+                r#"{{"type":"Permission","id":"{id}","decision":"deny","note":1}}"#
+            )),
+            Ok(Control::Permission {
+                id,
+                decision: Decision::Deny
+            })
         );
         assert_eq!(
-            parse(&format!(r#"{{"type":"SendMessage","run":"{run}","text":"keep going"}}"#)),
-            Ok(Control::SendMessage { run, text: "keep going".into() })
+            parse(&format!(
+                r#"{{"type":"SendMessage","run":"{run}","text":"keep going"}}"#
+            )),
+            Ok(Control::SendMessage {
+                run,
+                text: "keep going".into()
+            })
         );
     }
 
@@ -124,17 +151,36 @@ mod tests {
     #[test]
     fn a_slash_line_on_the_headless_control_channel_is_rejected() {
         let run = RunId::new();
-        let lines = ["/login anthropic", "/cancel @lead", "/model haiku", "/workflow save x --force"];
+        let lines = [
+            "/login anthropic",
+            "/cancel @lead",
+            "/model haiku",
+            "/workflow save x --force",
+        ];
         for line in lines {
             assert!(parse(line).is_err(), "{line}");
-            for kind in ["Command", "SubmitPrompt", "SetModel", "Cancel", "Login", "Workflow"] {
+            for kind in [
+                "Command",
+                "SubmitPrompt",
+                "SetModel",
+                "Cancel",
+                "Login",
+                "Workflow",
+            ] {
                 let v = serde_json::json!({"type": kind, "text": line, "line": line, "run": run.to_string()});
                 let why = parse(&v.to_string()).expect_err(kind);
                 assert!(why.contains("unknown type"), "{kind}: {why}");
             }
             // As the text of a message it is only ever text, and parsed back it is unchanged.
-            let v = serde_json::json!({"type": "SendMessage", "run": run.to_string(), "text": line});
-            assert_eq!(parse(&v.to_string()), Ok(Control::SendMessage { run, text: line.into() }));
+            let v =
+                serde_json::json!({"type": "SendMessage", "run": run.to_string(), "text": line});
+            assert_eq!(
+                parse(&v.to_string()),
+                Ok(Control::SendMessage {
+                    run,
+                    text: line.into()
+                })
+            );
         }
     }
 
@@ -143,6 +189,9 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         spawn(std::io::Cursor::new("\n  \nnot json\n"), tx);
         let got: Vec<Line> = std::iter::from_fn(|| rx.blocking_recv()).collect();
-        assert!(matches!(got.as_slice(), [Line::Bad(_), Line::Eof]), "{got:?}");
+        assert!(
+            matches!(got.as_slice(), [Line::Bad(_), Line::Eof]),
+            "{got:?}"
+        );
     }
 }

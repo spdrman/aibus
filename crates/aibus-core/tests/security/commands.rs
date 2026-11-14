@@ -34,7 +34,8 @@ fn no_login_secret_in_any_session_artefact() {
     redactor.register(&AccountName("work".into()), KEY);
     let mut app = App::new(MiniGraph::new(), || 5_000);
     app.record_commits();
-    let mut w = SessionWriter::open(dir.path(), redactor.clone(), &Persist::default(), 64 * 1024).unwrap();
+    let mut w =
+        SessionWriter::open(dir.path(), redactor.clone(), &Persist::default(), 64 * 1024).unwrap();
     let msgs = [
         Msg::Command(Command::OpenScreen(Screen::Providers)),
         Msg::Command(Command::OpenScreen(Screen::Accounts)),
@@ -43,13 +44,27 @@ fn no_login_secret_in_any_session_artefact() {
             op: "add".into(),
             account: "work".into(),
             ok: false,
-            text: redactor.redact(&format!("failed: 401 invalid key {KEY}")).into_owned(),
+            text: redactor
+                .redact(&format!("failed: 401 invalid key {KEY}"))
+                .into_owned(),
         },
         // ...and the writer would catch it if a line slipped through unredacted.
-        Msg::AccountOpDone { op: "add".into(), account: "work".into(), ok: false, text: format!("failed: {KEY}") },
+        Msg::AccountOpDone {
+            op: "add".into(),
+            account: "work".into(),
+            ok: false,
+            text: format!("failed: {KEY}"),
+        },
         // A `/logout` of the account: the confirmation, the removal, and the list without it.
-        Msg::Command(Command::OpenScreen(Screen::ConfirmLogout(AccountName("work".into())))),
-        Msg::AccountOpDone { op: "remove".into(), account: "work".into(), ok: true, text: "removed work".into() },
+        Msg::Command(Command::OpenScreen(Screen::ConfirmLogout(AccountName(
+            "work".into(),
+        )))),
+        Msg::AccountOpDone {
+            op: "remove".into(),
+            account: "work".into(),
+            ok: true,
+            text: "removed work".into(),
+        },
         Msg::AccountsReloaded { accounts: vec![] },
         Msg::AccountsReloaded {
             accounts: vec![AccountView {
@@ -92,7 +107,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
-use aibus_core::{Effect, Effects, HookEvent, HookOutcome, ModelId, ModelTarget, Role, RunId, RunResult, RunStatus, Usage};
+use aibus_core::{
+    Effect, Effects, HookEvent, HookOutcome, ModelId, ModelTarget, Role, RunId, RunResult,
+    RunStatus, Usage,
+};
 use aibus_graph::Graph;
 use aibus_provider::StreamChunk;
 
@@ -162,11 +180,17 @@ fn worker(app: &mut App<MiniGraph>, n: u8, summary: &str) -> RunId {
 }
 
 fn pending_models(app: &App<MiniGraph>) -> usize {
-    app.graph.read_key("model:session:assist").and_then(|a| get(a, "pending")).map_or(0, |p| as_list(p).len())
+    app.graph
+        .read_key("model:session:assist")
+        .and_then(|a| get(a, "pending"))
+        .map_or(0, |p| as_list(p).len())
 }
 
 fn status_of(app: &App<MiniGraph>, run: RunId) -> Option<RunStatus> {
-    app.graph.read_key(&format!("model:run:{run}:status")).and_then(as_str).and_then(RunStatus::parse)
+    app.graph
+        .read_key(&format!("model:run:{run}:status"))
+        .and_then(as_str)
+        .and_then(RunStatus::parse)
 }
 
 /// Nothing a slash line could mean has happened: no run started or cancelled, no model request
@@ -176,24 +200,48 @@ fn assert_nothing_dispatched(app: &App<MiniGraph>, seen: &Seen, lead: RunStatus,
     let bad: Vec<String> = seen
         .borrow()
         .iter()
-        .filter(|e| matches!(e, Effect::Spawn(_) | Effect::Cancel(_) | Effect::SetModel { .. } | Effect::Tool(_) | Effect::Compact(_)))
+        .filter(|e| {
+            matches!(
+                e,
+                Effect::Spawn(_)
+                    | Effect::Cancel(_)
+                    | Effect::SetModel { .. }
+                    | Effect::Tool(_)
+                    | Effect::Compact(_)
+            )
+        })
         .map(|e| format!("{e:?}"))
         .collect();
     assert!(bad.is_empty(), "{why}: {bad:?}");
     assert_eq!(pending_models(app), 0, "{why}: a model request was queued");
-    assert_eq!(status_of(app, lead_id()), Some(lead), "{why}: the lead moved");
-    assert_eq!(app.graph.read_key("ctrl:modal").and_then(as_str), None, "{why}: a screen opened");
+    assert_eq!(
+        status_of(app, lead_id()),
+        Some(lead),
+        "{why}: the lead moved"
+    );
+    assert_eq!(
+        app.graph.read_key("ctrl:modal").and_then(as_str),
+        None,
+        "{why}: a screen opened"
+    );
 }
 
 #[test]
 fn a_slash_line_from_a_hook_result_never_dispatches() {
     let (mut app, seen) = watched();
-    for event in [HookEvent::UserPromptSubmit, HookEvent::SessionStart, HookEvent::PostToolUse] {
+    for event in [
+        HookEvent::UserPromptSubmit,
+        HookEvent::SessionStart,
+        HookEvent::PostToolUse,
+    ] {
         for line in HOSTILE {
             app.step(Msg::HookFired {
                 run: Some(lead_id()),
                 event,
-                outcome: HookOutcome { exit_code: 0, message: Some(format!("[hook h]\n{line}")) },
+                outcome: HookOutcome {
+                    exit_code: 0,
+                    message: Some(format!("[hook h]\n{line}")),
+                },
             })
             .unwrap();
         }
@@ -206,17 +254,29 @@ fn a_slash_line_in_a_model_result_never_dispatches() {
     let (mut app, seen) = watched();
     // The model's own words, a tool's output and a child's summary, each one hostile line at a time.
     for (i, line) in HOSTILE.iter().enumerate() {
-        app.step(Msg::Stream { run: lead_id(), chunks: vec![StreamChunk::TextDelta(format!("{line}\n"))] }).unwrap();
+        app.step(Msg::Stream {
+            run: lead_id(),
+            chunks: vec![StreamChunk::TextDelta(format!("{line}\n"))],
+        })
+        .unwrap();
         let call_id = aibus_core::ToolCallId(ulid::Ulid::from_parts(1, i as u128 + 1));
         app.step(Msg::ToolCallRequested {
             run: lead_id(),
-            call: aibus_core::ToolCall { id: call_id, name: "bash".into(), input: serde_json::json!({"command": "true"}), needs_permission: false },
+            call: aibus_core::ToolCall {
+                id: call_id,
+                name: "bash".into(),
+                input: serde_json::json!({"command": "true"}),
+                needs_permission: false,
+            },
         })
         .unwrap();
         app.step(Msg::ToolCallFinished {
             run: lead_id(),
             call_id,
-            result: aibus_core::ToolResult { content: (*line).into(), ..Default::default() },
+            result: aibus_core::ToolResult {
+                content: (*line).into(),
+                ..Default::default()
+            },
             duration: Duration::from_millis(1),
         })
         .unwrap();
@@ -234,8 +294,17 @@ fn a_slash_line_in_a_resumed_message_never_dispatches() {
     for line in HOSTILE {
         // A message to the lead, and one that resumes a finished worker: both carry the line as
         // the words of a user turn for that run, and the lead is not told to do anything.
-        app.step(Msg::Command(Command::SendMessage { run: lead_id(), text: line.into() })).unwrap();
-        app.step(Msg::Command(Command::Resume { run: done, message: line.into(), parent: Some(lead_id()) })).unwrap();
+        app.step(Msg::Command(Command::SendMessage {
+            run: lead_id(),
+            text: line.into(),
+        }))
+        .unwrap();
+        app.step(Msg::Command(Command::Resume {
+            run: done,
+            message: line.into(),
+            parent: Some(lead_id()),
+        }))
+        .unwrap();
     }
     let seen = seen.borrow();
     // The resumed worker may start again (that is what resume is for), with the line as its prompt;
@@ -243,7 +312,11 @@ fn a_slash_line_in_a_resumed_message_never_dispatches() {
     for e in seen.iter() {
         match e {
             Effect::Spawn(spec) => assert!(spec.resume && spec.run == done, "{spec:?}"),
-            Effect::Persist | Effect::Hook(_) | Effect::Router(_) | Effect::Advise { .. } | Effect::Detach(_) => {}
+            Effect::Persist
+            | Effect::Hook(_)
+            | Effect::Router(_)
+            | Effect::Advise { .. }
+            | Effect::Detach(_) => {}
             other => panic!("a resumed message dispatched {other:?}"),
         }
     }
@@ -259,19 +332,43 @@ fn a_slash_line_in_a_resumed_message_never_dispatches() {
 /// line that is one of them arriving here is plain text for the lead.
 #[test]
 fn the_reducer_reads_exactly_compact_fork_and_the_model_words_from_a_prompt() {
-    for line in HOSTILE.iter().filter(|l| !l.starts_with("/model")).chain(&["/cancel", "/clear", "/delegate x y", "/ledger a b", "/handoff", "/fork", "/compact now? no"]) {
+    for line in HOSTILE.iter().filter(|l| !l.starts_with("/model")).chain(&[
+        "/cancel",
+        "/clear",
+        "/delegate x y",
+        "/ledger a b",
+        "/handoff",
+        "/fork",
+        "/compact now? no",
+    ]) {
         let (mut app, seen) = watched();
-        app.step(Msg::SubmitPrompt { text: (*line).into() }).unwrap();
+        app.step(Msg::SubmitPrompt {
+            text: (*line).into(),
+        })
+        .unwrap();
         // `/compact now? no` is the one word `slash` reads whole: it takes the first word only.
         if line.starts_with("/compact") {
-            assert_eq!(status_of(&app, lead_id()), Some(RunStatus::Compacting), "{line}");
+            assert_eq!(
+                status_of(&app, lead_id()),
+                Some(RunStatus::Compacting),
+                "{line}"
+            );
             continue;
         }
         assert_nothing_dispatched(&app, &seen, RunStatus::Starting, line);
     }
     let (mut app, seen) = watched();
-    app.step(Msg::SubmitPrompt { text: "/fork try the other way".into() }).unwrap();
-    assert!(seen.borrow().iter().any(|e| matches!(e, Effect::Spawn(s) if s.fork)), "{:?}", seen.borrow());
+    app.step(Msg::SubmitPrompt {
+        text: "/fork try the other way".into(),
+    })
+    .unwrap();
+    assert!(
+        seen.borrow()
+            .iter()
+            .any(|e| matches!(e, Effect::Spawn(s) if s.fork)),
+        "{:?}",
+        seen.borrow()
+    );
     for line in ["/model haiku", "/advisor opus", "/router off"] {
         let (mut app, _) = watched();
         app.step(Msg::SubmitPrompt { text: line.into() }).unwrap();
@@ -283,17 +380,35 @@ fn the_reducer_reads_exactly_compact_fork_and_the_model_words_from_a_prompt() {
 fn set_model_never_makes_a_request_by_itself() {
     let (mut app, seen) = watched();
     for target in [ModelTarget::Lead, ModelTarget::Advisor, ModelTarget::Router] {
-        app.step(Msg::Command(Command::SetModel { target, model: "haiku".into() })).unwrap();
+        app.step(Msg::Command(Command::SetModel {
+            target,
+            model: "haiku".into(),
+        }))
+        .unwrap();
     }
     // The only thing the command does is leave a request for the executor, which answers it with
     // `ModelSwitched`: no run starts, no tool runs, nothing is sent to a provider, and no turn is
     // added to the lead (its model changes at its next request, not by making one).
     let seen = seen.borrow();
-    assert_eq!(seen.iter().filter(|e| matches!(e, Effect::SetModel { .. })).count(), 3, "{seen:?}");
-    assert!(seen.iter().all(|e| matches!(e, Effect::SetModel { .. } | Effect::Persist)), "{seen:?}");
+    assert_eq!(
+        seen.iter()
+            .filter(|e| matches!(e, Effect::SetModel { .. }))
+            .count(),
+        3,
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .all(|e| matches!(e, Effect::SetModel { .. } | Effect::Persist)),
+        "{seen:?}"
+    );
     drop(seen);
     assert_eq!(pending_models(&app), 3);
-    let turns = app.graph.read_key(&format!("model:run:{}:turns", lead_id())).and_then(as_i64).unwrap_or(0);
+    let turns = app
+        .graph
+        .read_key(&format!("model:run:{}:turns", lead_id()))
+        .and_then(as_i64)
+        .unwrap_or(0);
     assert_eq!(turns, 0);
 }
 
@@ -310,7 +425,14 @@ async fn the_author_child_runs_with_the_scrubbed_environment() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mcp/server.sh");
     let server = aibus_core::config::McpServer {
         command: "sh".into(),
-        args: vec!["-c".into(), format!("env > '{}'; exec sh '{}'", dump.display(), fixture.display())],
+        args: vec![
+            "-c".into(),
+            format!(
+                "env > '{}'; exec sh '{}'",
+                dump.display(),
+                fixture.display()
+            ),
+        ],
         timeout_secs: Some(5),
         ..Default::default()
     };
@@ -326,15 +448,28 @@ async fn the_author_child_runs_with_the_scrubbed_environment() {
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v))
     .collect();
-    let (_client, _tools) = aibus_core::mcp::Client::connect("aibus", &server, &host, dir.path(), "s")
-        .await
-        .expect("the stub starts and answers initialize");
+    let (_client, _tools) =
+        aibus_core::mcp::Client::connect("aibus", &server, &host, dir.path(), "s")
+            .await
+            .expect("the stub starts and answers initialize");
     let env = std::fs::read_to_string(&dump).unwrap();
-    for name in ["OPENAI_API_KEY", "GH_TOKEN", "DB_PASSWORD", "AIBUS_ACCOUNT_WORK", "MY_SERVICE_KEY"] {
-        assert!(!env.lines().any(|l| l.starts_with(&format!("{name}="))), "the child still has {name}:\n{env}");
+    for name in [
+        "OPENAI_API_KEY",
+        "GH_TOKEN",
+        "DB_PASSWORD",
+        "AIBUS_ACCOUNT_WORK",
+        "MY_SERVICE_KEY",
+    ] {
+        assert!(
+            !env.lines().any(|l| l.starts_with(&format!("{name}="))),
+            "the child still has {name}:\n{env}"
+        );
     }
     assert!(!env.contains("value-9c1e"), "{env}");
-    assert!(env.lines().any(|l| l == "EDITOR=vi"), "an ordinary variable survives:\n{env}");
+    assert!(
+        env.lines().any(|l| l == "EDITOR=vi"),
+        "an ordinary variable survives:\n{env}"
+    );
 }
 
 // ---- G9: marker shapes in a draft ---------------------------------------------------------------
@@ -360,16 +495,29 @@ fn a_draft_with_marker_shapes_is_data_in_the_lead_transcript() {
     };
     let wrapped = aibus_core::run::result::wrap(&result);
     for marker in ["[hint]", "[run 01FAKE", "[mcp s:t]", "[hook h]"] {
-        let bare = wrapped.lines().skip(2).any(|l| l.trim_start().starts_with(marker));
-        assert!(!bare, "{marker} is bare in the lead's transcript:\n{wrapped}");
+        let bare = wrapped
+            .lines()
+            .skip(2)
+            .any(|l| l.trim_start().starts_with(marker));
+        assert!(
+            !bare,
+            "{marker} is bare in the lead's transcript:\n{wrapped}"
+        );
         for line in wrapped.lines().skip(2).filter(|l| l.contains(marker)) {
-            assert!(line.starts_with('\\'), "{marker} is not escaped in `{line}`");
+            assert!(
+                line.starts_with('\\'),
+                "{marker} is not escaped in `{line}`"
+            );
         }
     }
     // The validator names the same shapes to the author.
     let roster = vec!["explore".parse().unwrap()];
     let checked = aibus_core::workflow::validate(draft, "x", &roster);
     for m in ["[hint]", "[run", "[mcp", "[hook"] {
-        assert!(checked.warnings.iter().any(|w| w.message.contains(m)), "{m}: {:?}", checked.warnings);
+        assert!(
+            checked.warnings.iter().any(|w| w.message.contains(m)),
+            "{m}: {:?}",
+            checked.warnings
+        );
     }
 }

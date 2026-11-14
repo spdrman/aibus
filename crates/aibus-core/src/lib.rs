@@ -36,22 +36,22 @@ pub use agent::*;
 pub use app::{App, Ticker, MSG_CAPACITY};
 pub use assist::{AdvisorSeat, Assist, RouterSeat, Seat};
 pub use credentials::{
-    AccountCredential, CredentialSource, CredentialStore, KeyRef, Keychain, KeychainError,
-    FakeOAuth, MemoryKeychain, OAuthFlow, OAuthTokens, StoreHealth,
+    AccountCredential, CredentialSource, CredentialStore, FakeOAuth, KeyRef, Keychain,
+    KeychainError, MemoryKeychain, OAuthFlow, OAuthTokens, StoreHealth,
 };
-pub use redact::Redactor;
 pub use effects::{Effect, Effects, PendingTool, SpawnSpec};
 pub use error::{AibusError, CredentialError};
 pub use hooks::{Blocked, Fired, HookInput, HookRunner, HookTransport, Ran};
 pub use ids::*;
 pub use msg::*;
 pub use orchestrator::{parse_mention, Launcher, Limits, Orchestrator, Roster, Waited};
+pub use redact::Redactor;
 pub use run::*;
 pub use tool::*;
-pub use worktree::WorktreeInfo;
 pub use tools::{
     effective_tools, Bash, CreateHandoff, Delegate, EffectiveTools, Fork, Gate, JobView,
     LedgerUpdate, MemoryAppend, MemoryRead, MemoryWrite, Recall, ResumeRun, RunWorkflow, Sandbox,
     SendMessage, ShellDeny, ToolExecutor, ToolRegistry, WebFetch, WebFetcher,
 };
 pub use triggers::Triggers;
+pub use worktree::WorktreeInfo;

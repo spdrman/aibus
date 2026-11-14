@@ -7,8 +7,8 @@ use indexmap::IndexMap;
 use serde_json::Value;
 
 use super::builtin::BUILTINS;
-use super::roster;
 use super::def::{from_fields, parse, DefError};
+use super::roster;
 use super::{AgentDef, DefSource, PermissionMode, Scope};
 use crate::ids::AgentName;
 

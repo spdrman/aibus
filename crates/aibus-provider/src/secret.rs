@@ -91,7 +91,10 @@ mod tests {
             resolved_at: Instant::now(),
         };
         let text = format!("{c:?}");
-        assert!(text.contains("***") && !text.contains("sk-very-secret"), "{text}");
+        assert!(
+            text.contains("***") && !text.contains("sk-very-secret"),
+            "{text}"
+        );
         assert_eq!(format!("{:#?}", c.secret), "***");
     }
 

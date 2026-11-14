@@ -42,16 +42,35 @@ fn definitions_are_copied_and_every_hook_is_reported_and_switched_off() {
 
     let done = import(&from, &to).unwrap();
     assert_eq!(done.len(), 2);
-    let reviewer = done.iter().find(|i| i.file.ends_with("reviewer.md")).unwrap();
+    let reviewer = done
+        .iter()
+        .find(|i| i.file.ends_with("reviewer.md"))
+        .unwrap();
     assert_eq!(reviewer.outcome, Outcome::Copied(to.join("reviewer.md")));
 
     // Every hook is listed with the text that would run.
-    let mut found: Vec<_> = reviewer.hooks.iter().map(|h| (h.event.as_str(), h.kind, h.matcher.as_deref(), h.text.as_str())).collect();
+    let mut found: Vec<_> = reviewer
+        .hooks
+        .iter()
+        .map(|h| {
+            (
+                h.event.as_str(),
+                h.kind,
+                h.matcher.as_deref(),
+                h.text.as_str(),
+            )
+        })
+        .collect();
     found.sort_by_key(|h| h.0);
     assert_eq!(
         found,
         [
-            ("pre_tool_use", HookKind::Command, Some("bash"), "./scripts/audit.sh --strict"),
+            (
+                "pre_tool_use",
+                HookKind::Command,
+                Some("bash"),
+                "./scripts/audit.sh --strict"
+            ),
             ("stop", HookKind::Http, None, "https://hooks.example/stop"),
         ]
     );
@@ -76,16 +95,32 @@ fn nothing_is_overwritten_and_a_broken_file_is_skipped_with_its_reason() {
     let to = project.path().join(".aibus/agents");
     write(&from, "scout.md", PLAIN);
     write(&from, "broken.md", "no frontmatter here");
-    write(&to, "scout.md", "---\nname: scout\ndescription: Mine.\n---\nmine\n");
+    write(
+        &to,
+        "scout.md",
+        "---\nname: scout\ndescription: Mine.\n---\nmine\n",
+    );
 
     let done = import(&from, &to).unwrap();
-    let outcome = |name: &str| done.iter().find(|i| i.file.ends_with(name)).unwrap().outcome.clone();
+    let outcome = |name: &str| {
+        done.iter()
+            .find(|i| i.file.ends_with(name))
+            .unwrap()
+            .outcome
+            .clone()
+    };
     assert!(matches!(outcome("scout.md"), Outcome::Skipped(why) if why.contains("already exists")));
-    assert!(matches!(outcome("broken.md"), Outcome::Skipped(why) if why.contains("no frontmatter")));
-    assert!(fs::read_to_string(to.join("scout.md")).unwrap().contains("Mine."));
+    assert!(
+        matches!(outcome("broken.md"), Outcome::Skipped(why) if why.contains("no frontmatter"))
+    );
+    assert!(fs::read_to_string(to.join("scout.md"))
+        .unwrap()
+        .contains("Mine."));
     assert!(!to.join("broken.md").exists());
 
-    assert!(import(&project.path().join("missing"), &to).unwrap_err().contains("is not a directory"));
+    assert!(import(&project.path().join("missing"), &to)
+        .unwrap_err()
+        .contains("is not a directory"));
 }
 
 #[test]
@@ -93,8 +128,18 @@ fn a_bom_or_a_quoted_key_cannot_keep_a_hook_switched_on() {
     let project = xdg_temp();
     let from = project.path().join("theirs");
     let to = project.path().join(".aibus/agents");
-    write(&from, "bom.md", &format!("\u{feff}{REVIEWER}").replace("reviewer", "bom"));
-    write(&from, "quoted.md", &REVIEWER.replace("reviewer", "quoted").replace("hooks:", "\"hooks\":"));
+    write(
+        &from,
+        "bom.md",
+        &format!("\u{feff}{REVIEWER}").replace("reviewer", "bom"),
+    );
+    write(
+        &from,
+        "quoted.md",
+        &REVIEWER
+            .replace("reviewer", "quoted")
+            .replace("hooks:", "\"hooks\":"),
+    );
     let done = import(&from, &to).unwrap();
     for i in &done {
         match &i.outcome {
@@ -102,7 +147,10 @@ fn a_bom_or_a_quoted_key_cannot_keep_a_hook_switched_on() {
             Outcome::Copied(p) => {
                 let (def, _) = aibus_core::agent::def::parse(
                     &fs::read_to_string(p).unwrap(),
-                    aibus_core::DefSource { path: None, scope: aibus_core::Scope::Project },
+                    aibus_core::DefSource {
+                        path: None,
+                        scope: aibus_core::Scope::Project,
+                    },
                 )
                 .unwrap();
                 assert!(def.hooks.is_empty(), "{}", p.display());
@@ -117,7 +165,11 @@ fn a_bom_or_a_quoted_key_cannot_keep_a_hook_switched_on() {
 #[test]
 fn claude_agents_are_not_read_unless_extra_dirs_names_them() {
     let project = xdg_temp();
-    write(&project.path().join(".claude/agents"), "reviewer.md", REVIEWER);
+    write(
+        &project.path().join(".claude/agents"),
+        "reviewer.md",
+        REVIEWER,
+    );
 
     let without = discover(None, project.path(), None, &[], &[]).unwrap();
     assert!(!without.agents.keys().any(|k| k.as_str() == "reviewer"));
@@ -125,8 +177,16 @@ fn claude_agents_are_not_read_unless_extra_dirs_names_them() {
     let extra = [project.path().join(".claude/agents")];
     let with = discover(None, project.path(), None, &extra, &[]).unwrap();
     let def = &with.agents[&"reviewer".parse::<AgentName>().unwrap()];
-    assert!(def.hooks.is_empty(), "an untrusted directory's hooks are stripped");
+    assert!(
+        def.hooks.is_empty(),
+        "an untrusted directory's hooks are stripped"
+    );
 
     let trusted = discover(None, project.path(), None, &extra, &extra).unwrap();
-    assert_eq!(trusted.agents[&"reviewer".parse::<AgentName>().unwrap()].hooks.len(), 2);
+    assert_eq!(
+        trusted.agents[&"reviewer".parse::<AgentName>().unwrap()]
+            .hooks
+            .len(),
+        2
+    );
 }

@@ -57,5 +57,9 @@ fn eight_runs_streaming_with_the_dashboard_open() {
         share * 100.0
     );
     assert!(draws > 0, "the dashboard drew");
-    assert!(share < 1.0, "cannot keep up: {:.0} % of one core", share * 100.0);
+    assert!(
+        share < 1.0,
+        "cannot keep up: {:.0} % of one core",
+        share * 100.0
+    );
 }

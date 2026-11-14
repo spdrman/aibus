@@ -11,7 +11,9 @@ use common::schema::{check_against, load_from};
 use serde_json::Value;
 
 fn repo(sub: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(sub)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(sub)
 }
 
 fn toml_files(dir: &Path) -> Vec<(String, String)> {
@@ -19,7 +21,12 @@ fn toml_files(dir: &Path) -> Vec<(String, String)> {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
-        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+        .map(|p| {
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(&p).unwrap(),
+            )
+        })
         .collect();
     out.sort();
     assert!(!out.is_empty(), "{}", dir.display());
@@ -33,9 +40,11 @@ fn schema_errors(text: &str) -> Vec<String> {
 }
 
 fn roster() -> Vec<AgentName> {
-    ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit"]
-        .map(|n| AgentName::new(n).unwrap())
-        .to_vec()
+    [
+        "lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit",
+    ]
+    .map(|n| AgentName::new(n).unwrap())
+    .to_vec()
 }
 
 #[test]

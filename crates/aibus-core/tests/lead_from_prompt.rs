@@ -33,7 +33,10 @@ async fn the_first_prompt_starts_the_lead_through_the_launcher() {
     app.set_limits(&Limits::default()).unwrap();
     app.effects = Effects::orchestrated(orch, launcher.clone(), app.store.clone(), |_| {});
 
-    app.step(Msg::SubmitPrompt { text: "build the thing".into() }).unwrap();
+    app.step(Msg::SubmitPrompt {
+        text: "build the thing".into(),
+    })
+    .unwrap();
 
     {
         let launched = launcher.0.lock().unwrap();
@@ -45,10 +48,16 @@ async fn the_first_prompt_starts_the_lead_through_the_launcher() {
     }
 
     // A launcher that cannot build the run fails it where the session sees it.
-    let told = rx.recv().await.expect("the orchestrator reports the failure");
+    let told = rx
+        .recv()
+        .await
+        .expect("the orchestrator reports the failure");
     assert!(matches!(told, Msg::RunFailed { .. }), "{told:?}");
 
     // A second prompt goes to the lead that is already there, not to a second lead.
-    app.step(Msg::SubmitPrompt { text: "and also this".into() }).unwrap();
+    app.step(Msg::SubmitPrompt {
+        text: "and also this".into(),
+    })
+    .unwrap();
     assert_eq!(launcher.0.lock().unwrap().len(), 1);
 }

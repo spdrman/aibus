@@ -12,7 +12,9 @@ use aibus_core::agent::validate::{validate, validate_path, ValidateCx};
 use aibus_core::*;
 
 fn tree(test: &str) -> PathBuf {
-    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("agent_validate").join(test);
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("agent_validate")
+        .join(test);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     root
@@ -65,7 +67,10 @@ fn a_clean_definition_has_no_findings() {
         "---\nname: a\ndescription: d\ntools: [read, 'bash(git *)', 'mcp:github:*']\nmodel: sonnet\naccount: work\n---\nBody",
         Path::new("/"),
     );
-    assert!(r.ok && r.errors.is_empty() && r.warnings.is_empty(), "{r:?}");
+    assert!(
+        r.ok && r.errors.is_empty() && r.warnings.is_empty(),
+        "{r:?}"
+    );
 }
 
 #[test]
@@ -97,8 +102,17 @@ fn model_and_account_must_exist_but_inherit_and_reserved_aliases_always_do() {
             ("account", "account `gone` does not exist")
         ]
     );
-    for ok in ["inherit", "known-1", "sonnet", "advisor_model", "swarm_model"] {
-        let r = check(&format!("---\nname: a\ndescription: d\nmodel: {ok}\n---\n"), Path::new("/"));
+    for ok in [
+        "inherit",
+        "known-1",
+        "sonnet",
+        "advisor_model",
+        "swarm_model",
+    ] {
+        let r = check(
+            &format!("---\nname: a\ndescription: d\nmodel: {ok}\n---\n"),
+            Path::new("/"),
+        );
         assert!(r.ok, "{ok}: {r:?}");
     }
 }
@@ -146,18 +160,39 @@ fn hook_commands_must_exist_and_be_executable() {
     assert!(check(&hooks("./scripts/run.sh --flag"), &root).ok);
     assert!(check(&hooks("sh -c true"), &root).ok, "sh is on PATH");
     let r = check(&hooks("./scripts/missing.sh"), &root);
-    assert_eq!(fields(&r.errors), [("hooks", "pre_tool_use: `./scripts/missing.sh` does not exist")]);
+    assert_eq!(
+        fields(&r.errors),
+        [(
+            "hooks",
+            "pre_tool_use: `./scripts/missing.sh` does not exist"
+        )]
+    );
     let r = check(&hooks("./scripts/plain.sh"), &root);
-    assert_eq!(fields(&r.errors), [("hooks", "pre_tool_use: `./scripts/plain.sh` is not executable")]);
+    assert_eq!(
+        fields(&r.errors),
+        [(
+            "hooks",
+            "pre_tool_use: `./scripts/plain.sh` is not executable"
+        )]
+    );
     let r = check(&hooks("no-such-binary-anywhere"), &root);
-    assert_eq!(fields(&r.errors), [("hooks", "pre_tool_use: `no-such-binary-anywhere` is not on PATH")]);
+    assert_eq!(
+        fields(&r.errors),
+        [(
+            "hooks",
+            "pre_tool_use: `no-such-binary-anywhere` is not on PATH"
+        )]
+    );
 
     let r = check(
         "---\nname: a\ndescription: d\nhooks:\n  on_a_whim:\n    - command: sh\n---\n",
         &root,
     );
     assert!(r.ok);
-    assert_eq!(fields(&r.warnings), [("hooks", "unknown hook event `on_a_whim`")]);
+    assert_eq!(
+        fields(&r.warnings),
+        [("hooks", "unknown hook event `on_a_whim`")]
+    );
 }
 
 #[test]
@@ -179,7 +214,11 @@ fn the_built_ins_validate_clean() {
 #[test]
 fn a_directory_reports_parse_failures_warnings_and_duplicate_names() {
     let root = tree("dir");
-    write(&root, "a.md", "---\nname: same\ndescription: one\nflavour: x\n---\n");
+    write(
+        &root,
+        "a.md",
+        "---\nname: same\ndescription: one\nflavour: x\n---\n",
+    );
     write(&root, "b.md", "---\nname: same\ndescription: two\n---\n");
     write(&root, "c.md", "no frontmatter");
     write(&root, "notes.txt", "not a definition");
@@ -194,7 +233,18 @@ fn a_directory_reports_parse_failures_warnings_and_duplicate_names() {
     assert!(!r.ok);
     let f = |x: &[aibus_core::agent::validate::Finding]| {
         x.iter()
-            .map(|f| format!("{}|{}", f.path.as_ref().unwrap().file_name().unwrap().to_string_lossy(), f.field))
+            .map(|f| {
+                format!(
+                    "{}|{}",
+                    f.path
+                        .as_ref()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy(),
+                    f.field
+                )
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(f(&r.errors), ["b.md|name", "c.md|frontmatter"]);
@@ -217,14 +267,24 @@ fn extra_dir_definitions_lose_hooks_and_get_permission_mode_default() {
         let wild = &found.agents[&"wild".parse::<AgentName>().unwrap()];
         assert_eq!(wild.permission_mode, PermissionMode::Default);
         assert_eq!(wild.hooks.is_empty(), trusted.is_empty());
-        assert!(found.warnings.iter().any(|w| w.starts_with("wild: permission_mode reset to default")), "{:?}", found.warnings);
+        assert!(
+            found
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("wild: permission_mode reset to default")),
+            "{:?}",
+            found.warnings
+        );
         assert!(!found.warnings.iter().any(|w| w.starts_with("tame:")));
     }
     // The same file in the user's own scope keeps its mode.
     let user = root.join("user");
     write(&user, "wild.md", text);
     let found = discover(None, &root, Some(&user), &[], &[]).unwrap();
-    assert_eq!(found.agents[&"wild".parse::<AgentName>().unwrap()].permission_mode, PermissionMode::Bypass);
+    assert_eq!(
+        found.agents[&"wild".parse::<AgentName>().unwrap()].permission_mode,
+        PermissionMode::Bypass
+    );
 }
 
 #[test]
@@ -232,18 +292,34 @@ fn a_scope_reads_at_most_1000_files_and_says_so() {
     let root = tree("cap");
     let user = root.join("user");
     for i in 0..=MAX_FILES_PER_SCOPE {
-        write(&user, &format!("a{i:04}.md"), &format!("---\nname: a{i:04}\ndescription: d\n---\n"));
+        write(
+            &user,
+            &format!("a{i:04}.md"),
+            &format!("---\nname: a{i:04}\ndescription: d\n---\n"),
+        );
     }
     let found = discover(None, &root, Some(&user), &[], &[]).unwrap();
     assert_eq!(found.agents.len(), MAX_FILES_PER_SCOPE + BUILTINS.len());
-    assert!(found.agents.contains_key(&"a0999".parse::<AgentName>().unwrap()));
-    assert!(!found.agents.contains_key(&"a1000".parse::<AgentName>().unwrap()));
-    let cap: Vec<_> = found.warnings.iter().filter(|w| w.contains("more than 1000")).collect();
+    assert!(found
+        .agents
+        .contains_key(&"a0999".parse::<AgentName>().unwrap()));
+    assert!(!found
+        .agents
+        .contains_key(&"a1000".parse::<AgentName>().unwrap()));
+    let cap: Vec<_> = found
+        .warnings
+        .iter()
+        .filter(|w| w.contains("more than 1000"))
+        .collect();
     assert_eq!(cap.len(), 1, "{:?}", found.warnings);
 
     let exactly = tree("cap_exact");
     for i in 0..MAX_FILES_PER_SCOPE {
-        write(&exactly, &format!("a{i:04}.md"), &format!("---\nname: a{i:04}\ndescription: d\n---\n"));
+        write(
+            &exactly,
+            &format!("a{i:04}.md"),
+            &format!("---\nname: a{i:04}\ndescription: d\n---\n"),
+        );
     }
     let found = discover(None, &root, Some(&exactly), &[], &[]).unwrap();
     assert!(!found.warnings.iter().any(|w| w.contains("more than")));
@@ -253,14 +329,22 @@ fn a_scope_reads_at_most_1000_files_and_says_so() {
 fn the_roster_lists_non_built_ins_and_warns_past_15000_tokens_but_loads_all() {
     let root = tree("roster");
     let user = root.join("user");
-    write(&user, "short.md", "---\nname: short\ndescription: Does a thing.\n---\n");
+    write(
+        &user,
+        "short.md",
+        "---\nname: short\ndescription: Does a thing.\n---\n",
+    );
     let found = discover(None, &root, Some(&user), &[], &[]).unwrap();
     assert_eq!(found.roster, "- short: Does a thing.\n");
     assert!(found.warnings.is_empty());
 
     // 60,000 characters of description is 15,000 tokens by the fallback; the line adds a little.
     let long = "x".repeat(60_000);
-    write(&user, "long.md", &format!("---\nname: long\ndescription: {long}\n---\n"));
+    write(
+        &user,
+        "long.md",
+        &format!("---\nname: long\ndescription: {long}\n---\n"),
+    );
     let found = discover(None, &root, Some(&user), &[], &[]).unwrap();
     assert_eq!(found.agents.len(), BUILTINS.len() + 2);
     let tokens = roster::estimate_tokens(&found.roster);
@@ -291,13 +375,19 @@ fn examples_agents_are_the_built_in_sources() {
         .filter(|n| n.ends_with(".md"))
         .collect();
     on_disk.sort();
-    let mut want: Vec<String> = BUILTINS.iter().map(|t| format!("{}.md", def(t).name)).collect();
+    let mut want: Vec<String> = BUILTINS
+        .iter()
+        .map(|t| format!("{}.md", def(t).name))
+        .collect();
     want.sort();
     assert_eq!(on_disk, want);
     for text in BUILTINS {
         let name = def(text).name;
         let file = fs::read_to_string(dir.join(format!("{name}.md"))).unwrap();
-        assert_eq!(file, *text, "examples/agents/{name}.md has drifted from builtin.rs");
+        assert_eq!(
+            file, *text,
+            "examples/agents/{name}.md has drifted from builtin.rs"
+        );
     }
 }
 
@@ -311,7 +401,11 @@ fn show_output_parses_back_to_the_same_definition() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/agents/valid/advisor.md"),
     )
     .unwrap();
-    for text in BUILTINS.iter().copied().chain([maestro.as_str(), advisor.as_str()]) {
+    for text in BUILTINS
+        .iter()
+        .copied()
+        .chain([maestro.as_str(), advisor.as_str()])
+    {
         let d = def(text);
         let md = to_markdown(&d);
         let (back, warnings) = parse(&md, d.source.clone()).unwrap_or_else(|e| panic!("{e}\n{md}"));
@@ -333,5 +427,9 @@ fn show_json_is_snake_case_and_carries_the_prompt() {
     assert_eq!(j["prompt"], "Do it.");
     assert_eq!(j["role"], "worker");
     assert!(j.get("account").is_none());
-    assert!(j.as_object().unwrap().keys().all(|k| !k.chars().any(|c| c.is_ascii_uppercase())));
+    assert!(j
+        .as_object()
+        .unwrap()
+        .keys()
+        .all(|k| !k.chars().any(|c| c.is_ascii_uppercase())));
 }

@@ -22,11 +22,18 @@ const MODELS: &str = r#"{"object":"list","data":[{"id":"fake-model-1","object":"
 fn provider(answers: usize) -> String {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(async {
             let server = FakeServer::start().await;
             for _ in 0..answers {
-                server.script(Fixture::http(200, &[("content-type", "application/json")], MODELS));
+                server.script(Fixture::http(
+                    200,
+                    &[("content-type", "application/json")],
+                    MODELS,
+                ));
             }
             tx.send(server.uri()).unwrap();
             std::future::pending::<()>().await;
@@ -45,7 +52,14 @@ fn account_add_and_test_reach_the_provider_without_a_tokio_panic() {
     fs::set_permissions(&keyfile, fs::Permissions::from_mode(0o600)).unwrap();
 
     let add = command(h)
-        .args(["account", "add", "smoke", "--provider", "openai-compatible", "--base-url"])
+        .args([
+            "account",
+            "add",
+            "smoke",
+            "--provider",
+            "openai-compatible",
+            "--base-url",
+        ])
         .arg(format!("{uri}/v1"))
         .arg("--file")
         .arg(&keyfile)
@@ -54,8 +68,15 @@ fn account_add_and_test_reach_the_provider_without_a_tokio_panic() {
     assert!(!stderr(&add).contains("IO is disabled"), "{}", stderr(&add));
     assert_eq!(add.status.code(), Some(0), "{}", stderr(&add));
 
-    let test = command(h).args(["account", "test", "smoke", "--json"]).output().unwrap();
-    assert!(!stderr(&test).contains("IO is disabled"), "{}", stderr(&test));
+    let test = command(h)
+        .args(["account", "test", "smoke", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !stderr(&test).contains("IO is disabled"),
+        "{}",
+        stderr(&test)
+    );
     assert_eq!(test.status.code(), Some(0), "{}", stderr(&test));
     let report: serde_json::Value = serde_json::from_slice(&test.stdout).unwrap();
     assert_eq!(report["ok"], true, "{report}");

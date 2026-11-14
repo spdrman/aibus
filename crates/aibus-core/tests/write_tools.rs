@@ -6,8 +6,8 @@ use std::path::Path;
 
 use aibus_core::tools::{Edit, Write};
 use aibus_core::*;
-use serde_json::{json, Value};
 use aibus_testkit::xdg_temp;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -55,8 +55,10 @@ async fn call(
     tool: &str,
     input: Value,
 ) -> Result<ToolOutput, ToolError> {
-    ex.call_gated(e, &cx(cwd), mode, tool, input, |_| async { Decision::Allow })
-        .await
+    ex.call_gated(e, &cx(cwd), mode, tool, input, |_| async {
+        Decision::Allow
+    })
+    .await
 }
 
 fn is_denied(r: &Result<ToolOutput, ToolError>, needle: &str) -> bool {
@@ -75,7 +77,12 @@ fn write_and_edit_ask_by_default_and_never_in_accept_edits() {
     ];
     for tool in [&Write as &dyn Tool, &Edit] {
         for (mode, want) in table {
-            assert_eq!(tool.needs_permission(&json!({}), mode), want, "{} in {mode:?}", tool.name());
+            assert_eq!(
+                tool.needs_permission(&json!({}), mode),
+                want,
+                "{} in {mode:?}",
+                tool.name()
+            );
         }
     }
 }
@@ -85,13 +92,35 @@ async fn write_creates_files_and_directories_and_leaves_no_temp_file() {
     let dir = xdg_temp();
     let ex = executor(None);
     let e = eff(&["write"]);
-    let r = call(&ex, PermissionMode::AcceptEdits, &e, dir.path(), "write", json!({"path": "a/b/c.txt", "content": "hello"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::AcceptEdits,
+        &e,
+        dir.path(),
+        "write",
+        json!({"path": "a/b/c.txt", "content": "hello"}),
+    )
+    .await;
     assert!(r.is_ok(), "{r:?}");
-    assert_eq!(std::fs::read_to_string(dir.path().join("a/b/c.txt")).unwrap(), "hello");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a/b/c.txt")).unwrap(),
+        "hello"
+    );
 
-    let r = call(&ex, PermissionMode::AcceptEdits, &e, dir.path(), "write", json!({"path": "a/b/c.txt", "content": "second"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::AcceptEdits,
+        &e,
+        dir.path(),
+        "write",
+        json!({"path": "a/b/c.txt", "content": "second"}),
+    )
+    .await;
     assert!(r.is_ok());
-    assert_eq!(std::fs::read_to_string(dir.path().join("a/b/c.txt")).unwrap(), "second");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a/b/c.txt")).unwrap(),
+        "second"
+    );
     let names: Vec<_> = std::fs::read_dir(dir.path().join("a/b"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -106,10 +135,20 @@ async fn replacing_a_file_keeps_its_permissions() {
     std::fs::write(&f, "old").unwrap();
     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
     let ex = executor(None);
-    call(&ex, PermissionMode::Bypass, &eff(&["write"]), dir.path(), "write", json!({"path": "run.sh", "content": "new"}))
-        .await
-        .unwrap();
-    assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o755);
+    call(
+        &ex,
+        PermissionMode::Bypass,
+        &eff(&["write"]),
+        dir.path(),
+        "write",
+        json!({"path": "run.sh", "content": "new"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
 }
 
@@ -120,15 +159,31 @@ async fn a_failed_write_leaves_the_original_and_no_temp_file() {
     // The target is a directory, so the final rename fails after the temp file was written.
     std::fs::create_dir(dir.path().join("d")).unwrap();
     let ex = executor(None);
-    let r = call(&ex, PermissionMode::Bypass, &eff(&["write"]), dir.path(), "write", json!({"path": "d", "content": "x"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::Bypass,
+        &eff(&["write"]),
+        dir.path(),
+        "write",
+        json!({"path": "d", "content": "x"}),
+    )
+    .await;
     assert!(r.is_err(), "{r:?}");
     let names: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     // `home` is the XDG tree xdg_temp makes beside the files.
-    assert!(names.iter().all(|n| matches!(n.as_str(), "keep.txt" | "d" | "home")), "{names:?}");
-    assert_eq!(std::fs::read_to_string(dir.path().join("keep.txt")).unwrap(), "original");
+    assert!(
+        names
+            .iter()
+            .all(|n| matches!(n.as_str(), "keep.txt" | "d" | "home")),
+        "{names:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("keep.txt")).unwrap(),
+        "original"
+    );
 }
 
 #[tokio::test]
@@ -144,23 +199,41 @@ async fn edit_needs_an_exact_unique_match_unless_all_is_set() {
 
     std::fs::write(&f, "one two one three one").unwrap();
     let r = edit(json!({"path": "f.txt", "old": "one", "new": "1"})).await;
-    assert!(matches!(&r, Err(ToolError::Invalid(m)) if m.contains("3 times")), "{r:?}");
-    assert_eq!(std::fs::read_to_string(&f).unwrap(), "one two one three one", "untouched on error");
+    assert!(
+        matches!(&r, Err(ToolError::Invalid(m)) if m.contains("3 times")),
+        "{r:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        "one two one three one",
+        "untouched on error"
+    );
 
     let r = edit(json!({"path": "f.txt", "old": "One", "new": "1"})).await;
-    assert!(matches!(&r, Err(ToolError::Invalid(m)) if m.contains("not found")), "case matters: {r:?}");
+    assert!(
+        matches!(&r, Err(ToolError::Invalid(m)) if m.contains("not found")),
+        "case matters: {r:?}"
+    );
 
-    edit(json!({"path": "f.txt", "old": "two", "new": "2"})).await.unwrap();
+    edit(json!({"path": "f.txt", "old": "two", "new": "2"}))
+        .await
+        .unwrap();
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "one 2 one three one");
 
-    let r = edit(json!({"path": "f.txt", "old": "one", "new": "1", "all": true})).await.unwrap();
+    let r = edit(json!({"path": "f.txt", "old": "one", "new": "1", "all": true}))
+        .await
+        .unwrap();
     assert!(r.content.contains("3 occurrence"), "{}", r.content);
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "1 2 1 three 1");
 
     // Whitespace is part of the match.
     std::fs::write(&f, "a\n  b\n").unwrap();
-    assert!(edit(json!({"path": "f.txt", "old": "a\nb", "new": "x"})).await.is_err());
-    edit(json!({"path": "f.txt", "old": "a\n  b", "new": "x"})).await.unwrap();
+    assert!(edit(json!({"path": "f.txt", "old": "a\nb", "new": "x"}))
+        .await
+        .is_err());
+    edit(json!({"path": "f.txt", "old": "a\n  b", "new": "x"}))
+        .await
+        .unwrap();
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "x\n");
 
     for bad in [
@@ -186,7 +259,11 @@ async fn the_deny_list_holds_even_in_bypass() {
     std::fs::create_dir_all(home.path().join(".config/aibus")).unwrap();
     symlink(p.join(".git"), p.join("gitlink")).unwrap();
     let ex = executor(Some(home.path()));
-    let e = eff(&["write", "edit", &format!("write({}/**)", home.path().display())]);
+    let e = eff(&[
+        "write",
+        "edit",
+        &format!("write({}/**)", home.path().display()),
+    ]);
     let e_plain = eff(&["write", "edit"]);
 
     let blocked = [
@@ -202,27 +279,87 @@ async fn the_deny_list_holds_even_in_bypass() {
         ".AIBUS/Settings.toml",
     ];
     for path in blocked {
-        for mode in [PermissionMode::Default, PermissionMode::AcceptEdits, PermissionMode::Bypass] {
-            let r = call(&ex, mode, &e_plain, p, "write", json!({"path": path, "content": "pwned"})).await;
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::AcceptEdits,
+            PermissionMode::Bypass,
+        ] {
+            let r = call(
+                &ex,
+                mode,
+                &e_plain,
+                p,
+                "write",
+                json!({"path": path, "content": "pwned"}),
+            )
+            .await;
             assert!(is_denied(&r, "protected"), "{path} in {mode:?}: {r:?}");
         }
     }
-    let r = call(&ex, PermissionMode::Bypass, &e_plain, p, "edit", json!({"path": ".git/config", "old": "core", "new": "x"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::Bypass,
+        &e_plain,
+        p,
+        "edit",
+        json!({"path": ".git/config", "old": "core", "new": "x"}),
+    )
+    .await;
     assert!(is_denied(&r, ".git/**"), "{r:?}");
-    assert_eq!(std::fs::read_to_string(p.join(".git/config")).unwrap(), "[core]\n");
-    assert_eq!(std::fs::read_to_string(p.join(".aibus/settings.toml")).unwrap(), "x = 1\n");
+    assert_eq!(
+        std::fs::read_to_string(p.join(".git/config")).unwrap(),
+        "[core]\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(p.join(".aibus/settings.toml")).unwrap(),
+        "x = 1\n"
+    );
 
     // ~/.config/aibus is outside the project, so it needs its own specifier to be reachable
     // at all, and the deny-list still holds against that specifier unless it names the path.
     let target = home.path().join(".config/aibus/config.toml");
-    let r = call(&ex, PermissionMode::Bypass, &e, p, "write", json!({"path": target, "content": "x"})).await;
-    assert!(r.is_ok(), "a specifier that names the path lifts the deny-list: {r:?}");
-    let r = call(&ex, PermissionMode::Bypass, &e_plain, p, "write", json!({"path": target, "content": "y"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::Bypass,
+        &e,
+        p,
+        "write",
+        json!({"path": target, "content": "x"}),
+    )
+    .await;
+    assert!(
+        r.is_ok(),
+        "a specifier that names the path lifts the deny-list: {r:?}"
+    );
+    let r = call(
+        &ex,
+        PermissionMode::Bypass,
+        &e_plain,
+        p,
+        "write",
+        json!({"path": target, "content": "y"}),
+    )
+    .await;
     assert!(is_denied(&r, "protected"), "{r:?}");
 
     // Things that only look similar are fine.
-    for ok in [".gitignore", ".github/ci.yml", ".aibus/other.toml", "gitfile", "a.git", "notes/.gitkeep"] {
-        let r = call(&ex, PermissionMode::AcceptEdits, &e_plain, p, "write", json!({"path": ok, "content": "fine"})).await;
+    for ok in [
+        ".gitignore",
+        ".github/ci.yml",
+        ".aibus/other.toml",
+        "gitfile",
+        "a.git",
+        "notes/.gitkeep",
+    ] {
+        let r = call(
+            &ex,
+            PermissionMode::AcceptEdits,
+            &e_plain,
+            p,
+            "write",
+            json!({"path": ok, "content": "fine"}),
+        )
+        .await;
         assert!(r.is_ok(), "{ok}: {r:?}");
     }
 }
@@ -233,13 +370,35 @@ async fn a_specifier_naming_the_path_lifts_the_deny_list() {
     std::fs::create_dir_all(dir.path().join(".aibus")).unwrap();
     let ex = executor(None);
     let e = eff(&["write(.aibus/settings.toml)"]);
-    let r = call(&ex, PermissionMode::AcceptEdits, &e, dir.path(), "write", json!({"path": ".aibus/settings.toml", "content": "x = 2\n"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::AcceptEdits,
+        &e,
+        dir.path(),
+        "write",
+        json!({"path": ".aibus/settings.toml", "content": "x = 2\n"}),
+    )
+    .await;
     assert!(r.is_ok(), "{r:?}");
-    assert_eq!(std::fs::read_to_string(dir.path().join(".aibus/settings.toml")).unwrap(), "x = 2\n");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".aibus/settings.toml")).unwrap(),
+        "x = 2\n"
+    );
     // The same specifier says nothing about .git.
     std::fs::create_dir_all(dir.path().join(".git")).unwrap();
-    let r = call(&ex, PermissionMode::AcceptEdits, &e, dir.path(), "write", json!({"path": ".git/config", "content": "x"})).await;
-    assert!(is_denied(&r, "not in allow-list") || is_denied(&r, "protected"), "{r:?}");
+    let r = call(
+        &ex,
+        PermissionMode::AcceptEdits,
+        &e,
+        dir.path(),
+        "write",
+        json!({"path": ".git/config", "content": "x"}),
+    )
+    .await;
+    assert!(
+        is_denied(&r, "not in allow-list") || is_denied(&r, "protected"),
+        "{r:?}"
+    );
 }
 
 #[tokio::test]
@@ -254,21 +413,51 @@ async fn paths_are_confined_to_the_project_unless_a_specifier_reaches_out() {
         "sub/../../escape.txt".to_owned(),
         "/etc/aibus-test.txt".to_owned(),
     ] {
-        let r = call(&ex, PermissionMode::Bypass, &bare, dir.path(), "write", json!({"path": path, "content": "x"})).await;
+        let r = call(
+            &ex,
+            PermissionMode::Bypass,
+            &bare,
+            dir.path(),
+            "write",
+            json!({"path": path, "content": "x"}),
+        )
+        .await;
         assert!(r.is_err(), "{path}: {r:?}");
     }
     assert!(!outside.path().join("x.txt").exists());
 
     // A link that points out of the project is judged by where it lands.
     symlink(outside.path(), dir.path().join("out")).unwrap();
-    let r = call(&ex, PermissionMode::Bypass, &bare, dir.path(), "write", json!({"path": "out/y.txt", "content": "x"})).await;
+    let r = call(
+        &ex,
+        PermissionMode::Bypass,
+        &bare,
+        dir.path(),
+        "write",
+        json!({"path": "out/y.txt", "content": "x"}),
+    )
+    .await;
     assert!(is_denied(&r, "not in allow-list"), "{r:?}");
     assert!(!outside.path().join("y.txt").exists());
 
-    let spec = eff(&[&format!("write({}/**)", outside.path().canonicalize().unwrap().display())]);
-    let r = call(&ex, PermissionMode::Bypass, &spec, dir.path(), "write", json!({"path": outside.path().join("new/z.txt"), "content": "z"})).await;
+    let spec = eff(&[&format!(
+        "write({}/**)",
+        outside.path().canonicalize().unwrap().display()
+    )]);
+    let r = call(
+        &ex,
+        PermissionMode::Bypass,
+        &spec,
+        dir.path(),
+        "write",
+        json!({"path": outside.path().join("new/z.txt"), "content": "z"}),
+    )
+    .await;
     assert!(r.is_ok(), "{r:?}");
-    assert_eq!(std::fs::read_to_string(outside.path().join("new/z.txt")).unwrap(), "z");
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("new/z.txt")).unwrap(),
+        "z"
+    );
 }
 
 #[tokio::test]
@@ -278,7 +467,14 @@ async fn a_cancelled_write_does_nothing() {
     let c = cx(dir.path());
     c.cancel.cancel();
     let r = ex
-        .call_gated(&eff(&["write"]), &c, PermissionMode::Bypass, "write", json!({"path": "a.txt", "content": "x"}), |_| async { Decision::Allow })
+        .call_gated(
+            &eff(&["write"]),
+            &c,
+            PermissionMode::Bypass,
+            "write",
+            json!({"path": "a.txt", "content": "x"}),
+            |_| async { Decision::Allow },
+        )
         .await;
     assert!(matches!(r, Err(ToolError::Cancelled)), "{r:?}");
     assert!(!dir.path().join("a.txt").exists());

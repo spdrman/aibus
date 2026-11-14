@@ -91,7 +91,11 @@ impl Default for Defaults {
             swarm_model: None,
             permission_mode: "default".into(),
             effort: "high".into(),
-            fallback_on: vec![FallbackKind::Quota, FallbackKind::Auth, FallbackKind::Overloaded],
+            fallback_on: vec![
+                FallbackKind::Quota,
+                FallbackKind::Auth,
+                FallbackKind::Overloaded,
+            ],
         }
     }
 }
@@ -395,7 +399,9 @@ impl Hook {
             HookKind::Http => self.url.as_ref(),
         };
         match (text.filter(|t| !t.trim().is_empty()), self.kind) {
-            (Some(t), HookKind::Http) if !(t.starts_with("http://") || t.starts_with("https://")) => {
+            (Some(t), HookKind::Http)
+                if !(t.starts_with("http://") || t.starts_with("https://")) =>
+            {
                 Err("an http hook needs an http:// or https:// url")
             }
             (Some(t), _) => Ok(crate::agent::HookSpec {
@@ -497,7 +503,9 @@ impl Account {
         } else if a.aws_env {
             Some(KeyRef::AwsEnv)
         } else if let Some(profile) = &a.aws_profile {
-            Some(KeyRef::AwsProfile { profile: profile.clone() })
+            Some(KeyRef::AwsProfile {
+                profile: profile.clone(),
+            })
         } else if a.keyring || a.oauth || a.sigv4 {
             Some(KeyRef::Keyring {
                 service: KEYCHAIN_SERVICE.into(),
@@ -560,18 +568,35 @@ impl Config {
             }
         }
         for (name, server) in &self.mcp {
-            let ok = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            let ok = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
             if !ok {
-                bad(&format!("mcp.{name}"), "a server name is letters, digits, `_` and `-`".into());
+                bad(
+                    &format!("mcp.{name}"),
+                    "a server name is letters, digits, `_` and `-`".into(),
+                );
             } else if server.command.trim().is_empty() {
-                bad(&format!("mcp.{name}.command"), "a server needs a command".into());
+                bad(
+                    &format!("mcp.{name}.command"),
+                    "a server needs a command".into(),
+                );
             }
         }
         if !["newest", "branch"].contains(&self.continuity.topic.as_str()) {
             bad("continuity.topic", "expected newest or branch".into());
         }
-        if let Some(s) = self.memory.scopes.iter().find(|s| MemoryScope::parse(s).is_none()) {
-            bad("memory.scopes", format!("{s}: expected user, project or local"));
+        if let Some(s) = self
+            .memory
+            .scopes
+            .iter()
+            .find(|s| MemoryScope::parse(s).is_none())
+        {
+            bad(
+                "memory.scopes",
+                format!("{s}: expected user, project or local"),
+            );
         }
         if self.memory.recall_k == 0 {
             bad("memory.recall_k", "must be at least 1".into());
@@ -584,7 +609,14 @@ impl Config {
             if !defined.insert(d.id.as_str()) {
                 bad("provider.id", format!("provider {} is defined twice", d.id));
             } else if let Err(why) = aibus_provider::presets::resolve(&d.id, Some(d)) {
-                bad(if why.contains(": headers:") { "provider.headers" } else { "provider" }, why);
+                bad(
+                    if why.contains(": headers:") {
+                        "provider.headers"
+                    } else {
+                        "provider"
+                    },
+                    why,
+                );
             }
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -592,15 +624,30 @@ impl Config {
             for to in &a.fallback {
                 let path = format!("account.{i}.fallback");
                 if *to == a.name {
-                    bad(&path, format!("account {} lists itself as its own fallback", a.name));
+                    bad(
+                        &path,
+                        format!("account {} lists itself as its own fallback", a.name),
+                    );
                 } else if !self.accounts.iter().any(|b| b.name == *to) {
-                    bad(&path, format!("account {}: fallback names {to}, which is not an account", a.name));
+                    bad(
+                        &path,
+                        format!(
+                            "account {}: fallback names {to}, which is not an account",
+                            a.name
+                        ),
+                    );
                 }
             }
             if a.name.is_empty() || a.provider.is_empty() {
-                bad("account.name", "every account needs a name and a provider".into());
+                bad(
+                    "account.name",
+                    "every account needs a name and a provider".into(),
+                );
             } else if !seen.insert(a.name.as_str()) {
-                bad("account.name", format!("account {} is defined twice", a.name));
+                bad(
+                    "account.name",
+                    format!("account {} is defined twice", a.name),
+                );
             }
             let sources = [
                 a.auth.keyring,
@@ -620,14 +667,21 @@ impl Config {
             }
             // The cloud auth forms only make sense for their own api, and name the line.
             let user = self.providers.iter().find(|d| d.id == a.provider);
-            let def = aibus_provider::presets::resolve(&a.provider, user).ok().flatten();
+            let def = aibus_provider::presets::resolve(&a.provider, user)
+                .ok()
+                .flatten();
             let api = def.as_ref().and_then(|d| d.api);
             let bedrock = api == Some(aibus_provider::Api::AnthropicBedrock);
             let vertex = api == Some(aibus_provider::Api::AnthropicVertex);
             for (key, on, ok, wants) in [
                 ("sigv4", a.auth.sigv4, bedrock, "anthropic-bedrock"),
                 ("aws_env", a.auth.aws_env, bedrock, "anthropic-bedrock"),
-                ("aws_profile", a.auth.aws_profile.is_some(), bedrock, "anthropic-bedrock"),
+                (
+                    "aws_profile",
+                    a.auth.aws_profile.is_some(),
+                    bedrock,
+                    "anthropic-bedrock",
+                ),
                 ("gcloud", a.auth.gcloud, vertex, "anthropic-vertex"),
             ] {
                 if on && !ok {
@@ -637,15 +691,27 @@ impl Config {
                     );
                 }
             }
-            let region = a.region.as_ref().or(def.as_ref().and_then(|d| d.region.as_ref()));
+            let region = a
+                .region
+                .as_ref()
+                .or(def.as_ref().and_then(|d| d.region.as_ref()));
             if (bedrock || vertex) && region.is_none() {
-                bad("account.region", format!("account {}: region is required for {}; set it here or on the [[provider]]", a.name, a.provider));
+                bad(
+                    "account.region",
+                    format!(
+                        "account {}: region is required for {}; set it here or on the [[provider]]",
+                        a.name, a.provider
+                    ),
+                );
             }
             if vertex && a.project.is_none() && def.as_ref().is_none_or(|d| d.project.is_none()) {
                 bad("account.project", format!("account {}: project is required for {}; set it here or on the [[provider]]", a.name, a.provider));
             }
             if a.rate.max_concurrent == 0 {
-                bad("account.rate", format!("account {}: max_concurrent must be at least 1", a.name));
+                bad(
+                    "account.rate",
+                    format!("account {}: max_concurrent must be at least 1", a.name),
+                );
             }
         }
         out
@@ -684,7 +750,11 @@ mod tests {
 
     #[test]
     fn the_sandbox_names_are_the_three_spellings_and_nothing_else() {
-        for (text, want) in [("none", SandboxKind::None), ("bwrap", SandboxKind::Bwrap), ("sandbox-exec", SandboxKind::SandboxExec)] {
+        for (text, want) in [
+            ("none", SandboxKind::None),
+            ("bwrap", SandboxKind::Bwrap),
+            ("sandbox-exec", SandboxKind::SandboxExec),
+        ] {
             let t: Tools = toml::from_str(&format!("sandbox = \"{text}\"")).unwrap();
             assert_eq!((t.sandbox, t.sandbox.as_str()), (want, text));
         }
@@ -706,10 +776,25 @@ default_capabilities = { logprobs = false, max_tools = 16 }
         )
         .unwrap();
         let d = &c.providers[0];
-        assert_eq!(d.compat, Some(vec![CompatFlag::NoStore, CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)]));
-        assert_eq!((d.default_capabilities.logprobs, d.default_capabilities.max_tools), (Some(false), Some(16)));
+        assert_eq!(
+            d.compat,
+            Some(vec![
+                CompatFlag::NoStore,
+                CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)
+            ])
+        );
+        assert_eq!(
+            (
+                d.default_capabilities.logprobs,
+                d.default_capabilities.max_tools
+            ),
+            (Some(false), Some(16))
+        );
         assert!(c.problems().is_empty());
         // A flag nobody named is a parse error, so a typo cannot pass for a quirk.
-        assert!(toml::from_str::<Config>("[[provider]]\nid = \"gw\"\ncompat = [\"no_such_quirk\"]\n").is_err());
+        assert!(toml::from_str::<Config>(
+            "[[provider]]\nid = \"gw\"\ncompat = [\"no_such_quirk\"]\n"
+        )
+        .is_err());
     }
 }

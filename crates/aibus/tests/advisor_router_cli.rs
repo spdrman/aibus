@@ -6,9 +6,9 @@ mod common;
 
 use std::fs;
 
+use aibus_testkit::{xdg_temp, Xdg};
 use common::schema::assert_valid;
 use common::{command, ndjson, stderr};
-use aibus_testkit::{xdg_temp, Xdg};
 
 const SCRIPT: &str = r##"[
     // the lead: a plan that ends on an intention
@@ -37,17 +37,26 @@ fn run(home: &Xdg, extra: &[&str]) -> std::process::Output {
 #[test]
 fn both_events_show_up_in_the_json_output() {
     let home = xdg_temp();
-    let out = run(&home, &["--advisor", "fake-large", "--router", "fake-small"]);
+    let out = run(
+        &home,
+        &["--advisor", "fake-large", "--router", "fake-small"],
+    );
     assert!(out.status.success(), "{}", stderr(&out));
     let lines = ndjson(&out);
     for l in &lines {
         assert_valid("run-event", l);
     }
-    let spoke = lines.iter().find(|l| l["type"] == "AdvisorSpoke").expect("AdvisorSpoke");
+    let spoke = lines
+        .iter()
+        .find(|l| l["type"] == "AdvisorSpoke")
+        .expect("AdvisorSpoke");
     assert_eq!(spoke["checkpoint"], "before_plan");
     assert_eq!(spoke["advice"], "plan skips auth");
     assert!(spoke["tokens_read"].as_u64().unwrap() > 0);
-    let routed = lines.iter().find(|l| l["type"] == "RouterAnswered").expect("RouterAnswered");
+    let routed = lines
+        .iter()
+        .find(|l| l["type"] == "RouterAnswered")
+        .expect("RouterAnswered");
     assert_eq!(routed["kind"], "which_tool");
     assert_eq!(routed["choice"], "ls");
     assert_eq!(routed["verdict"], "sharp");
@@ -61,7 +70,9 @@ fn off_flags_leave_them_out_with_a_note() {
     // may end differently; what matters is that neither event appears and the notes are said.
     let out = run(&home, &["--advisor", "off", "--router", "off"]);
     let lines = ndjson(&out);
-    assert!(lines.iter().all(|l| l["type"] != "AdvisorSpoke" && l["type"] != "RouterAnswered"));
+    assert!(lines
+        .iter()
+        .all(|l| l["type"] != "AdvisorSpoke" && l["type"] != "RouterAnswered"));
     let err = stderr(&out);
     assert!(err.contains("the advisor is off"), "{err}");
     assert!(err.contains("the router is off"), "{err}");

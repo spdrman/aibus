@@ -13,8 +13,8 @@ use aibus_core::config::Config;
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::*;
 use aibus_graph::Graph;
-use common::*;
 use aibus_testkit::{xdg_temp, Xdg};
+use common::*;
 
 fn wired() -> (A, Rc<RefCell<Vec<Effect>>>) {
     let mut a = app();
@@ -62,9 +62,13 @@ fn runnable(a: &A) -> Vec<String> {
 }
 
 fn status(a: &A, run: RunId) -> String {
-    as_str(a.graph.read_key(&format!("model:run:{run}:status")).unwrap())
-        .unwrap()
-        .to_owned()
+    as_str(
+        a.graph
+            .read_key(&format!("model:run:{run}:status"))
+            .unwrap(),
+    )
+    .unwrap()
+    .to_owned()
 }
 
 fn count(a: &A, k: &str) -> i64 {
@@ -91,14 +95,24 @@ fn spawns(log: &Rc<RefCell<Vec<Effect>>>) -> usize {
 fn defaults_are_3_8_4_and_500() {
     let l = Limits::default();
     assert_eq!(
-        (l.max_spawn_depth, l.max_concurrent_runs, l.max_per_account, l.max_runs_per_session),
+        (
+            l.max_spawn_depth,
+            l.max_concurrent_runs,
+            l.max_per_account,
+            l.max_runs_per_session
+        ),
         (3, 8, 4, 500)
     );
     let a = app();
     let node = a.graph.read_key("model:limits").unwrap();
     let n = |k: &str| as_i64(get(node, k).unwrap()).unwrap();
     assert_eq!(
-        (n("max_spawn_depth"), n("max_concurrent_runs"), n("max_per_account"), n("max_runs_per_session")),
+        (
+            n("max_spawn_depth"),
+            n("max_concurrent_runs"),
+            n("max_per_account"),
+            n("max_runs_per_session")
+        ),
         (3, 8, 4, 500)
     );
 }
@@ -108,7 +122,11 @@ fn check_1_the_parent_has_to_be_alive() {
     let mut a = app();
     let parent = ask(&mut a, 1, None, None);
     let child = ask(&mut a, 2, Some(parent), None);
-    assert_eq!(runnable(&a), [parent.to_string()], "the parent is only queued");
+    assert_eq!(
+        runnable(&a),
+        [parent.to_string()],
+        "the parent is only queued"
+    );
     start_with(&mut a, parent, None, "acct");
     assert_eq!(runnable(&a), [child.to_string()], "the parent runs now");
 }
@@ -116,7 +134,8 @@ fn check_1_the_parent_has_to_be_alive() {
 #[test]
 fn a_run_whose_parent_ended_is_cancelled_and_never_listed() {
     let mut a = app();
-    a.set_limits(&limits(|l| l.max_concurrent_runs = 1)).unwrap();
+    a.set_limits(&limits(|l| l.max_concurrent_runs = 1))
+        .unwrap();
     let parent = ask(&mut a, 1, None, None);
     start_with(&mut a, parent, None, "acct");
     // The only slot is taken, so the child waits in the queue ...
@@ -142,7 +161,11 @@ fn a_run_whose_parent_ended_is_cancelled_and_never_listed() {
     })
     .unwrap();
     assert_eq!(status(&a, child), "cancelled");
-    assert_eq!(status(&a, grandchild), "cancelled", "and the queue below it");
+    assert_eq!(
+        status(&a, grandchild),
+        "cancelled",
+        "and the queue below it"
+    );
     assert!(runnable(&a).is_empty());
 
     // A delegate that names an ended parent is cancelled on arrival.
@@ -156,7 +179,8 @@ fn cancelling_a_queued_parent_cancels_its_queued_children() {
     let mut a = app();
     let parent = ask(&mut a, 1, None, None);
     let child = ask(&mut a, 2, Some(parent), None);
-    a.step(Msg::Command(Command::Cancel { run: parent })).unwrap();
+    a.step(Msg::Command(Command::Cancel { run: parent }))
+        .unwrap();
     assert_eq!(status(&a, child), "cancelled");
     assert_eq!(count(&a, "failed"), 2);
 }
@@ -187,7 +211,8 @@ fn check_2_depth_is_limited_to_max_spawn_depth() {
 #[test]
 fn check_3_concurrency_is_limited_to_max_concurrent_runs() {
     let mut a = app();
-    a.set_limits(&limits(|l| l.max_concurrent_runs = 3)).unwrap();
+    a.set_limits(&limits(|l| l.max_concurrent_runs = 3))
+        .unwrap();
     start_with(&mut a, R(), None, "acct");
     let runs: Vec<RunId> = (1..=4).map(|i| ask(&mut a, i, None, None)).collect();
     assert_eq!(runnable(&a).len(), 2, "one slot is the lead's");
@@ -224,7 +249,8 @@ fn check_4_each_account_has_its_own_slots() {
 fn check_5_the_session_total_is_limited() {
     // Queueing stops at the cap ...
     let mut a = app();
-    a.set_limits(&limits(|l| l.max_runs_per_session = 3)).unwrap();
+    a.set_limits(&limits(|l| l.max_runs_per_session = 3))
+        .unwrap();
     for i in 1..=4 {
         ask(&mut a, i, None, None);
     }
@@ -235,9 +261,11 @@ fn check_5_the_session_total_is_limited() {
     let mut a = app();
     let runs: Vec<RunId> = (1..=3).map(|i| ask(&mut a, i, None, None)).collect();
     start_with(&mut a, runs[0], None, "acct");
-    a.set_limits(&limits(|l| l.max_runs_per_session = 2)).unwrap();
+    a.set_limits(&limits(|l| l.max_runs_per_session = 2))
+        .unwrap();
     assert_eq!(runnable(&a), [runs[1].to_string()]);
-    a.set_limits(&limits(|l| l.max_runs_per_session = 1)).unwrap();
+    a.set_limits(&limits(|l| l.max_runs_per_session = 1))
+        .unwrap();
     assert!(runnable(&a).is_empty());
 }
 
@@ -336,7 +364,11 @@ fn the_environment_overrides_depth_and_concurrency() {
     let l = Limits::resolve(&cfg, none).unwrap();
     assert_eq!((l.max_spawn_depth, l.max_concurrent_runs), (2, 5), "config");
     let l = Limits::resolve(&cfg, env).unwrap();
-    assert_eq!((l.max_spawn_depth, l.max_concurrent_runs), (1, 2), "env over config");
+    assert_eq!(
+        (l.max_spawn_depth, l.max_concurrent_runs),
+        (1, 2),
+        "env over config"
+    );
 
     let bad = |_: &str| Some("lots".to_owned());
     let e = Limits::resolve(&cfg, bad).unwrap_err();
@@ -365,7 +397,10 @@ fn a_mention_is_the_name_and_the_rest() {
         m("@agent-code-reviewer look at src/auth.rs"),
         Some(("code-reviewer".into(), "look at src/auth.rs".into()))
     );
-    assert_eq!(m("  @agent-explore\n  find it"), Some(("explore".into(), "find it".into())));
+    assert_eq!(
+        m("  @agent-explore\n  find it"),
+        Some(("explore".into(), "find it".into()))
+    );
     assert_eq!(m("@agent-explore"), Some(("explore".into(), String::new())));
     assert_eq!(m("please @agent-explore this"), None, "only at the start");
     assert_eq!(m("@agent-Bad name"), None, "not a valid name");
@@ -376,7 +411,10 @@ fn a_mention_is_the_name_and_the_rest() {
 #[test]
 fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
     let mut a = app();
-    a.step(Msg::SubmitPrompt { text: "hello".into() }).unwrap();
+    a.step(Msg::SubmitPrompt {
+        text: "hello".into(),
+    })
+    .unwrap();
     let lead = as_str(&as_list(a.graph.read_key("model:runs:order").unwrap())[0].clone())
         .unwrap()
         .parse::<RunId>()
@@ -389,12 +427,28 @@ fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
     let order = as_list(a.graph.read_key("model:runs:order").unwrap()).to_vec();
     assert_eq!(order.len(), 2);
     let child = as_str(&order[1]).unwrap();
-    let meta = a.graph.read_key(&format!("model:run:{child}:meta")).unwrap();
+    let meta = a
+        .graph
+        .read_key(&format!("model:run:{child}:meta"))
+        .unwrap();
     assert_eq!(as_str(get(meta, "agent").unwrap()), Some("explore"));
-    assert_eq!(as_str(get(meta, "parent").unwrap()), Some(lead.to_string().as_str()));
-    assert_eq!(get(meta, "background"), Some(&aibus_graph::Value::Bool(true)));
-    assert_eq!(as_str(get(meta, "prompt").unwrap()), Some("find the parser"));
-    assert_eq!(runnable(&a), [child.to_owned()], "the lead is alive, so it can start");
+    assert_eq!(
+        as_str(get(meta, "parent").unwrap()),
+        Some(lead.to_string().as_str())
+    );
+    assert_eq!(
+        get(meta, "background"),
+        Some(&aibus_graph::Value::Bool(true))
+    );
+    assert_eq!(
+        as_str(get(meta, "prompt").unwrap()),
+        Some("find the parser")
+    );
+    assert_eq!(
+        runnable(&a),
+        [child.to_owned()],
+        "the lead is alive, so it can start"
+    );
 }
 
 // ---- the schema ---------------------------------------------------------------------------
@@ -426,11 +480,21 @@ fn the_delegate_tool_matches_01_section_4_1() {
     assert_eq!(s["required"], serde_json::json!(["agent", "prompt"]));
     let props = s["properties"].as_object().unwrap();
     let keys: Vec<&str> = props.keys().map(String::as_str).collect();
-    for k in ["agent", "prompt", "background", "isolation", "model", "account"] {
+    for k in [
+        "agent",
+        "prompt",
+        "background",
+        "isolation",
+        "model",
+        "account",
+    ] {
         assert!(keys.contains(&k), "{k}");
     }
     assert_eq!(props["background"]["default"], serde_json::json!(true));
-    assert_eq!(props["isolation"]["enum"], serde_json::json!(["none", "worktree"]));
+    assert_eq!(
+        props["isolation"]["enum"],
+        serde_json::json!(["none", "worktree"])
+    );
     let agents: Vec<&str> = props["agent"]["enum"]
         .as_array()
         .unwrap()
@@ -501,7 +565,11 @@ fn background_moves_a_run_to_the_background_and_a_definition_can_force_it() {
     })
     .unwrap();
     let meta_bg = |a: &A, run: RunId| {
-        get(a.graph.read_key(&format!("model:run:{run}:meta")).unwrap(), "background").cloned()
+        get(
+            a.graph.read_key(&format!("model:run:{run}:meta")).unwrap(),
+            "background",
+        )
+        .cloned()
     };
     // The definition says background: true, the caller says false.
     let forced = rid(7);
@@ -520,7 +588,8 @@ fn background_moves_a_run_to_the_background_and_a_definition_can_force_it() {
 
     let fg = ask_fg(&mut a, 8);
     assert_eq!(meta_bg(&a, fg), Some(aibus_graph::Value::Bool(false)));
-    a.step(Msg::Command(Command::Background { run: fg })).unwrap();
+    a.step(Msg::Command(Command::Background { run: fg }))
+        .unwrap();
     assert_eq!(meta_bg(&a, fg), Some(aibus_graph::Value::Bool(true)));
 }
 

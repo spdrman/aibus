@@ -23,7 +23,11 @@ fn ron(text: &str) -> String {
 }
 
 fn tool(name: &str, input: Value) -> String {
-    format!("ToolCall(name: {}, input: {}), Stop(ToolUse),", ron(name), input)
+    format!(
+        "ToolCall(name: {}, input: {}), Stop(ToolUse),",
+        ron(name),
+        input
+    )
 }
 
 /// `aibus run --agent workflow-author` with `script`, the aibus tools pre-approved.
@@ -31,7 +35,15 @@ fn author(home: &Path, script: &str) -> Output {
     let file = home.join("s.ron");
     fs::write(&file, script).unwrap();
     command(home)
-        .args(["run", "--json", "--agent", "workflow-author", "--allow", "mcp:aibus:*", "--script"])
+        .args([
+            "run",
+            "--json",
+            "--agent",
+            "workflow-author",
+            "--allow",
+            "mcp:aibus:*",
+            "--script",
+        ])
         .arg(&file)
         .arg("review a PR and leave a summary")
         .output()
@@ -43,16 +55,28 @@ fn audit_lines_all(home: &Path) -> Vec<Value> {
     let dir = home.join(".local/state/aibus/logs/mcp");
     let files: Vec<_> = fs::read_dir(&dir).unwrap().flatten().collect();
     assert_eq!(files.len(), 1, "one `aibus mcp` child");
-    fs::read_to_string(files[0].path()).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    fs::read_to_string(files[0].path())
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
 }
 
 /// The tool calls in that file.
 fn audit_lines(home: &Path) -> Vec<Value> {
-    audit_lines_all(home).into_iter().filter(|l| l["method"] == "tools/call").collect()
+    audit_lines_all(home)
+        .into_iter()
+        .filter(|l| l["method"] == "tools/call")
+        .collect()
 }
 
 fn answer() -> String {
-    format!("Text({}), Stop(EndTurn)", ron(&format!("Here it is.\n```toml\n{GOOD}```\nexplore finds the change, plan reviews it.")))
+    format!(
+        "Text({}), Stop(EndTurn)",
+        ron(&format!(
+            "Here it is.\n```toml\n{GOOD}```\nexplore finds the change, plan reviews it."
+        ))
+    )
 }
 
 /// The scripted model: lists the agents, validates a draft with a bad step and then a good one.
@@ -73,20 +97,53 @@ fn new_delegates_to_the_author_and_returns_validated_toml() {
     let out = author(home.path(), &script());
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let lines = ndjson(&out);
-    let calls: Vec<&str> = lines.iter().filter(|l| l["type"] == "ToolCallRequested").map(|l| l["call"]["name"].as_str().unwrap()).collect();
-    assert_eq!(calls, ["mcp__aibus__agent_list", "mcp__aibus__workflow_validate", "mcp__aibus__workflow_validate"]);
+    let calls: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["type"] == "ToolCallRequested")
+        .map(|l| l["call"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            "mcp__aibus__agent_list",
+            "mcp__aibus__workflow_validate",
+            "mcp__aibus__workflow_validate"
+        ]
+    );
     // The child server saw exactly those three calls, and the bad draft is in its audit log.
     let audit = audit_lines(home.path());
     let tools: Vec<&str> = audit.iter().filter_map(|l| l["tool"].as_str()).collect();
-    assert_eq!(tools, ["agent_list", "workflow_validate", "workflow_validate"]);
-    assert!(audit[1]["args"].to_string().contains("ghost") || audit[2]["args"].to_string().contains("ghost"));
-    assert!(lines.iter().filter(|l| l["type"] == "ToolCallFinished").all(|l| l["ok"] == true), "{lines:?}");
+    assert_eq!(
+        tools,
+        ["agent_list", "workflow_validate", "workflow_validate"]
+    );
+    assert!(
+        audit[1]["args"].to_string().contains("ghost")
+            || audit[2]["args"].to_string().contains("ghost")
+    );
+    assert!(
+        lines
+            .iter()
+            .filter(|l| l["type"] == "ToolCallFinished")
+            .all(|l| l["ok"] == true),
+        "{lines:?}"
+    );
     // The result is a fenced block that parses and validates against the builtin roster.
-    let last = lines.iter().rev().find(|l| l["type"] == "RunFinished").unwrap();
+    let last = lines
+        .iter()
+        .rev()
+        .find(|l| l["type"] == "RunFinished")
+        .unwrap();
     let summary = last["summary"].as_str().unwrap();
-    let toml = summary.split("```toml\n").nth(1).and_then(|s| s.split("```").next()).unwrap();
+    let toml = summary
+        .split("```toml\n")
+        .nth(1)
+        .and_then(|s| s.split("```").next())
+        .unwrap();
     assert!(Workflow::parse("draft", toml).is_ok());
-    let roster: Vec<AgentName> = ["explore", "plan"].map(|n| AgentName::new(n).unwrap()).to_vec();
+    let roster: Vec<AgentName> = ["explore", "plan"]
+        .map(|n| AgentName::new(n).unwrap())
+        .to_vec();
     assert!(validate(toml, "draft", &roster).ok);
 }
 
@@ -95,14 +152,20 @@ fn the_child_is_read_only_and_the_tool_list_has_no_write_tool() {
     let home = xdg_temp();
     let script = format!(
         "[{} {}]",
-        tool("mcp__aibus__workflow_create", json!({"name": "x", "scope": "project", "toml": GOOD})),
+        tool(
+            "mcp__aibus__workflow_create",
+            json!({"name": "x", "scope": "project", "toml": GOOD})
+        ),
         "Text(\"done\"), Stop(EndTurn)"
     );
     let out = author(home.path(), &script);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let lines = ndjson(&out);
     // The agent never saw a write tool, so asking for one is an error and nothing is written.
-    let finished = lines.iter().find(|l| l["type"] == "ToolCallFinished").unwrap();
+    let finished = lines
+        .iter()
+        .find(|l| l["type"] == "ToolCallFinished")
+        .unwrap();
     assert_eq!(finished["ok"], false, "{finished}");
     assert!(!home.path().join("proj/.aibus/workflows/x.toml").exists());
     // The child's own log says it started with no capability flag.
@@ -119,7 +182,13 @@ fn a_user_mcp_aibus_entry_wins() {
     let doctor = |home: &Path| -> String {
         let out = aibus(home, &["doctor", "--json"]);
         let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-        let row = v["checks"].as_array().unwrap().iter().find(|c| c["name"] == "workflow author").unwrap().clone();
+        let row = v["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "workflow author")
+            .unwrap()
+            .clone();
         assert_eq!(row["ok"], true, "{row}");
         row["detail"].as_str().unwrap().to_owned()
     };
@@ -129,6 +198,13 @@ fn a_user_mcp_aibus_entry_wins() {
     // With one, theirs is kept and the binary adds nothing.
     let config = home.path().join(".config/aibus/config.toml");
     fs::create_dir_all(config.parent().unwrap()).unwrap();
-    fs::write(&config, "[mcp.aibus]\ncommand = \"/opt/aibus\"\nargs = [\"mcp\", \"--cwd\", \"/srv/app\"]\n").unwrap();
-    assert_eq!(doctor(home.path()), "your [mcp.aibus]: /opt/aibus mcp --cwd /srv/app");
+    fs::write(
+        &config,
+        "[mcp.aibus]\ncommand = \"/opt/aibus\"\nargs = [\"mcp\", \"--cwd\", \"/srv/app\"]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        doctor(home.path()),
+        "your [mcp.aibus]: /opt/aibus mcp --cwd /srv/app"
+    );
 }

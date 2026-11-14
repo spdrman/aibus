@@ -11,7 +11,7 @@ use ratatui::style::Style;
 use ratatui::widgets::{Clear, Widget};
 
 use crate::hit::{HitId, HitKind};
-use crate::screens::{buttons, button, entry_line, Entry};
+use crate::screens::{button, buttons, entry_line, Entry};
 use crate::theme::{Interact, Theme};
 use crate::ui::Pointer;
 use crate::widgets::{clip, flag, int, panel, put, text};
@@ -56,11 +56,19 @@ pub fn size(bytes: i64) -> String {
 
 /// The plain text of a tool row, which is also what is drawn.
 fn tool_line(th: &Theme, row: &Value) -> String {
-    let glyph = if flag(row, "expanded") { th.g("▾") } else { th.g("▸") };
+    let glyph = if flag(row, "expanded") {
+        th.g("▾")
+    } else {
+        th.g("▸")
+    };
     let mut line = format!("{glyph} {}  {}", text(row, "name"), text(row, "summary"));
     match get(row, "ok") {
         Some(Value::Bool(ok)) => {
-            line.push_str(&format!("  ({}, {})", duration(int(row, "ms")), size(int(row, "bytes"))));
+            line.push_str(&format!(
+                "  ({}, {})",
+                duration(int(row, "ms")),
+                size(int(row, "bytes"))
+            ));
             if !ok {
                 line.push(' ');
                 line.push_str(th.g("✗"));
@@ -78,8 +86,17 @@ fn short(label: &str) -> String {
 /// The header: `search · haiku · anthropic-work`.
 pub fn title(v: &Value) -> String {
     // After a fallback the account reads `↷ anthropic-personal`: where the run went (F9).
-    let marker = if text(v, "fallback_from").is_empty() { "" } else { "↷ " };
-    let mut t = format!("{} · {} · {marker}{}", text(v, "agent"), short(text(v, "model")), text(v, "account"));
+    let marker = if text(v, "fallback_from").is_empty() {
+        ""
+    } else {
+        "↷ "
+    };
+    let mut t = format!(
+        "{} · {} · {marker}{}",
+        text(v, "agent"),
+        short(text(v, "model")),
+        text(v, "account")
+    );
     let status = text(v, "status");
     if !status.is_empty() {
         t.push_str(&format!(" · {status}"));
@@ -88,7 +105,16 @@ pub fn title(v: &Value) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer, sel: Option<Cells>, entry: Option<&Entry>, copied: bool) -> Geom {
+pub fn draw(
+    buf: &mut Buffer,
+    full: Rect,
+    v: &Value,
+    th: &Theme,
+    pointer: &Pointer,
+    sel: Option<Cells>,
+    entry: Option<&Entry>,
+    copied: bool,
+) -> Geom {
     Clear.render(full, buf);
     let border = match text(v, "role") {
         "lead" => th.lead,
@@ -97,41 +123,92 @@ pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
     };
     let inner = {
         let i = panel(buf, full, &title(v), border, th);
-        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+        Rect {
+            x: i.x + 1,
+            width: i.width.saturating_sub(2),
+            ..i
+        }
     };
     let dim = Style::new().fg(th.dim_text);
     // Row 0: what the view is showing besides the live end.
-    let notice = if let Some(oldest) = get(v, "evicted").and_then(aibus_core::state::value::as_i64) {
-        Some((format!("evicted, oldest retained t={oldest}"), Style::new().fg(th.warn)))
+    let notice = if let Some(oldest) = get(v, "evicted").and_then(aibus_core::state::value::as_i64)
+    {
+        Some((
+            format!("evicted, oldest retained t={oldest}"),
+            Style::new().fg(th.warn),
+        ))
     } else if let Some(t) = get(v, "at").and_then(aibus_core::state::value::as_i64) {
-        Some((format!("stepped back to t={t}  ([ older, ] newer, f live)"), Style::new().fg(th.warn)))
+        Some((
+            format!("stepped back to t={t}  ([ older, ] newer, f live)"),
+            Style::new().fg(th.warn),
+        ))
     } else if flag(v, "loading") {
         Some(("reading the transcript from disk...".to_owned(), dim))
     } else {
-        get(v, "error").and_then(aibus_core::state::value::as_str).map(|e| (format!("failed: {e}"), Style::new().fg(th.error)))
+        get(v, "error")
+            .and_then(aibus_core::state::value::as_str)
+            .map(|e| (format!("failed: {e}"), Style::new().fg(th.error)))
     };
     if let Some((line, style)) = notice {
-        put(buf, inner, 0, 0, &clip(&line, usize::from(inner.width)), style);
+        put(
+            buf,
+            inner,
+            0,
+            0,
+            &clip(&line, usize::from(inner.width)),
+            style,
+        );
     }
     let height = int(v, "height").max(1) as u16;
-    let body = Rect { y: inner.y + 1, height: height.min(inner.height.saturating_sub(3)), width: inner.width.saturating_sub(1), ..inner };
+    let body = Rect {
+        y: inner.y + 1,
+        height: height.min(inner.height.saturating_sub(3)),
+        width: inner.width.saturating_sub(1),
+        ..inner
+    };
     let rows = as_list(get(v, "rows").unwrap_or(&NULL));
-    let mut geom = Geom { area: full, body, total: int(v, "total").max(0) as usize, ..Geom::default() };
+    let mut geom = Geom {
+        area: full,
+        body,
+        total: int(v, "total").max(0) as usize,
+        ..Geom::default()
+    };
     for (i, row) in rows.iter().take(usize::from(body.height)).enumerate() {
         let y = i as u16;
-        let r = Rect { y: body.y + y, height: 1, ..body };
+        let r = Rect {
+            y: body.y + y,
+            height: 1,
+            ..body
+        };
         let (line, style) = match text(row, "kind") {
             "user" => (format!("│ {}", text(row, "text")), Style::new().fg(th.lead)),
             "detail" => (text(row, "text").to_owned(), dim),
-            "compact" => (format!("⌁ compacted at {}k", int(row, "tokens") / 1000), dim),
-            "note" => (text(row, "text").to_owned(), Style::new().fg(if flag(row, "error") { th.error } else { th.dim_text })),
+            "compact" => (
+                format!("⌁ compacted at {}k", int(row, "tokens") / 1000),
+                dim,
+            ),
+            "note" => (
+                text(row, "text").to_owned(),
+                Style::new().fg(if flag(row, "error") {
+                    th.error
+                } else {
+                    th.dim_text
+                }),
+            ),
             "tool" => {
                 let failed = matches!(get(row, "ok"), Some(Value::Bool(false)));
-                (tool_line(th, row), Style::new().fg(if failed { th.error } else { th.fg }))
+                (
+                    tool_line(th, row),
+                    Style::new().fg(if failed { th.error } else { th.fg }),
+                )
             }
             _ => (text(row, "text").to_owned(), Style::new().fg(th.fg)),
         };
-        let line = if th.ascii { line.replace('⌁', "~") } else { line };
+        let line = if th.ascii {
+            line.replace('⌁', "~")
+        } else {
+            line
+        };
         put(buf, r, 0, 0, &clip(&line, usize::from(r.width)), style);
         if text(row, "kind") == "tool" {
             if flag(row, "selected") {
@@ -139,36 +216,82 @@ pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
             }
             if matches!(get(row, "ok"), Some(Value::Bool(true))) {
                 // The name stays plain; only the glyph of a finished call is lit.
-                put(buf, r, 0, 0, th.g(if flag(row, "expanded") { "▾" } else { "▸" }), Style::new().fg(th.ok).patch(if flag(row, "selected") { th.interact(Interact::Selected) } else { Style::new() }));
+                put(
+                    buf,
+                    r,
+                    0,
+                    0,
+                    th.g(if flag(row, "expanded") { "▾" } else { "▸" }),
+                    Style::new().fg(th.ok).patch(if flag(row, "selected") {
+                        th.interact(Interact::Selected)
+                    } else {
+                        Style::new()
+                    }),
+                );
             }
         }
         geom.lines.push(clip(&line, usize::from(r.width)));
-        geom.tools.push((text(row, "kind") == "tool").then(|| int(row, "ordinal") as usize));
+        geom.tools
+            .push((text(row, "kind") == "tool").then(|| int(row, "ordinal") as usize));
         geom.hits.push((HitId::TrRow(i), r, HitKind::Text));
     }
     // Selected cells: reading order from the first to the last.
     if let Some(((r0, c0), (r1, c1))) = sel {
         for row in r0..=r1 {
-            let (from, to) = (if row == r0 { c0 } else { 0 }, if row == r1 { c1 } else { body.width.saturating_sub(1) });
+            let (from, to) = (
+                if row == r0 { c0 } else { 0 },
+                if row == r1 {
+                    c1
+                } else {
+                    body.width.saturating_sub(1)
+                },
+            );
             for col in from..=to.min(body.width.saturating_sub(1)) {
                 if row < body.height {
-                    buf.set_style(Rect { x: body.x + col, y: body.y + row, width: 1, height: 1 }, th.interact(Interact::Selected));
+                    buf.set_style(
+                        Rect {
+                            x: body.x + col,
+                            y: body.y + row,
+                            width: 1,
+                            height: 1,
+                        },
+                        th.interact(Interact::Selected),
+                    );
                 }
             }
         }
     }
     // The scrollbar: a track on the right edge, a thumb sized by how much shows.
-    let (total, first) = (int(v, "total").max(0) as usize, int(v, "first").max(0) as usize);
+    let (total, first) = (
+        int(v, "total").max(0) as usize,
+        int(v, "first").max(0) as usize,
+    );
     let visible = usize::from(body.height);
     if total > visible && visible > 0 {
         let x = body.right();
-        let track = Rect { x, y: body.y, width: 1, height: body.height };
+        let track = Rect {
+            x,
+            y: body.y,
+            width: 1,
+            height: body.height,
+        };
         let len = (visible * visible / total).clamp(1, visible);
         let top = first.min(total - visible) * (visible - len) / (total - visible);
-        let thumb = Rect { y: track.y + top as u16, height: len as u16, ..track };
+        let thumb = Rect {
+            y: track.y + top as u16,
+            height: len as u16,
+            ..track
+        };
         let lit = [pointer.hover, pointer.pressed].contains(&Some(HitId::TrThumb));
         for y in thumb.top()..thumb.bottom() {
-            buf.set_string(x, y, th.g("█"), Style::new().fg(if lit { th.focus } else { th.dim_text }).bg(th.panel));
+            buf.set_string(
+                x,
+                y,
+                th.g("█"),
+                Style::new()
+                    .fg(if lit { th.focus } else { th.dim_text })
+                    .bg(th.panel),
+            );
         }
         geom.track = Some((track, thumb));
         geom.hits.push((HitId::TrTrack, track, HitKind::Track));
@@ -179,7 +302,12 @@ pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
     if !follow && body.height > 0 {
         let label = "jump to latest";
         let w = label.chars().count() as u16 + 4;
-        let r = Rect { x: body.right().saturating_sub(w + 1), y: body.bottom() - 1, width: w, height: 1 };
+        let r = Rect {
+            x: body.right().saturating_sub(w + 1),
+            y: body.bottom() - 1,
+            width: w,
+            height: 1,
+        };
         let state = if pointer.pressed == Some(HitId::JumpLatest) {
             Some(Interact::Pressed)
         } else if pointer.hover == Some(HitId::JumpLatest) {
@@ -191,16 +319,39 @@ pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
         geom.hits.push((HitId::JumpLatest, r, HitKind::Button));
     }
     // The bottom bar: the keys as buttons, or the text field a key opened.
-    let bar = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    let bar = Rect {
+        y: inner.bottom().saturating_sub(2),
+        height: 2,
+        ..inner
+    };
     if let Some(e) = entry {
         entry_line(buf, bar, 0, e, th);
-        let (b, _) = buttons(buf, bar, 1, &[("send_entry", "Enter", "Send", true), ("cancel_entry", "Esc", "Back", true)], th, pointer);
-        geom.hits.extend(b.into_iter().map(|(id, r)| (id, r, HitKind::Button)));
+        let (b, _) = buttons(
+            buf,
+            bar,
+            1,
+            &[
+                ("send_entry", "Enter", "Send", true),
+                ("cancel_entry", "Esc", "Back", true),
+            ],
+            th,
+            pointer,
+        );
+        geom.hits
+            .extend(b.into_iter().map(|(id, r)| (id, r, HitKind::Button)));
     } else {
         let live = flag(v, "live");
-        let mut items: Vec<(&'static str, &str, &str, bool)> = vec![("close", "Esc", "Close", true), ("toggle", "Enter", "Expand", true)];
+        let mut items: Vec<(&'static str, &str, &str, bool)> = vec![
+            ("close", "Esc", "Close", true),
+            ("toggle", "Enter", "Expand", true),
+        ];
         items.push(("older", "[", "Older", true));
-        items.push(("newer", "]", "Newer", get(v, "at").is_some_and(|a| !matches!(a, Value::Null))));
+        items.push((
+            "newer",
+            "]",
+            "Newer",
+            get(v, "at").is_some_and(|a| !matches!(a, Value::Null)),
+        ));
         if flag(v, "retryable") {
             items.push(("retry", "r", "Retry", true));
         }
@@ -215,12 +366,21 @@ pub fn draw(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Point
             items.push(("resume", "R", "Resume", true));
         }
         if sel.is_some() {
-            items.push(("copy", "Ctrl+C", if copied { "Copied" } else { "Copy" }, true));
+            items.push((
+                "copy",
+                "Ctrl+C",
+                if copied { "Copied" } else { "Copy" },
+                true,
+            ));
         }
         let (b, _) = buttons(buf, bar, 0, &items, th, pointer);
         geom.hits.extend(b.into_iter().map(|(id, r)| {
             // The copy button is the `copy` hint of a selection.
-            let id = if id == HitId::Button("copy") { HitId::CopyHint } else { id };
+            let id = if id == HitId::Button("copy") {
+                HitId::CopyHint
+            } else {
+                id
+            };
             (id, r, HitKind::Button)
         }));
     }

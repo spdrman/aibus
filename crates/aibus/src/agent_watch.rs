@@ -79,9 +79,16 @@ mod tests {
     fn a_new_file_in_a_watched_directory_sends_agents_reloaded() {
         let dir = tempfile::tempdir().unwrap();
         let (tx, mut rx) = mpsc::channel(8);
-        let _watch = start(&[dir.path().to_owned()], RecursiveMode::NonRecursive, &tx, || Some(reloaded())).unwrap();
+        let _watch = start(
+            &[dir.path().to_owned()],
+            RecursiveMode::NonRecursive,
+            &tx,
+            || Some(reloaded()),
+        )
+        .unwrap();
         std::fs::write(dir.path().join("a.md"), "---\nname: a\n---\n").unwrap();
-        let msg = wait_for_one(&mut rx, Duration::from_secs(10)).expect("no AgentsReloaded within 10s");
+        let msg =
+            wait_for_one(&mut rx, Duration::from_secs(10)).expect("no AgentsReloaded within 10s");
         assert_eq!(msg.name(), "AgentsReloaded");
     }
 

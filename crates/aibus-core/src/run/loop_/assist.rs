@@ -17,8 +17,8 @@ use smol_str::SmolStr;
 
 use super::{last_text, Task};
 use crate::advisor::Triggers;
-use crate::assist::{complete, Assist};
 use crate::agent::{PermissionMode, Role};
+use crate::assist::{complete, Assist};
 use crate::msg::{Checkpoint, Decision, HookEvent, Msg, RouterKind, RouterQuestion, Verdict};
 use crate::router::{self, RETRY_CHOICES};
 use crate::run::Conversation;
@@ -50,7 +50,13 @@ impl Task<'_> {
     pub(super) fn ledger_begin(&self, conv: &Conversation) {
         if let Some(a) = self.deps.assist.as_deref().filter(|a| a.advisor.is_some()) {
             let c = self.cfg;
-            a.ledger.begin(c.run, &c.def.name, c.def.role, &c.prompt, conv.messages.len());
+            a.ledger.begin(
+                c.run,
+                &c.def.name,
+                c.def.role,
+                &c.prompt,
+                conv.messages.len(),
+            );
         }
     }
 
@@ -104,13 +110,21 @@ impl<'a> LeadAssist<'a> {
 
     /// `[label]`, the prefix of what the router says.
     fn tag(&self) -> String {
-        let label = self.assist.router.as_ref().map_or("router", |r| r.label.as_str());
+        let label = self
+            .assist
+            .router
+            .as_ref()
+            .map_or("router", |r| r.label.as_str());
         format!("[{}]", label.to_lowercase())
     }
 
     /// One router question. `None` when the router is off, the turn's cap is used up, or it
     /// could not answer (the lead then carries on without it).
-    async fn consult(&mut self, t: &Task<'_>, q: RouterQuestion) -> Option<crate::msg::RouterAnswer> {
+    async fn consult(
+        &mut self,
+        t: &Task<'_>,
+        q: RouterQuestion,
+    ) -> Option<crate::msg::RouterAnswer> {
         let router = self.assist.router_now()?;
         if self.used >= router.max_per_turn {
             return None;
@@ -126,7 +140,12 @@ impl<'a> LeadAssist<'a> {
                     latency_ms = answer.latency.as_millis() as u64,
                     turn_ms = self.spent.as_millis() as u64,
                 );
-                t.send(Msg::RouterAnswered { fork, question: q, answer: answer.clone() }).await;
+                t.send(Msg::RouterAnswered {
+                    fork,
+                    question: q,
+                    answer: answer.clone(),
+                })
+                .await;
                 Some(answer)
             }
             Err(error) => {
@@ -143,7 +162,8 @@ impl<'a> LeadAssist<'a> {
         self.spent = Duration::ZERO;
         self.which_file(t, conv).await;
         for note in self.notes.drain(..) {
-            conv.messages.push(Message::text(MessageRole::System, &note));
+            conv.messages
+                .push(Message::text(MessageRole::System, &note));
         }
     }
 
@@ -167,7 +187,12 @@ impl<'a> LeadAssist<'a> {
             })
             .unwrap_or_default();
         for b in &last.blocks {
-            if let ContentBlock::ToolResult { content, is_error: true, .. } = b {
+            if let ContentBlock::ToolResult {
+                content,
+                is_error: true,
+                ..
+            } = b
+            {
                 text.push('\n');
                 text.push_str(content);
             }
@@ -178,10 +203,11 @@ impl<'a> LeadAssist<'a> {
         }
         let cwd = t.cfg.cwd.clone();
         let asked = text.clone();
-        let found = tokio::task::spawn_blocking(move || router::which_file_candidates(&cwd, &asked))
-            .await
-            .ok()
-            .flatten();
+        let found =
+            tokio::task::spawn_blocking(move || router::which_file_candidates(&cwd, &asked))
+                .await
+                .ok()
+                .flatten();
         let Some((symbol, files)) = found else {
             return;
         };
@@ -263,7 +289,14 @@ impl<'a> LeadAssist<'a> {
         if !router::ends_with_intention(&said) {
             return false;
         }
-        let tail: String = said.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
+        let tail: String = said
+            .chars()
+            .rev()
+            .take(400)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         let q = RouterQuestion {
             kind: RouterKind::WhichTool,
             context: format!("The lead said, and then called no tool:\n{tail}"),
@@ -293,11 +326,20 @@ impl<'a> LeadAssist<'a> {
     }
 
     /// The model replied: `before_plan`.
-    pub(super) async fn after_reply(&mut self, t: &Task<'_>, conv: &Conversation, mode: PermissionMode) {
+    pub(super) async fn after_reply(
+        &mut self,
+        t: &Task<'_>,
+        conv: &Conversation,
+        mode: PermissionMode,
+    ) {
         let Some(msg) = conv.messages.last() else {
             return;
         };
-        if msg.blocks.iter().any(|b| matches!(b, ContentBlock::ToolUse { .. })) {
+        if msg
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolUse { .. }))
+        {
             self.nudged = false;
         }
         let hit = self.triggers.as_mut().and_then(|tr| tr.on_assistant(msg));
@@ -363,11 +405,17 @@ impl<'a> LeadAssist<'a> {
             ("checkpoint".to_owned(), json!(cp.name())),
             ("detail".to_owned(), json!(detail)),
         ]);
-        let fired = t.fire(HookEvent::Checkpoint, Some(cp.name()), mode, extra).await;
+        let fired = t
+            .fire(HookEvent::Checkpoint, Some(cp.name()), mode, extra)
+            .await;
         if fired.block.is_some() {
             return;
         }
-        t.send(Msg::CheckpointHit { checkpoint: cp.clone(), detail: detail.clone() }).await;
+        t.send(Msg::CheckpointHit {
+            checkpoint: cp.clone(),
+            detail: detail.clone(),
+        })
+        .await;
         t.sync(conv);
         let packet = self.assist.ledger.packet(adv.packet_max_tokens);
         let text = t.deps.hooks.redact(&packet.text).into_owned();
@@ -379,7 +427,11 @@ impl<'a> LeadAssist<'a> {
         let advice = match advise(t, &adv, &prompt).await {
             Ok(advice) => advice,
             Err(error) => {
-                t.send(Msg::IoError { context: "advisor".into(), error }).await;
+                t.send(Msg::IoError {
+                    context: "advisor".into(),
+                    error,
+                })
+                .await;
                 String::new()
             }
         };
@@ -429,7 +481,9 @@ async fn advise(
             logprobs: false,
             metadata: RequestMetadata::default(),
         };
-        let (resp, _) = complete(&adv.seat, req, t.cancel).await.map_err(|e| e.message)?;
+        let (resp, _) = complete(&adv.seat, req, t.cancel)
+            .await
+            .map_err(|e| e.message)?;
         advice = resp
             .message
             .blocks
@@ -444,7 +498,9 @@ async fn advise(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input, .. } => Some((*id, name.clone(), input.clone())),
+                ContentBlock::ToolUse {
+                    id, name, input, ..
+                } => Some((*id, name.clone(), input.clone())),
                 _ => None,
             })
             .collect();
@@ -457,15 +513,24 @@ async fn advise(
             let out = t
                 .deps
                 .tools
-                .call_gated(&eff, &cx, adv.def.permission_mode, &name, input, |_| async {
-                    Decision::Deny
-                })
+                .call_gated(
+                    &eff,
+                    &cx,
+                    adv.def.permission_mode,
+                    &name,
+                    input,
+                    |_| async { Decision::Deny },
+                )
                 .await;
             let (content, is_error) = match out {
                 Ok(o) => (o.content, false),
                 Err(e) => (e.to_string(), true),
             };
-            results.push(ContentBlock::ToolResult { id, content, is_error });
+            results.push(ContentBlock::ToolResult {
+                id,
+                content,
+                is_error,
+            });
         }
         messages.push(Message {
             role: MessageRole::User,

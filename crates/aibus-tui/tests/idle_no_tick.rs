@@ -43,5 +43,8 @@ async fn ticks_flow_while_a_run_is_running() {
     .unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), app.run()).await;
     let n = ticks(&app);
-    assert!((25..=35).contains(&n), "about 30 ticks in one second, got {n}");
+    assert!(
+        (25..=35).contains(&n),
+        "about 30 ticks in one second, got {n}"
+    );
 }

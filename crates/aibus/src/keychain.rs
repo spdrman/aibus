@@ -34,7 +34,9 @@ impl Keychain for OsKeychain {
     }
 
     fn set(&self, service: &str, user: &str, secret: &Secret<String>) -> Result<(), KeychainError> {
-        entry(service, user)?.set_password(secret.expose()).map_err(map)
+        entry(service, user)?
+            .set_password(secret.expose())
+            .map_err(map)
     }
 
     fn delete(&self, service: &str, user: &str) -> Result<(), KeychainError> {
@@ -87,7 +89,8 @@ mod tests {
 
     #[test]
     fn other_errors_fail_the_call_and_never_echo_stored_bytes() {
-        let KeychainError::Failed(m) = map(keyring::Error::BadEncoding(b"sk-secret-bytes".to_vec()))
+        let KeychainError::Failed(m) =
+            map(keyring::Error::BadEncoding(b"sk-secret-bytes".to_vec()))
         else {
             panic!("not Failed")
         };
@@ -108,7 +111,9 @@ mod tests {
         keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
         assert!(OsKeychain.get("aibus", "account:none").unwrap().is_none());
         OsKeychain.delete("aibus", "account:none").unwrap();
-        OsKeychain.set("aibus", "account:none", &Secret::new("k".into())).unwrap();
+        OsKeychain
+            .set("aibus", "account:none", &Secret::new("k".into()))
+            .unwrap();
         assert!(matches!(OsKeychain.probe(), StoreHealth::Available(_)));
     }
 }

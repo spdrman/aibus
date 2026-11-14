@@ -48,7 +48,10 @@ fn check(rel: &str) {
         std::fs::write(&path, want).unwrap();
         return;
     }
-    panic!("{rel} does not match the command registry (AIBUS_UPDATE_DOCS=1 rewrites it):\n{}", diff(&have, &want));
+    panic!(
+        "{rel} does not match the command registry (AIBUS_UPDATE_DOCS=1 rewrites it):\n{}",
+        diff(&have, &want)
+    );
 }
 
 #[test]
@@ -95,15 +98,37 @@ fn rows_of(rel: &str) -> BTreeMap<String, String> {
 fn help_spec_and_readme_share_one_help_line_per_command() {
     let help: BTreeMap<String, String> = help_lines()
         .into_iter()
-        .map(|(entry, line)| (entry.trim_start_matches('/').split(' ').next().unwrap().to_owned(), line.to_owned()))
+        .map(|(entry, line)| {
+            (
+                entry
+                    .trim_start_matches('/')
+                    .split(' ')
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+                line.to_owned(),
+            )
+        })
         .collect();
-    let slash: Vec<&str> = REGISTRY.iter().filter(|s| s.surfaces.slash > 0).map(|s| s.name).collect();
+    let slash: Vec<&str> = REGISTRY
+        .iter()
+        .filter(|s| s.surfaces.slash > 0)
+        .map(|s| s.name)
+        .collect();
     assert_eq!(help.len(), slash.len(), "one /help line per slash command");
     for rel in ["README.md", "docs/spec/05-ui.md"] {
         let rows = rows_of(rel);
         for name in &slash {
-            assert_eq!(rows.get(*name), help.get(*name), "{rel}: /{name} has another help line than /help");
+            assert_eq!(
+                rows.get(*name),
+                help.get(*name),
+                "{rel}: /{name} has another help line than /help"
+            );
         }
-        assert_eq!(rows.len(), slash.len(), "{rel}: a row for a command the registry does not have");
+        assert_eq!(
+            rows.len(),
+            slash.len(),
+            "{rel}: a row for a command the registry does not have"
+        );
     }
 }

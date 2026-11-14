@@ -40,7 +40,10 @@ impl AuditLog {
             opts.mode(0o600);
         }
         let file = opts.open(dir.join(format!("{}.jsonl", ulid::Ulid::new())))?;
-        Ok(Self { file: Mutex::new(file), redactor })
+        Ok(Self {
+            file: Mutex::new(file),
+            redactor,
+        })
     }
 
     /// Writes one line. A failure to write is logged and otherwise ignored: a full disk must not

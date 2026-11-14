@@ -22,9 +22,19 @@ const REPLY_BYTES: usize = 64 * 1024;
 #[async_trait::async_trait]
 pub trait HookTransport: Send + Sync {
     /// One model call in a fresh context with no tools; the reply's text.
-    async fn ask(&self, system: &str, user: &str, cancel: &CancellationToken) -> Result<String, String>;
+    async fn ask(
+        &self,
+        system: &str,
+        user: &str,
+        cancel: &CancellationToken,
+    ) -> Result<String, String>;
     /// POSTs `body` as `application/json`; the status and the (capped) body of the answer.
-    async fn post(&self, url: &str, body: &str, cancel: &CancellationToken) -> Result<(u16, String), String>;
+    async fn post(
+        &self,
+        url: &str,
+        body: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(u16, String), String>;
 }
 
 #[derive(Deserialize)]
@@ -67,7 +77,8 @@ fn verdict(reply: &str) -> Result<Reply, String> {
         let inner = inner.strip_prefix("json").unwrap_or(inner);
         text = inner.strip_suffix("```").unwrap_or(inner).trim();
     }
-    serde_json::from_str(text).map_err(|e| format!("the reply is not {{\"decision\", \"reason\"}}: {e}"))
+    serde_json::from_str(text)
+        .map_err(|e| format!("the reply is not {{\"decision\", \"reason\"}}: {e}"))
 }
 
 /// Runs a `prompt` or `http` hook and shapes the answer like a command's exit: 0 with the
@@ -82,7 +93,9 @@ pub(super) async fn run(
 ) -> std::io::Result<Done> {
     let started = Instant::now();
     let Some(transport) = transport else {
-        return Err(io("no model or network access is set up for this kind of hook"));
+        return Err(io(
+            "no model or network access is set up for this kind of hook",
+        ));
     };
     let call = async {
         match spec.kind {
@@ -91,13 +104,12 @@ pub(super) async fn run(
                 let reply = transport.ask(SYSTEM, &user, cancel).await.map_err(io)?;
                 let v = verdict(&reply).map_err(io)?;
                 Ok(match v.decision {
-                    Decision::Deny => exited(
-                        2,
-                        String::new(),
-                        v.reason.unwrap_or_default(),
-                        started,
-                    ),
-                    Decision::Allow => exited(0, "{\"decision\":\"allow\"}".into(), String::new(), started),
+                    Decision::Deny => {
+                        exited(2, String::new(), v.reason.unwrap_or_default(), started)
+                    }
+                    Decision::Allow => {
+                        exited(0, "{\"decision\":\"allow\"}".into(), String::new(), started)
+                    }
                     Decision::Ask => exited(
                         0,
                         serde_json::json!({"decision": "ask", "reason": v.reason}).to_string(),
@@ -108,11 +120,19 @@ pub(super) async fn run(
             }
             // The answer is the verdict a command would print: a JSON object, or nothing.
             HookKind::Http => {
-                let (status, body) = transport.post(&spec.command, stdin, cancel).await.map_err(io)?;
+                let (status, body) = transport
+                    .post(&spec.command, stdin, cancel)
+                    .await
+                    .map_err(io)?;
                 if (200..300).contains(&status) {
                     Ok(exited(0, body, String::new(), started))
                 } else {
-                    Ok(exited(1, String::new(), format!("the server answered {status}"), started))
+                    Ok(exited(
+                        1,
+                        String::new(),
+                        format!("the server answered {status}"),
+                        started,
+                    ))
                 }
             }
             HookKind::Command => Err(io("not a remote hook")),
@@ -137,8 +157,18 @@ mod tests {
 
     #[test]
     fn a_verdict_is_strict() {
-        assert!(matches!(verdict("{\"decision\":\"deny\",\"reason\":\"no\"}").unwrap().decision, Decision::Deny));
-        assert!(matches!(verdict("```json\n{\"decision\":\"allow\"}\n```").unwrap().decision, Decision::Allow));
+        assert!(matches!(
+            verdict("{\"decision\":\"deny\",\"reason\":\"no\"}")
+                .unwrap()
+                .decision,
+            Decision::Deny
+        ));
+        assert!(matches!(
+            verdict("```json\n{\"decision\":\"allow\"}\n```")
+                .unwrap()
+                .decision,
+            Decision::Allow
+        ));
         for bad in [
             "sure, allow it",
             "{\"decision\":\"maybe\"}",

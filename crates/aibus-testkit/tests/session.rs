@@ -18,7 +18,12 @@ fn big_session_is_deterministic_and_the_size_the_spec_names() {
 #[test]
 fn xdg_temp_resolves_all_four_directories_under_one_root() {
     let x = xdg_temp();
-    for p in [&x.paths.config, &x.paths.data, &x.paths.state, &x.paths.cache] {
+    for p in [
+        &x.paths.config,
+        &x.paths.data,
+        &x.paths.state,
+        &x.paths.cache,
+    ] {
         assert!(p.is_dir() && p.starts_with(x.root()), "{}", p.display());
     }
 }

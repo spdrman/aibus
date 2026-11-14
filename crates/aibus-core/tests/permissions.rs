@@ -17,9 +17,9 @@ use aibus_core::*;
 use aibus_graph::Graph;
 use aibus_provider::fake::{FakeProvider, Script, Step};
 use aibus_provider::StopReason;
+use aibus_testkit::xdg_temp;
 use aibus_testkit::{fake_credential, FakeClock};
 use serde_json::{json, Value};
-use aibus_testkit::xdg_temp;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -73,7 +73,11 @@ fn decide_reproduces_every_cell_of_the_09_table() {
         // web_fetch and delegate-with-worktree are not implemented yet, but they sit in the bash
         // column of the table: they report `Ask` outside bypass.
         for name in ["web_fetch", "delegate"] {
-            let need = if mode == Bypass { Need::Never } else { Need::Ask };
+            let need = if mode == Bypass {
+                Need::Never
+            } else {
+                Need::Ask
+            };
             assert_eq!(decide(mode, name, need, false), sh, "{name} in {mode:?}");
         }
     }
@@ -98,17 +102,34 @@ fn pre_approval_skips_the_prompt_but_never_lifts_a_refusal() {
         (Default, Need::Never, false, Allow),
     ];
     for (mode, need, pre, want) in table {
-        assert_eq!(decide(mode, "bash", need, pre), want, "{mode:?} {need:?} pre={pre}");
+        assert_eq!(
+            decide(mode, "bash", need, pre),
+            want,
+            "{mode:?} {need:?} pre={pre}"
+        );
     }
-    assert_eq!(decide(Plan, "plan", Need::Ask, false), Allow, "the plan tool is allowed in plan mode");
+    assert_eq!(
+        decide(Plan, "plan", Need::Ask, false),
+        Allow,
+        "the plan tool is allowed in plan mode"
+    );
 }
 
 #[test]
 fn bypass_needs_the_environment_variable_and_marks_the_graph() {
     use PermissionMode::*;
-    assert!(matches!(bypass_allowed(Bypass, None), Err(AibusError::Usage(_))));
-    assert!(matches!(bypass_allowed(Bypass, Some("0")), Err(AibusError::Usage(_))));
-    assert!(matches!(bypass_allowed(Bypass, Some("yes")), Err(AibusError::Usage(_))));
+    assert!(matches!(
+        bypass_allowed(Bypass, None),
+        Err(AibusError::Usage(_))
+    ));
+    assert!(matches!(
+        bypass_allowed(Bypass, Some("0")),
+        Err(AibusError::Usage(_))
+    ));
+    assert!(matches!(
+        bypass_allowed(Bypass, Some("yes")),
+        Err(AibusError::Usage(_))
+    ));
     assert_eq!(bypass_allowed(Bypass, None).unwrap_err().exit_code(), 2);
     assert!(bypass_allowed(Bypass, Some("1")).unwrap());
     for m in [Default, AcceptEdits, DontAsk, Plan] {
@@ -118,7 +139,10 @@ fn bypass_needs_the_environment_variable_and_marks_the_graph() {
 
     let mut a = common::app();
     let key = "model:permissions:bypass";
-    assert_eq!(a.graph.read_key(key), Some(&aibus_graph::Value::Bool(false)));
+    assert_eq!(
+        a.graph.read_key(key),
+        Some(&aibus_graph::Value::Bool(false))
+    );
     a.enable_bypass().unwrap();
     assert_eq!(a.graph.read_key(key), Some(&aibus_graph::Value::Bool(true)));
 }
@@ -135,14 +159,33 @@ fn patterns_round_trip_and_persist_without_losing_other_keys() {
     let dir = xdg_temp();
     let f = dir.path().join(".aibus/settings.toml");
     persist_allow(&f, &[pat("bash(cargo *)")]).unwrap();
-    assert!(std::fs::read_to_string(&f).unwrap().contains("bash(cargo *)"));
-    std::fs::write(&f, "[defaults]\nmodel = \"fast\"\n\n[tools]\nweb = true\nallow = [\"read\"]\n").unwrap();
-    persist_allow(&f, &[pat("bash(cargo *)"), pat("read"), pat("bash(cargo *)")]).unwrap();
+    assert!(std::fs::read_to_string(&f)
+        .unwrap()
+        .contains("bash(cargo *)"));
+    std::fs::write(
+        &f,
+        "[defaults]\nmodel = \"fast\"\n\n[tools]\nweb = true\nallow = [\"read\"]\n",
+    )
+    .unwrap();
+    persist_allow(
+        &f,
+        &[pat("bash(cargo *)"), pat("read"), pat("bash(cargo *)")],
+    )
+    .unwrap();
     let doc: toml::Table = std::fs::read_to_string(&f).unwrap().parse().unwrap();
     assert_eq!(doc["defaults"]["model"].as_str(), Some("fast"));
     assert_eq!(doc["tools"]["web"].as_bool(), Some(true));
-    let allow: Vec<_> = doc["tools"]["allow"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
-    assert_eq!(allow, ["read", "bash(cargo *)"], "no duplicates, order kept");
+    let allow: Vec<_> = doc["tools"]["allow"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        allow,
+        ["read", "bash(cargo *)"],
+        "no duplicates, order kept"
+    );
     assert!(!f.with_extension("toml.tmp").exists());
 }
 
@@ -157,7 +200,19 @@ fn executor(gate: Gate, dir: &Path) -> (Arc<ToolExecutor>, Arc<Bash>) {
 
 fn all() -> EffectiveTools {
     EffectiveTools {
-        allow: ["read", "ls", "glob", "grep", "write", "edit", "bash", "report_artifact"].iter().map(|s| pat(s)).collect(),
+        allow: [
+            "read",
+            "ls",
+            "glob",
+            "grep",
+            "write",
+            "edit",
+            "bash",
+            "report_artifact",
+        ]
+        .iter()
+        .map(|s| pat(s))
+        .collect(),
         deny: vec![],
     }
 }
@@ -195,42 +250,120 @@ async fn the_executor_asks_denies_and_remembers_per_the_mode() {
     let write = json!({"path": "a.txt", "content": "x"});
 
     // default: bash and write ask; a yes runs the call and a no is a denial
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Default, "bash", echo.clone(), Some(Decision::Allow)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "bash",
+        echo.clone(),
+        Some(Decision::Allow),
+    )
+    .await;
     assert_eq!(r.unwrap().content.trim_end(), "hi");
     assert_eq!(asked, ["bash: echo hi"]);
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Default, "bash", echo.clone(), Some(Decision::Deny)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "bash",
+        echo.clone(),
+        Some(Decision::Deny),
+    )
+    .await;
     assert_eq!(denied(&r), Some("permission denied"));
     assert_eq!(asked.len(), 1);
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Default, "write", write.clone(), Some(Decision::Allow)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "write",
+        write.clone(),
+        Some(Decision::Allow),
+    )
+    .await;
     assert!(r.is_ok());
     assert_eq!(asked.len(), 1);
     assert!(asked[0].starts_with("write: "));
 
     // accept_edits: write is silent, bash still asks
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::AcceptEdits, "write", write.clone(), None).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::AcceptEdits,
+        "write",
+        write.clone(),
+        None,
+    )
+    .await;
     assert!(r.is_ok() && asked.is_empty());
-    let (_, asked) = gated(&ex, dir.path(), PermissionMode::AcceptEdits, "bash", echo.clone(), Some(Decision::Allow)).await;
+    let (_, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::AcceptEdits,
+        "bash",
+        echo.clone(),
+        Some(Decision::Allow),
+    )
+    .await;
     assert_eq!(asked.len(), 1);
 
     // dont_ask: what would ask is refused without asking
     for (tool, input) in [("bash", echo.clone()), ("write", write.clone())] {
-        let (r, asked) = gated(&ex, dir.path(), PermissionMode::DontAsk, tool, input, Some(Decision::Allow)).await;
-        assert_eq!(denied(&r), Some(&*format!("dont_ask mode does not allow {tool}")));
+        let (r, asked) = gated(
+            &ex,
+            dir.path(),
+            PermissionMode::DontAsk,
+            tool,
+            input,
+            Some(Decision::Allow),
+        )
+        .await;
+        assert_eq!(
+            denied(&r),
+            Some(&*format!("dont_ask mode does not allow {tool}"))
+        );
         assert!(asked.is_empty());
     }
 
     // plan: reads pass, anything that writes or runs is refused
     std::fs::write(dir.path().join("r.txt"), "readable\n").unwrap();
-    let (r, _) = gated(&ex, dir.path(), PermissionMode::Plan, "read", json!({"path": "r.txt"}), None).await;
+    let (r, _) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Plan,
+        "read",
+        json!({"path": "r.txt"}),
+        None,
+    )
+    .await;
     assert!(r.unwrap().content.contains("readable"));
     for (tool, input) in [("bash", echo.clone()), ("write", write.clone())] {
-        let (r, asked) = gated(&ex, dir.path(), PermissionMode::Plan, tool, input, Some(Decision::Allow)).await;
-        assert_eq!(denied(&r), Some(&*format!("plan mode does not allow {tool}")));
+        let (r, asked) = gated(
+            &ex,
+            dir.path(),
+            PermissionMode::Plan,
+            tool,
+            input,
+            Some(Decision::Allow),
+        )
+        .await;
+        assert_eq!(
+            denied(&r),
+            Some(&*format!("plan mode does not allow {tool}"))
+        );
         assert!(asked.is_empty());
     }
 
     // bypass: nothing asks
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Bypass, "bash", echo.clone(), None).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Bypass,
+        "bash",
+        echo.clone(),
+        None,
+    )
+    .await;
     assert!(r.is_ok() && asked.is_empty());
 }
 
@@ -241,18 +374,50 @@ async fn always_for_this_pattern_is_session_scoped_and_covers_every_part() {
     let mode = PermissionMode::Default;
     let echo = |c: &str| json!({ "command": c });
 
-    let (r, asked) = gated(&ex, dir.path(), mode, "bash", echo("echo one"), Some(Decision::AllowSession)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        mode,
+        "bash",
+        echo("echo one"),
+        Some(Decision::AllowSession),
+    )
+    .await;
     assert!(r.is_ok());
     assert_eq!(asked.len(), 1);
     assert_eq!(ex.session_allow(), [pat("bash(echo *)")]);
 
     // The same pattern no longer asks, even as one part of a compound command...
-    let (r, asked) = gated(&ex, dir.path(), mode, "bash", echo("echo two; echo three | cat"), Some(Decision::Deny)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        mode,
+        "bash",
+        echo("echo two; echo three | cat"),
+        Some(Decision::Deny),
+    )
+    .await;
     assert_eq!(asked.len(), 1, "`cat` is not covered, so it asks: {r:?}");
-    let (r, asked) = gated(&ex, dir.path(), mode, "bash", echo("echo two && echo $(echo three)"), None).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        mode,
+        "bash",
+        echo("echo two && echo $(echo three)"),
+        None,
+    )
+    .await;
     assert!(r.is_ok() && asked.is_empty(), "{r:?}");
     // ...but a part it does not cover asks again.
-    let (r, asked) = gated(&ex, dir.path(), mode, "bash", echo("echo ok; touch PWN"), Some(Decision::Deny)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        mode,
+        "bash",
+        echo("echo ok; touch PWN"),
+        Some(Decision::Deny),
+    )
+    .await;
     assert_eq!(denied(&r), Some("permission denied"));
     assert_eq!(asked.len(), 1);
     assert!(!dir.path().join("PWN").exists());
@@ -261,8 +426,16 @@ async fn always_for_this_pattern_is_session_scoped_and_covers_every_part() {
     let (fresh, _) = executor(Gate::default(), dir.path());
     assert!(fresh.session_allow().is_empty());
     assert!(!dir.path().join(".aibus").exists());
-    persist_allow(&dir.path().join(".aibus/settings.toml"), &ex.session_allow()).unwrap();
-    assert!(std::fs::read_to_string(dir.path().join(".aibus/settings.toml")).unwrap().contains("bash(echo *)"));
+    persist_allow(
+        &dir.path().join(".aibus/settings.toml"),
+        &ex.session_allow(),
+    )
+    .unwrap();
+    assert!(
+        std::fs::read_to_string(dir.path().join(".aibus/settings.toml"))
+            .unwrap()
+            .contains("bash(echo *)")
+    );
 }
 
 #[tokio::test]
@@ -274,17 +447,57 @@ async fn pre_approved_patterns_from_config_and_the_flag_skip_the_prompt() {
     };
     let (ex, _) = executor(gate, dir.path());
     let echo = |c: &str| json!({ "command": c });
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Default, "bash", echo("echo a && echo b"), None).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "bash",
+        echo("echo a && echo b"),
+        None,
+    )
+    .await;
     assert!(r.is_ok() && asked.is_empty(), "{r:?}");
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Default, "bash", echo("echo a; touch PWN"), Some(Decision::Deny)).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "bash",
+        echo("echo a; touch PWN"),
+        Some(Decision::Deny),
+    )
+    .await;
     assert!(r.is_err() && asked.len() == 1);
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::Default, "write", json!({"path": "p.txt", "content": "x"}), None).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "write",
+        json!({"path": "p.txt", "content": "x"}),
+        None,
+    )
+    .await;
     assert!(r.is_ok() && asked.is_empty());
     // dont_ask treats a pre-approved call as one that would not ask
-    let (r, asked) = gated(&ex, dir.path(), PermissionMode::DontAsk, "bash", echo("echo a"), None).await;
+    let (r, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::DontAsk,
+        "bash",
+        echo("echo a"),
+        None,
+    )
+    .await;
     assert!(r.is_ok() && asked.is_empty());
     // a pre-approval does not reach into plan mode
-    let (r, _) = gated(&ex, dir.path(), PermissionMode::Plan, "bash", echo("echo a"), None).await;
+    let (r, _) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Plan,
+        "bash",
+        echo("echo a"),
+        None,
+    )
+    .await;
     assert!(r.is_err());
 }
 
@@ -298,10 +511,26 @@ async fn the_prompt_summary_is_redacted_and_short() {
         ..Gate::default()
     };
     let (ex, _) = executor(gate, dir.path());
-    let (_, asked) = gated(&ex, dir.path(), PermissionMode::Default, "bash", json!({"command": "curl -H 'x: sk-live-123456789' host"}), None).await;
+    let (_, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "bash",
+        json!({"command": "curl -H 'x: sk-live-123456789' host"}),
+        None,
+    )
+    .await;
     assert!(!asked[0].contains("sk-live-123456789"), "{}", asked[0]);
     let long = format!("echo {}", "x".repeat(500));
-    let (_, asked) = gated(&ex, dir.path(), PermissionMode::Default, "bash", json!({ "command": long }), None).await;
+    let (_, asked) = gated(
+        &ex,
+        dir.path(),
+        PermissionMode::Default,
+        "bash",
+        json!({ "command": long }),
+        None,
+    )
+    .await;
     assert!(asked[0].chars().count() <= 203, "{}", asked[0].len());
     assert!(asked[0].ends_with("..."));
 }
@@ -313,16 +542,23 @@ async fn cancelling_while_a_prompt_is_open_ends_the_call() {
     let c = cx(dir.path());
     let cancel = c.cancel.clone();
     let tools = all();
-    let call = ex.call_gated(&tools, &c, PermissionMode::Default, "bash", json!({"command": "echo hi"}), |_| async {
-        std::future::pending::<Decision>().await
-    });
+    let call = ex.call_gated(
+        &tools,
+        &c,
+        PermissionMode::Default,
+        "bash",
+        json!({"command": "echo hi"}),
+        |_| async { std::future::pending::<Decision>().await },
+    );
     tokio::pin!(call);
     tokio::select! {
         _ = &mut call => panic!("waiting for an answer"),
         () = tokio::time::sleep(Duration::from_millis(100)) => {}
     }
     cancel.cancel();
-    let r = tokio::time::timeout(Duration::from_millis(500), call).await.unwrap();
+    let r = tokio::time::timeout(Duration::from_millis(500), call)
+        .await
+        .unwrap();
     assert!(matches!(r, Err(ToolError::Cancelled)), "{r:?}");
 }
 
@@ -333,14 +569,26 @@ async fn report_artifact_records_the_file_and_the_fraction() {
     let dir = xdg_temp();
     std::fs::write(dir.path().join("out.md"), "report").unwrap();
     let c = cx(dir.path());
-    let out = ReportArtifact.call(&c, json!({"path": "out.md", "kind": "report", "progress": 0.25})).await.unwrap();
+    let out = ReportArtifact
+        .call(
+            &c,
+            json!({"path": "out.md", "kind": "report", "progress": 0.25}),
+        )
+        .await
+        .unwrap();
     assert_eq!(out.artifacts.len(), 1);
     assert_eq!(out.artifacts[0].name, "out.md");
     assert_eq!(out.artifacts[0].kind, "report");
-    assert_eq!(out.artifacts[0].path, dir.path().canonicalize().unwrap().join("out.md"));
+    assert_eq!(
+        out.artifacts[0].path,
+        dir.path().canonicalize().unwrap().join("out.md")
+    );
     assert_eq!(out.progress, Some(Progress::Fraction(0.25)));
 
-    let out = ReportArtifact.call(&c, json!({"path": "out.md", "kind": "report"})).await.unwrap();
+    let out = ReportArtifact
+        .call(&c, json!({"path": "out.md", "kind": "report"}))
+        .await
+        .unwrap();
     assert_eq!(out.progress, None);
 
     for bad in [
@@ -360,13 +608,31 @@ async fn report_artifact_records_the_file_and_the_fraction() {
 async fn ask_user_and_the_plan_tools_return_signals_for_the_run_loop() {
     let dir = xdg_temp();
     let c = cx(dir.path());
-    let out = AskUser.call(&c, json!({"question": "which?", "choices": ["a", "b"]})).await.unwrap();
-    assert_eq!(out.signal, Some(Signal::AskUser { question: "which?".into(), choices: vec!["a".into(), "b".into()] }));
+    let out = AskUser
+        .call(&c, json!({"question": "which?", "choices": ["a", "b"]}))
+        .await
+        .unwrap();
+    assert_eq!(
+        out.signal,
+        Some(Signal::AskUser {
+            question: "which?".into(),
+            choices: vec!["a".into(), "b".into()]
+        })
+    );
     assert!(AskUser.call(&c, json!({"question": ""})).await.is_err());
-    assert_eq!(EnterPlanMode.call(&c, json!({})).await.unwrap().signal, Some(Signal::EnterPlan));
-    assert_eq!(ExitPlanMode.call(&c, json!({})).await.unwrap().signal, Some(Signal::ExitPlan));
+    assert_eq!(
+        EnterPlanMode.call(&c, json!({})).await.unwrap().signal,
+        Some(Signal::EnterPlan)
+    );
+    assert_eq!(
+        ExitPlanMode.call(&c, json!({})).await.unwrap().signal,
+        Some(Signal::ExitPlan)
+    );
     assert!(EnterPlanMode.call(&c, json!({"x": 1})).await.is_err());
-    let plan = Plan.call(&c, json!({"plan": "1. read\n2. write"})).await.unwrap();
+    let plan = Plan
+        .call(&c, json!({"plan": "1. read\n2. write"}))
+        .await
+        .unwrap();
     assert!(plan.content.contains("1. read") && plan.signal.is_none());
 }
 
@@ -376,10 +642,23 @@ fn interactive_and_plan_tools_are_lead_only_and_foreground_only() {
     let found = discover(None, dir.path(), None, &[], &[]).unwrap();
     let get = |n: &str| found.agents[&n.parse::<AgentName>().unwrap()].clone();
     let names = |d: &AgentDef, role, bg| -> Vec<String> {
-        effective_tools(d, role, 0, bg, 3).allow.iter().map(|p| p.tool.to_string()).collect()
+        effective_tools(d, role, 0, bg, 3)
+            .allow
+            .iter()
+            .map(|p| p.tool.to_string())
+            .collect()
     };
     let lead = names(&get("lead"), Role::Lead, false);
-    for t in ["ask_user", "plan", "enter_plan_mode", "exit_plan_mode", "bash", "write", "edit", "report_artifact"] {
+    for t in [
+        "ask_user",
+        "plan",
+        "enter_plan_mode",
+        "exit_plan_mode",
+        "bash",
+        "write",
+        "edit",
+        "report_artifact",
+    ] {
         assert!(lead.iter().any(|n| n == t), "lead lacks {t}: {lead:?}");
     }
     let worker = names(&get("general"), Role::Worker, false);
@@ -389,7 +668,10 @@ fn interactive_and_plan_tools_are_lead_only_and_foreground_only() {
     assert!(worker.iter().any(|n| n == "bash"));
     let background = names(&get("lead"), Role::Lead, true);
     for t in ["ask_user", "enter_plan_mode", "exit_plan_mode"] {
-        assert!(!background.iter().any(|n| n == t), "background lead has {t}");
+        assert!(
+            !background.iter().any(|n| n == t),
+            "background lead has {t}"
+        );
     }
     assert!(background.iter().any(|n| n == "plan"));
 }
@@ -402,8 +684,18 @@ fn every_tool_schema_matches_its_file_under_docs_schemas_tools() {
     let reg = ToolRegistry::standard(bash);
     let everything = EffectiveTools {
         allow: [
-            "read", "write", "edit", "glob", "grep", "ls", "bash", "report_artifact", "ask_user",
-            "plan", "enter_plan_mode", "exit_plan_mode",
+            "read",
+            "write",
+            "edit",
+            "glob",
+            "grep",
+            "ls",
+            "bash",
+            "report_artifact",
+            "ask_user",
+            "plan",
+            "enter_plan_mode",
+            "exit_plan_mode",
         ]
         .iter()
         .map(|s| pat(s))
@@ -418,9 +710,16 @@ fn every_tool_schema_matches_its_file_under_docs_schemas_tools() {
             .unwrap_or_else(|e| panic!("schema file for {}: {e}", spec.name));
         let mut file: Value = serde_json::from_str(&text).unwrap();
         let obj = file.as_object_mut().unwrap();
-        assert_eq!(obj.remove("title").as_ref().and_then(Value::as_str), Some(spec.name.as_str()));
+        assert_eq!(
+            obj.remove("title").as_ref().and_then(Value::as_str),
+            Some(spec.name.as_str())
+        );
         assert!(obj.remove("$schema").is_some());
-        assert_eq!(file, spec.schema, "{} drifted from its schema file", spec.name);
+        assert_eq!(
+            file, spec.schema,
+            "{} drifted from its schema file",
+            spec.name
+        );
     }
     // And nothing in the directory is orphaned.
     let files = std::fs::read_dir(&dir).unwrap().count();
@@ -434,20 +733,75 @@ async fn sample_inputs_validate_against_the_schemas_the_tools_publish() {
     std::fs::write(dir.path().join("f"), "x").unwrap();
     let (ex, _) = executor(Gate::default(), dir.path());
     let table: [(&str, Vec<Value>, Vec<Value>); 6] = [
-        ("write", vec![json!({"path": "w1", "content": ""})], vec![json!({"path": "w2"}), json!({"content": "x"}), json!({"path": "", "content": "x"}), json!({"path": "w3", "content": "x", "extra": 1})]),
-        ("edit", vec![json!({"path": "f", "old": "x", "new": "y"})], vec![json!({"path": "f", "old": "y"}), json!({"path": "f", "old": "", "new": "z"}), json!({"path": "f", "old": "y", "new": "z", "all": "yes"})]),
-        ("bash", vec![json!({"command": "true"}), json!({"command": "true", "timeout": 5, "background": false})], vec![json!({}), json!({"command": "true", "timeout": "5"}), json!({"command": "true", "timeout": 0})]),
-        ("report_artifact", vec![json!({"path": "f", "kind": "data", "progress": 1})], vec![json!({"path": "f"}), json!({"path": "f", "kind": "data", "progress": 2})]),
-        ("read", vec![json!({"path": "f"})], vec![json!({}), json!({"path": 3})]),
+        (
+            "write",
+            vec![json!({"path": "w1", "content": ""})],
+            vec![
+                json!({"path": "w2"}),
+                json!({"content": "x"}),
+                json!({"path": "", "content": "x"}),
+                json!({"path": "w3", "content": "x", "extra": 1}),
+            ],
+        ),
+        (
+            "edit",
+            vec![json!({"path": "f", "old": "x", "new": "y"})],
+            vec![
+                json!({"path": "f", "old": "y"}),
+                json!({"path": "f", "old": "", "new": "z"}),
+                json!({"path": "f", "old": "y", "new": "z", "all": "yes"}),
+            ],
+        ),
+        (
+            "bash",
+            vec![
+                json!({"command": "true"}),
+                json!({"command": "true", "timeout": 5, "background": false}),
+            ],
+            vec![
+                json!({}),
+                json!({"command": "true", "timeout": "5"}),
+                json!({"command": "true", "timeout": 0}),
+            ],
+        ),
+        (
+            "report_artifact",
+            vec![json!({"path": "f", "kind": "data", "progress": 1})],
+            vec![
+                json!({"path": "f"}),
+                json!({"path": "f", "kind": "data", "progress": 2}),
+            ],
+        ),
+        (
+            "read",
+            vec![json!({"path": "f"})],
+            vec![json!({}), json!({"path": 3})],
+        ),
         ("ls", vec![json!({"path": "."})], vec![json!({"path": []})]),
     ];
     for (tool, good, bad) in table {
         for input in good {
-            let (r, _) = gated(&ex, dir.path(), PermissionMode::Bypass, tool, input.clone(), None).await;
+            let (r, _) = gated(
+                &ex,
+                dir.path(),
+                PermissionMode::Bypass,
+                tool,
+                input.clone(),
+                None,
+            )
+            .await;
             assert!(r.is_ok(), "{tool} {input}: {r:?}");
         }
         for input in bad {
-            let (r, _) = gated(&ex, dir.path(), PermissionMode::Bypass, tool, input.clone(), None).await;
+            let (r, _) = gated(
+                &ex,
+                dir.path(),
+                PermissionMode::Bypass,
+                tool,
+                input.clone(),
+                None,
+            )
+            .await;
             assert!(r.is_err(), "{tool} {input} should be rejected");
         }
     }
@@ -463,7 +817,10 @@ fn lead_or(name: &str) -> AgentDef {
 
 fn call_step(name: &str, input: Value) -> [Step; 2] {
     [
-        Step::ToolCall { name: name.into(), input },
+        Step::ToolCall {
+            name: name.into(),
+            input,
+        },
         Step::Stop(StopReason::ToolUse),
     ]
 }
@@ -571,7 +928,13 @@ fn open_len(a: &common::A) -> usize {
 async fn a_prompt_parks_the_run_until_the_answer_arrives() {
     let _clock = FakeClock::new();
     let dir = xdg_temp();
-    let (ex, _) = executor(Gate { tty: true, ..Gate::default() }, dir.path());
+    let (ex, _) = executor(
+        Gate {
+            tty: true,
+            ..Gate::default()
+        },
+        dir.path(),
+    );
     let mut saw_open = false;
     let msgs = drive(
         script(&[("bash", json!({"command": "echo ran"}))]),
@@ -586,11 +949,19 @@ async fn a_prompt_parks_the_run_until_the_answer_arrives() {
                 assert!(request.summary.contains("echo ran"));
                 // The graph holds the open request and the run waits on it.
                 assert_eq!(open_len(app), 1);
-                assert_eq!(status_of(app, h.id), format!("waiting_permission:{}", request.id));
+                assert_eq!(
+                    status_of(app, h.id),
+                    format!("waiting_permission:{}", request.id)
+                );
                 let entry = &as_list(app.graph.read_key("model:permissions:open").unwrap())[0];
                 assert_eq!(get(entry, "agent").and_then(as_str), Some("general"));
                 saw_open = true;
-                h.mailbox.try_send(RunMail::Permission { id: request.id, decision: Decision::Allow }).unwrap();
+                h.mailbox
+                    .try_send(RunMail::Permission {
+                        id: request.id,
+                        decision: Decision::Allow,
+                    })
+                    .unwrap();
             }
             Msg::PermissionDecided { .. } => assert_eq!(open_len(app), 0),
             _ => {}
@@ -598,41 +969,92 @@ async fn a_prompt_parks_the_run_until_the_answer_arrives() {
     )
     .await;
     assert!(saw_open);
-    let names: Vec<_> = msgs.iter().map(Msg::name).filter(|n| !matches!(*n, "Stream" | "UsageUpdate")).collect();
+    let names: Vec<_> = msgs
+        .iter()
+        .map(Msg::name)
+        .filter(|n| !matches!(*n, "Stream" | "UsageUpdate"))
+        .collect();
     assert_eq!(
         names,
-        ["RunStarted", "ToolCallRequested", "PermissionNeeded", "PermissionDecided", "ToolCallFinished", "RunFinished"]
+        [
+            "RunStarted",
+            "ToolCallRequested",
+            "PermissionNeeded",
+            "PermissionDecided",
+            "ToolCallFinished",
+            "RunFinished"
+        ]
     );
     let r = finished(&msgs);
-    assert!(!r[0].is_error && r[0].content.trim_end() == "ran", "{:?}", r[0]);
-    assert!(matches!(&msgs[msgs.len() - 1], Msg::RunFinished { result, .. } if result.status == RunStatus::Completed));
-    assert!(msgs.iter().any(|m| matches!(m, Msg::PermissionDecided { decision: Decision::Allow, reason: None, .. })));
+    assert!(
+        !r[0].is_error && r[0].content.trim_end() == "ran",
+        "{:?}",
+        r[0]
+    );
+    assert!(
+        matches!(&msgs[msgs.len() - 1], Msg::RunFinished { result, .. } if result.status == RunStatus::Completed)
+    );
+    assert!(msgs.iter().any(|m| matches!(
+        m,
+        Msg::PermissionDecided {
+            decision: Decision::Allow,
+            reason: None,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]
 async fn a_denied_call_is_an_error_result_and_the_run_carries_on() {
     let _clock = FakeClock::new();
     let dir = xdg_temp();
-    let (ex, _) = executor(Gate { tty: true, ..Gate::default() }, dir.path());
+    let (ex, _) = executor(
+        Gate {
+            tty: true,
+            ..Gate::default()
+        },
+        dir.path(),
+    );
     let msgs = drive(
-        script(&[("bash", json!({"command": "touch PWN"})), ("ls", json!({"path": "."}))]),
+        script(&[
+            ("bash", json!({"command": "touch PWN"})),
+            ("ls", json!({"path": "."})),
+        ]),
         lead_or("general"),
         dir.path(),
         ex,
         |m, h, _| {
             if let Msg::PermissionNeeded { request } = m {
-                h.mailbox.try_send(RunMail::Permission { id: request.id, decision: Decision::Deny }).unwrap();
+                h.mailbox
+                    .try_send(RunMail::Permission {
+                        id: request.id,
+                        decision: Decision::Deny,
+                    })
+                    .unwrap();
             }
         },
     )
     .await;
     let r = finished(&msgs);
     assert_eq!(r.len(), 2, "the second call still ran");
-    assert!(r[0].is_error && r[0].content.contains("permission denied"), "{:?}", r[0]);
+    assert!(
+        r[0].is_error && r[0].content.contains("permission denied"),
+        "{:?}",
+        r[0]
+    );
     assert!(!r[1].is_error);
     assert!(!dir.path().join("PWN").exists());
-    assert!(matches!(&msgs[msgs.len() - 1], Msg::RunFinished { result, .. } if result.status == RunStatus::Completed));
-    assert!(msgs.iter().any(|m| matches!(m, Msg::PermissionDecided { decision: Decision::Deny, reason: None, .. })));
+    assert!(
+        matches!(&msgs[msgs.len() - 1], Msg::RunFinished { result, .. } if result.status == RunStatus::Completed)
+    );
+    assert!(msgs.iter().any(|m| matches!(
+        m,
+        Msg::PermissionDecided {
+            decision: Decision::Deny,
+            reason: None,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]
@@ -648,13 +1070,28 @@ async fn headless_default_emits_needed_then_denied_with_no_tty() {
         |_, _, _| {},
     )
     .await;
-    let names: Vec<_> = msgs.iter().map(Msg::name).filter(|n| !matches!(*n, "Stream" | "UsageUpdate")).collect();
+    let names: Vec<_> = msgs
+        .iter()
+        .map(Msg::name)
+        .filter(|n| !matches!(*n, "Stream" | "UsageUpdate"))
+        .collect();
     assert_eq!(
         names,
-        ["RunStarted", "ToolCallRequested", "PermissionNeeded", "PermissionDecided", "ToolCallFinished", "RunFinished"]
+        [
+            "RunStarted",
+            "ToolCallRequested",
+            "PermissionNeeded",
+            "PermissionDecided",
+            "ToolCallFinished",
+            "RunFinished"
+        ]
     );
     let decided = msgs.iter().find_map(|m| match m {
-        Msg::PermissionDecided { id, decision, reason } => Some((*id, *decision, reason.clone())),
+        Msg::PermissionDecided {
+            id,
+            decision,
+            reason,
+        } => Some((*id, *decision, reason.clone())),
         _ => None,
     });
     let (id, decision, reason) = decided.unwrap();
@@ -669,15 +1106,29 @@ async fn headless_default_emits_needed_then_denied_with_no_tty() {
 async fn always_applies_to_later_calls_in_the_same_session() {
     let _clock = FakeClock::new();
     let dir = xdg_temp();
-    let (ex, _) = executor(Gate { tty: true, ..Gate::default() }, dir.path());
+    let (ex, _) = executor(
+        Gate {
+            tty: true,
+            ..Gate::default()
+        },
+        dir.path(),
+    );
     let msgs = drive(
-        script(&[("bash", json!({"command": "echo one"})), ("bash", json!({"command": "echo two"}))]),
+        script(&[
+            ("bash", json!({"command": "echo one"})),
+            ("bash", json!({"command": "echo two"})),
+        ]),
         lead_or("general"),
         dir.path(),
         ex.clone(),
         |m, h, _| {
             if let Msg::PermissionNeeded { request } = m {
-                h.mailbox.try_send(RunMail::Permission { id: request.id, decision: Decision::AllowSession }).unwrap();
+                h.mailbox
+                    .try_send(RunMail::Permission {
+                        id: request.id,
+                        decision: Decision::AllowSession,
+                    })
+                    .unwrap();
             }
         },
     )
@@ -704,12 +1155,17 @@ async fn dont_ask_and_accept_edits_in_the_loop() {
     )
     .await;
     assert!(needed(&msgs).is_empty(), "dont_ask never prompts");
-    assert!(finished(&msgs)[0].content.contains("dont_ask mode does not allow bash"));
+    assert!(finished(&msgs)[0]
+        .content
+        .contains("dont_ask mode does not allow bash"));
 
     let mut def = lead_or("general");
     def.permission_mode = PermissionMode::AcceptEdits;
     let msgs = drive(
-        script(&[("write", json!({"path": "w.txt", "content": "hi"})), ("bash", json!({"command": "touch PWN"}))]),
+        script(&[
+            ("write", json!({"path": "w.txt", "content": "hi"})),
+            ("bash", json!({"command": "touch PWN"})),
+        ]),
         def,
         dir.path(),
         ex,
@@ -749,8 +1205,16 @@ async fn enter_plan_mode_switches_the_effective_mode_until_exit() {
     assert_eq!(r.len(), 7);
     assert!(!r[0].is_error, "{:?}", r[0]);
     assert!(!r[1].is_error);
-    assert!(r[2].is_error && r[2].content.contains("plan mode does not allow write"), "{:?}", r[2]);
-    assert!(!r[3].is_error, "the plan tool is allowed in plan mode: {:?}", r[3]);
+    assert!(
+        r[2].is_error && r[2].content.contains("plan mode does not allow write"),
+        "{:?}",
+        r[2]
+    );
+    assert!(
+        !r[3].is_error,
+        "the plan tool is allowed in plan mode: {:?}",
+        r[3]
+    );
     assert!(!r[4].is_error);
     assert!(!r[5].is_error);
     assert!(!r[6].is_error, "back to accept_edits: {:?}", r[6]);
@@ -766,7 +1230,10 @@ async fn ask_user_commits_waiting_user_and_the_next_message_is_the_answer() {
     let (ex, _) = executor(Gate::default(), dir.path());
     let mut waiting = false;
     let msgs = drive(
-        script(&[("ask_user", json!({"question": "which colour?", "choices": ["red", "blue"]}))]),
+        script(&[(
+            "ask_user",
+            json!({"question": "which colour?", "choices": ["red", "blue"]}),
+        )]),
         lead_or("lead"),
         dir.path(),
         ex,
@@ -775,7 +1242,9 @@ async fn ask_user_commits_waiting_user_and_the_next_message_is_the_answer() {
                 assert_eq!(call.name, "ask_user");
                 assert_eq!(status_of(app, h.id), "waiting_user");
                 waiting = true;
-                h.mailbox.try_send(RunMail::UserMessage("blue".into())).unwrap();
+                h.mailbox
+                    .try_send(RunMail::UserMessage("blue".into()))
+                    .unwrap();
             }
             Msg::ToolCallFinished { .. } => assert_eq!(status_of(app, h.id), "running"),
             _ => {}
@@ -795,15 +1264,23 @@ async fn report_artifact_reaches_the_graph_as_an_artifact_and_a_percentage() {
     let mut meta_artifacts = 0;
     let mut progress = None;
     let msgs = drive(
-        script(&[("report_artifact", json!({"path": "report.md", "kind": "report", "progress": 0.5}))]),
+        script(&[(
+            "report_artifact",
+            json!({"path": "report.md", "kind": "report", "progress": 0.5}),
+        )]),
         lead_or("general"),
         dir.path(),
         ex,
         |m, h, app| {
             if matches!(m, Msg::ToolCallFinished { .. }) {
-                let meta = app.graph.read_key(&format!("model:run:{}:meta", h.id)).unwrap();
+                let meta = app
+                    .graph
+                    .read_key(&format!("model:run:{}:meta", h.id))
+                    .unwrap();
                 meta_artifacts = get(meta, "artifacts").map_or(0, |a| as_list(a).len());
-                if let Some(aibus_graph::Value::F64(p)) = app.graph.read_key(&format!("model:run:{}:progress", h.id)) {
+                if let Some(aibus_graph::Value::F64(p)) =
+                    app.graph.read_key(&format!("model:run:{}:progress", h.id))
+                {
                     progress = Some(*p);
                 }
             }

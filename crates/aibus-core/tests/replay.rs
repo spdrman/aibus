@@ -67,6 +67,17 @@ fn the_script_is_the_one_the_fake_plays() {
 #[test]
 fn dropping_a_message_changes_the_hash() {
     let full = fixture("msgs.jsonl");
-    let without_last: String = full.lines().rev().skip(1).collect::<Vec<_>>().into_iter().rev().map(|l| format!("{l}\n")).collect();
-    assert_ne!(replay_hash(&without_last).unwrap(), replay_hash(&full).unwrap());
+    let without_last: String = full
+        .lines()
+        .rev()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(
+        replay_hash(&without_last).unwrap(),
+        replay_hash(&full).unwrap()
+    );
 }

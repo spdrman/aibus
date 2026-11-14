@@ -40,8 +40,15 @@ pub fn resume_args(
     let run_id: RunId = run
         .parse()
         .map_err(|_| AibusError::Usage(format!("run {run}: not a run id")))?;
-    if !dir.join("runs").join(run).join("conversation.jsonl").is_file() {
-        return Err(AibusError::Usage(format!("session {id} has no saved conversation for run {run}")));
+    if !dir
+        .join("runs")
+        .join(run)
+        .join("conversation.jsonl")
+        .is_file()
+    {
+        return Err(AibusError::Usage(format!(
+            "session {id} has no saved conversation for run {run}"
+        )));
     }
     let message = message
         .filter(|m| !m.trim().is_empty())
@@ -102,7 +109,8 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                 .show(id)?
                 .ok_or_else(|| AibusError::Usage(format!("no session {id}")))?;
             // `session` is session.json as it is on disk, which has `started`, `lead` and `cwd`.
-            shown["session"] = serde_json::to_value(SessionMeta::read(&dir)?).map_err(std::io::Error::other)?;
+            shown["session"] =
+                serde_json::to_value(SessionMeta::read(&dir)?).map_err(std::io::Error::other)?;
             // The latest handoff and the ledger are what the graph held at the last snapshot.
             let snap = read_snapshot(&dir).ok();
             let input = |k: &str| snap.as_ref().and_then(|s| s.inputs.get(k));
@@ -114,7 +122,11 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
             if g.json {
                 writeln!(out, "{shown}")?;
             } else {
-                writeln!(out, "{}", serde_json::to_string_pretty(&shown).map_err(std::io::Error::other)?)?;
+                writeln!(
+                    out,
+                    "{}",
+                    serde_json::to_string_pretty(&shown).map_err(std::io::Error::other)?
+                )?;
                 for w in worktrees(&paths, id) {
                     writeln!(out, "worktree kept: {}", w.display())?;
                 }
@@ -122,7 +134,11 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
         }
         SessionCmd::Log { id } => {
             for rec in commits::read_all(&dir_of(id)?)? {
-                writeln!(out, "{}", json!({"time": rec.time, "intent": rec.intent, "changed": rec.changed.len(), "at": rec.at}))?;
+                writeln!(
+                    out,
+                    "{}",
+                    json!({"time": rec.time, "intent": rec.intent, "changed": rec.changed.len(), "at": rec.at})
+                )?;
             }
         }
         SessionCmd::Replay { id, .. } => {
@@ -153,7 +169,10 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                 if md {
                     let file = dir.join("export").join(format!("{}.md", run.id));
                     aibus_core::persist::fs::create_private_dir(&dir.join("export"))?;
-                    aibus_core::persist::fs::write_atomic(&file, markdown(&run.id, &run.agent, &lines))?;
+                    aibus_core::persist::fs::write_atomic(
+                        &file,
+                        markdown(&run.id, &run.agent, &lines),
+                    )?;
                     writeln!(out, "{}", file.display())?;
                 } else {
                     for v in lines {
@@ -181,7 +200,9 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
                 writeln!(out, "{} sessions removed", removed.len())?;
             }
         }
-        SessionCmd::Resume { id, run, message, .. } => {
+        SessionCmd::Resume {
+            id, run, message, ..
+        } => {
             let dir = dir_of(id)?;
             let (snap, tail) = load(&dir)?;
             let mut app = App::new(MiniGraph::new(), now_ms);
@@ -189,12 +210,22 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
             app.hydrate(snap, &tail)?;
             let runs = aibus_core::persist::session::read_runs(&dir).len();
             if g.json {
-                writeln!(out, "{}", json!({"session": id, "runs": runs, "snapshot_time": at, "replayed": tail.len()}))?;
+                writeln!(
+                    out,
+                    "{}",
+                    json!({"session": id, "runs": runs, "snapshot_time": at, "replayed": tail.len()})
+                )?;
             } else {
-                writeln!(out, "resumed {id}: {runs} runs, snapshot at {at}, {} commits replayed", tail.len())?;
+                writeln!(
+                    out,
+                    "resumed {id}: {runs} runs, snapshot at {at}, {} commits replayed",
+                    tail.len()
+                )?;
             }
             if run.is_some() || message.is_some() {
-                eprintln!("aibus: session resume: continuing a run needs the interactive loop: not yet");
+                eprintln!(
+                    "aibus: session resume: continuing a run needs the interactive loop: not yet"
+                );
                 return Ok(2);
             }
         }
@@ -209,7 +240,11 @@ fn index(paths: &Paths, rebuild: bool) -> Result<Index, AibusError> {
     let path = paths.data.join("index.sqlite");
     let fresh = !path.is_file();
     let mut idx = Index::open(&path)?;
-    let dirs = fs::read_dir(&sessions).map_or(0, |d| d.flatten().filter(|e| e.path().join("session.json").is_file()).count());
+    let dirs = fs::read_dir(&sessions).map_or(0, |d| {
+        d.flatten()
+            .filter(|e| e.path().join("session.json").is_file())
+            .count()
+    });
     if (rebuild || fresh || idx.list()?.len() != dirs) && sessions.is_dir() {
         idx.rebuild(&sessions)?;
     }
@@ -223,7 +258,10 @@ fn markdown(run: &str, agent: &str, lines: &[Json]) -> String {
         let when = l["t"].as_str().unwrap_or("");
         match l["type"].as_str().unwrap_or("") {
             "message" => {
-                md.push_str(&format!("\n## {} ({when})\n", l["role"].as_str().unwrap_or("?")));
+                md.push_str(&format!(
+                    "\n## {} ({when})\n",
+                    l["role"].as_str().unwrap_or("?")
+                ));
                 for b in l["blocks"].as_array().into_iter().flatten() {
                     match b["type"].as_str().unwrap_or("") {
                         "tool_use" => md.push_str(&format!(
@@ -231,24 +269,40 @@ fn markdown(run: &str, agent: &str, lines: &[Json]) -> String {
                             b["name"].as_str().unwrap_or("?"),
                             b["input"]
                         )),
-                        "thinking" => md.push_str(&format!("\n> {}\n", b["text"].as_str().unwrap_or(""))),
+                        "thinking" => {
+                            md.push_str(&format!("\n> {}\n", b["text"].as_str().unwrap_or("")))
+                        }
                         _ => md.push_str(&format!("\n{}\n", b["text"].as_str().unwrap_or(""))),
                     }
                 }
             }
             "tool_result" => {
-                let err = if l["is_error"] == true { " (error)" } else { "" };
+                let err = if l["is_error"] == true {
+                    " (error)"
+                } else {
+                    ""
+                };
                 md.push_str(&format!(
                     "\n### Result{err}, {} bytes\n\n```text\n{}\n```\n",
                     l["bytes"],
                     l["content"].as_str().unwrap_or("")
                 ));
                 if l["truncated"] == true {
-                    md.push_str(&format!("\nCut; the whole text is in `{}`.\n", l["full"].as_str().unwrap_or("")));
+                    md.push_str(&format!(
+                        "\nCut; the whole text is in `{}`.\n",
+                        l["full"].as_str().unwrap_or("")
+                    ));
                 }
             }
-            "compact_boundary" => md.push_str(&format!("\n---\nCompacted at {} tokens.\n", l["pre_tokens"])),
-            "end" => md.push_str(&format!("\n---\nEnded {} after {} turns.\n", l["status"].as_str().unwrap_or("?"), l["turns"])),
+            "compact_boundary" => md.push_str(&format!(
+                "\n---\nCompacted at {} tokens.\n",
+                l["pre_tokens"]
+            )),
+            "end" => md.push_str(&format!(
+                "\n---\nEnded {} after {} turns.\n",
+                l["status"].as_str().unwrap_or("?"),
+                l["turns"]
+            )),
             _ => {}
         }
     }

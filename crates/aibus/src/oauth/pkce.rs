@@ -55,11 +55,13 @@ impl Login {
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let redirect = format!("http://127.0.0.1:{port}{PATH}");
 
-        let mut url = Url::parse(&d.authorize_url).map_err(|e| format!("bad authorize URL: {e}"))?;
+        let mut url =
+            Url::parse(&d.authorize_url).map_err(|e| format!("bad authorize URL: {e}"))?;
         {
             let mut q = url.query_pairs_mut();
             if let Some(id) = &d.client_id {
-                q.append_pair("response_type", "code").append_pair("client_id", id);
+                q.append_pair("response_type", "code")
+                    .append_pair("client_id", id);
             }
             q.append_pair(d.redirect_param, &redirect);
             if !d.scopes.is_empty() {
@@ -68,7 +70,8 @@ impl Login {
             if d.state == StateMode::Echoed {
                 q.append_pair("state", &state);
             }
-            q.append_pair("code_challenge", &challenge).append_pair("code_challenge_method", "S256");
+            q.append_pair("code_challenge", &challenge)
+                .append_pair("code_challenge_method", "S256");
         }
         notify(&format!("open this address to log in:\n  {url}"));
         if self.open_browser {
@@ -82,7 +85,10 @@ impl Login {
         let want_state = (d.state == StateMode::Echoed).then_some(state.as_str());
         let code = tokio::time::timeout(WAIT, wait_for_code(listener, want_state, paste, cancel))
             .await
-            .map_err(|_| "timed out after 5 minutes waiting for the browser; run the command again".to_owned())??;
+            .map_err(|_| {
+                "timed out after 5 minutes waiting for the browser; run the command again"
+                    .to_owned()
+            })??;
 
         self.hold("oauth-flow:code", &code);
         let (body, json) = if d.result == Outcome::ApiKey {
@@ -106,7 +112,9 @@ impl Login {
 }
 
 async fn bind_any() -> Result<TcpListener, String> {
-    TcpListener::bind(("127.0.0.1", 0)).await.map_err(|e| format!("could not listen on 127.0.0.1: {e}"))
+    TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .map_err(|e| format!("could not listen on 127.0.0.1: {e}"))
 }
 
 /// The platform opener, with the URL as one argv element and no shell. A failure only means
@@ -121,7 +129,12 @@ pub(crate) fn open(url: &str) {
     } else {
         Command::new("xdg-open")
     };
-    let _ = cmd.arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    let _ = cmd
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
 }
 
 /// One line from stdin on its own thread (a blocked read cannot be cancelled).
@@ -211,7 +224,10 @@ enum Verdict {
 fn judge(head: &str, state: Option<&str>) -> Verdict {
     let mut lines = head.split("\r\n");
     let mut first = lines.next().unwrap_or_default().split(' ');
-    let (method, target) = (first.next().unwrap_or_default(), first.next().unwrap_or_default());
+    let (method, target) = (
+        first.next().unwrap_or_default(),
+        first.next().unwrap_or_default(),
+    );
     let host = lines
         .filter_map(|l| l.split_once(':'))
         .find(|(k, _)| k.eq_ignore_ascii_case("host"))
@@ -237,7 +253,11 @@ fn check(query: &str, state: Option<&str>) -> Verdict {
     let Ok(q) = Url::parse(&format!("http://x/?{query}")) else {
         return Verdict::Ignore("400 Bad Request", "bad query");
     };
-    let get = |k: &str| q.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.into_owned());
+    let get = |k: &str| {
+        q.query_pairs()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| v.into_owned())
+    };
     if state.is_some_and(|want| get("state").as_deref() != Some(want)) {
         return Verdict::Ignore("400 Bad Request", "state does not match");
     }

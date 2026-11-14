@@ -36,8 +36,8 @@ pub use continuity::{CreateHandoff, LedgerUpdate, Recall};
 pub use delegate::Delegate;
 pub use lifecycle::{Fork, ResumeRun, SendMessage};
 pub use memory::{MemoryAppend, MemoryRead, MemoryWrite};
-pub use readonly::{Glob, Grep, Ls, Read};
 pub use policy::{normalise_command, spec_matches};
+pub use readonly::{Glob, Grep, Ls, Read};
 pub use sandbox::Sandbox;
 pub use shell::split;
 pub use shell::ShellDeny;
@@ -133,7 +133,12 @@ pub fn effective_tools(
             spec: None,
         });
     }
-    allow.retain(|p| !def.tools.deny.iter().any(|d| d.spec.is_none() && d.tool == p.tool));
+    allow.retain(|p| {
+        !def.tools
+            .deny
+            .iter()
+            .any(|d| d.spec.is_none() && d.tool == p.tool)
+    });
     // A bare deny of an MCP tool stays, since `mcp:*` in the allow-list still covers the name.
     let deny = def
         .tools
@@ -199,7 +204,10 @@ impl ToolRegistry {
     }
 
     fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.get(name).cloned().or_else(|| lock(&self.late).get(name).cloned())
+        self.tools
+            .get(name)
+            .cloned()
+            .or_else(|| lock(&self.late).get(name).cloned())
     }
 
     /// Schemas for the tools the run may call. Names outside `eff` are never shown.
@@ -210,7 +218,11 @@ impl ToolRegistry {
             .chain(late.iter())
             .filter(|(name, _)| eff.allow.iter().any(|p| names_tool(&p.tool, name)))
             // A bare deny of an MCP tool (`mcp:aibus:*`) keeps it out of the list too.
-            .filter(|(name, _)| !eff.deny.iter().any(|d| d.spec.is_none() && d.tool.starts_with("mcp:") && names_tool(&d.tool, name)))
+            .filter(|(name, _)| {
+                !eff.deny.iter().any(|d| {
+                    d.spec.is_none() && d.tool.starts_with("mcp:") && names_tool(&d.tool, name)
+                })
+            })
             .map(|(_, t)| t.spec())
             .collect()
     }
@@ -261,7 +273,9 @@ struct Admitted {
 fn covers(pats: &[&ToolPattern], name: &str, subjects: &[String], outside: bool) -> bool {
     let of_tool = || pats.iter().filter(|p| names_tool(&p.tool, name));
     let matches = |p: &ToolPattern, s: &str| {
-        p.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s))
+        p.spec
+            .as_deref()
+            .is_none_or(|spec| policy::spec_matches(spec, s))
     };
     if name == "bash" {
         !subjects.is_empty() && subjects.iter().all(|s| of_tool().any(|p| matches(p, s)))
@@ -352,7 +366,10 @@ impl ToolExecutor {
         match permission::decide(mode, name, need, pre) {
             Verdict::Allow => {}
             Verdict::Deny => {
-                return Err(denied(&format!("{} mode does not allow {name}", mode.as_str())))
+                return Err(denied(&format!(
+                    "{} mode does not allow {name}",
+                    mode.as_str()
+                )))
             }
             Verdict::Ask => {
                 // The one line a prompt shows: scrubbed, and cut to 200 characters.
@@ -361,7 +378,10 @@ impl ToolExecutor {
                     "write" | "edit" => adm.input.get("path"),
                     _ => None,
                 };
-                let mut summary = match (main.and_then(Value::as_str), crate::workflow::write_summary(name, &adm.input)) {
+                let mut summary = match (
+                    main.and_then(Value::as_str),
+                    crate::workflow::write_summary(name, &adm.input),
+                ) {
                     (Some(s), _) => format!("{name}: {s}"),
                     (None, Some(line)) => format!("{name}: {line}"),
                     (None, None) => format!("{name}: {}", adm.input),
@@ -391,11 +411,17 @@ impl ToolExecutor {
                         };
                         let added: Vec<ToolPattern> = match name {
                             "bash" => {
-                                let mut words: Vec<&str> =
-                                    adm.subjects.iter().filter_map(|s| s.split(' ').next()).collect();
+                                let mut words: Vec<&str> = adm
+                                    .subjects
+                                    .iter()
+                                    .filter_map(|s| s.split(' ').next())
+                                    .collect();
                                 words.sort_unstable();
                                 words.dedup();
-                                words.into_iter().map(|w| pattern(Some(format!("{w} *")))).collect()
+                                words
+                                    .into_iter()
+                                    .map(|w| pattern(Some(format!("{w} *"))))
+                                    .collect()
                             }
                             "write" | "edit" => vec![pattern(adm.subjects.first().cloned())],
                             _ => vec![pattern(None)],
@@ -426,8 +452,11 @@ impl ToolExecutor {
         name: &str,
         mut input: Value,
     ) -> Result<Admitted, ToolError> {
-        let allows: Vec<&ToolPattern> =
-            eff.allow.iter().filter(|p| names_tool(&p.tool, name)).collect();
+        let allows: Vec<&ToolPattern> = eff
+            .allow
+            .iter()
+            .filter(|p| names_tool(&p.tool, name))
+            .collect();
         if allows.is_empty() {
             return Err(denied("not in allow-list"));
         }
@@ -452,7 +481,9 @@ impl ToolExecutor {
             }
             "web_fetch" => {
                 let url = input.get("url").and_then(Value::as_str);
-                vec![url.ok_or_else(|| ToolError::Invalid("missing url".into()))?.to_string()]
+                vec![url
+                    .ok_or_else(|| ToolError::Invalid("missing url".into()))?
+                    .to_string()]
             }
             "glob" => {
                 let pat = input.get("pattern").and_then(Value::as_str);
@@ -550,9 +581,11 @@ impl ToolExecutor {
         if eff.deny.iter().any(|d| {
             names_tool(&d.tool, name)
                 && (subjects.is_empty() && d.spec.is_none()
-                    || subjects
-                        .iter()
-                        .any(|s| d.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s))))
+                    || subjects.iter().any(|s| {
+                        d.spec
+                            .as_deref()
+                            .is_none_or(|spec| policy::spec_matches(spec, s))
+                    }))
         }) {
             return Err(denied("denied by tool policy"));
         }
@@ -572,7 +605,10 @@ impl ToolExecutor {
     fn refuse_destructive(&self, text: &str) -> Result<(), ToolError> {
         match self.deny.hit(text) {
             Some(rule) => {
-                tracing::warn!(pattern = rule, "bash command refused by the shell deny-list");
+                tracing::warn!(
+                    pattern = rule,
+                    "bash command refused by the shell deny-list"
+                );
                 Err(denied(&format!("matches shell deny pattern {rule}")))
             }
             None => Ok(()),

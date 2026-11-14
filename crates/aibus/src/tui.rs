@@ -48,7 +48,10 @@ impl Env {
 /// `/home/me/app` as `~/app`.
 fn tilde(cwd: &Path, home: Option<&str>) -> String {
     let shown = cwd.to_string_lossy();
-    match home.filter(|h| !h.is_empty()).and_then(|h| shown.strip_prefix(h)) {
+    match home
+        .filter(|h| !h.is_empty())
+        .and_then(|h| shown.strip_prefix(h))
+    {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
         _ => shown.into_owned(),
     }
@@ -67,7 +70,12 @@ pub fn options(
 ) -> (Options, Vec<String>) {
     let name = global.theme.as_deref().unwrap_or(&cfg.ui.theme);
     let ascii = global.ascii || cfg.ui.ascii;
-    let theme = Theme::resolve(name, env.no_color.as_deref(), env.colorterm.as_deref(), ascii);
+    let theme = Theme::resolve(
+        name,
+        env.no_color.as_deref(),
+        env.colorterm.as_deref(),
+        ascii,
+    );
     let (keys, warnings) = Keymap::load(&cfg.keys, keys_toml);
     let launch: Vec<&str> = env.args.iter().skip(1).map(String::as_str).collect();
     let opts = Options {
@@ -77,8 +85,12 @@ pub fn options(
         prompt: {
             let mut p = Prompt::default().with_text(prompt);
             p.cwd = tilde(&env.cwd, env.home.as_deref());
-            p.placeholder = std::iter::once("aibus").chain(launch).collect::<Vec<_>>().join(" ");
-            p.hints = cfg.ui.hints && sessions_seen(&paths.state) < aibus_tui::prompt::HINT_SESSIONS;
+            p.placeholder = std::iter::once("aibus")
+                .chain(launch)
+                .collect::<Vec<_>>()
+                .join(" ");
+            p.hints =
+                cfg.ui.hints && sessions_seen(&paths.state) < aibus_tui::prompt::HINT_SESSIONS;
             p
         },
         mouse: cfg.ui.mouse && !global.no_mouse,
@@ -107,14 +119,18 @@ pub fn options(
 /// How many sessions have started before this one: `state/sessions_seen`, one number. The hint
 /// row under the prompt is for the first five (`[ui] hints`).
 fn sessions_seen(state: &Path) -> u32 {
-    std::fs::read_to_string(state.join("sessions_seen")).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0)
+    std::fs::read_to_string(state.join("sessions_seen"))
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 fn count_session(state: &Path) {
     let n = sessions_seen(state).saturating_add(1);
     // A hint that fails to count is not worth a message.
-    let _ = aibus_core::persist::fs::create_private_dir(state)
-        .and_then(|()| aibus_core::persist::fs::write_private(state.join("sessions_seen"), n.to_string()));
+    let _ = aibus_core::persist::fs::create_private_dir(state).and_then(|()| {
+        aibus_core::persist::fs::write_private(state.join("sessions_seen"), n.to_string())
+    });
 }
 
 /// One account operation from the Accounts screen, run by the same code as `aibus account`. It
@@ -155,27 +171,72 @@ fn account_op(
             (
                 "login",
                 name.clone(),
-                AccountCmd::Add(AccountAdd { name, provider, key_stdin: false, env: None, file: None, oauth: true, base_url: None, label: None, region: None, project: None }),
+                AccountCmd::Add(AccountAdd {
+                    name,
+                    provider,
+                    key_stdin: false,
+                    env: None,
+                    file: None,
+                    oauth: true,
+                    base_url: None,
+                    label: None,
+                    region: None,
+                    project: None,
+                }),
                 None,
             )
         }
         AccountOp::Test(name) => ("test", name.clone(), AccountCmd::Test { name }, None),
         AccountOp::Disable(name) => ("disable", name.clone(), AccountCmd::Disable { name }, None),
         AccountOp::Remove(name) => ("remove", name.clone(), AccountCmd::Remove { name }, None),
-        AccountOp::Add { name, provider, key } => (
+        AccountOp::Add {
+            name,
+            provider,
+            key,
+        } => (
             "add",
             name.clone(),
-            AccountCmd::Add(AccountAdd { name, provider, key_stdin: true, env: None, file: None, oauth: false, base_url: None, label: None, region: None, project: None }),
+            AccountCmd::Add(AccountAdd {
+                name,
+                provider,
+                key_stdin: true,
+                env: None,
+                file: None,
+                oauth: false,
+                base_url: None,
+                label: None,
+                region: None,
+                project: None,
+            }),
             Some(key),
         ),
     };
-    let (paths, project_settings, redactor) = (paths.clone(), project_settings.to_path_buf(), redactor.clone());
-    let shown = format!("{} {name}...", match what { "add" => "verifying", "login" => "logging in", w => w });
+    let (paths, project_settings, redactor) = (
+        paths.clone(),
+        project_settings.to_path_buf(),
+        redactor.clone(),
+    );
+    let shown = format!(
+        "{} {name}...",
+        match what {
+            "add" => "verifying",
+            "login" => "logging in",
+            w => w,
+        }
+    );
     let provider_login = cancel.is_some().then(|| (tx.clone(), name.clone()));
     std::thread::spawn(move || {
-        let mut out = Lines { all: Vec::new(), sent: 0, to: provider_login, redactor: redactor.clone() };
+        let mut out = Lines {
+            all: Vec::new(),
+            sent: 0,
+            to: provider_login,
+            redactor: redactor.clone(),
+        };
         // The only copy of the key outside the keychain: wiped when the worker is done with it.
-        let bytes = zeroize::Zeroizing::new(key.map(|k| k.expose().clone().into_bytes()).unwrap_or_default());
+        let bytes = zeroize::Zeroizing::new(
+            key.map(|k| k.expose().clone().into_bytes())
+                .unwrap_or_default(),
+        );
         let mut stdin: &[u8] = &bytes;
         let mut io = Io {
             paths: paths.clone(),
@@ -185,12 +246,13 @@ fn account_op(
             redactor: redactor.clone(),
             // The browser is opened by `o` in the modal, and there is no stdin to paste on.
             oauth: match &cmd {
-                AccountCmd::Add(a) if a.oauth => crate::oauth::definition(&a.provider, None)
-                    .map(|def| {
+                AccountCmd::Add(a) if a.oauth => {
+                    crate::oauth::definition(&a.provider, None).map(|def| {
                         let mut login = crate::oauth::Login::new(def);
                         login.redactor = redactor.clone();
                         Arc::new(login) as Arc<dyn aibus_core::OAuthFlow>
-                    }),
+                    })
+                }
                 _ => None,
             },
             cancel,
@@ -201,7 +263,11 @@ fn account_op(
         let ran = account::run(&cmd, false, &mut io);
         // A browser login printed its address and code for the modal; only the last line is the result.
         let said = String::from_utf8_lossy(&out.all);
-        let line = if what == "login" { said.lines().last().unwrap_or_default().trim().to_owned() } else { said.trim().replace('\n', "  ") };
+        let line = if what == "login" {
+            said.lines().last().unwrap_or_default().trim().to_owned()
+        } else {
+            said.trim().replace('\n', "  ")
+        };
         let (ok, mut text) = match ran {
             Ok(_) if line.is_empty() => (true, format!("{what} {name}: done")),
             Ok(_) => (true, line),
@@ -209,9 +275,16 @@ fn account_op(
         };
         // The accounts changed: the new set is usable by the next pick, and the screens show it.
         if ok && what != "test" {
-            match crate::startup::reload_accounts(&paths, &project_settings, &crate::providers::os_factories(&redactor)) {
+            match crate::startup::reload_accounts(
+                &paths,
+                &project_settings,
+                &crate::providers::os_factories(&redactor),
+            ) {
                 Ok((registry, accounts, defaults)) => {
-                    if let Some(Err(why)) = launcher.as_ref().map(|l| l.set_accounts(registry, &accounts, &defaults)) {
+                    if let Some(Err(why)) = launcher
+                        .as_ref()
+                        .map(|l| l.set_accounts(registry, &accounts, &defaults))
+                    {
                         text.push_str(&format!(" (this session keeps the built-in fake: {why})"));
                     }
                     let _ = tx.blocking_send(Msg::AccountsReloaded { accounts });
@@ -220,7 +293,12 @@ fn account_op(
             }
         }
         let text = redactor.redact(&text).into_owned();
-        let _ = tx.blocking_send(Msg::AccountOpDone { op: what.to_owned(), account: name, ok, text });
+        let _ = tx.blocking_send(Msg::AccountOpDone {
+            op: what.to_owned(),
+            account: name,
+            ok,
+            text,
+        });
     });
     shown
 }
@@ -242,7 +320,10 @@ impl std::io::Write for Lines {
             if let Some((tx, account)) = &self.to {
                 let line = String::from_utf8_lossy(&self.all[self.sent..self.sent + end]);
                 let line = self.redactor.redact(&line).into_owned();
-                let _ = tx.try_send(Msg::AccountPrompt { account: account.clone(), line });
+                let _ = tx.try_send(Msg::AccountPrompt {
+                    account: account.clone(),
+                    line,
+                });
             }
             self.sent += end + 1;
         }
@@ -256,7 +337,10 @@ impl std::io::Write for Lines {
 
 /// Returns the process exit code.
 pub fn run(global: Global, prompt: Option<String>, redactor: Redactor) -> Result<u8, AibusError> {
-    let args = RunArgs { prompt, ..RunArgs::default() };
+    let args = RunArgs {
+        prompt,
+        ..RunArgs::default()
+    };
     let mut ctx = Ctx::new(global, args, redactor);
     ctx.interactive = true;
     let started = startup::start(startup::interactive_steps(), &mut ctx)?;
@@ -312,14 +396,27 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         cap: loaded.config.limits.result_max_bytes,
         redactor: ctx.redactor.clone(),
     };
-    app.step(Msg::WorkflowsLoaded { rows: aibus_core::workflow::rows(&workflows.dirs), shown: None, said: None })?;
+    app.step(Msg::WorkflowsLoaded {
+        rows: aibus_core::workflow::rows(&workflows.dirs),
+        shown: None,
+        said: None,
+    })?;
     opts.workflows = Some(workflows);
     count_session(&paths.state);
     // Permission answers and messages reach the run that is waiting through its mailbox. The
     // map of which run asked is kept from what the runs say.
     let author = ctx.launcher.clone().map(|launcher| {
-        let session = ctx.session.as_ref().map(|s| s.id.to_string()).unwrap_or_default();
-        Arc::new(crate::author::Author::new(ctx.author.clone(), launcher, ctx.cwd.clone(), session))
+        let session = ctx
+            .session
+            .as_ref()
+            .map(|s| s.id.to_string())
+            .unwrap_or_default();
+        Arc::new(crate::author::Author::new(
+            ctx.author.clone(),
+            launcher,
+            ctx.cwd.clone(),
+            session,
+        ))
     });
     if let Some(orch) = ctx.orch.clone() {
         let asked: Arc<std::sync::Mutex<HashMap<PermissionId, RunId>>> = Arc::default();
@@ -333,10 +430,18 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             }
             match m {
                 Msg::PermissionNeeded { request } => {
-                    seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(request.id, request.run);
+                    seen.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(request.id, request.run);
                 }
-                Msg::RunStarted { run, role: aibus_core::Role::Lead, .. } => {
-                    *lead_seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(*run);
+                Msg::RunStarted {
+                    run,
+                    role: aibus_core::Role::Lead,
+                    ..
+                } => {
+                    *lead_seen
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(*run);
                 }
                 _ => {}
             }
@@ -344,9 +449,15 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         let o = orch.clone();
         opts.user = Some(Box::new(move |m| match m {
             Msg::Command(aibus_core::Command::Permission { id, decision }) => {
-                let run = asked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(id);
+                let run = asked
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(id);
                 if let Some(mail) = run.and_then(|r| o.mailbox(r)) {
-                    let _ = mail.try_send(RunMail::Permission { id: *id, decision: *decision });
+                    let _ = mail.try_send(RunMail::Permission {
+                        id: *id,
+                        decision: *decision,
+                    });
                 }
             }
             Msg::Command(aibus_core::Command::SendMessage { run, text }) => {
@@ -357,15 +468,26 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             // task is the server's `author_workflow` prompt when the server has one. `--write`
             // starts the write child for this run (see `author.rs`).
             Msg::Command(aibus_core::Command::WorkflowAuthor { goal, write, edit }) => {
-                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let (Some(mail), Some(author)) = (run.and_then(|r| o.mailbox(r)), author.clone()) {
+                let run = *lead
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let (Some(mail), Some(author)) = (run.and_then(|r| o.mailbox(r)), author.clone())
+                {
                     let (goal, edit, write, orch) = (goal.clone(), edit.clone(), *write, o.clone());
                     tokio::spawn(async move {
                         match author.delegate(&goal, write, edit.as_deref()).await {
                             Ok(call) => {
-                                let _ = mail.send(RunMail::Call { tool: "delegate".into(), input: call }).await;
+                                let _ = mail
+                                    .send(RunMail::Call {
+                                        tool: "delegate".into(),
+                                        input: call,
+                                    })
+                                    .await;
                             }
-                            Err(why) => orch.send_later(Msg::IoError { context: format!("workflow author: {why}"), error: String::new() }),
+                            Err(why) => orch.send_later(Msg::IoError {
+                                context: format!("workflow author: {why}"),
+                                error: String::new(),
+                            }),
                         }
                     });
                 }
@@ -373,15 +495,22 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
             // `/workflow run <name> <input>` and the shorthands: the lead makes the `workflow`
             // call at its next turn boundary, so the steps are cards under it.
             Msg::Command(aibus_core::Command::Workflow { name, input }) => {
-                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let run = *lead
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(mail) = run.and_then(|r| o.mailbox(r)) {
                     let call = serde_json::json!({"name": name, "input": input});
-                    let _ = mail.try_send(RunMail::Call { tool: "workflow".into(), input: call });
+                    let _ = mail.try_send(RunMail::Call {
+                        tool: "workflow".into(),
+                        input: call,
+                    });
                 }
             }
             // A prompt typed while the lead runs is a message to it; slash commands are not.
             Msg::SubmitPrompt { text } if !text.starts_with('/') => {
-                let run = *lead.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let run = *lead
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(run) = run.filter(|r| o.is_live(*r)) {
                     let _ = o.message(run, text.clone());
                 }
@@ -395,7 +524,17 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     let project_settings = aibus_core::persist::paths::project_dir(&ctx.cwd).join("settings.toml");
     let launcher = ctx.launcher.clone();
     let mut login = None;
-    opts.account = Some(Box::new(move |op, tx| account_op(op, tx, &g, &project_settings, &r, launcher.clone(), &mut login)));
+    opts.account = Some(Box::new(move |op, tx| {
+        account_op(
+            op,
+            tx,
+            &g,
+            &project_settings,
+            &r,
+            launcher.clone(),
+            &mut login,
+        )
+    }));
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();
@@ -441,7 +580,10 @@ mod tests {
     #[test]
     fn theme_ascii_and_colour_come_from_flags_config_and_environment() {
         let cfg = Config::default();
-        let truecolor = Env { colorterm: Some("truecolor".into()), ..Env::default() };
+        let truecolor = Env {
+            colorterm: Some("truecolor".into()),
+            ..Env::default()
+        };
         let (o, _) = build(&[], &cfg, &truecolor);
         assert_eq!(o.theme, Theme::recording());
         let (o, _) = build(&["--theme", "light", "--ascii"], &cfg, &truecolor);
@@ -450,7 +592,10 @@ mod tests {
         // Without COLORTERM the hex colours become palette indices.
         let (o, _) = build(&[], &cfg, &Env::default());
         assert_eq!(o.theme, Theme::recording().to_256());
-        let no_color = Env { no_color: Some("1".into()), ..truecolor };
+        let no_color = Env {
+            no_color: Some("1".into()),
+            ..truecolor
+        };
         assert!(build(&[], &cfg, &no_color).0.theme.mono);
     }
 
@@ -469,9 +614,15 @@ mod tests {
         assert_eq!(o.prompt.cwd, "~/app");
         assert_eq!(o.prompt.text, "");
         assert_eq!(o.prompt.placeholder, "aibus --model sonnet");
-        assert_eq!(o.layout_file, Some(PathBuf::from("/home/me/.local/state/aibus/ui.toml")));
+        assert_eq!(
+            o.layout_file,
+            Some(PathBuf::from("/home/me/.local/state/aibus/ui.toml"))
+        );
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("unknown action `nonsense`"), "{warnings:?}");
+        assert!(
+            warnings[0].contains("unknown action `nonsense`"),
+            "{warnings:?}"
+        );
         assert_eq!(o.hz, 30);
     }
 
@@ -487,7 +638,10 @@ mod tests {
     #[test]
     fn a_home_prefix_only_counts_at_a_path_boundary() {
         assert_eq!(tilde(Path::new("/home/me"), Some("/home/me")), "~");
-        assert_eq!(tilde(Path::new("/home/mex/app"), Some("/home/me")), "/home/mex/app");
+        assert_eq!(
+            tilde(Path::new("/home/mex/app"), Some("/home/me")),
+            "/home/mex/app"
+        );
         assert_eq!(tilde(Path::new("/srv/app"), None), "/srv/app");
     }
 }

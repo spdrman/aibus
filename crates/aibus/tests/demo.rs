@@ -38,11 +38,20 @@ fn the_demo_output_holds_nothing_personal() {
     all.push_str(&String::from_utf8(aibus(home.path(), &["demo"]).stdout).unwrap());
     // The recording and its script are scanned too: they are what the frames come from.
     for f in ["msgs.jsonl", "script.ron"] {
-        all.push_str(&std::fs::read_to_string(format!("{}/../../docs/media/demo/{f}", env!("CARGO_MANIFEST_DIR"))).unwrap());
+        all.push_str(
+            &std::fs::read_to_string(format!(
+                "{}/../../docs/media/demo/{f}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap(),
+        );
     }
     let home_dir = home.path().to_string_lossy().into_owned();
     let mut banned = vec![home_dir.as_str(), "/home/", "/Users/", "/root", "C:\\", "@"];
-    let host = std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+    let host = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
     if let Some(h) = host.as_deref().filter(|h| h.len() > 3) {
         banned.push(h);
     }
@@ -54,8 +63,15 @@ fn the_demo_output_holds_nothing_personal() {
     for b in banned {
         assert!(!all.contains(b), "the demo output contains {b:?}");
     }
-    let keys = regex::Regex::new(r"sk-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|gh[pous]_[A-Za-z0-9]{20,}|[A-Za-z0-9+/_-]{40,}").unwrap();
-    assert!(keys.find(&all).is_none(), "key-shaped string: {:?}", keys.find(&all));
+    let keys = regex::Regex::new(
+        r"sk-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|gh[pous]_[A-Za-z0-9]{20,}|[A-Za-z0-9+/_-]{40,}",
+    )
+    .unwrap();
+    assert!(
+        keys.find(&all).is_none(),
+        "key-shaped string: {:?}",
+        keys.find(&all)
+    );
     // The only account in the demo is the built-in fake; no real provider is named.
     for real in ["anthropic", "openai", "kimi", "moonshot", "claude", "gpt-"] {
         assert!(!all.to_lowercase().contains(real), "{real}");

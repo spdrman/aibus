@@ -11,8 +11,8 @@ use aibus_provider::{
     ModelRef, Price, Provider, ProviderError, ProviderId, StreamChunk,
 };
 use aibus_testkit::fake_credential;
-use async_trait::async_trait;
 use aibus_testkit::xdg_temp;
+use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -47,7 +47,11 @@ impl Provider for Costed {
         resp.usage.cost_usd = 0.25;
         Ok(resp)
     }
-    async fn count_tokens(&self, c: &Credential, r: &ChatRequest) -> Option<Result<u64, ProviderError>> {
+    async fn count_tokens(
+        &self,
+        c: &Credential,
+        r: &ChatRequest,
+    ) -> Option<Result<u64, ProviderError>> {
         self.0.count_tokens(c, r).await
     }
     async fn verify(&self, c: &Credential) -> Result<AccountInfo, ProviderError> {
@@ -109,7 +113,12 @@ async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
 }
 
 fn script() -> Script {
-    Script::new().then(Step::Text("done".into())).then(Step::Usage { input: 1_000_000, output: 0 })
+    Script::new()
+        .then(Step::Text("done".into()))
+        .then(Step::Usage {
+            input: 1_000_000,
+            output: 0,
+        })
 }
 
 #[tokio::test]

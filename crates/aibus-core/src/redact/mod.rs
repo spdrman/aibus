@@ -153,7 +153,11 @@ mod tests {
             .lines()
             .filter(|l| l.trim_start().starts_with("[[pattern]]"))
             .count();
-        assert_eq!(r.0.patterns.len(), in_file, "every [[pattern]] in patterns.toml compiles");
+        assert_eq!(
+            r.0.patterns.len(),
+            in_file,
+            "every [[pattern]] in patterns.toml compiles"
+        );
     }
 
     #[test]
@@ -181,7 +185,10 @@ mod tests {
         let r = Redactor::new();
         r.register(&acct("a"), "old-secret-1");
         r.register(&acct("a"), "new-secret-2");
-        assert_eq!(r.redact("old-secret-1 new-secret-2"), "old-secret-1 [redacted:a]");
+        assert_eq!(
+            r.redact("old-secret-1 new-secret-2"),
+            "old-secret-1 [redacted:a]"
+        );
     }
 
     #[test]

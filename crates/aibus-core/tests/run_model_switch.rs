@@ -27,13 +27,25 @@ async fn the_request_after_set_model_carries_the_new_model_and_the_in_flight_one
     // Request 1 stays in flight for a second, then asks for a tool; request 2 is the next one.
     let old = Arc::new(FakeProvider::new(script([
         Step::Delay(Duration::from_secs(1)),
-        Step::ToolCall { name: "bash".into(), input: serde_json::json!({"command": "true"}) },
+        Step::ToolCall {
+            name: "bash".into(),
+            input: serde_json::json!({"command": "true"}),
+        },
         Step::Stop(StopReason::ToolUse),
     ])));
-    let new = Arc::new(FakeProvider::new(script([Step::Text("done".into()), Step::Stop(StopReason::EndTurn)])));
+    let new = Arc::new(FakeProvider::new(script([
+        Step::Text("done".into()),
+        Step::Stop(StopReason::EndTurn),
+    ])));
 
     let path = vec![("PATH".to_owned(), std::env::var("PATH").unwrap_or_default())];
-    let bash = Arc::new(Bash::new(20, vec![], path, dir.path().to_path_buf(), "s".into()));
+    let bash = Arc::new(Bash::new(
+        20,
+        vec![],
+        path,
+        dir.path().to_path_buf(),
+        "s".into(),
+    ));
     let (tx, mut rx) = mpsc::channel(MSG_CAPACITY);
     let cfg = RunConfig {
         run: RunId::new(),
@@ -89,9 +101,17 @@ async fn the_request_after_set_model_carries_the_new_model_and_the_in_flight_one
     handle.join.await.unwrap();
 
     let first = old.requests();
-    assert_eq!(first.len(), 1, "the old provider served only the request that was in flight");
+    assert_eq!(
+        first.len(),
+        1,
+        "the old provider served only the request that was in flight"
+    );
     assert_eq!(first[0].request.model, ModelId("fake-small".into()));
     let second = new.requests();
     assert_eq!(second.len(), 1);
-    assert_eq!(second[0].request.model, ModelId("fake-large".into()), "the next request carries the new model");
+    assert_eq!(
+        second[0].request.model,
+        ModelId("fake-large".into()),
+        "the next request carries the new model"
+    );
 }

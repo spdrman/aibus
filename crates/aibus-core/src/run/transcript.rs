@@ -43,15 +43,27 @@ pub struct RunMeta {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Line {
     Start(RunMeta),
-    System { text: String },
-    Message { message: Message },
+    System {
+        text: String,
+    },
+    Message {
+        message: Message,
+    },
     /// Blocks added to the message before it, which a resume does when the file ends in a user
     /// message (the new text joins it rather than following it).
-    Extend { blocks: Vec<ContentBlock> },
-    CompactBoundary { pre_tokens: u64, messages: Vec<Message> },
+    Extend {
+        blocks: Vec<ContentBlock>,
+    },
+    CompactBoundary {
+        pre_tokens: u64,
+        messages: Vec<Message>,
+    },
     /// A fallback moved the run to another account before the first token of a turn (F9). The
     /// `start` line names the account the run began on; a reader of the file sees both.
-    Switch { account: AccountName, model: ModelId },
+    Switch {
+        account: AccountName,
+        model: ModelId,
+    },
 }
 
 /// What a transcript holds: the conversation as the run would send it now, and the latest
@@ -137,7 +149,12 @@ impl Transcript {
     /// Appends the messages `conv` gained since the last call.
     pub fn sync(&mut self, conv: &Conversation, redact: impl Fn(&str) -> String) -> io::Result<()> {
         for message in conv.messages.iter().skip(self.written) {
-            self.write(&Line::Message { message: message.clone() }, &redact)?;
+            self.write(
+                &Line::Message {
+                    message: message.clone(),
+                },
+                &redact,
+            )?;
         }
         self.written = conv.messages.len();
         Ok(())
@@ -169,14 +186,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("r/transcript.jsonl");
         let mut t = Transcript::open(&path).unwrap();
-        t.write(&Line::Start(meta(Kind::Run)), |s| s.to_owned()).unwrap();
-        t.write(&Line::System { text: "sys".into() }, |s| s.to_owned()).unwrap();
+        t.write(&Line::Start(meta(Kind::Run)), |s| s.to_owned())
+            .unwrap();
+        t.write(&Line::System { text: "sys".into() }, |s| s.to_owned())
+            .unwrap();
         let mut conv = Conversation {
             system: "sys".into(),
             ..Default::default()
         };
         conv.messages.push(Message::text(MessageRole::User, "one"));
-        conv.messages.push(Message::text(MessageRole::Assistant, "two"));
+        conv.messages
+            .push(Message::text(MessageRole::Assistant, "two"));
         t.sync(&conv, |s| s.to_owned()).unwrap();
         t.write(
             &Line::CompactBoundary {
@@ -188,12 +208,18 @@ mod tests {
         .unwrap();
         t.mark(1);
         conv.messages = vec![Message::text(MessageRole::User, "summary")];
-        conv.messages.push(Message::text(MessageRole::Assistant, "three"));
+        conv.messages
+            .push(Message::text(MessageRole::Assistant, "three"));
         t.sync(&conv, |s| s.to_owned()).unwrap();
 
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.conv.system, "sys");
-        let texts: Vec<_> = loaded.conv.messages.iter().map(Message::plain_text).collect();
+        let texts: Vec<_> = loaded
+            .conv
+            .messages
+            .iter()
+            .map(Message::plain_text)
+            .collect();
         assert_eq!(texts, ["summary", "three"]);
         assert_eq!(loaded.conv.compact_boundary, Some(0));
         // The file itself still has the first two messages.
@@ -207,7 +233,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
         let mut t = Transcript::open(&path).unwrap();
-        t.write(&Line::Start(meta(Kind::Fork)), |s| s.to_owned()).unwrap();
+        t.write(&Line::Start(meta(Kind::Fork)), |s| s.to_owned())
+            .unwrap();
         drop(t);
         let mut text = std::fs::read_to_string(&path).unwrap();
         text.push_str("{\"type\":\"mess");
@@ -223,9 +250,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
         let mut t = Transcript::open(&path).unwrap();
-        t.write(&Line::Start(meta(Kind::Run)), |s| s.to_owned()).unwrap();
+        t.write(&Line::Start(meta(Kind::Run)), |s| s.to_owned())
+            .unwrap();
         let mut conv = Conversation::default();
-        conv.messages.push(Message::text(MessageRole::User, "key is sk-secret-1"));
+        conv.messages
+            .push(Message::text(MessageRole::User, "key is sk-secret-1"));
         t.sync(&conv, id("sk-secret-1")).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("sk-secret-1") && raw.contains("[redacted]"));

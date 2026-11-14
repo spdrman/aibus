@@ -15,9 +15,14 @@ fn the_model_label_follows_set_model() {
     let text = render(&mut app, (98, 46), 0).text;
     assert!(text.contains("sonnet · lead"), "{text}");
 
-    app.step(Msg::Command(Command::SetModel { target: ModelTarget::Lead, model: "haiku".into() })).unwrap();
+    app.step(Msg::Command(Command::SetModel {
+        target: ModelTarget::Lead,
+        model: "haiku".into(),
+    }))
+    .unwrap();
     let assist = app.graph.read_key("model:session:assist").unwrap().clone();
-    let id = as_i64(get(&as_list(get(&assist, "pending").unwrap())[0], "id").unwrap()).unwrap() as u64;
+    let id =
+        as_i64(get(&as_list(get(&assist, "pending").unwrap())[0], "id").unwrap()).unwrap() as u64;
     app.step(Msg::ModelSwitched {
         id,
         target: ModelTarget::Lead,

@@ -2,7 +2,6 @@
 //! drawing (6.1), the help screen, and the draw gate that redraws only when `view:dirty` names a
 //! widget, a piece of UI state changed, or the size changed (08 section 1).
 
-
 use aibus_core::state::value::{as_i64, as_list, as_str, get};
 use aibus_core::state::{
     scroll_key, FOCUS, LAYOUT, LOG_FILTER, LOG_FOLLOW, MENU, MODAL, RAIL_EXPANDED, SELECTED_CARD,
@@ -19,9 +18,9 @@ use ratatui::Terminal;
 
 use crate::glyphs;
 use crate::hit::{z, HitId, HitKind, HitMap, Segment};
+use crate::keys::Keymap;
 pub use crate::layout::{areas, Areas, Layout};
 use crate::layout::{too_small, MIN_COLS, MIN_ROWS};
-use crate::keys::Keymap;
 use crate::screens::{self, Entry, Placed};
 use crate::theme::{Interact, Theme};
 use crate::transcript::{self, Cells, Geom};
@@ -29,7 +28,10 @@ use crate::view::{
     CARDS, DELEGATE_ROW, DIRTY, FORK_LAYER, HEADER, LEAD_BOX, LOG_LINES, MENU_VIEW, RAIL,
     RETURN_BOX, RUN_TIPS, STATUS_BAR,
 };
-use crate::views::{ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, PROVIDERS, RUN_STATUS, TRANSCRIPT, WORKFLOWS_VIEW};
+use crate::views::{
+    ACCOUNTS_VIEW, AGENTS, COST, MODELS, PALETTE, PERMISSION, PROVIDERS, RUN_STATUS, TRANSCRIPT,
+    WORKFLOWS_VIEW,
+};
 pub use crate::widgets::Prompt;
 use crate::widgets::{self, panel, put};
 
@@ -130,16 +132,26 @@ impl Chrome {
         };
         let layout = g.read_key(LAYOUT);
         Self {
-            focus: g.read_key(FOCUS).and_then(as_str).map_or(Pane::Input, pane_of),
+            focus: g
+                .read_key(FOCUS)
+                .and_then(as_str)
+                .map_or(Pane::Input, pane_of),
             selected_card: uint(SELECTED_CARD).unwrap_or(0),
             selected_log: uint(SELECTED_LOG),
             scroll_log: uint(&scroll_key("log")).unwrap_or(0),
             cards_x: uint(&scroll_key("cards:x")).unwrap_or(0),
             rail_open: matches!(g.read_key(RAIL_EXPANDED), Some(Value::Bool(true))),
             modal: g.read_key(MODAL).and_then(as_str).map(str::to_owned),
-            layout: Layout { rail: size(layout, "rail"), log: size(layout, "log") },
+            layout: Layout {
+                rail: size(layout, "rail"),
+                log: size(layout, "log"),
+            },
             tick: int(TICK).unwrap_or(0),
-            filter: g.read_key(LOG_FILTER).and_then(as_str).unwrap_or("").to_owned(),
+            filter: g
+                .read_key(LOG_FILTER)
+                .and_then(as_str)
+                .unwrap_or("")
+                .to_owned(),
             follow: !matches!(g.read_key(LOG_FOLLOW), Some(Value::Bool(false))),
             menu_open: !matches!(g.read_key(MENU), None | Some(Value::Null)),
         }
@@ -200,7 +212,14 @@ pub struct Scene<'a> {
 
 /// Dotted cells in `dim`, with a brighter `●` at step `at` of the path when there is one. Only
 /// blank cells are drawn on, so a connector never cuts through a box.
-fn dotted(buf: &mut Buffer, path: &[(u16, u16)], at: Option<usize>, dim: Style, bright: Style, th: &Theme) {
+fn dotted(
+    buf: &mut Buffer,
+    path: &[(u16, u16)],
+    at: Option<usize>,
+    dim: Style,
+    bright: Style,
+    th: &Theme,
+) {
     let full = buf.area;
     for (i, &(x, y)) in path.iter().enumerate() {
         // Blank cells only, except that a travelling dot may take the place of a plain one.
@@ -227,9 +246,20 @@ pub(crate) struct Centre {
 /// The checkpoint that is active now and where it was drawn on the rail, with the box it is
 /// about: the lead box, the failing worker's card or the return box. A dotted path with
 /// travelling dots joins them.
-fn advisor_link(buf: &mut Buffer, rail: Rect, marks: &[Rect], c: &Centre, v: &Views, th: &Theme, tick: i64) {
+fn advisor_link(
+    buf: &mut Buffer,
+    rail: Rect,
+    marks: &[Rect],
+    c: &Centre,
+    v: &Views,
+    th: &Theme,
+    tick: i64,
+) {
     let checkpoints = as_list(get(v.rail, "checkpoints").unwrap_or(&NULL));
-    let Some(i) = checkpoints.iter().position(|m| matches!(get(m, "active"), Some(Value::Bool(true)))) else {
+    let Some(i) = checkpoints
+        .iter()
+        .position(|m| matches!(get(m, "active"), Some(Value::Bool(true))))
+    else {
         return;
     };
     let target = match i {
@@ -241,7 +271,9 @@ fn advisor_link(buf: &mut Buffer, rail: Rect, marks: &[Rect], c: &Centre, v: &Vi
             .map(|(_, r)| *r),
         _ => Some(c.ret),
     };
-    let (Some(target), Some(from)) = (target, marks.get(i)) else { return };
+    let (Some(target), Some(from)) = (target, marks.get(i)) else {
+        return;
+    };
     if target.width == 0 || from.width == 0 {
         return;
     }
@@ -255,7 +287,14 @@ fn advisor_link(buf: &mut Buffer, rail: Rect, marks: &[Rect], c: &Centre, v: &Vi
     path.extend((gx + 1..target.x).map(|x| (x, y1)));
     let len = i64::try_from(path.len()).unwrap_or(1).max(1);
     let at = usize::try_from(tick.rem_euclid(len)).unwrap_or(0);
-    dotted(buf, &path, Some(at), Style::new().fg(th.dim), Style::new().fg(th.advisor), th);
+    dotted(
+        buf,
+        &path,
+        Some(at),
+        Style::new().fg(th.dim),
+        Style::new().fg(th.advisor),
+        th,
+    );
 }
 
 /// A style patched onto the four edges of a rectangle.
@@ -287,14 +326,28 @@ fn too_small_screen(buf: &mut Buffer, th: &Theme) {
     let full = buf.area;
     let lines = [
         "terminal too small".to_owned(),
-        format!("need {MIN_COLS}x{MIN_ROWS}, have {}x{}", full.width, full.height),
+        format!(
+            "need {MIN_COLS}x{MIN_ROWS}, have {}x{}",
+            full.width, full.height
+        ),
     ];
     let fg = Style::new().fg(th.warn).add_modifier(Modifier::BOLD);
     for (i, line) in lines.iter().enumerate() {
         let w = line.chars().count() as u16;
         let x = full.width.saturating_sub(w) / 2;
         let y = (full.height / 2).saturating_sub(1) + i as u16;
-        put(buf, full, x, y, line, if i == 0 { fg } else { Style::new().fg(th.dim_text) });
+        put(
+            buf,
+            full,
+            x,
+            y,
+            line,
+            if i == 0 {
+                fg
+            } else {
+                Style::new().fg(th.dim_text)
+            },
+        );
     }
 }
 
@@ -316,8 +369,22 @@ fn help(buf: &mut Buffer, full: Rect, sc: &Scene) -> Rect {
             width: half.saturating_sub(2),
             ..inner
         };
-        let x = put(buf, cell, 0, y, &row.keys, Style::new().fg(th.swarm).add_modifier(Modifier::BOLD));
-        put(buf, cell, x.max(11) + 1, y, row.text, Style::new().fg(th.fg));
+        let x = put(
+            buf,
+            cell,
+            0,
+            y,
+            &row.keys,
+            Style::new().fg(th.swarm).add_modifier(Modifier::BOLD),
+        );
+        put(
+            buf,
+            cell,
+            x.max(11) + 1,
+            y,
+            row.text,
+            Style::new().fg(th.fg),
+        );
     }
     area
 }
@@ -333,12 +400,33 @@ fn advice(buf: &mut Buffer, full: Rect, sc: &Scene) -> Rect {
     Clear.render(area, buf);
     let inner = panel(buf, area, "last advice", th.advisor, th);
     if lines.is_empty() {
-        put(buf, inner, 0, 0, "nothing yet", Style::new().fg(th.dim_text));
+        put(
+            buf,
+            inner,
+            0,
+            0,
+            "nothing yet",
+            Style::new().fg(th.dim_text),
+        );
     }
     for (i, l) in lines.iter().enumerate() {
-        put(buf, inner, 0, i as u16, &format!("{} {l}", th.g("»")), Style::new().fg(th.advisor));
+        put(
+            buf,
+            inner,
+            0,
+            i as u16,
+            &format!("{} {l}", th.g("»")),
+            Style::new().fg(th.advisor),
+        );
     }
-    put(buf, inner, 0, lines.len().max(1) as u16 + 1, "Esc closes", Style::new().fg(th.dim_text));
+    put(
+        buf,
+        inner,
+        0,
+        lines.len().max(1) as u16 + 1,
+        "Esc closes",
+        Style::new().fg(th.dim_text),
+    );
     area
 }
 
@@ -347,7 +435,14 @@ fn placeholder(buf: &mut Buffer, full: Rect, th: &Theme, name: &str) -> Rect {
     let area = centred(full, 50, 5);
     Clear.render(area, buf);
     let inner = panel(buf, area, name, th.dim_text, th);
-    put(buf, inner, 0, 0, "this screen is not built yet", Style::new().fg(th.dim_text));
+    put(
+        buf,
+        inner,
+        0,
+        0,
+        "this screen is not built yet",
+        Style::new().fg(th.dim_text),
+    );
     put(buf, inner, 0, 1, "Esc closes", Style::new().fg(th.dim_text));
     area
 }
@@ -356,7 +451,10 @@ fn placeholder(buf: &mut Buffer, full: Rect, th: &Theme, name: &str) -> Rect {
 fn tip_lines(id: HitId, v: &Views) -> Option<Vec<String>> {
     let word = |x: &Value, k: &str| get(x, k).and_then(as_str).unwrap_or("").to_owned();
     let of_run = |run: &str| -> Vec<String> {
-        let Some(t) = as_list(v.tips).iter().find(|t| get(t, "run_id").and_then(as_str) == Some(run)) else {
+        let Some(t) = as_list(v.tips)
+            .iter()
+            .find(|t| get(t, "run_id").and_then(as_str) == Some(run))
+        else {
             return Vec::new();
         };
         let mut out = vec![word(t, "name")];
@@ -364,7 +462,11 @@ fn tip_lines(id: HitId, v: &Views) -> Option<Vec<String>> {
         if !description.is_empty() {
             out.push(description);
         }
-        out.push(format!("model {}  account {}", word(t, "model"), word(t, "account")));
+        out.push(format!(
+            "model {}  account {}",
+            word(t, "model"),
+            word(t, "account")
+        ));
         out.push(format!("cost {}", word(t, "cost")));
         out.push(format!("run {run}"));
         out
@@ -378,16 +480,24 @@ fn tip_lines(id: HitId, v: &Views) -> Option<Vec<String>> {
         }
         HitId::LogRow(i) => {
             let line = as_list(v.log).get(i)?;
-            let mut out = vec![format!("{}  {}", word(line, "time"), word(line, "actor")), word(line, "text")];
+            let mut out = vec![
+                format!("{}  {}", word(line, "time"), word(line, "actor")),
+                word(line, "text"),
+            ];
             out.extend(of_run(&word(line, "run")));
             Some(out)
         }
         HitId::Status(Segment::Ledger) => {
             let l = get(v.status, "ledger")?;
-            Some(vec![format!("goal: {}", word(l, "goal")), format!("now: {}", word(l, "now"))])
+            Some(vec![
+                format!("goal: {}", word(l, "goal")),
+                format!("now: {}", word(l, "now")),
+            ])
         }
         HitId::Status(Segment::Alert) => {
-            let a = as_list(get(v.status, "alerts")?).iter().find(|a| get(a, "kind").and_then(as_str) == Some("permission"))?;
+            let a = as_list(get(v.status, "alerts")?)
+                .iter()
+                .find(|a| get(a, "kind").and_then(as_str) == Some("permission"))?;
             Some(vec![word(a, "text")])
         }
         _ => None,
@@ -410,11 +520,26 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     // what is left is still a dashboard.
     let want_hint = sc.prompt.hints || sc.prompt.notice.is_some();
     let wanted = sc.prompt.rows().saturating_sub(1) + u16::from(want_hint);
-    let extra = if full.height.saturating_sub(wanted) >= MIN_ROWS { wanted } else { 0 };
-    let mut a = areas(Rect { height: full.height - extra, ..full }, &c.layout, c.rail_open);
+    let extra = if full.height.saturating_sub(wanted) >= MIN_ROWS {
+        wanted
+    } else {
+        0
+    };
+    let mut a = areas(
+        Rect {
+            height: full.height - extra,
+            ..full
+        },
+        &c.layout,
+        c.rail_open,
+    );
     let hint = extra > 0 && want_hint;
     a.prompt.height = if extra == 0 { 1 } else { sc.prompt.rows() };
-    let hint_area = Rect { y: a.prompt.bottom(), height: u16::from(hint), ..a.prompt };
+    let hint_area = Rect {
+        y: a.prompt.bottom(),
+        height: u16::from(hint),
+        ..a.prompt
+    };
     a.status.y += extra;
     widgets::header(buf, a.header, v.header, th);
     widgets::legend(buf, a.legend, v.header, th);
@@ -438,7 +563,15 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     // The hit map, bottom layer first.
     let mut hits = HitMap::default();
     let strip = a.rail.width < crate::layout::RAIL_FULL;
-    hits.add(Rect { height: a.prompt.height + u16::from(hint), ..a.prompt }, HitId::Pane(Pane::Input), HitKind::Pane, z::PANE);
+    hits.add(
+        Rect {
+            height: a.prompt.height + u16::from(hint),
+            ..a.prompt
+        },
+        HitId::Pane(Pane::Input),
+        HitKind::Pane,
+        z::PANE,
+    );
     for (i, (r, _)) in prompt_rows.iter().enumerate() {
         hits.add(*r, HitId::PromptRow(i), HitKind::Pane, z::ITEM);
     }
@@ -465,7 +598,11 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         hits.add(*r, HitId::Status(*seg), HitKind::Item, z::ITEM);
     }
     for k in 0..log.shown {
-        let row = Rect { y: log.inner.y + k as u16, height: 1, ..log.inner };
+        let row = Rect {
+            y: log.inner.y + k as u16,
+            height: 1,
+            ..log.inner
+        };
         hits.add(row, HitId::LogRow(log.first + k), HitKind::Item, z::ITEM);
     }
     if let Some(h) = a.rail_handle {
@@ -481,8 +618,17 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         let held = c.scroll_log.min(max_scroll);
         let len = (visible * visible / log.total).clamp(1, visible);
         let top = (max_scroll - held) * (visible - len) / max_scroll;
-        let track = Rect { x, y: log.inner.y, width: 1, height: log.inner.height };
-        let thumb = Rect { y: track.y + top as u16, height: len as u16, ..track };
+        let track = Rect {
+            x,
+            y: log.inner.y,
+            width: 1,
+            height: log.inner.height,
+        };
+        let thumb = Rect {
+            y: track.y + top as u16,
+            height: len as u16,
+            ..track
+        };
         hits.add(track, HitId::Track(Pane::Log), HitKind::Track, z::TRACK);
         hits.add(thumb, HitId::Thumb(Pane::Log), HitKind::Thumb, z::THUMB);
         let lit = [sc.pointer.hover, sc.pointer.pressed].contains(&Some(HitId::Thumb(Pane::Log)));
@@ -505,8 +651,13 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
                 buf.set_style(r.rect, th.interact(Interact::Selected));
             }
         }
-        for (id, state) in [(sc.pointer.hover, Interact::Hover), (sc.pointer.pressed, Interact::Pressed)] {
-            let Some(r) = id.and_then(|id| hits.find(id)) else { continue };
+        for (id, state) in [
+            (sc.pointer.hover, Interact::Hover),
+            (sc.pointer.pressed, Interact::Pressed),
+        ] {
+            let Some(r) = id.and_then(|id| hits.find(id)) else {
+                continue;
+            };
             if r.kind == HitKind::Item && (state == Interact::Pressed || !is_selected(r.id)) {
                 buf.set_style(r.rect, th.interact(state));
             }
@@ -556,7 +707,13 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             Some(HitId::MenuItem(i)) => Some(i),
             _ => None,
         };
-        let (rect, rows) = widgets::menu(buf, full, v.menu, th, (item(sc.pointer.hover), item(sc.pointer.pressed)));
+        let (rect, rows) = widgets::menu(
+            buf,
+            full,
+            v.menu,
+            th,
+            (item(sc.pointer.hover), item(sc.pointer.pressed)),
+        );
         hits.add(rect, HitId::MenuBox, HitKind::Modal, z::MODAL);
         for (i, r) in rows.iter().enumerate() {
             let enabled = as_list(get(v.menu, "items").unwrap_or(&NULL))
@@ -570,7 +727,10 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             }
         }
     } else if modal.is_none() {
-        let shown = sc.pointer.tip.and_then(|id| Some((hits.find(id)?.rect, tip_lines(id, v)?)));
+        let shown = sc
+            .pointer
+            .tip
+            .and_then(|id| Some((hits.find(id)?.rect, tip_lines(id, v)?)));
         if let Some((anchor, lines)) = shown {
             widgets::tooltip(buf, full, anchor, &lines, th);
         }
@@ -581,18 +741,36 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
         hits.add(full, HitId::Backdrop, HitKind::Modal, z::BACKDROP);
         let cwd = sc.prompt.cwd.as_str();
         let placed: Placed = match name {
-            "help" => Placed { area: help(buf, full, sc), hits: Vec::new() },
-            "advice" => Placed { area: advice(buf, full, sc), hits: Vec::new() },
+            "help" => Placed {
+                area: help(buf, full, sc),
+                hits: Vec::new(),
+            },
+            "advice" => Placed {
+                area: advice(buf, full, sc),
+                hits: Vec::new(),
+            },
             "permission" if !matches!(v.permission, Value::Null) => {
                 screens::permission(buf, full, v.permission, th, &sc.pointer, sc.entry, cwd)
             }
             "palette" => screens::palette(buf, full, v.palette, th, &sc.pointer),
             "agents" => screens::agents(buf, full, v.agents, th, &sc.pointer, sc.entry, sc.note),
-            "accounts" => screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note),
-            m if m.starts_with("models:") => screens::models(buf, full, v.models, th, &sc.pointer, sc.entry, sc.note),
+            "accounts" => {
+                screens::accounts(buf, full, v.accounts, th, &sc.pointer, sc.entry, sc.note)
+            }
+            m if m.starts_with("models:") => {
+                screens::models(buf, full, v.models, th, &sc.pointer, sc.entry, sc.note)
+            }
             "providers" => screens::providers(buf, full, v.providers, th, &sc.pointer),
             "outcome" => screens::outcome(buf, full, th, &sc.pointer),
-            "confirm:clear" => screens::confirm(buf, full, th, &sc.pointer, "clear", "Clear the session log?", ("clear_yes", "Clear")),
+            "confirm:clear" => screens::confirm(
+                buf,
+                full,
+                th,
+                &sc.pointer,
+                "clear",
+                "Clear the session log?",
+                ("clear_yes", "Clear"),
+            ),
             c if c.starts_with("confirm:logout:") => screens::confirm(
                 buf,
                 full,
@@ -602,28 +780,59 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
                 &format!("Log out of {}?", &c["confirm:logout:".len()..]),
                 ("logout_yes", "Log out"),
             ),
-            c if c.starts_with("confirm:cancel:") => {
-                screens::confirm(buf, full, th, &sc.pointer, "cancel", "Cancel the lead run?", ("cancel_yes", "Cancel the lead"))
+            c if c.starts_with("confirm:cancel:") => screens::confirm(
+                buf,
+                full,
+                th,
+                &sc.pointer,
+                "cancel",
+                "Cancel the lead run?",
+                ("cancel_yes", "Cancel the lead"),
+            ),
+            t if t.starts_with("status:") => {
+                screens::run_status(buf, full, v.run_status, th, &sc.pointer)
             }
-            t if t.starts_with("status:") => screens::run_status(buf, full, v.run_status, th, &sc.pointer),
             "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
             "workflows" => screens::workflows(buf, full, v.workflows, th, &sc.pointer),
             "workflow_show" => screens::workflow_show(buf, full, v.workflows, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
-                let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
+                let g = transcript::draw(
+                    buf,
+                    full,
+                    v.transcript,
+                    th,
+                    &sc.pointer,
+                    sc.selection,
+                    sc.entry,
+                    sc.copied,
+                );
                 for (id, r, kind) in &g.hits {
-                    let layer = if matches!(id, HitId::TrRow(_)) { z::MODAL + 1 } else { z::MODAL + 2 };
+                    let layer = if matches!(id, HitId::TrRow(_)) {
+                        z::MODAL + 1
+                    } else {
+                        z::MODAL + 2
+                    };
                     hits.add(*r, *id, *kind, layer);
                 }
                 let area = g.area;
                 transcript_geom = Some(g);
-                Placed { area, hits: Vec::new() }
+                Placed {
+                    area,
+                    hits: Vec::new(),
+                }
             }
-            other => Placed { area: placeholder(buf, full, th, other), hits: Vec::new() },
+            other => Placed {
+                area: placeholder(buf, full, th, other),
+                hits: Vec::new(),
+            },
         };
         hits.add(placed.area, HitId::Modal, HitKind::Modal, z::MODAL);
         for (id, r) in placed.hits {
-            let kind = if matches!(id, HitId::ListRow(_)) { HitKind::Item } else { HitKind::Button };
+            let kind = if matches!(id, HitId::ListRow(_)) {
+                HitKind::Item
+            } else {
+                HitKind::Button
+            };
             hits.add(r, id, kind, z::MODAL + 1);
         }
     }
@@ -633,7 +842,10 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     Drawn {
         hits,
         areas: a,
-        log: Extent { total: log.total, visible },
+        log: Extent {
+            total: log.total,
+            visible,
+        },
         cards: as_list(v.cards).len(),
         transcript: transcript_geom,
         prompt_rows,
@@ -722,7 +934,11 @@ impl Ui {
 
     /// Draws if a widget is dirty, the size, the UI state, the pointer or the prompt changed, or
     /// nothing was drawn yet. Returns whether it did.
-    pub fn draw<G: Graph, B: Backend>(&mut self, term: &mut Terminal<B>, g: &G) -> Result<bool, B::Error> {
+    pub fn draw<G: Graph, B: Backend>(
+        &mut self,
+        term: &mut Terminal<B>,
+        g: &G,
+    ) -> Result<bool, B::Error> {
         let size = term.size()?;
         let now = (size.width, size.height);
         let chrome = Chrome::read(g);

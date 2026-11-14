@@ -126,7 +126,7 @@ impl HitMap {
             .iter()
             .filter(|r| r.rect.contains((col, row).into()))
             .max_by_key(|r| r.z)
-            // `max_by_key` keeps the last of equals, which is the one registered later.
+        // `max_by_key` keeps the last of equals, which is the one registered later.
     }
 
     pub fn regions(&self) -> &[HitRegion] {
@@ -142,10 +142,19 @@ impl HitMap {
     /// whether move events are worth asking the terminal for.
     pub fn hoverable(&self) -> bool {
         // A context menu has a backdrop but its items still react to the pointer.
-        let menu = self.regions.iter().any(|r| matches!(r.id, HitId::MenuItem(_)));
-        let buttons = self.regions.iter().any(|r| matches!(r.kind, HitKind::Button | HitKind::Text));
+        let menu = self
+            .regions
+            .iter()
+            .any(|r| matches!(r.id, HitId::MenuItem(_)));
+        let buttons = self
+            .regions
+            .iter()
+            .any(|r| matches!(r.kind, HitKind::Button | HitKind::Text));
         buttons
-            || (self.regions.iter().any(|r| !matches!(r.kind, HitKind::Modal))
+            || (self
+                .regions
+                .iter()
+                .any(|r| !matches!(r.kind, HitKind::Modal))
                 && (menu || !self.regions.iter().any(|r| r.id == HitId::Backdrop)))
     }
 }
@@ -157,14 +166,54 @@ mod tests {
     fn map() -> HitMap {
         let mut m = HitMap::default();
         // The dashboard: a log pane with a row, a thumb and a handle, then a rail overlay.
-        m.add(Rect::new(0, 0, 80, 24), HitId::Pane(Pane::Input), HitKind::Pane, z::PANE);
-        m.add(Rect::new(0, 16, 80, 6), HitId::Pane(Pane::Log), HitKind::Pane, z::PANE);
-        m.add(Rect::new(1, 17, 70, 1), HitId::LogRow(0), HitKind::Item, z::ITEM);
-        m.add(Rect::new(79, 17, 1, 4), HitId::Track(Pane::Log), HitKind::Track, z::TRACK);
-        m.add(Rect::new(79, 18, 1, 2), HitId::Thumb(Pane::Log), HitKind::Thumb, z::THUMB);
-        m.add(Rect::new(0, 16, 80, 1), HitId::LogHandle, HitKind::Handle, z::HANDLE);
-        m.add(Rect::new(0, 3, 22, 12), HitId::Pane(Pane::Advisor), HitKind::Pane, z::OVERLAY);
-        m.add(Rect::new(1, 5, 20, 1), HitId::Checkpoint(0), HitKind::Item, z::OVERLAY + 1);
+        m.add(
+            Rect::new(0, 0, 80, 24),
+            HitId::Pane(Pane::Input),
+            HitKind::Pane,
+            z::PANE,
+        );
+        m.add(
+            Rect::new(0, 16, 80, 6),
+            HitId::Pane(Pane::Log),
+            HitKind::Pane,
+            z::PANE,
+        );
+        m.add(
+            Rect::new(1, 17, 70, 1),
+            HitId::LogRow(0),
+            HitKind::Item,
+            z::ITEM,
+        );
+        m.add(
+            Rect::new(79, 17, 1, 4),
+            HitId::Track(Pane::Log),
+            HitKind::Track,
+            z::TRACK,
+        );
+        m.add(
+            Rect::new(79, 18, 1, 2),
+            HitId::Thumb(Pane::Log),
+            HitKind::Thumb,
+            z::THUMB,
+        );
+        m.add(
+            Rect::new(0, 16, 80, 1),
+            HitId::LogHandle,
+            HitKind::Handle,
+            z::HANDLE,
+        );
+        m.add(
+            Rect::new(0, 3, 22, 12),
+            HitId::Pane(Pane::Advisor),
+            HitKind::Pane,
+            z::OVERLAY,
+        );
+        m.add(
+            Rect::new(1, 5, 20, 1),
+            HitId::Checkpoint(0),
+            HitKind::Item,
+            z::OVERLAY + 1,
+        );
         m
     }
 
@@ -196,8 +245,18 @@ mod tests {
     #[test]
     fn a_modal_backdrop_is_above_everything_and_its_box_above_that() {
         let mut m = map();
-        m.add(Rect::new(0, 0, 80, 24), HitId::Backdrop, HitKind::Modal, z::BACKDROP);
-        m.add(Rect::new(10, 4, 60, 16), HitId::Modal, HitKind::Modal, z::MODAL);
+        m.add(
+            Rect::new(0, 0, 80, 24),
+            HitId::Backdrop,
+            HitKind::Modal,
+            z::BACKDROP,
+        );
+        m.add(
+            Rect::new(10, 4, 60, 16),
+            HitId::Modal,
+            HitKind::Modal,
+            z::MODAL,
+        );
         let table = [
             ((5, 17), HitId::Backdrop),
             ((10, 5), HitId::Modal),
@@ -216,13 +275,28 @@ mod tests {
     #[test]
     fn equal_layers_go_to_the_later_registration() {
         let mut m = HitMap::default();
-        m.add(Rect::new(0, 0, 4, 4), HitId::Card(0), HitKind::Item, z::ITEM);
-        m.add(Rect::new(2, 0, 4, 4), HitId::Card(1), HitKind::Item, z::ITEM);
+        m.add(
+            Rect::new(0, 0, 4, 4),
+            HitId::Card(0),
+            HitKind::Item,
+            z::ITEM,
+        );
+        m.add(
+            Rect::new(2, 0, 4, 4),
+            HitId::Card(1),
+            HitKind::Item,
+            z::ITEM,
+        );
         assert_eq!(m.at(1, 1).map(|r| r.id), Some(HitId::Card(0)));
         assert_eq!(m.at(3, 1).map(|r| r.id), Some(HitId::Card(1)));
         assert!(m.find(HitId::Card(1)).is_some());
         // An empty rectangle registers nothing.
-        m.add(Rect::new(0, 0, 0, 5), HitId::Card(2), HitKind::Item, z::ITEM);
+        m.add(
+            Rect::new(0, 0, 0, 5),
+            HitId::Card(2),
+            HitKind::Item,
+            z::ITEM,
+        );
         assert!(m.find(HitId::Card(2)).is_none());
     }
 }

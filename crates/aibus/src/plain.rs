@@ -51,7 +51,11 @@ impl<'a> Plain<'a> {
     fn notice(&self, text: &str) {
         let text = self.redactor.redact(text);
         let text = term::strip_ansi(&text);
-        let (on, off) = if self.color { ("\u{1b}[2m", "\u{1b}[0m") } else { ("", "") };
+        let (on, off) = if self.color {
+            ("\u{1b}[2m", "\u{1b}[0m")
+        } else {
+            ("", "")
+        };
         let _ = writeln!(std::io::stderr().lock(), "{on}aibus: {text}{off}");
     }
 
@@ -70,7 +74,8 @@ impl<'a> Plain<'a> {
                 self.stdout(&text, out_color)?;
             }
             Msg::ToolCallRequested { call, .. } => {
-                self.names.insert(call.id.0.to_string(), call.name.to_string());
+                self.names
+                    .insert(call.id.0.to_string(), call.name.to_string());
                 self.notice(&format!("tool {} {}", call.name, brief(&call.input)));
             }
             Msg::ToolCallFinished {
@@ -79,7 +84,10 @@ impl<'a> Plain<'a> {
                 duration,
                 ..
             } if result.is_error => {
-                let name = self.names.get(&call_id.0.to_string()).map_or("call", String::as_str);
+                let name = self
+                    .names
+                    .get(&call_id.0.to_string())
+                    .map_or("call", String::as_str);
                 self.notice(&format!("tool {name} failed ({} ms)", duration.as_millis()));
             }
             Msg::PermissionDecided {
@@ -145,8 +153,14 @@ mod tests {
 
     #[test]
     fn a_notice_names_the_most_telling_field_on_one_short_line() {
-        assert_eq!(brief(&json!({"path": "src/main.rs", "lines": [1, 2]})), "src/main.rs");
-        assert_eq!(brief(&json!({"command": "cargo\n  test -p x"})), "cargo test -p x");
+        assert_eq!(
+            brief(&json!({"path": "src/main.rs", "lines": [1, 2]})),
+            "src/main.rs"
+        );
+        assert_eq!(
+            brief(&json!({"command": "cargo\n  test -p x"})),
+            "cargo test -p x"
+        );
         assert_eq!(brief(&json!({"n": 1})), r#"{"n":1}"#);
         let long = brief(&json!({"command": "x".repeat(200)}));
         assert_eq!(long.chars().count(), 80);

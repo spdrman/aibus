@@ -62,9 +62,13 @@ impl Gate {
         }
         let class = std::env::var("AIBUS_RUNNER_CLASS").unwrap_or_else(|_| "local".into());
         let gate = Self {
-            dir: [env!("CARGO_MANIFEST_DIR"), "../../benches/baselines", &class]
-                .iter()
-                .collect(),
+            dir: [
+                env!("CARGO_MANIFEST_DIR"),
+                "../../benches/baselines",
+                &class,
+            ]
+            .iter()
+            .collect(),
             enforce: std::env::var("AIBUS_BENCH_GATE").as_deref() == Ok("1"),
             save: std::env::var("AIBUS_BENCH_SAVE").as_deref() == Ok("1"),
             calibration_us: calibrate(),
@@ -135,7 +139,10 @@ impl Gate {
             std::fs::create_dir_all(&self.dir).unwrap();
             std::fs::write(
                 self.dir.join(format!("{name}.txt")),
-                format!("p99_us {:.1}\ncalibration_us {:.1}\n", s.p99, self.calibration_us),
+                format!(
+                    "p99_us {:.1}\ncalibration_us {:.1}\n",
+                    s.p99, self.calibration_us
+                ),
             )
             .unwrap();
         }

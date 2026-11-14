@@ -54,16 +54,27 @@ fn draft(a: &A) -> Option<String> {
 fn a_finished_author_sets_the_draft_only_when_it_validates() {
     let mut a = app();
     let found = discover(None, Path::new("/nonexistent"), None, &[], &[]).unwrap();
-    a.step(Msg::AgentsReloaded { defs: found.agents.values().cloned().collect(), warnings: vec![] }).unwrap();
+    a.step(Msg::AgentsReloaded {
+        defs: found.agents.values().cloned().collect(),
+        warnings: vec![],
+    })
+    .unwrap();
     assert_eq!(draft(&a), None);
 
     // Another agent's fenced block is not a draft.
     finish(&mut a, 2, "explore", &format!("```toml\n{GOOD}```"));
     assert_eq!(draft(&a), None);
 
-    finish(&mut a, 3, "workflow-author", &format!("Here.\n```toml\n{GOOD}```\nwhy: explore finds it."));
+    finish(
+        &mut a,
+        3,
+        "workflow-author",
+        &format!("Here.\n```toml\n{GOOD}```\nwhy: explore finds it."),
+    );
     assert_eq!(draft(&a).as_deref(), Some(GOOD));
-    let summary = get(a.graph.read_key(WORKFLOW_DRAFT).unwrap(), "summary").and_then(as_str).unwrap();
+    let summary = get(a.graph.read_key(WORKFLOW_DRAFT).unwrap(), "summary")
+        .and_then(as_str)
+        .unwrap();
     assert!(summary.starts_with("valid, 2 steps"), "{summary}");
 
     // A later draft that names an agent nobody has leaves the good one where it was.
@@ -73,7 +84,12 @@ fn a_finished_author_sets_the_draft_only_when_it_validates() {
 
     // The last block of a result wins, and a result with none changes nothing.
     let better = GOOD.replace("Find it", "Find out");
-    finish(&mut a, 5, "workflow-author", &format!("```toml\n{GOOD}```\nbetter:\n```toml\n{better}```"));
+    finish(
+        &mut a,
+        5,
+        "workflow-author",
+        &format!("```toml\n{GOOD}```\nbetter:\n```toml\n{better}```"),
+    );
     assert_eq!(draft(&a).as_deref(), Some(better.as_str()));
     finish(&mut a, 6, "workflow-author", "I could not.");
     assert_eq!(draft(&a).as_deref(), Some(better.as_str()));

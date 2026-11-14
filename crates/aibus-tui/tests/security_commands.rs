@@ -30,9 +30,17 @@ fn run(id: &str) -> RunId {
 /// present and an MCP server configured: every command is on offer.
 fn with_env<T>(f: impl FnOnce(&Env) -> T) -> T {
     let agents = vec!["grep".to_owned(), "workflow-author".to_owned()];
-    let workflows = ["fix", "build", "review", "explore"].map(str::to_owned).to_vec();
-    let runs = vec![(run(LEAD), "lead".to_owned()), (run(GREP), "grep".to_owned())];
-    let states = vec![(run(LEAD), RunStatus::Running), (run(GREP), RunStatus::Running)];
+    let workflows = ["fix", "build", "review", "explore"]
+        .map(str::to_owned)
+        .to_vec();
+    let runs = vec![
+        (run(LEAD), "lead".to_owned()),
+        (run(GREP), "grep".to_owned()),
+    ];
+    let states = vec![
+        (run(LEAD), RunStatus::Running),
+        (run(GREP), RunStatus::Running),
+    ];
     let accounts = vec!["work".to_owned()];
     f(&Env {
         agents: &agents,
@@ -80,9 +88,13 @@ fn the_author_child_never_gets_gates_or_run() {
         for payload in payloads {
             let line = format!("/{} {payload}", spec.name);
             let sent = with_env(|env| send(&line, env));
-            let (Sent::Msgs(out) | Sent::Login(_, out)) = sent else { continue };
+            let (Sent::Msgs(out) | Sent::Login(_, out)) = sent else {
+                continue;
+            };
             for m in out {
-                let Msg::Command(Command::WorkflowAuthor { goal, write, edit }) = m else { continue };
+                let Msg::Command(Command::WorkflowAuthor { goal, write, edit }) = m else {
+                    continue;
+                };
                 if !spawning.contains(&spec.name) {
                     spawning.push(spec.name);
                 }
@@ -94,7 +106,10 @@ fn the_author_child_never_gets_gates_or_run() {
                 // Every word that looks like a server flag is still in the goal, as words.
                 for flag in ["--allow", "--allow-tool", "--http", "--no-provenance"] {
                     if payload.contains(flag) {
-                        assert!(goal.contains(flag), "{line}: the flag left the goal: {goal:?}");
+                        assert!(
+                            goal.contains(flag),
+                            "{line}: the flag left the goal: {goal:?}"
+                        );
                     }
                 }
             }
@@ -115,16 +130,27 @@ fn cancel_lead_asks() {
             Sent::Login(..) => vec!["LOGIN".into()],
         });
         // `@LEAD` is not a seat name: it matches no agent and is refused, which is also not a cancel.
-        assert!(got == [ask.clone()] || got[0].starts_with("BAD"), "{line}: {got:?}");
+        assert!(
+            got == [ask.clone()] || got[0].starts_with("BAD"),
+            "{line}: {got:?}"
+        );
     }
     // The lead by its run id, too: the ask follows the run, not the spelling.
     let by_id = msgs(&format!("/cancel @{}", &LEAD[..26]));
     assert_eq!(format!("{:?}", by_id[0]), ask);
     // A worker is cancelled at once.
-    assert!(matches!(&msgs("/cancel @grep")[..], [Msg::Command(Command::Cancel { .. })]));
+    assert!(matches!(
+        &msgs("/cancel @grep")[..],
+        [Msg::Command(Command::Cancel { .. })]
+    ));
     // And nothing typed ever cancels the lead in one step.
     for line in ["/cancel", "/cancel @lead", "/cancel   @lead"] {
-        assert!(!msgs(line).iter().any(|m| matches!(m, Msg::Command(Command::Cancel { run: r }) if *r == run(LEAD))), "{line}");
+        assert!(
+            !msgs(line)
+                .iter()
+                .any(|m| matches!(m, Msg::Command(Command::Cancel { run: r }) if *r == run(LEAD))),
+            "{line}"
+        );
     }
 }
 
@@ -142,7 +168,13 @@ fn prompt_history_never_holds_a_login_line() {
         p.set(&text);
         assert!(p.take().is_some());
     }
-    assert!(p.history.iter().all(|h| !h.contains("sk-test") && !h.contains(KEY)), "{:?}", p.history);
+    assert!(
+        p.history
+            .iter()
+            .all(|h| !h.contains("sk-test") && !h.contains(KEY)),
+        "{:?}",
+        p.history
+    );
     // The commands that carry no key are history like any other.
     for text in ["/login", "/login anthropic", "/logout work"] {
         p.set(text);
@@ -159,13 +191,20 @@ fn an_inline_key_is_redacted_in_the_notice_and_the_log() {
     assert!(sent.is_empty(), "nothing reaches the graph: {sent:?}");
 
     let notice = r.ui.prompt.notice.clone().expect("a notice says why");
-    assert!(notice.contains("[redacted]") && !notice.contains("sk-test") && !notice.contains(KEY), "{notice}");
+    assert!(
+        notice.contains("[redacted]") && !notice.contains("sk-test") && !notice.contains(KEY),
+        "{notice}"
+    );
     assert!(!r.text().contains("sk-test"), "{}", r.text());
 
     // The log, the graph and everything the session would save.
     let log = format!("{:?}", r.app.store.log_rows(1_000));
     let snapshot = format!("{:?}", r.app.graph.snapshot());
-    for (what, text) in [("the log", log), ("the snapshot", snapshot), ("the jobs", format!("{:?}", r.jobs))] {
+    for (what, text) in [
+        ("the log", log),
+        ("the snapshot", snapshot),
+        ("the jobs", format!("{:?}", r.jobs)),
+    ] {
         assert!(!text.contains("LOGIN-0123456789"), "the key is in {what}");
     }
 }
@@ -174,11 +213,24 @@ fn an_inline_key_is_redacted_in_the_notice_and_the_log() {
 fn a_key_typed_on_the_login_line_is_drawn_as_dots() {
     let mut r = Rig::new(session(), (98, 46), Theme::recording());
     r.type_text("/login anthropic ");
-    assert!(r.text().contains("/login anthropic ▌"), "the provider name is plain: {}", r.text());
+    assert!(
+        r.text().contains("/login anthropic ▌"),
+        "the provider name is plain: {}",
+        r.text()
+    );
     r.type_text(KEY);
     let text = r.text();
-    assert!(!text.contains("sk-test") && !text.contains("LOGIN"), "{text}");
-    assert!(text.contains(&format!("/login anthropic {}", "•".repeat(KEY.chars().count()))), "{text}");
+    assert!(
+        !text.contains("sk-test") && !text.contains("LOGIN"),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "/login anthropic {}",
+            "•".repeat(KEY.chars().count())
+        )),
+        "{text}"
+    );
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
@@ -251,7 +303,12 @@ fn no_login_secret_in_a_frame_a_notice_or_ui_toml() {
 
     // `ui.toml` is the one file the dashboard writes on its own.
     let dir = tempfile::tempdir().unwrap();
-    Layout { rail: Some(30), log: Some(8) }.save(&dir.path().join("state/ui.toml")).unwrap();
+    Layout {
+        rail: Some(30),
+        log: Some(8),
+    }
+    .save(&dir.path().join("state/ui.toml"))
+    .unwrap();
     for file in walk(dir.path()) {
         seen.push(std::fs::read_to_string(file).unwrap());
     }
@@ -267,8 +324,14 @@ fn root() -> PathBuf {
 }
 
 fn files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut all: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut all: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .collect();
     all.sort();
     all
 }
@@ -278,17 +341,31 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 #[test]
 fn commands_send_corpus_and_crashes_hold() {
     let mut n = 0;
-    for dir in [root().join("fuzz/corpus/commands_send"), root().join("fixtures/fuzz/commands_send")] {
+    for dir in [
+        root().join("fuzz/corpus/commands_send"),
+        root().join("fixtures/fuzz/commands_send"),
+    ] {
         for file in files(&dir) {
             let data = std::fs::read(&file).unwrap();
-            assert!(std::panic::catch_unwind(|| commands_checks::commands_send(&data)).is_ok(), "{} breaks an invariant", file.display());
+            assert!(
+                std::panic::catch_unwind(|| commands_checks::commands_send(&data)).is_ok(),
+                "{} breaks an invariant",
+                file.display()
+            );
             n += 1;
         }
     }
     assert!(n > 0, "no corpus for commands_send");
-    let seeds: Vec<String> = files(&root().join("fuzz/corpus/commands_send")).iter().filter_map(|f| f.file_name()?.to_str().map(str::to_owned)).collect();
+    let seeds: Vec<String> = files(&root().join("fuzz/corpus/commands_send"))
+        .iter()
+        .filter_map(|f| f.file_name()?.to_str().map(str::to_owned))
+        .collect();
     for spec in REGISTRY.iter().filter(|s| s.surfaces.slash > 0) {
-        assert!(seeds.iter().any(|s| s == spec.name), "/{} has no seed in fuzz/corpus/commands_send", spec.name);
+        assert!(
+            seeds.iter().any(|s| s == spec.name),
+            "/{} has no seed in fuzz/corpus/commands_send",
+            spec.name
+        );
     }
 }
 
@@ -300,16 +377,59 @@ fn any_line_send_accepts_is_in_the_help_text() {
     let words: Vec<String> = REGISTRY
         .iter()
         .map(|s| format!("/{}", s.name))
-        .chain(["/", "//", "/LOGIN", "/login", "/workflow", "new", "edit", "save", "show", "run", "list", "--write", "--force", "--user", "--allow", "gates", "@lead", "@grep", "@advisor", "@router", "@agent-grep", "@nobody", "@01J", "review", "work", "anthropic", "openrouter", "sk-ant-api03-abcdefghijklmnop", "a b", "\u{a0}", "\t", "\n", "é", "ß", "x"].map(str::to_owned))
+        .chain(
+            [
+                "/",
+                "//",
+                "/LOGIN",
+                "/login",
+                "/workflow",
+                "new",
+                "edit",
+                "save",
+                "show",
+                "run",
+                "list",
+                "--write",
+                "--force",
+                "--user",
+                "--allow",
+                "gates",
+                "@lead",
+                "@grep",
+                "@advisor",
+                "@router",
+                "@agent-grep",
+                "@nobody",
+                "@01J",
+                "review",
+                "work",
+                "anthropic",
+                "openrouter",
+                "sk-ant-api03-abcdefghijklmnop",
+                "a b",
+                "\u{a0}",
+                "\t",
+                "\n",
+                "é",
+                "ß",
+                "x",
+            ]
+            .map(str::to_owned),
+        )
         .collect();
     let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
     let mut next = move |n: usize| {
-        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         ((seed >> 33) as usize) % n
     };
     let mut accepted = 0;
     for _ in 0..4_000 {
-        let line: Vec<&str> = (0..1 + next(5)).map(|_| words[next(words.len())].as_str()).collect();
+        let line: Vec<&str> = (0..1 + next(5))
+            .map(|_| words[next(words.len())].as_str())
+            .collect();
         let line = line.join([" ", "  ", "\t"][next(3)]);
         let mut data = vec![(next(256)) as u8];
         data.extend(line.bytes());
@@ -318,11 +438,21 @@ fn any_line_send_accepts_is_in_the_help_text() {
             accepted += 1;
         }
     }
-    assert!(accepted > 100, "the generator should reach accepted lines too ({accepted})");
+    assert!(
+        accepted > 100,
+        "the generator should reach accepted lines too ({accepted})"
+    );
     // Every accepted slash command word is a help line: the registry's slash rows are the help.
-    let help: Vec<String> = help_lines().into_iter().map(|(entry, _)| entry.split(' ').next().unwrap().to_owned()).collect();
+    let help: Vec<String> = help_lines()
+        .into_iter()
+        .map(|(entry, _)| entry.split(' ').next().unwrap().to_owned())
+        .collect();
     for spec in REGISTRY.iter().filter(|s| s.surfaces.slash > 0) {
-        assert!(help.contains(&format!("/{}", spec.name)), "/{} is not in /help", spec.name);
+        assert!(
+            help.contains(&format!("/{}", spec.name)),
+            "/{} is not in /help",
+            spec.name
+        );
     }
 }
 
@@ -335,12 +465,30 @@ fn any_line_send_accepts_is_in_the_help_text() {
 fn pick_runs_registry_rows_only() {
     let mut out = aibus_tui::input::Out::default();
     with_env(|env| {
-        for name in ["login", "logout", "../x", "/login anthropic", "workflow save x --force", ""] {
+        for name in [
+            "login",
+            "logout",
+            "../x",
+            "/login anthropic",
+            "workflow save x --force",
+            "",
+        ] {
             aibus_tui::commands::pick(name, aibus_tui::commands::Via::Palette, None, env, &mut out);
         }
     });
     // A pick has no arguments to give: `login` cannot start a flow for a provider and `logout` has
     // no account, so neither does anything beyond opening the list.
     assert!(out.login.is_none(), "a pick started a login");
-    assert!(!out.msgs.iter().any(|m| matches!(m, Msg::Command(Command::WorkflowFile(_) | Command::WorkflowAuthor { .. } | Command::SetModel { .. }))), "{:?}", out.msgs);
+    assert!(
+        !out.msgs.iter().any(|m| matches!(
+            m,
+            Msg::Command(
+                Command::WorkflowFile(_)
+                    | Command::WorkflowAuthor { .. }
+                    | Command::SetModel { .. }
+            )
+        )),
+        "{:?}",
+        out.msgs
+    );
 }

@@ -28,7 +28,12 @@ pub(crate) fn filter(g: &Global, directives: Option<&str>) -> (Targets, Vec<Stri
     };
     let mut targets = Targets::new().with_default(base);
     let mut bad = Vec::new();
-    for d in directives.unwrap_or_default().split(',').map(str::trim).filter(|d| !d.is_empty()) {
+    for d in directives
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
         match d.split_once('=') {
             Some((target, level)) => match level.trim().parse::<LevelFilter>() {
                 Ok(l) => targets = targets.with_target(target.trim(), l),
@@ -112,7 +117,10 @@ mod tests {
 
     #[test]
     fn aibus_log_adds_directives_and_bad_ones_are_reported() {
-        let (t, bad) = filter(&global(0, false), Some("aibus_core=debug, hyper=off ,loud, x=nope"));
+        let (t, bad) = filter(
+            &global(0, false),
+            Some("aibus_core=debug, hyper=off ,loud, x=nope"),
+        );
         assert!(t.would_enable("aibus_core", &Level::DEBUG));
         assert!(t.would_enable("aibus", &Level::WARN));
         assert!(!t.would_enable("aibus", &Level::INFO));

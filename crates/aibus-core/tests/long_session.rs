@@ -15,13 +15,13 @@ use std::time::Duration;
 
 use aibus_core::persist::session::{write_snapshot, SNAPSHOT};
 use aibus_core::state::derive::transcript_rows;
-use aibus_core::state::store::{LOG_RING, SUMMARY_HEAD, TAIL_MAX};
 use aibus_core::state::run_key;
+use aibus_core::state::store::{LOG_RING, SUMMARY_HEAD, TAIL_MAX};
 use aibus_core::*;
 use aibus_graph::mini::MiniGraph;
-use aibus_testkit::xdg_temp;
 use aibus_graph::{Graph, Value, COMMIT_HISTORY_CAP};
 use aibus_provider::StreamChunk;
+use aibus_testkit::xdg_temp;
 
 const HOURS: u64 = 12;
 const RUNS: usize = 300;
@@ -51,7 +51,11 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
     let clock = Arc::new(AtomicU64::new(1_700_000_000_000));
     let now = clock.clone();
     let mut app = App::new(MiniGraph::new(), move || now.load(Ordering::SeqCst));
-    app.step(Msg::Resize { cols: WIDTH as u16, rows: 46 }).unwrap();
+    app.step(Msg::Resize {
+        cols: WIDTH as u16,
+        rows: 46,
+    })
+    .unwrap();
 
     let total_ms = HOURS * 3_600_000;
     let gap_ms = total_ms / RUNS as u64;
@@ -60,7 +64,10 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
     let (mut peak_mib, mut peak_content) = (0u32, 0usize);
     let mut t = 0u64;
 
-    let text = |n: usize| format!("step {n:08} the quick brown fox jumps over the lazy dog and keeps going a while\n").repeat(128);
+    let text = |n: usize| {
+        format!("step {n:08} the quick brown fox jumps over the lazy dog and keeps going a while\n")
+            .repeat(128)
+    };
 
     while t < total_ms {
         // A new run each `gap_ms`; the oldest one ends when eight are running.
@@ -93,7 +100,11 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
                     transcript_rows(app.store.clone(), run.to_string(), WIDTH),
                 );
             }
-            live.push_back(Live { run, entry, streamed: 0 });
+            live.push_back(Live {
+                run,
+                entry,
+                streamed: 0,
+            });
             started += 1;
         }
 
@@ -110,7 +121,11 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
 
         // Something worth a log row every 20 simulated seconds, so the ring fills and wraps.
         if (t / SAMPLE_EVERY_MS).is_multiple_of(2) {
-            app.step(Msg::IoError { context: format!("step {t}"), error: "e".into() }).unwrap();
+            app.step(Msg::IoError {
+                context: format!("step {t}"),
+                error: "e".into(),
+            })
+            .unwrap();
         }
 
         // `eng:mem`: one step is 10 simulated seconds, one sample.
@@ -123,7 +138,11 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
         // The caps, at every step: the log ring, the commit ring, and the store holding no more
         // than what the running runs hold plus a 2 KiB head for each run ever started.
         let stats = app.store.stats();
-        assert!(stats.log_rows <= LOG_RING, "log ring: {} rows", stats.log_rows);
+        assert!(
+            stats.log_rows <= LOG_RING,
+            "log ring: {} rows",
+            stats.log_rows
+        );
         assert!(
             app.graph.commit_log().len() <= COMMIT_HISTORY_CAP,
             "commit ring: {}",
@@ -139,7 +158,11 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
         // The wrapped-line cache holds blocks of runs that are still running, at the one width.
         assert!(stats.wrap_width == 0 || stats.wrap_width == WIDTH);
         assert!(
-            stats.wrap_blocks <= live.iter().map(|l| app.store.blocks(l.entry).len()).sum::<usize>(),
+            stats.wrap_blocks
+                <= live
+                    .iter()
+                    .map(|l| app.store.blocks(l.entry).len())
+                    .sum::<usize>(),
             "wrapped caches outlived their blocks"
         );
 
@@ -152,7 +175,11 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
         assert_finished_run_is_only_a_head(&app, &old);
     }
     assert_eq!((started, finished), (RUNS, RUNS));
-    assert_eq!(samples, total_ms / SAMPLE_EVERY_MS, "eng:mem is sampled every 10 s");
+    assert_eq!(
+        samples,
+        total_ms / SAMPLE_EVERY_MS,
+        "eng:mem is sampled every 10 s"
+    );
 
     // Every ring is full by now, and nothing but 2 KiB heads is left in the store.
     let stats = app.store.stats();
@@ -186,8 +213,17 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
     let tables: u64 = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
         .unwrap()
         .flatten()
-        .filter(|d| d.file_name().to_string_lossy().starts_with("aibus-provider"))
-        .flat_map(|d| std::fs::read_dir(d.path().join("src")).into_iter().flatten().flatten())
+        .filter(|d| {
+            d.file_name()
+                .to_string_lossy()
+                .starts_with("aibus-provider")
+        })
+        .flat_map(|d| {
+            std::fs::read_dir(d.path().join("src"))
+                .into_iter()
+                .flatten()
+                .flatten()
+        })
         .filter(|f| f.path().extension().is_some_and(|e| e == "json"))
         .map(|f| f.metadata().unwrap().len())
         .sum();
@@ -200,7 +236,10 @@ fn twelve_hours_and_three_hundred_runs_stay_inside_every_cap() {
     );
     match rss_mib() {
         Some(end) => {
-            assert!(peak_mib < MEM_BUDGET_MIB && end < MEM_BUDGET_MIB, "peak {peak_mib} MiB, end {end} MiB");
+            assert!(
+                peak_mib < MEM_BUDGET_MIB && end < MEM_BUDGET_MIB,
+                "peak {peak_mib} MiB, end {end} MiB"
+            );
             assert!(matches!(app.graph.read_key("ctrl:mem"), Some(Value::I64(m)) if *m > 0));
         }
         None => println!("no /proc here: the resident size was not measured"),
@@ -229,8 +268,17 @@ fn finish<G: Graph>(app: &mut App<G>, l: &Live) {
 /// A finished run drops its `Conversation` (the run task ends) and its store content: no
 /// blocks, no tail, and a head of at most 2 KiB.
 fn assert_finished_run_is_only_a_head<G: Graph>(app: &App<G>, l: &Live) {
-    assert!(app.store.blocks(l.entry).is_empty(), "blocks kept for a finished run");
-    assert!(app.store.tail(l.entry).is_empty(), "tail kept for a finished run");
+    assert!(
+        app.store.blocks(l.entry).is_empty(),
+        "blocks kept for a finished run"
+    );
+    assert!(
+        app.store.tail(l.entry).is_empty(),
+        "tail kept for a finished run"
+    );
     assert!(app.store.head(l.entry).len() <= SUMMARY_HEAD);
-    assert!(!app.store.head(l.entry).is_empty(), "the card keeps its head");
+    assert!(
+        !app.store.head(l.entry).is_empty(),
+        "the card keeps its head"
+    );
 }

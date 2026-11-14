@@ -20,7 +20,8 @@ fn write_ask() -> Rig {
             run: run_id(1),
             call: call_id(7),
             tool: "mcp__aibus-write__workflow_create".into(),
-            summary: "mcp__aibus-write__workflow_create: create review (project), 4 steps, no gate".into(),
+            summary: "mcp__aibus-write__workflow_create: create review (project), 4 steps, no gate"
+                .into(),
         },
     })
     .unwrap();
@@ -32,18 +33,30 @@ fn the_modal_summarises_the_write_and_hides_always() {
     let mut r = write_ask();
     assert_eq!(modal(&r).as_deref(), Some("permission"));
     let text = r.text();
-    assert!(text.contains("create review (project), 4 steps, no gate"), "{text}");
-    assert!(text.contains("Allow once") && text.contains("Deny"), "{text}");
+    assert!(
+        text.contains("create review (project), 4 steps, no gate"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Allow once") && text.contains("Deny"),
+        "{text}"
+    );
     assert!(!text.contains("Allow always"), "{text}");
     assert!(r.ui.drawn.hits.find(HitId::Button("always")).is_none());
     assert_frame!(r.frame(), "permission_mcp_write");
 
     // The key is not a way around the missing button.
     let msgs = r.press('a');
-    assert!(names(&msgs).iter().all(|m| !m.contains("AllowSession")), "{msgs:?}");
+    assert!(
+        names(&msgs).iter().all(|m| !m.contains("AllowSession")),
+        "{msgs:?}"
+    );
     // The other answers still work.
     let allowed = r.press('y');
-    assert!(names(&allowed).iter().any(|m| m.contains("Allow")), "{allowed:?}");
+    assert!(
+        names(&allowed).iter().any(|m| m.contains("Allow")),
+        "{allowed:?}"
+    );
 }
 
 #[test]

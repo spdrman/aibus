@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::gcloud::{run_gcloud, GcloudTokens};
 use aibus_core::config::Account;
 use aibus_core::persist::paths::Paths;
 use aibus_core::CredentialStore;
 use aibus_provider::models::cache_is_stale;
-use crate::gcloud::{run_gcloud, GcloudTokens};
 use aibus_provider::presets::resolve;
 use aibus_provider::{
     Api, ConfigError, ProviderConfig, ProviderDef, ProviderFactory, ProviderRegistry,
@@ -27,7 +27,9 @@ pub fn builtin_factories(store: Arc<CredentialStore>) -> Vec<Box<dyn ProviderFac
     vec![
         Box::new(aibus_provider::fake::Factory),
         Box::new(aibus_provider_anthropic::Factory),
-        Box::new(aibus_provider_anthropic::CloudFactory { tokens: Arc::new(gcloud) }),
+        Box::new(aibus_provider_anthropic::CloudFactory {
+            tokens: Arc::new(gcloud),
+        }),
         Box::new(aibus_provider_openai::Factory::openai()),
         Box::new(aibus_provider_gemini::Factory),
     ]
@@ -35,7 +37,10 @@ pub fn builtin_factories(store: Arc<CredentialStore>) -> Vec<Box<dyn ProviderFac
 
 /// The built-in factories with the real keychain behind Vertex's token cache.
 pub fn os_factories(redactor: &aibus_core::Redactor) -> Vec<Box<dyn ProviderFactory>> {
-    builtin_factories(Arc::new(CredentialStore::new(Arc::new(crate::keychain::OsKeychain), redactor.clone())))
+    builtin_factories(Arc::new(CredentialStore::new(
+        Arc::new(crate::keychain::OsKeychain),
+        redactor.clone(),
+    )))
 }
 
 /// What each provider id is built from: its definition (the preset of that id, the user's
@@ -72,7 +77,9 @@ pub fn provider_configs(
                         None | Some("chat") => {}
                         Some("responses") => def.api = Some(Api::OpenaiResponses),
                         Some(other) => {
-                            return Err(invalid(format!("api \"{other}\" is not \"chat\" or \"responses\"")));
+                            return Err(invalid(format!(
+                                "api \"{other}\" is not \"chat\" or \"responses\""
+                            )));
                         }
                     }
                 }
@@ -103,7 +110,11 @@ pub fn provider_configs(
 
 /// One enabled account per provider whose model list is missing or older than 7 days. The fake
 /// has no list to fetch.
-fn stale_accounts<'a>(accounts: &'a [Account], cache_dir: &Path, now: SystemTime) -> Vec<&'a Account> {
+fn stale_accounts<'a>(
+    accounts: &'a [Account],
+    cache_dir: &Path,
+    now: SystemTime,
+) -> Vec<&'a Account> {
     let mut seen = BTreeSet::new();
     accounts
         .iter()
@@ -128,7 +139,10 @@ pub fn refresh_stale_models(
         return;
     }
     std::thread::spawn(move || {
-        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else {
             return;
         };
         for a in &stale {
@@ -176,8 +190,14 @@ mod tests {
         ];
         let configs = provider_configs(&accounts, &[], &paths()).unwrap();
         let url = |id: &str| configs[id].def.as_ref().unwrap().base_url.clone();
-        assert_eq!(url("openai-compatible").as_deref(), Some("http://127.0.0.1:11434/v1"));
-        assert_eq!(url("anthropic").as_deref(), Some("https://api.anthropic.com"));
+        assert_eq!(
+            url("openai-compatible").as_deref(),
+            Some("http://127.0.0.1:11434/v1")
+        );
+        assert_eq!(
+            url("anthropic").as_deref(),
+            Some("https://api.anthropic.com")
+        );
         assert_eq!(
             configs["anthropic"].cache_dir.as_deref(),
             Some(std::path::Path::new("/home/u/.cache/aibus/models"))
@@ -190,13 +210,18 @@ mod tests {
 
     #[test]
     fn two_accounts_of_one_provider_may_agree_but_not_disagree() {
-        let same = [account("a", "anthropic", None), account("b", "anthropic", None)];
+        let same = [
+            account("a", "anthropic", None),
+            account("b", "anthropic", None),
+        ];
         assert!(provider_configs(&same, &[], &paths()).is_ok());
         let differ = [
             account("a", "anthropic", None),
             account("b", "anthropic", Some("https://gw.example")),
         ];
-        let err = provider_configs(&differ, &[], &paths()).unwrap_err().to_string();
+        let err = provider_configs(&differ, &[], &paths())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("accounts a and b"), "{err}");
         let mut off = account("b", "anthropic", Some("https://gw.example"));
         off.enabled = false;
@@ -228,7 +253,10 @@ mod tests {
             off,
             account("f", "fake", None),
         ];
-        let names: Vec<_> = stale_accounts(&accounts, dir.path(), now).iter().map(|a| a.name.as_str()).collect();
+        let names: Vec<_> = stale_accounts(&accounts, dir.path(), now)
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
         assert_eq!(names, ["o1", "k"]);
     }
 
@@ -243,8 +271,14 @@ mod tests {
 
     #[test]
     fn two_local_servers_with_two_ids_build_two_instances() {
-        let defs = [local("ollama-home", "http://10.0.0.5:11434/v1"), local("ollama-work", "http://10.0.0.6:11434/v1")];
-        let accounts = [account("home", "ollama-home", None), account("work", "ollama-work", None)];
+        let defs = [
+            local("ollama-home", "http://10.0.0.5:11434/v1"),
+            local("ollama-work", "http://10.0.0.6:11434/v1"),
+        ];
+        let accounts = [
+            account("home", "ollama-home", None),
+            account("work", "ollama-work", None),
+        ];
         let configs = provider_configs(&accounts, &defs, &paths()).unwrap();
         let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
         for id in ["ollama-home", "ollama-work"] {
@@ -254,19 +288,36 @@ mod tests {
 
     #[test]
     fn a_provider_table_with_a_preset_id_overrides_the_preset() {
-        let defs = [ProviderDef { id: "groq".into(), base_url: Some("https://gw.example/openai/v1".into()), ..ProviderDef::default() }];
+        let defs = [ProviderDef {
+            id: "groq".into(),
+            base_url: Some("https://gw.example/openai/v1".into()),
+            ..ProviderDef::default()
+        }];
         let configs = provider_configs(&[account("g", "groq", None)], &defs, &paths()).unwrap();
         let def = configs["groq"].def.as_ref().unwrap();
-        assert_eq!(def.base_url.as_deref(), Some("https://gw.example/openai/v1"));
+        assert_eq!(
+            def.base_url.as_deref(),
+            Some("https://gw.example/openai/v1")
+        );
         assert_eq!(def.env_vars, ["GROQ_API_KEY"]);
-        assert!(ProviderRegistry::new(&builtin(), &configs).unwrap().get("groq").is_ok());
+        assert!(ProviderRegistry::new(&builtin(), &configs)
+            .unwrap()
+            .get("groq")
+            .is_ok());
     }
 
     #[test]
     fn a_preset_needs_no_provider_table_and_an_unknown_id_is_left_for_the_registry() {
-        let accounts = [account("g", "groq", None), account("o", "ollama", None), account("x", "nobody", None)];
+        let accounts = [
+            account("g", "groq", None),
+            account("o", "ollama", None),
+            account("x", "nobody", None),
+        ];
         let configs = provider_configs(&accounts, &[], &paths()).unwrap();
-        assert_eq!(configs["groq"].def.as_ref().unwrap().base_url.as_deref(), Some("https://api.groq.com/openai/v1"));
+        assert_eq!(
+            configs["groq"].def.as_ref().unwrap().base_url.as_deref(),
+            Some("https://api.groq.com/openai/v1")
+        );
         assert!(configs["nobody"].def.is_none());
         let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
         assert!(registry.get("ollama").is_ok() && registry.get("nobody").is_err());
@@ -277,9 +328,15 @@ mod tests {
         let mut a = account("o", "openai", None);
         a.api = Some("responses".into());
         let configs = provider_configs(&[a.clone()], &[], &paths()).unwrap();
-        assert_eq!(configs["openai"].def.as_ref().unwrap().api, Some(Api::OpenaiResponses));
+        assert_eq!(
+            configs["openai"].def.as_ref().unwrap().api,
+            Some(Api::OpenaiResponses)
+        );
         a.api = Some("grpc".into());
-        assert!(provider_configs(&[a], &[], &paths()).unwrap_err().to_string().contains("grpc"));
+        assert!(provider_configs(&[a], &[], &paths())
+            .unwrap_err()
+            .to_string()
+            .contains("grpc"));
     }
 
     /// The 0.1.0 corpus: one config per id that existed then. Each loads with no edits, as the
@@ -287,19 +344,37 @@ mod tests {
     #[test]
     fn every_0_1_0_config_still_loads_and_builds() {
         let corpus = [
-            ("fake", include_str!("../../../fixtures/config/0.1.0-fake.toml")),
-            ("anthropic", include_str!("../../../fixtures/config/0.1.0-anthropic.toml")),
-            ("openai", include_str!("../../../fixtures/config/0.1.0-openai.toml")),
-            ("kimi", include_str!("../../../fixtures/config/0.1.0-kimi.toml")),
-            ("openai-compatible", include_str!("../../../fixtures/config/0.1.0-openai-compatible.toml")),
+            (
+                "fake",
+                include_str!("../../../fixtures/config/0.1.0-fake.toml"),
+            ),
+            (
+                "anthropic",
+                include_str!("../../../fixtures/config/0.1.0-anthropic.toml"),
+            ),
+            (
+                "openai",
+                include_str!("../../../fixtures/config/0.1.0-openai.toml"),
+            ),
+            (
+                "kimi",
+                include_str!("../../../fixtures/config/0.1.0-kimi.toml"),
+            ),
+            (
+                "openai-compatible",
+                include_str!("../../../fixtures/config/0.1.0-openai-compatible.toml"),
+            ),
         ];
         for (id, text) in corpus {
-            let (table, warnings) = aibus_core::config::parse_file(Path::new("0.1.0.toml"), text).unwrap();
+            let (table, warnings) =
+                aibus_core::config::parse_file(Path::new("0.1.0.toml"), text).unwrap();
             assert!(warnings.is_empty(), "{id}: {warnings:?}");
             let cfg: aibus_core::config::Config = toml::Value::Table(table).try_into().unwrap();
             assert!(cfg.problems().is_empty(), "{id}: {:?}", cfg.problems());
             assert!(cfg.providers.is_empty(), "{id}");
-            let [a] = &cfg.accounts[..] else { panic!("{id}: one account") };
+            let [a] = &cfg.accounts[..] else {
+                panic!("{id}: one account")
+            };
             assert_eq!(a.provider, id);
             assert!(a.enabled, "{id}");
 
@@ -317,11 +392,20 @@ mod tests {
             let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths()).unwrap();
             configs[id].def.clone().unwrap()
         };
-        let gw = base("anthropic", include_str!("../../../fixtures/config/0.1.0-anthropic.toml"));
+        let gw = base(
+            "anthropic",
+            include_str!("../../../fixtures/config/0.1.0-anthropic.toml"),
+        );
         assert_eq!(gw.base_url.as_deref(), Some("https://gw.example.com"));
-        let oa = base("openai", include_str!("../../../fixtures/config/0.1.0-openai.toml"));
+        let oa = base(
+            "openai",
+            include_str!("../../../fixtures/config/0.1.0-openai.toml"),
+        );
         assert_eq!(oa.api, Some(Api::OpenaiResponses));
-        let local = base("openai-compatible", include_str!("../../../fixtures/config/0.1.0-openai-compatible.toml"));
+        let local = base(
+            "openai-compatible",
+            include_str!("../../../fixtures/config/0.1.0-openai-compatible.toml"),
+        );
         assert_eq!(local.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
     }
 
@@ -372,19 +456,30 @@ auth = {{ none = true }}
             home.uri(),
             work.uri()
         );
-        let (table, warnings) = aibus_core::config::parse_file(Path::new("two.toml"), &text).unwrap();
+        let (table, warnings) =
+            aibus_core::config::parse_file(Path::new("two.toml"), &text).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         let cfg: aibus_core::config::Config = toml::Value::Table(table).try_into().unwrap();
         assert!(cfg.problems().is_empty(), "{:?}", cfg.problems());
         let configs = provider_configs(&cfg.accounts, &cfg.providers, &paths()).unwrap();
         let registry = ProviderRegistry::new(&builtin(), &configs).unwrap();
 
-        let cassette = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aibus-provider-openai/tests/cassettes/local_stream_text.http");
-        let fixtures = Fixtures { model: "llama3.2", kind: AuthMethodKind::None, auth: None, cases: vec![], skipped: vec![] };
+        let cassette = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../aibus-provider-openai/tests/cassettes/local_stream_text.http");
+        let fixtures = Fixtures {
+            model: "llama3.2",
+            kind: AuthMethodKind::None,
+            auth: None,
+            cases: vec![],
+            skipped: vec![],
+        };
         let case = Case {
             name: "text",
             fixture: Fixture::load(&cassette),
-            expect: Expect::Stream { text: Some("Hi there"), stop: StopReason::EndTurn },
+            expect: Expect::Stream {
+                text: Some("Hi there"),
+                stop: StopReason::EndTurn,
+            },
         };
         let _logs = aibus_testkit::capture_logs();
         for (id, mine, other) in [("ollama-home", &home, &work), ("ollama-work", &work, &home)] {
@@ -392,8 +487,16 @@ auth = {{ none = true }}
             assert_eq!(provider.id().0, id);
             let before = (mine.requests().len(), other.requests().len());
             check_case(&provider, mine, &fixtures, &case).await;
-            assert_eq!(mine.requests().len(), before.0 + 1, "{id}: its own server got the request");
-            assert_eq!(other.requests().len(), before.1, "{id}: the other server heard nothing");
+            assert_eq!(
+                mine.requests().len(),
+                before.0 + 1,
+                "{id}: its own server got the request"
+            );
+            assert_eq!(
+                other.requests().len(),
+                before.1,
+                "{id}: the other server heard nothing"
+            );
         }
     }
 }

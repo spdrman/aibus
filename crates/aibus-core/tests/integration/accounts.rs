@@ -77,13 +77,24 @@ fn accounts() -> Accounts {
                 .then(Step::Stop(StopReason::EndTurn))
                 .then(Step::Text("done".into())),
         )
-            .with_account("anthropic-work", WORK_KEY)
-            .with_account("anthropic-personal", PERSONAL_KEY),
+        .with_account("anthropic-work", WORK_KEY)
+        .with_account("anthropic-personal", PERSONAL_KEY),
     );
-    let providers = ProviderRegistry::new(&[Box::new(Shared(fake.clone()))], &BTreeMap::new()).unwrap();
-    let store = Arc::new(CredentialStore::new(Arc::new(MemoryKeychain::default()), Redactor::new()));
-    store.store(&name("anthropic-work"), &Secret::new(WORK_KEY.into())).unwrap();
-    store.store(&name("anthropic-personal"), &Secret::new(PERSONAL_KEY.into())).unwrap();
+    let providers =
+        ProviderRegistry::new(&[Box::new(Shared(fake.clone()))], &BTreeMap::new()).unwrap();
+    let store = Arc::new(CredentialStore::new(
+        Arc::new(MemoryKeychain::default()),
+        Redactor::new(),
+    ));
+    store
+        .store(&name("anthropic-work"), &Secret::new(WORK_KEY.into()))
+        .unwrap();
+    store
+        .store(
+            &name("anthropic-personal"),
+            &Secret::new(PERSONAL_KEY.into()),
+        )
+        .unwrap();
     Accounts {
         fake,
         registry: AccountRegistry::new(&cfg, Arc::new(providers)),
@@ -193,7 +204,10 @@ async fn no_credential_appears_in_a_file_under_the_temp_xdg_dirs_or_in_the_log()
     assert_eq!(status(&msgs), RunStatus::Completed);
     for m in &msgs {
         let line = format!("{m:?} {:?}", m.summary());
-        assert!(!line.contains(PERSONAL_KEY) && !line.contains(WORK_KEY), "{line}");
+        assert!(
+            !line.contains(PERSONAL_KEY) && !line.contains(WORK_KEY),
+            "{line}"
+        );
     }
     // The run left its conversation and result under the state dir, and the config is there.
     assert!(a.xdg.paths.state.join("runs").is_dir());

@@ -24,7 +24,11 @@ fn main() {
     let (app, _) = fixture::big_session(MiniGraph::new);
     let snap = app.graph.snapshot();
     let json = serde_json::to_string(&snap).unwrap();
-    println!("reference snapshot: {} inputs, {} bytes of JSON", snap.inputs.len(), json.len());
+    println!(
+        "reference snapshot: {} inputs, {} bytes of JSON",
+        snap.inputs.len(),
+        json.len()
+    );
 
     let hydrate = gate::Gate::best_of(ROUNDS, || {
         (0..SAMPLES)
@@ -51,6 +55,10 @@ fn main() {
             .collect()
     });
     gate.judge("hydrate_snapshot-mini-hydrate", &hydrate, BUDGET_US);
-    gate.judge("hydrate_snapshot-mini-parse-and-hydrate", &resume, BUDGET_US);
+    gate.judge(
+        "hydrate_snapshot-mini-parse-and-hydrate",
+        &resume,
+        BUDGET_US,
+    );
     gate.finish();
 }

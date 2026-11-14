@@ -92,7 +92,12 @@ const HOOK_EVENTS: [&str; 11] = [
 ];
 
 /// The reserved aliases the built-ins use for the `defaults.*` config keys.
-const RESERVED_MODELS: [&str; 4] = ["default_model", "advisor_model", "router_model", "swarm_model"];
+const RESERVED_MODELS: [&str; 4] = [
+    "default_model",
+    "advisor_model",
+    "router_model",
+    "swarm_model",
+];
 
 /// Checks one parsed definition. Findings carry the definition's file path.
 pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
@@ -120,7 +125,8 @@ pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
         error(field, message);
     }
 
-    let reserved = matches!(&def.model, ModelRef::Alias(a) if RESERVED_MODELS.contains(&a.as_str()));
+    let reserved =
+        matches!(&def.model, ModelRef::Alias(a) if RESERVED_MODELS.contains(&a.as_str()));
     if def.model != ModelRef::Inherit && !reserved && !(cx.model_resolves)(&def.model) {
         error(
             "model",
@@ -140,7 +146,10 @@ pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
         );
     }
     if def.router.is_some() && def.role != Role::Router {
-        error("router", "router settings are only for router agents".into());
+        error(
+            "router",
+            "router settings are only for router agents".into(),
+        );
     }
 
     let mut warnings = Vec::new();
@@ -154,11 +163,12 @@ pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
             }
         }
     }
-    r.warnings.extend(warnings.into_iter().map(|(field, message)| Finding {
-        path: def.source.path.clone(),
-        field: field.into(),
-        message,
-    }));
+    r.warnings
+        .extend(warnings.into_iter().map(|(field, message)| Finding {
+            path: def.source.path.clone(),
+            field: field.into(),
+            message,
+        }));
     r.ok = r.errors.is_empty();
     r
 }

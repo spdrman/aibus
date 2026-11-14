@@ -1,7 +1,9 @@
 //! Request bodies for Chat Completions and the Responses API.
 
 use aibus_provider::presets::{CompatFlag, MaxTokensField, ReasoningField};
-use aibus_provider::{ChatRequest, ContentBlock, Effort, Message, MessageRole, ToolCallId, ToolChoice};
+use aibus_provider::{
+    ChatRequest, ContentBlock, Effort, Message, MessageRole, ToolCallId, ToolChoice,
+};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 
@@ -40,14 +42,20 @@ fn effort(e: Effort) -> &'static str {
 }
 
 fn data_url(media_type: &str, data: &[u8]) -> String {
-    format!("data:{media_type};base64,{}", base64::engine::general_purpose::STANDARD.encode(data))
+    format!(
+        "data:{media_type};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(data)
+    )
 }
 
 fn user_id(req: &ChatRequest) -> Option<String> {
-    let ids: Vec<&str> = [req.metadata.session_id.as_deref(), req.metadata.run_id.as_deref()]
-        .into_iter()
-        .flatten()
-        .collect();
+    let ids: Vec<&str> = [
+        req.metadata.session_id.as_deref(),
+        req.metadata.run_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     (!ids.is_empty()).then(|| format!("aibus:{}", ids.join(":")))
 }
 
@@ -80,7 +88,9 @@ fn chat_user(m: &Message) -> Vec<Value> {
             ContentBlock::ToolResult { id, content, .. } => {
                 out.push(json!({"role": "tool", "tool_call_id": wire_id(*id), "content": content}));
             }
-            ContentBlock::Text(t) if !t.is_empty() => parts.push(json!({"type": "text", "text": t})),
+            ContentBlock::Text(t) if !t.is_empty() => {
+                parts.push(json!({"type": "text", "text": t}))
+            }
             ContentBlock::Image { media_type, data } => parts.push(
                 json!({"type": "image_url", "image_url": {"url": data_url(media_type, data)}}),
             ),
@@ -104,8 +114,14 @@ fn chat_assistant(m: &Message, o: Opts<'_>) -> Option<Value> {
     for b in &m.blocks {
         match b {
             ContentBlock::Text(t) => text.push_str(t),
-            ContentBlock::Thinking { text, redacted: false, .. } => thinking.push_str(text),
-            ContentBlock::ToolUse { id, name, input, .. } => calls.push(json!({
+            ContentBlock::Thinking {
+                text,
+                redacted: false,
+                ..
+            } => thinking.push_str(text),
+            ContentBlock::ToolUse {
+                id, name, input, ..
+            } => calls.push(json!({
                 "id": wire_id(*id),
                 "type": "function",
                 "function": {"name": name, "arguments": input.to_string()},
@@ -164,7 +180,9 @@ pub fn chat_body(req: &ChatRequest, o: Opts<'_>) -> Value {
     body.insert(key.into(), json!(req.max_output_tokens));
     if o.reasoning {
         if let Some(e) = req.effort {
-            let nested = o.compat.contains(&CompatFlag::ReasoningField(ReasoningField::Reasoning));
+            let nested = o
+                .compat
+                .contains(&CompatFlag::ReasoningField(ReasoningField::Reasoning));
             match nested {
                 true => body.insert("reasoning".into(), json!({"effort": effort(e)})),
                 false => body.insert("reasoning_effort".into(), json!(effort(e))),
@@ -206,7 +224,12 @@ pub fn responses_body(req: &ChatRequest, o: Opts<'_>) -> Value {
                 for b in &m.blocks {
                     match b {
                         ContentBlock::Text(t) => text.push_str(t),
-                        ContentBlock::ToolUse { id, name, input: args, .. } => {
+                        ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input: args,
+                            ..
+                        } => {
                             if !text.is_empty() {
                                 input.push(json!({"role": "assistant", "content": [{"type": "output_text", "text": std::mem::take(&mut text)}]}));
                             }
@@ -231,7 +254,9 @@ pub fn responses_body(req: &ChatRequest, o: Opts<'_>) -> Value {
                         ContentBlock::ToolResult { id, content, .. } => {
                             input.push(json!({"type": "function_call_output", "call_id": wire_id(*id), "output": content}));
                         }
-                        ContentBlock::Text(t) if !t.is_empty() => parts.push(json!({"type": "input_text", "text": t})),
+                        ContentBlock::Text(t) if !t.is_empty() => {
+                            parts.push(json!({"type": "input_text", "text": t}))
+                        }
                         ContentBlock::Image { media_type, data } => {
                             parts.push(json!({"type": "input_image", "image_url": data_url(media_type, data)}));
                         }
@@ -296,7 +321,13 @@ mod tests {
     use aibus_provider::{CacheHint, Capabilities, ModelId, RequestMetadata, SystemRole, ToolSpec};
     use ulid::Ulid;
 
-    const PLAIN: Opts<'static> = Opts { reasoning: false, user: false, logprobs: false, include_cost: false, compat: &[] };
+    const PLAIN: Opts<'static> = Opts {
+        reasoning: false,
+        user: false,
+        logprobs: false,
+        include_cost: false,
+        compat: &[],
+    };
 
     fn with(compat: &'static [CompatFlag]) -> Opts<'static> {
         Opts { compat, ..PLAIN }
@@ -307,7 +338,11 @@ mod tests {
             model: ModelId("gpt-4.1".into()),
             system: "Be terse.".into(),
             messages: vec![Message::text(MessageRole::User, "hi")],
-            tools: vec![ToolSpec { name: "read".into(), description: "Read".into(), schema: json!({"type": "object"}) }],
+            tools: vec![ToolSpec {
+                name: "read".into(),
+                description: "Read".into(),
+                schema: json!({"type": "object"}),
+            }],
             tool_choice: ToolChoice::Auto,
             max_output_tokens: 256,
             temperature: Some(0.5),
@@ -315,7 +350,10 @@ mod tests {
             thinking: None,
             cache_hint: CacheHint::None,
             logprobs: false,
-            metadata: RequestMetadata { run_id: Some("RUN".into()), session_id: Some("SES".into()) },
+            metadata: RequestMetadata {
+                run_id: Some("RUN".into()),
+                session_id: Some("SES".into()),
+            },
         }
     }
 
@@ -325,16 +363,29 @@ mod tests {
         r.messages.push(Message {
             role: MessageRole::Assistant,
             blocks: vec![
-                ContentBlock::Thinking { text: "hmm".into(), redacted: false, signature: None },
+                ContentBlock::Thinking {
+                    text: "hmm".into(),
+                    redacted: false,
+                    signature: None,
+                },
                 ContentBlock::Text("looking".into()),
-                ContentBlock::ToolUse { id, name: "read".into(), input: json!({"p": 1}), signature: None },
+                ContentBlock::ToolUse {
+                    id,
+                    name: "read".into(),
+                    input: json!({"p": 1}),
+                    signature: None,
+                },
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         r.messages.push(Message {
             role: MessageRole::User,
             blocks: vec![
-                ContentBlock::ToolResult { id, content: "contents".into(), is_error: false },
+                ContentBlock::ToolResult {
+                    id,
+                    content: "contents".into(),
+                    is_error: false,
+                },
                 ContentBlock::Text("and then?".into()),
             ],
             at: std::time::SystemTime::UNIX_EPOCH,
@@ -345,20 +396,36 @@ mod tests {
     #[test]
     fn chat_body_has_system_tools_and_usage_streaming() {
         let b = chat_body(&req(), PLAIN);
-        assert_eq!(b["messages"][0], json!({"role": "system", "content": "Be terse."}));
+        assert_eq!(
+            b["messages"][0],
+            json!({"role": "system", "content": "Be terse."})
+        );
         assert_eq!(b["messages"][1], json!({"role": "user", "content": "hi"}));
-        assert_eq!(b["tools"][0]["function"]["parameters"], json!({"type": "object"}));
+        assert_eq!(
+            b["tools"][0]["function"]["parameters"],
+            json!({"type": "object"})
+        );
         assert_eq!(b["tool_choice"], "auto");
         assert_eq!(b["stream_options"], json!({"include_usage": true}));
         assert_eq!(b["max_tokens"], 256);
-        assert!(b.get("max_completion_tokens").is_none() && b.get("user").is_none() && b.get("logprobs").is_none());
+        assert!(
+            b.get("max_completion_tokens").is_none()
+                && b.get("user").is_none()
+                && b.get("logprobs").is_none()
+        );
         assert!((b["temperature"].as_f64().unwrap() - 0.5).abs() < 1e-6);
         assert!(b.get("reasoning_effort").is_none());
     }
 
     #[test]
     fn a_reasoning_model_takes_effort_and_completion_tokens_but_no_temperature() {
-        let o = Opts { reasoning: true, compat: &[CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)], ..PLAIN };
+        let o = Opts {
+            reasoning: true,
+            compat: &[CompatFlag::MaxTokensField(
+                MaxTokensField::MaxCompletionTokens,
+            )],
+            ..PLAIN
+        };
         let b = chat_body(&req(), o);
         assert_eq!(b["max_completion_tokens"], 256);
         assert_eq!(b["reasoning_effort"], "high");
@@ -367,9 +434,16 @@ mod tests {
 
     #[test]
     fn logprobs_and_user_ids_are_sent_only_when_asked() {
-        let o = Opts { logprobs: true, user: true, ..PLAIN };
+        let o = Opts {
+            logprobs: true,
+            user: true,
+            ..PLAIN
+        };
         let b = chat_body(&req(), o);
-        assert_eq!((b["logprobs"].clone(), b["top_logprobs"].clone()), (json!(true), json!(5)));
+        assert_eq!(
+            (b["logprobs"].clone(), b["top_logprobs"].clone()),
+            (json!(true), json!(5))
+        );
         assert_eq!(b["user"], "aibus:SES:RUN");
     }
 
@@ -386,7 +460,10 @@ mod tests {
         assert_eq!(m[4], json!({"role": "user", "content": "and then?"}));
 
         let k = with(&[CompatFlag::ReasoningContentReplay]);
-        assert_eq!(chat_body(&history(), k)["messages"][2]["reasoning_content"], "hmm");
+        assert_eq!(
+            chat_body(&history(), k)["messages"][2]["reasoning_content"],
+            "hmm"
+        );
     }
 
     #[test]
@@ -395,7 +472,12 @@ mod tests {
         let mut r = req();
         r.messages.push(Message {
             role: MessageRole::Assistant,
-            blocks: vec![ContentBlock::ToolUse { id, name: "read".into(), input: json!({}), signature: None }],
+            blocks: vec![ContentBlock::ToolUse {
+                id,
+                name: "read".into(),
+                input: json!({}),
+                signature: None,
+            }],
             at: std::time::SystemTime::UNIX_EPOCH,
         });
         r.messages.push(Message::text(MessageRole::Assistant, ""));
@@ -407,7 +489,10 @@ mod tests {
     #[test]
     fn images_make_the_user_content_an_array_of_parts() {
         let mut r = req();
-        r.messages[0].blocks.push(ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") });
+        r.messages[0].blocks.push(ContentBlock::Image {
+            media_type: "image/png".into(),
+            data: bytes::Bytes::from_static(b"\x89PNG"),
+        });
         let c = &chat_body(&r, PLAIN)["messages"][1]["content"];
         assert_eq!(c[0]["type"], "text");
         assert_eq!(c[1]["image_url"]["url"], "data:image/png;base64,iVBORw==");
@@ -417,8 +502,14 @@ mod tests {
     fn tool_choice_maps() {
         let mut r = req();
         r.tool_choice = ToolChoice::Named("read".into());
-        assert_eq!(chat_body(&r, PLAIN)["tool_choice"]["function"]["name"], "read");
-        assert_eq!(responses_body(&r, PLAIN)["tool_choice"], json!({"type": "function", "name": "read"}));
+        assert_eq!(
+            chat_body(&r, PLAIN)["tool_choice"]["function"]["name"],
+            "read"
+        );
+        assert_eq!(
+            responses_body(&r, PLAIN)["tool_choice"],
+            json!({"type": "function", "name": "read"})
+        );
         r.tool_choice = ToolChoice::Required;
         assert_eq!(chat_body(&r, PLAIN)["tool_choice"], "required");
         r.tools.clear();
@@ -428,13 +519,20 @@ mod tests {
     #[test]
     fn the_cost_is_only_asked_for_when_the_gateway_reports_it() {
         assert!(chat_body(&req(), PLAIN).get("usage").is_none());
-        let o = Opts { include_cost: true, ..PLAIN };
+        let o = Opts {
+            include_cost: true,
+            ..PLAIN
+        };
         assert_eq!(chat_body(&req(), o)["usage"], json!({"include": true}));
     }
 
     #[test]
     fn responses_body_sends_items_instructions_and_no_server_state() {
-        let o = Opts { reasoning: true, logprobs: true, ..PLAIN };
+        let o = Opts {
+            reasoning: true,
+            logprobs: true,
+            ..PLAIN
+        };
         let b = responses_body(&history(), o);
         assert_eq!(b["instructions"], "Be terse.");
         assert_eq!(b["store"], false);
@@ -443,8 +541,14 @@ mod tests {
         assert!(b.get("temperature").is_none());
         assert_eq!(b["include"][0], "message.output_text.logprobs");
         let i = b["input"].as_array().unwrap();
-        assert_eq!(i[0], json!({"role": "user", "content": [{"type": "input_text", "text": "hi"}]}));
-        assert_eq!(i[1]["content"][0], json!({"type": "output_text", "text": "looking"}));
+        assert_eq!(
+            i[0],
+            json!({"role": "user", "content": [{"type": "input_text", "text": "hi"}]})
+        );
+        assert_eq!(
+            i[1]["content"][0],
+            json!({"type": "output_text", "text": "looking"})
+        );
         assert_eq!(i[2]["type"], "function_call");
         assert_eq!(i[3]["type"], "function_call_output");
         assert_eq!(i[2]["call_id"], i[3]["call_id"]);
@@ -457,7 +561,11 @@ mod tests {
     #[test]
     fn flag_no_strict_tools_leaves_strict_off_the_responses_tools() {
         assert_eq!(responses_body(&req(), PLAIN)["tools"][0]["strict"], false);
-        assert!(responses_body(&req(), with(&[CompatFlag::NoStrictTools]))["tools"][0].get("strict").is_none());
+        assert!(
+            responses_body(&req(), with(&[CompatFlag::NoStrictTools]))["tools"][0]
+                .get("strict")
+                .is_none()
+        );
     }
 
     #[test]
@@ -465,23 +573,41 @@ mod tests {
         let mut r = req();
         r.messages.push(Message::text(MessageRole::System, "note"));
         assert_eq!(responses_body(&r, PLAIN)["input"][1]["role"], "developer");
-        assert_eq!(responses_body(&r, with(&[CompatFlag::NoDeveloperRole]))["input"][1]["role"], "system");
+        assert_eq!(
+            responses_body(&r, with(&[CompatFlag::NoDeveloperRole]))["input"][1]["role"],
+            "system"
+        );
     }
 
     #[test]
     fn flag_max_tokens_field_names_the_limit_key() {
-        let b = chat_body(&req(), with(&[CompatFlag::MaxTokensField(MaxTokensField::MaxCompletionTokens)]));
+        let b = chat_body(
+            &req(),
+            with(&[CompatFlag::MaxTokensField(
+                MaxTokensField::MaxCompletionTokens,
+            )]),
+        );
         assert_eq!(b["max_completion_tokens"], 256);
         assert!(b.get("max_tokens").is_none());
-        let b = chat_body(&req(), with(&[CompatFlag::MaxTokensField(MaxTokensField::MaxTokens)]));
+        let b = chat_body(
+            &req(),
+            with(&[CompatFlag::MaxTokensField(MaxTokensField::MaxTokens)]),
+        );
         assert_eq!(b["max_tokens"], 256);
     }
 
     #[test]
     fn flag_reasoning_field_picks_reasoning_effort_or_reasoning() {
-        let on = Opts { reasoning: true, ..PLAIN };
+        let on = Opts {
+            reasoning: true,
+            ..PLAIN
+        };
         assert_eq!(chat_body(&req(), on)["reasoning_effort"], "high");
-        let o = Opts { reasoning: true, compat: &[CompatFlag::ReasoningField(ReasoningField::Reasoning)], ..PLAIN };
+        let o = Opts {
+            reasoning: true,
+            compat: &[CompatFlag::ReasoningField(ReasoningField::Reasoning)],
+            ..PLAIN
+        };
         let b = chat_body(&req(), o);
         assert_eq!(b["reasoning"], json!({"effort": "high"}));
         assert!(b.get("reasoning_effort").is_none());
@@ -489,15 +615,27 @@ mod tests {
 
     #[test]
     fn flag_reasoning_content_replay_sends_earlier_thinking_back() {
-        let sent = |o| chat_body(&history(), o)["messages"][2].get("reasoning_content").cloned();
+        let sent = |o| {
+            chat_body(&history(), o)["messages"][2]
+                .get("reasoning_content")
+                .cloned()
+        };
         assert_eq!(sent(PLAIN), None);
-        assert_eq!(sent(with(&[CompatFlag::ReasoningContentReplay])), Some(json!("hmm")));
+        assert_eq!(
+            sent(with(&[CompatFlag::ReasoningContentReplay])),
+            Some(json!("hmm"))
+        );
     }
 
     #[test]
     fn flag_no_usage_in_stream_drops_stream_options() {
-        assert_eq!(chat_body(&req(), PLAIN)["stream_options"], json!({"include_usage": true}));
-        assert!(chat_body(&req(), with(&[CompatFlag::NoUsageInStream])).get("stream_options").is_none());
+        assert_eq!(
+            chat_body(&req(), PLAIN)["stream_options"],
+            json!({"include_usage": true})
+        );
+        assert!(chat_body(&req(), with(&[CompatFlag::NoUsageInStream]))
+            .get("stream_options")
+            .is_none());
     }
 
     #[test]
@@ -516,20 +654,32 @@ mod tests {
         assert_eq!(chat_body(&r, o)["tool_choice"], "required");
         assert_eq!(responses_body(&r, o)["tool_choice"], "required");
         r.tool_choice = ToolChoice::Auto;
-        assert_eq!(chat_body(&r, o)["tool_choice"], "auto", "other choices are untouched");
+        assert_eq!(
+            chat_body(&r, o)["tool_choice"],
+            "auto",
+            "other choices are untouched"
+        );
     }
 
     #[test]
     fn flag_no_store_leaves_store_out_of_the_responses_body() {
         assert_eq!(responses_body(&req(), PLAIN)["store"], false);
-        assert!(responses_body(&req(), with(&[CompatFlag::NoStore])).get("store").is_none());
+        assert!(responses_body(&req(), with(&[CompatFlag::NoStore]))
+            .get("store")
+            .is_none());
     }
 
     #[test]
     fn flag_no_sampling_params_leaves_temperature_out() {
         assert!(chat_body(&req(), PLAIN).get("temperature").is_some());
-        assert!(chat_body(&req(), with(&[CompatFlag::NoSamplingParams])).get("temperature").is_none());
-        assert!(responses_body(&req(), with(&[CompatFlag::NoSamplingParams])).get("temperature").is_none());
+        assert!(chat_body(&req(), with(&[CompatFlag::NoSamplingParams]))
+            .get("temperature")
+            .is_none());
+        assert!(
+            responses_body(&req(), with(&[CompatFlag::NoSamplingParams]))
+                .get("temperature")
+                .is_none()
+        );
     }
 
     fn all_on() -> Capabilities {
@@ -551,14 +701,24 @@ mod tests {
     fn flag_no_system_role_folds_the_prompt_into_the_first_user_message() {
         let c = all_on().with_compat(&[CompatFlag::NoSystemRole]);
         let b = chat_body(&c.degrade(req()), PLAIN);
-        assert_eq!(b["messages"][0], json!({"role": "user", "content": "Be terse.\n\n\nhi"}));
-        assert!(!b["messages"].as_array().unwrap().iter().any(|m| m["role"] == "system"));
+        assert_eq!(
+            b["messages"][0],
+            json!({"role": "user", "content": "Be terse.\n\n\nhi"})
+        );
+        assert!(!b["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "system"));
     }
 
     #[test]
     fn flag_strip_images_sends_a_note_instead_of_the_picture() {
         let mut r = req();
-        r.messages[0].blocks.push(ContentBlock::Image { media_type: "image/png".into(), data: bytes::Bytes::from_static(b"\x89PNG") });
+        r.messages[0].blocks.push(ContentBlock::Image {
+            media_type: "image/png".into(),
+            data: bytes::Bytes::from_static(b"\x89PNG"),
+        });
         let c = all_on().with_compat(&[CompatFlag::StripImages]);
         let b = chat_body(&c.degrade(r), PLAIN);
         assert!(!b.to_string().contains("image_url"), "{b}");

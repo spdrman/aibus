@@ -72,7 +72,10 @@ impl Layout {
                 .and_then(toml::Value::as_integer)
                 .and_then(|v| u16::try_from(v).ok())
         };
-        Self { rail: get("rail"), log: get("log") }
+        Self {
+            rail: get("rail"),
+            log: get("log"),
+        }
     }
 
     pub fn to_toml(&self) -> String {
@@ -87,7 +90,9 @@ impl Layout {
 
     /// Reads `state/ui.toml`; a missing or unreadable file is the automatic layout.
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path).map(|t| Self::from_toml(&t)).unwrap_or_default()
+        std::fs::read_to_string(path)
+            .map(|t| Self::from_toml(&t))
+            .unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -115,7 +120,12 @@ pub fn areas(full: Rect, layout: &Layout, rail_open: bool) -> Areas {
     // Gap order: under the legend, under main, under the log, under the header, over status.
     let mut y = full.y;
     let mut take = |h: u16, after: u16| {
-        let r = Rect { y, height: h, x: full.x, width: full.width };
+        let r = Rect {
+            y,
+            height: h,
+            x: full.x,
+            width: full.width,
+        };
         y += h + after;
         r
     };
@@ -126,8 +136,16 @@ pub fn areas(full: Rect, layout: &Layout, rail_open: bool) -> Areas {
     let prompt = take(1, gap(4));
     let status = take(1, 0);
     let wide = full.width >= RAIL_COLS;
-    let rail_w = if wide { layout.rail_width(full.width) } else { STRIP };
-    let rail = Rect { x: main.x + 1, width: rail_w, ..main };
+    let rail_w = if wide {
+        layout.rail_width(full.width)
+    } else {
+        STRIP
+    };
+    let rail = Rect {
+        x: main.x + 1,
+        width: rail_w,
+        ..main
+    };
     let cx = rail.right() + 2;
     let centre = Rect {
         x: cx,
@@ -143,8 +161,19 @@ pub fn areas(full: Rect, layout: &Layout, rail_open: bool) -> Areas {
         log: fit(log),
         prompt: fit(prompt),
         status: fit(status),
-        rail_open: (!wide && rail_open).then(|| fit(Rect { width: RAIL_FULL, ..rail })),
-        rail_handle: wide.then(|| fit(Rect { x: rail.right(), width: 1, ..main })),
+        rail_open: (!wide && rail_open).then(|| {
+            fit(Rect {
+                width: RAIL_FULL,
+                ..rail
+            })
+        }),
+        rail_handle: wide.then(|| {
+            fit(Rect {
+                x: rail.right(),
+                width: 1,
+                ..main
+            })
+        }),
         log_handle: fit(Rect { height: 1, ..log }),
         compact,
     }
@@ -152,7 +181,11 @@ pub fn areas(full: Rect, layout: &Layout, rail_open: bool) -> Areas {
 
 /// The rail width a drag to column `col` asks for.
 pub fn rail_for_drag(a: &Areas, col: u16, cols: u16) -> u16 {
-    Layout { rail: Some(col.saturating_sub(a.rail.x)), log: None }.rail_width(cols)
+    Layout {
+        rail: Some(col.saturating_sub(a.rail.x)),
+        log: None,
+    }
+    .rail_width(cols)
 }
 
 /// The log height (border included) a drag to row `row` asks for.
@@ -164,7 +197,10 @@ pub fn log_for_drag(a: &Areas, row: u16) -> u16 {
 mod tests {
     use super::*;
 
-    const AUTO: Layout = Layout { rail: None, log: None };
+    const AUTO: Layout = Layout {
+        rail: None,
+        log: None,
+    };
 
     fn at(w: u16, h: u16) -> Areas {
         areas(Rect::new(0, 0, w, h), &AUTO, false)
@@ -182,8 +218,13 @@ mod tests {
     fn a_is_the_full_rail_over_the_strip_on_a_narrow_terminal() {
         let a = areas(Rect::new(0, 0, 80, 24), &AUTO, true);
         let open = a.rail_open.unwrap();
-        assert_eq!((open.x, open.width, open.height), (a.rail.x, 22, a.rail.height));
-        assert!(areas(Rect::new(0, 0, 98, 46), &AUTO, true).rail_open.is_none());
+        assert_eq!(
+            (open.x, open.width, open.height),
+            (a.rail.x, 22, a.rail.height)
+        );
+        assert!(areas(Rect::new(0, 0, 98, 46), &AUTO, true)
+            .rail_open
+            .is_none());
     }
 
     #[test]
@@ -206,14 +247,35 @@ mod tests {
     #[test]
     fn dragged_sizes_are_clamped_to_the_minimums() {
         let full = Rect::new(0, 0, 120, 50);
-        let wide = areas(full, &Layout { rail: Some(500), log: Some(2) }, false);
+        let wide = areas(
+            full,
+            &Layout {
+                rail: Some(500),
+                log: Some(2),
+            },
+            false,
+        );
         assert_eq!(wide.rail.width, 40);
         assert_eq!(wide.log.height, 5);
-        let narrow = areas(full, &Layout { rail: Some(3), log: Some(500) }, false);
+        let narrow = areas(
+            full,
+            &Layout {
+                rail: Some(3),
+                log: Some(500),
+            },
+            false,
+        );
         assert_eq!(narrow.rail.width, 22);
         assert!(narrow.centre.height >= 14, "{:?}", narrow.centre);
         // A terminal just wide enough leaves the centre its 40 columns.
-        let tight = areas(Rect::new(0, 0, 98, 46), &Layout { rail: Some(60), log: None }, false);
+        let tight = areas(
+            Rect::new(0, 0, 98, 46),
+            &Layout {
+                rail: Some(60),
+                log: None,
+            },
+            false,
+        );
         assert!(tight.centre.width >= 40 - 1, "{:?}", tight.centre);
     }
 
@@ -228,7 +290,10 @@ mod tests {
 
     #[test]
     fn ui_toml_round_trips_and_forgives() {
-        let l = Layout { rail: Some(30), log: Some(9) };
+        let l = Layout {
+            rail: Some(30),
+            log: Some(9),
+        };
         assert_eq!(Layout::from_toml(&l.to_toml()), l);
         assert_eq!(Layout::from_toml(&AUTO.to_toml()), AUTO);
         assert_eq!(Layout::from_toml("rail = \"wide\"\nlog = -4\n"), AUTO);

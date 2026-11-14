@@ -24,19 +24,41 @@ use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventK
 fn rig8() -> Rig {
     let mut app = session();
     for i in 0..8u128 {
-        worker(&mut app, 2 + i, &format!("w{i}"), "work", Some(0.3), "running");
+        worker(
+            &mut app,
+            2 + i,
+            &format!("w{i}"),
+            "work",
+            Some(0.3),
+            "running",
+        );
     }
     Rig::new(app, (98, 46), Theme::recording())
 }
 
 fn event(kind: MouseEventKind, (column, row): (u16, u16)) -> Event {
-    Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })
+    Event::Mouse(MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
 }
 
 /// One pass of the loop for these events: handled as one batch, then the frame.
 fn batch(r: &mut Rig, events: Vec<Event>) {
     let step = &mut |app: &mut App<aibus_graph::mini::MiniGraph>, m: Msg| app.step(m);
-    terminal_events(events, &mut r.app, &mut r.ui, &mut r.input, &mut CtrlC::default(), true, Instant::now(), step).unwrap();
+    terminal_events(
+        events,
+        &mut r.app,
+        &mut r.ui,
+        &mut r.input,
+        &mut CtrlC::default(),
+        true,
+        Instant::now(),
+        step,
+    )
+    .unwrap();
     r.settle();
 }
 
@@ -44,7 +66,12 @@ fn batch(r: &mut Rig, events: Vec<Event>) {
 fn streaming(r: &mut Rig) {
     for i in 0..8 {
         let chunks = vec![StreamChunk::TextDelta("some more output ".into())];
-        r.app.step(Msg::Stream { run: run_id(2 + i), chunks }).unwrap();
+        r.app
+            .step(Msg::Stream {
+                run: run_id(2 + i),
+                chunks,
+            })
+            .unwrap();
         r.settle();
     }
     r.app.step(Msg::Tick).unwrap();
@@ -61,9 +88,20 @@ fn right_click(r: &mut Rig, at: (u16, u16)) {
 /// Whether the menu on screen is the one for worker `card`: its title sits right above the first
 /// item (the card row has the same titles, so the text alone says nothing).
 fn menu_for(r: &Rig, card: u128) -> bool {
-    let Some((x, y)) = r.find("Open transcript") else { return false };
-    let Some(title) = y.checked_sub(1).and_then(|row| r.text().lines().nth(usize::from(row)).map(str::to_owned)) else { return false };
-    let near: String = title.chars().skip(usize::from(x).saturating_sub(8)).take(24).collect();
+    let Some((x, y)) = r.find("Open transcript") else {
+        return false;
+    };
+    let Some(title) = y
+        .checked_sub(1)
+        .and_then(|row| r.text().lines().nth(usize::from(row)).map(str::to_owned))
+    else {
+        return false;
+    };
+    let near: String = title
+        .chars()
+        .skip(usize::from(x).saturating_sub(8))
+        .take(24)
+        .collect();
     near.contains(&format!("┌ w{card} ")) && r.text().contains("Copy id")
 }
 
@@ -74,10 +112,18 @@ fn twenty_right_clicks_in_a_row_open_the_menu_twenty_times_without_an_escape_bet
     for trial in 0..20 {
         let card = trial % 3;
         right_click(&mut r, at[card]);
-        assert!(menu_for(&r, card as u128), "trial {trial}: no menu for card {card}\n{}", r.text());
+        assert!(
+            menu_for(&r, card as u128),
+            "trial {trial}: no menu for card {card}\n{}",
+            r.text()
+        );
         assert_eq!(r.int(SELECTED_CARD), Some(card as i64), "trial {trial}");
         streaming(&mut r);
-        assert!(menu_for(&r, card as u128), "trial {trial}: the menu went away by itself\n{}", r.text());
+        assert!(
+            menu_for(&r, card as u128),
+            "trial {trial}: the menu went away by itself\n{}",
+            r.text()
+        );
     }
 }
 
@@ -103,7 +149,11 @@ fn a_right_click_on_a_log_row_while_a_menu_is_open_moves_the_menu_to_that_run() 
     let (row, worker) = (0..runs.len())
         .rev()
         .filter(|i| r.ui.drawn.hits.find(HitId::LogRow(*i)).is_some())
-        .find_map(|i| (0..8u128).find(|k| runs[i] == Some(run_id(2 + k))).map(|k| (i, k)))
+        .find_map(|i| {
+            (0..8u128)
+                .find(|k| runs[i] == Some(run_id(2 + k)))
+                .map(|k| (i, k))
+        })
         .expect("a drawn log row of a worker");
     let at = r.centre(HitId::LogRow(row));
     right_click(&mut r, at);
@@ -127,7 +177,10 @@ fn a_right_click_on_the_menu_acts_on_the_card_that_is_under_it() {
     right_click(&mut r, at);
     // The menu opens at the pointer and is 21 cells wide, so it covers part of card 1.
     let under_menu = (55, 24);
-    assert!(matches!(r.ui.drawn.hits.at(under_menu.0, under_menu.1).map(|h| h.id), Some(HitId::MenuBox | HitId::MenuItem(_))));
+    assert!(matches!(
+        r.ui.drawn.hits.at(under_menu.0, under_menu.1).map(|h| h.id),
+        Some(HitId::MenuBox | HitId::MenuItem(_))
+    ));
     right_click(&mut r, under_menu);
     assert!(menu_for(&r, 1), "{}", r.text());
     assert_eq!(r.int(SELECTED_CARD), Some(1));
@@ -139,7 +192,13 @@ fn a_left_click_beside_the_menu_closes_it_and_leaves_the_selection_alone() {
     let at = r.centre(HitId::Card(0));
     right_click(&mut r, at);
     let other = r.centre(HitId::Card(2));
-    batch(&mut r, vec![event(MouseEventKind::Down(MouseButton::Left), other), event(MouseEventKind::Up(MouseButton::Left), other)]);
+    batch(
+        &mut r,
+        vec![
+            event(MouseEventKind::Down(MouseButton::Left), other),
+            event(MouseEventKind::Up(MouseButton::Left), other),
+        ],
+    );
     assert!(!r.text().contains("Open transcript"));
     assert_eq!(r.int(SELECTED_CARD), Some(0));
 }

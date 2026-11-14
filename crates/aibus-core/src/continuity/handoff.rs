@@ -113,7 +113,10 @@ impl Handoff {
             .map_err(|e| e.to_string())?;
         let mut all = Hash::new();
         if docs.len() > 2 {
-            return Err(format!("{} YAML documents; want a front matter and a body", docs.len()));
+            return Err(format!(
+                "{} YAML documents; want a front matter and a body",
+                docs.len()
+            ));
         }
         for doc in docs {
             let Yaml::Hash(h) = doc else {
@@ -137,7 +140,11 @@ impl Handoff {
     /// ones the schema names.
     pub fn build(front: &Front<'_>, body: &Map<String, Value>) -> Result<Self, String> {
         if !STATUSES.contains(&front.status) {
-            return Err(format!("status {}: want {}", front.status, STATUSES.join(", ")));
+            return Err(format!(
+                "status {}: want {}",
+                front.status,
+                STATUSES.join(", ")
+            ));
         }
         if let Some(o) = front.outcome.filter(|o| !OUTCOMES.contains(o)) {
             return Err(format!("outcome {o}: want {}", OUTCOMES.join(", ")));
@@ -236,7 +243,11 @@ impl Handoff {
         // too, so when the text does not read back as what was written, write that instead
         // (found by the handoff fuzz target, fixtures/fuzz/handoff).
         if !YamlLoader::load_from_str(&out).is_ok_and(|back| back == docs) {
-            out = docs.iter().map(|d| format!("---\n{}\n", to_json(d))).collect::<Vec<_>>().join("\n");
+            out = docs
+                .iter()
+                .map(|d| format!("---\n{}\n", to_json(d)))
+                .collect::<Vec<_>>()
+                .join("\n");
         }
         out.push('\n');
         out
@@ -249,7 +260,11 @@ impl Handoff {
 
     /// The line that opens what the lead is shown at `session_start`.
     pub fn line(&self) -> String {
-        format!("[handoff] goal: {} now: {}", one_line(&self.goal()), one_line(&self.now()))
+        format!(
+            "[handoff] goal: {} now: {}",
+            one_line(&self.goal()),
+            one_line(&self.now())
+        )
     }
 }
 
@@ -262,13 +277,19 @@ fn quote_colons(text: &str) -> String {
         let indent = &line[..line.len() - body.len()];
         let (dash, rest) = body.strip_prefix("- ").map_or(("", body), |r| ("- ", r));
         let (k, v) = rest.split_once(": ")?;
-        let plain_key = !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-'));
+        let plain_key = !k.is_empty()
+            && k.chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-'));
         let v = v.trim();
-        let plain_value = !v.is_empty() && !v.starts_with(['"', '\'', '[', '{', '|', '>', '&', '*', '!', '#']);
+        let plain_value =
+            !v.is_empty() && !v.starts_with(['"', '\'', '[', '{', '|', '>', '&', '*', '!', '#']);
         (plain_key && plain_value && (v.contains(": ") || v.ends_with(':')))
             .then(|| format!("{indent}{dash}{k}: '{}'", v.replace('\'', "''")))
     };
-    let mut out: Vec<String> = text.lines().map(|l| fixed(l).unwrap_or_else(|| l.to_owned())).collect();
+    let mut out: Vec<String> = text
+        .lines()
+        .map(|l| fixed(l).unwrap_or_else(|| l.to_owned()))
+        .collect();
     out.push(String::new());
     out.join("\n")
 }
@@ -286,17 +307,25 @@ pub fn context(path: &Path) -> Result<String, String> {
 
 /// The first line of `text`, cut to `max` characters.
 fn head(text: &str, max: usize) -> String {
-    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
     line.chars().take(max).collect()
 }
 
 fn text_of(c: &Conversation, role: MessageRole, first: bool) -> Option<String> {
-    let mut texts = c.messages.iter().filter(|m| m.role == role).filter_map(|m| {
-        m.blocks.iter().find_map(|b| match b {
-            ContentBlock::Text(t) if !t.trim().is_empty() => Some(t.clone()),
-            _ => None,
-        })
-    });
+    let mut texts = c
+        .messages
+        .iter()
+        .filter(|m| m.role == role)
+        .filter_map(|m| {
+            m.blocks.iter().find_map(|b| match b {
+                ContentBlock::Text(t) if !t.trim().is_empty() => Some(t.clone()),
+                _ => None,
+            })
+        });
     if first {
         texts.next()
     } else {
@@ -327,7 +356,14 @@ pub fn summarise(ledger: Option<&Ledger>, conv: Option<&Conversation>) -> Map<St
     body.insert("goal".into(), goal.into());
     body.insert("now".into(), now.into());
     if let Some(l) = ledger {
-        let list = |name| Value::from(l.items(name).into_iter().map(str::to_owned).collect::<Vec<_>>());
+        let list = |name| {
+            Value::from(
+                l.items(name)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>(),
+            )
+        };
         let done: Vec<Value> = l
             .items("Completed")
             .into_iter()
@@ -336,7 +372,12 @@ pub fn summarise(ledger: Option<&Ledger>, conv: Option<&Conversation>) -> Map<St
         body.insert("done_this_session".into(), done.into());
         body.insert("blockers".into(), list("Blockers"));
         body.insert("decisions".into(), list("Decisions"));
-        let next: Vec<_> = l.items("In Progress").into_iter().skip(1).map(str::to_owned).collect();
+        let next: Vec<_> = l
+            .items("In Progress")
+            .into_iter()
+            .skip(1)
+            .map(str::to_owned)
+            .collect();
         body.insert("next".into(), next.into());
     }
     body
@@ -368,7 +409,12 @@ fn slug(goal: &str) -> String {
         .take(5)
         .map(str::to_lowercase)
         .collect();
-    let s: String = words.join("-").chars().filter(char::is_ascii).take(40).collect();
+    let s: String = words
+        .join("-")
+        .chars()
+        .filter(char::is_ascii)
+        .take(40)
+        .collect();
     if s.is_empty() {
         "handoff".into()
     } else {
@@ -388,9 +434,17 @@ pub fn write(layout: &Layout, h: &Handoff, auto: bool, at: SystemTime) -> io::Re
         format!("{}_{}", stamp(at, false), slug(&h.goal()))
     };
     for n in 1.. {
-        let name = if n == 1 { format!("{base}.yaml") } else { format!("{base}-{n}.yaml") };
+        let name = if n == 1 {
+            format!("{base}.yaml")
+        } else {
+            format!("{base}-{n}.yaml")
+        };
         let path = dir.join(name);
-        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(_) => {
                 write_locked(&path, h.to_yaml())?;
                 return Ok(path);
@@ -404,8 +458,16 @@ pub fn write(layout: &Layout, h: &Handoff, auto: bool, at: SystemTime) -> io::Re
 
 /// What a handoff's name sorts by: its timestamp, wherever `auto-handoff-` puts it.
 fn order(path: &Path) -> (String, String) {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    (name.strip_prefix("auto-handoff-").unwrap_or(&name).to_owned(), name)
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    (
+        name.strip_prefix("auto-handoff-")
+            .unwrap_or(&name)
+            .to_owned(),
+        name,
+    )
 }
 
 /// Every handoff of `topic`, or of all topics, newest first (the newest name wins, 07
@@ -484,7 +546,10 @@ files:
         assert_eq!(again.to_json(), h.to_json());
         let j = h.to_json();
         assert_eq!(j["files"]["modified"][1], "Cargo.toml");
-        assert_eq!(j["decisions"][0]["middleware_over_extractor"], "keeps handlers free of auth plumbing");
+        assert_eq!(
+            j["decisions"][0]["middleware_over_extractor"],
+            "keeps handlers free of auth plumbing"
+        );
         assert_eq!(j["blockers"], serde_json::json!([]));
     }
 
@@ -499,7 +564,9 @@ files:
     fn goal_and_now_are_required() {
         assert!(Handoff::parse("goal: a\n").unwrap_err().contains("now"));
         assert!(Handoff::parse("now: a\n").unwrap_err().contains("goal"));
-        assert!(Handoff::parse("goal: ''\nnow: b\n").unwrap_err().contains("goal"));
+        assert!(Handoff::parse("goal: ''\nnow: b\n")
+            .unwrap_err()
+            .contains("goal"));
         assert!(Handoff::parse("- a\n- b\n").is_err());
         assert!(Handoff::parse("a: [\n").is_err());
         // One document with everything in it is fine too.
@@ -508,7 +575,10 @@ files:
 
     #[test]
     fn keys_this_version_does_not_know_survive() {
-        let h = Handoff::parse("---\nsession: s\nmood: tired\n---\ngoal: a\nnow: b\nmy_notes: [1, two]\n").unwrap();
+        let h = Handoff::parse(
+            "---\nsession: s\nmood: tired\n---\ngoal: a\nnow: b\nmy_notes: [1, two]\n",
+        )
+        .unwrap();
         let again = Handoff::parse(&h.to_yaml()).unwrap();
         assert_eq!(again.to_json()["my_notes"], serde_json::json!([1, "two"]));
         assert_eq!(again.to_json()["mood"], "tired");
@@ -517,7 +587,12 @@ files:
     #[test]
     fn build_checks_the_front_and_the_two_required_fields() {
         let body = |v: Value| v.as_object().unwrap().clone();
-        let front = |status, outcome| Front { session: "s", date: "2026-11-08", status, outcome };
+        let front = |status, outcome| Front {
+            session: "s",
+            date: "2026-11-08",
+            status,
+            outcome,
+        };
         let ok = Handoff::build(
             &front("partial", Some("FAILED")),
             &body(serde_json::json!({"now": "n", "goal": "g", "next": ["a", "b: c"], "extra": 1})),
@@ -528,17 +603,38 @@ files:
         assert!(text.find("next:").unwrap() < text.find("extra:").unwrap());
         assert_eq!(Handoff::parse(&text).unwrap(), ok);
         let b = body(serde_json::json!({"goal": "g", "now": "n"}));
-        assert!(Handoff::build(&front("done", None), &b).unwrap_err().contains("status"));
-        assert!(Handoff::build(&front("partial", Some("GREAT")), &b).unwrap_err().contains("outcome"));
-        assert!(Handoff::build(&front("partial", None), &body(serde_json::json!({"goal": "g"}))).is_err());
-        assert!(Handoff::build(&front("partial", None), &body(serde_json::json!({"goal": "g", "now": 4}))).is_err());
-        assert!(Handoff::build(&front("partial", None), &body(serde_json::json!({"goal": "g", "now": "n", "status": "x"}))).is_err());
+        assert!(Handoff::build(&front("done", None), &b)
+            .unwrap_err()
+            .contains("status"));
+        assert!(Handoff::build(&front("partial", Some("GREAT")), &b)
+            .unwrap_err()
+            .contains("outcome"));
+        assert!(Handoff::build(
+            &front("partial", None),
+            &body(serde_json::json!({"goal": "g"}))
+        )
+        .is_err());
+        assert!(Handoff::build(
+            &front("partial", None),
+            &body(serde_json::json!({"goal": "g", "now": 4}))
+        )
+        .is_err());
+        assert!(Handoff::build(
+            &front("partial", None),
+            &body(serde_json::json!({"goal": "g", "now": "n", "status": "x"}))
+        )
+        .is_err());
     }
 
     #[test]
     fn awkward_text_survives_the_emitter() {
         let b = serde_json::json!({"goal": "fix: the \"quoted\" # thing", "now": "line one\nline two", "questions": ["true", "123", "- dash", "null"]});
-        let front = Front { session: "s", date: "2026-11-08", status: "partial", outcome: None };
+        let front = Front {
+            session: "s",
+            date: "2026-11-08",
+            status: "partial",
+            outcome: None,
+        };
         let h = Handoff::build(&front, b.as_object().unwrap()).unwrap();
         let again = Handoff::parse(&h.to_yaml()).unwrap();
         assert_eq!(again.to_json(), h.to_json());
@@ -547,14 +643,19 @@ files:
 
     #[test]
     fn set_outcome_goes_into_the_front_matter() {
-        let mut h = Handoff::parse("---\nsession: s\nstatus: partial\n---\ngoal: a\nnow: b\n").unwrap();
+        let mut h =
+            Handoff::parse("---\nsession: s\nstatus: partial\n---\ngoal: a\nnow: b\n").unwrap();
         h.set_outcome("SUCCEEDED");
-        assert!(h.to_yaml().starts_with("---\nsession: s\nstatus: partial\noutcome: SUCCEEDED\n---\ngoal"));
+        assert!(h
+            .to_yaml()
+            .starts_with("---\nsession: s\nstatus: partial\noutcome: SUCCEEDED\n---\ngoal"));
         h.set_outcome("FAILED");
         assert_eq!(h.text("outcome").as_deref(), Some("FAILED"));
         let mut bare = Handoff::parse("goal: a\nnow: b\n").unwrap();
         bare.set_outcome("FAILED");
-        assert!(bare.to_yaml().starts_with("---\noutcome: FAILED\n---\ngoal"));
+        assert!(bare
+            .to_yaml()
+            .starts_with("---\noutcome: FAILED\n---\ngoal"));
     }
 
     #[test]
@@ -574,9 +675,15 @@ files:
             dir.path().join("thoughts/shared/handoffs/auth/2026-11-08_09-15_move-session-auth-to-middleware.yaml")
         );
         let b = write(&l, &h, false, at(1)).unwrap();
-        assert_eq!(b.file_name().unwrap(), "2026-11-08_09-15_move-session-auth-to-middleware-2.yaml");
+        assert_eq!(
+            b.file_name().unwrap(),
+            "2026-11-08_09-15_move-session-auth-to-middleware-2.yaml"
+        );
         let auto = write(&l, &h, true, at(0)).unwrap();
-        assert_eq!(auto.file_name().unwrap(), "auto-handoff-2026-11-08_09-15-30.yaml");
+        assert_eq!(
+            auto.file_name().unwrap(),
+            "auto-handoff-2026-11-08_09-15-30.yaml"
+        );
         assert_eq!(Handoff::parse(&fs::read_to_string(a).unwrap()).unwrap(), h);
     }
 
@@ -596,7 +703,8 @@ files:
         }
         assert_eq!(
             latest(dir.path(), None).unwrap(),
-            dir.path().join("auth/auto-handoff-2026-11-08_09-10-05.yaml")
+            dir.path()
+                .join("auth/auto-handoff-2026-11-08_09-10-05.yaml")
         );
         assert_eq!(
             latest(dir.path(), Some("general")).unwrap(),
@@ -611,7 +719,9 @@ files:
     fn a_summary_prefers_the_ledger_and_falls_back_to_the_conversation() {
         let mut ledger = Ledger::new("auth", "2026-11-08");
         ledger.update("goal", "Ship auth", false, "d").unwrap();
-        ledger.update("in progress", "write tests\nrun migration", false, "d").unwrap();
+        ledger
+            .update("in progress", "write tests\nrun migration", false, "d")
+            .unwrap();
         ledger.update("completed", "layer", false, "d").unwrap();
         let s = summarise(Some(&ledger), None);
         assert_eq!(s["goal"], "Ship auth");
@@ -632,7 +742,12 @@ files:
         assert_eq!(s["now"], "found it in auth.rs");
         let s = summarise(None, None);
         assert!(s["goal"].as_str().unwrap().contains("no goal"));
-        let front = Front { session: "s", date: "d", status: "partial", outcome: None };
+        let front = Front {
+            session: "s",
+            date: "d",
+            status: "partial",
+            outcome: None,
+        };
         Handoff::build(&front, &s).unwrap();
     }
 
@@ -643,7 +758,10 @@ files:
         assert_eq!(status_of(RunStatus::Partial), "partial");
         assert_eq!(stamp(at(0), false), "2026-11-08_09-15");
         assert_eq!(stamp(at(0), true), "2026-11-08_09-15-30");
-        assert_eq!(slug("Fix: the login!! bug in auth now please"), "fix-the-login-bug-in");
+        assert_eq!(
+            slug("Fix: the login!! bug in auth now please"),
+            "fix-the-login-bug-in"
+        );
         assert_eq!(slug("???"), "handoff");
     }
 }

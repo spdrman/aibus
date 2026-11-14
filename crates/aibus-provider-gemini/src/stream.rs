@@ -47,7 +47,13 @@ fn stream_error(e: &Value) -> ProviderError {
         Some(c) => c as u16,
         None => status_of(e["status"].as_str().unwrap_or_default()),
     };
-    ProviderError::from_http(status, e["message"].as_str().unwrap_or_default(), None, None, "")
+    ProviderError::from_http(
+        status,
+        e["message"].as_str().unwrap_or_default(),
+        None,
+        None,
+        "",
+    )
 }
 
 impl Turn {
@@ -88,13 +94,30 @@ impl Turn {
         self.take_usage(&v["usageMetadata"]);
         let mut out = Vec::new();
         let candidate = &v["candidates"][0];
-        for part in candidate["content"]["parts"].as_array().into_iter().flatten() {
+        for part in candidate["content"]["parts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
             if let Some(call) = part["functionCall"].as_object() {
                 let id = ToolCallId(Ulid::new());
-                let name: SmolStr = call.get("name").and_then(Value::as_str).unwrap_or_default().into();
-                let args = call.get("args").cloned().unwrap_or_else(|| Value::Object(Default::default()));
-                out.push(StreamChunk::ToolUseStart { id, name: name.clone() });
-                out.push(StreamChunk::ToolUseInputDelta { id, json_fragment: args.to_string() });
+                let name: SmolStr = call
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .into();
+                let args = call
+                    .get("args")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Object(Default::default()));
+                out.push(StreamChunk::ToolUseStart {
+                    id,
+                    name: name.clone(),
+                });
+                out.push(StreamChunk::ToolUseInputDelta {
+                    id,
+                    json_fragment: args.to_string(),
+                });
                 out.push(StreamChunk::ToolUseEnd { id });
                 let signature = part["thoughtSignature"].as_str().map(str::to_owned);
                 self.tools.push((id, name, args, signature));
@@ -112,11 +135,12 @@ impl Turn {
             self.stop = Some(match reason {
                 "STOP" => StopReason::EndTurn,
                 "MAX_TOKENS" => StopReason::MaxTokens,
-                "SAFETY" | "RECITATION" | "PROHIBITED_CONTENT" | "BLOCKLIST" | "SPII" | "IMAGE_SAFETY" => {
-                    StopReason::ContentFilter
-                }
+                "SAFETY" | "RECITATION" | "PROHIBITED_CONTENT" | "BLOCKLIST" | "SPII"
+                | "IMAGE_SAFETY" => StopReason::ContentFilter,
                 "MALFORMED_FUNCTION_CALL" => {
-                    let raw = candidate["finishMessage"].as_str().unwrap_or("no detail given");
+                    let raw = candidate["finishMessage"]
+                        .as_str()
+                        .unwrap_or("no detail given");
                     return Err(ProviderError::new(
                         ProviderErrorKind::InvalidRequest,
                         format!("the model made a malformed function call: {raw}"),
@@ -141,26 +165,49 @@ impl Turn {
             ));
         };
         // Gemini says STOP for a reply that called tools.
-        let stop = if stop == StopReason::EndTurn && !self.tools.is_empty() { StopReason::ToolUse } else { stop };
+        let stop = if stop == StopReason::EndTurn && !self.tools.is_empty() {
+            StopReason::ToolUse
+        } else {
+            stop
+        };
         self.stop = Some(stop.clone());
-        self.usage.cost_usd = self.price.and_then(|p| p.cost_usd(&self.usage)).unwrap_or(0.0);
-        Ok(vec![StreamChunk::Usage(self.usage), StreamChunk::Done(stop)])
+        self.usage.cost_usd = self
+            .price
+            .and_then(|p| p.cost_usd(&self.usage))
+            .unwrap_or(0.0);
+        Ok(vec![
+            StreamChunk::Usage(self.usage),
+            StreamChunk::Done(stop),
+        ])
     }
 
     /// The message, once `close` has run.
     pub fn into_response(self, request_id: Option<String>) -> ChatResponse {
         let mut blocks = Vec::new();
         if !self.thinking.is_empty() {
-            blocks.push(ContentBlock::Thinking { text: self.thinking, redacted: false, signature: None });
+            blocks.push(ContentBlock::Thinking {
+                text: self.thinking,
+                redacted: false,
+                signature: None,
+            });
         }
         if !self.text.is_empty() {
             blocks.push(ContentBlock::Text(self.text));
         }
         for (id, name, input, signature) in self.tools {
-            blocks.push(ContentBlock::ToolUse { id, name, input, signature });
+            blocks.push(ContentBlock::ToolUse {
+                id,
+                name,
+                input,
+                signature,
+            });
         }
         ChatResponse {
-            message: Message { role: MessageRole::Assistant, blocks, at: SystemTime::now() },
+            message: Message {
+                role: MessageRole::Assistant,
+                blocks,
+                at: SystemTime::now(),
+            },
             usage: self.usage,
             stop: self.stop.unwrap_or(StopReason::EndTurn),
             request_id: request_id.or(self.response_id),
@@ -181,7 +228,10 @@ mod tests {
             "candidatesTokenCount": 15, "thoughtsTokenCount": 30, "totalTokenCount": 170
         }));
         assert_eq!((t.usage.input_tokens, t.usage.cache_read), (25, 100));
-        assert_eq!((t.usage.output_tokens, t.usage.reasoning_tokens), (45, Some(30)));
+        assert_eq!(
+            (t.usage.output_tokens, t.usage.reasoning_tokens),
+            (45, Some(30))
+        );
 
         let mut t = Turn::new(None);
         t.take_usage(&serde_json::json!({"promptTokenCount": 10, "candidatesTokenCount": 5}));
@@ -192,7 +242,10 @@ mod tests {
     fn finish_reasons_map_and_a_malformed_call_carries_the_raw_text() {
         let stop = |reason: &str| {
             let mut t = Turn::new(None);
-            t.event(&format!(r#"{{"candidates":[{{"finishReason":"{reason}"}}]}}"#)).unwrap();
+            t.event(&format!(
+                r#"{{"candidates":[{{"finishReason":"{reason}"}}]}}"#
+            ))
+            .unwrap();
             t.stop.unwrap()
         };
         assert_eq!(stop("STOP"), StopReason::EndTurn);
@@ -206,24 +259,35 @@ mod tests {
         let e = t
             .event(r#"{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL","finishMessage":"print(read_file(path=1))"}]}"#)
             .unwrap_err();
-        assert_eq!((e.kind, e.retryable), (ProviderErrorKind::InvalidRequest, false));
+        assert_eq!(
+            (e.kind, e.retryable),
+            (ProviderErrorKind::InvalidRequest, false)
+        );
         assert!(e.message.contains("print(read_file(path=1))"));
     }
 
     #[test]
     fn a_blocked_prompt_with_no_candidate_is_a_content_filter_stop() {
         let mut t = Turn::new(None);
-        t.event(r#"{"promptFeedback":{"blockReason":"SAFETY"}}"#).unwrap();
-        assert_eq!(t.close().unwrap().last(), Some(&StreamChunk::Done(StopReason::ContentFilter)));
+        t.event(r#"{"promptFeedback":{"blockReason":"SAFETY"}}"#)
+            .unwrap();
+        assert_eq!(
+            t.close().unwrap().last(),
+            Some(&StreamChunk::Done(StopReason::ContentFilter))
+        );
     }
 
     #[test]
     fn a_mid_stream_error_maps_by_its_code_or_its_status_name() {
-        let e = stream_error(&serde_json::json!({"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "slow"}));
+        let e = stream_error(
+            &serde_json::json!({"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "slow"}),
+        );
         assert_eq!((e.kind, e.retryable), (ProviderErrorKind::RateLimit, true));
         let e = stream_error(&serde_json::json!({"status": "UNAUTHENTICATED", "message": "no"}));
         assert_eq!(e.kind, ProviderErrorKind::Auth);
-        let e = stream_error(&serde_json::json!({"code": 404, "status": "NOT_FOUND", "message": "models/x is not found"}));
+        let e = stream_error(
+            &serde_json::json!({"code": 404, "status": "NOT_FOUND", "message": "models/x is not found"}),
+        );
         assert_eq!(e.kind, ProviderErrorKind::ModelNotFound);
     }
 }

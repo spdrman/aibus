@@ -69,7 +69,11 @@ mod tests {
     #[test]
     fn a_family_override_changes_the_ratio() {
         assert_eq!(estimate(&req(&"a".repeat(400)), 2.0), 220);
-        assert_eq!(estimate(&req(&"a".repeat(400)), 0.0), 110, "a bad override falls back");
+        assert_eq!(
+            estimate(&req(&"a".repeat(400)), 0.0),
+            110,
+            "a bad override falls back"
+        );
     }
 
     #[test]

@@ -7,9 +7,11 @@ use aibus_core::AgentName;
 use serde_json::Value;
 
 fn roster() -> Vec<AgentName> {
-    ["lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit"]
-        .map(|n| AgentName::new(n).unwrap())
-        .to_vec()
+    [
+        "lead", "explore", "plan", "general", "advisor", "router", "search", "grep", "audit",
+    ]
+    .map(|n| AgentName::new(n).unwrap())
+    .to_vec()
 }
 
 fn fixtures() -> PathBuf {
@@ -38,7 +40,10 @@ fn parse_errors_and_roster_errors_come_together() {
 
 #[test]
 fn a_file_that_is_not_toml_or_has_unknown_keys_is_an_error_without_a_step() {
-    for text in ["step = [", "flavour = 1\n[[step]]\nagent = \"explore\"\nprompt = \"p\"\n"] {
+    for text in [
+        "step = [",
+        "flavour = 1\n[[step]]\nagent = \"explore\"\nprompt = \"p\"\n",
+    ] {
         let v = validate(text, "t", &roster());
         assert!(!v.ok, "{text}");
         assert_eq!(v.errors.len(), 1, "{v:?}");
@@ -80,14 +85,25 @@ fn a_same_named_step_in_between_hides_the_earlier_summary() {
 
 #[test]
 fn marker_shapes_in_a_prompt_are_a_warning() {
-    for marker in ["[hint]", "[run ls]", "[mcp x]", "[hook x]", "[web x]", "[advisor]"] {
+    for marker in [
+        "[hint]",
+        "[run ls]",
+        "[mcp x]",
+        "[hook x]",
+        "[web x]",
+        "[advisor]",
+    ] {
         let text = format!("[[step]]\nagent = \"explore\"\nprompt = \"see {marker}\"\n");
         let v = validate(&text, "t", &roster());
         assert!(v.ok);
         assert_eq!(v.warnings.len(), 1, "{marker}: {v:?}");
         assert_eq!(v.warnings[0].field.as_deref(), Some("prompt"));
     }
-    let plain = validate("[[step]]\nagent = \"explore\"\nprompt = \"see [1] and [x]\"\n", "t", &roster());
+    let plain = validate(
+        "[[step]]\nagent = \"explore\"\nprompt = \"see [1] and [x]\"\n",
+        "t",
+        &roster(),
+    );
     assert!(plain.warnings.is_empty(), "{plain:?}");
 }
 
@@ -104,7 +120,12 @@ fn files(dir: &str) -> Vec<(String, String)> {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
-        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+        .map(|p| {
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(&p).unwrap(),
+            )
+        })
         .collect();
     out.sort();
     out
@@ -113,12 +134,18 @@ fn files(dir: &str) -> Vec<(String, String)> {
 #[test]
 fn every_fixture_matches_its_expected_json() {
     for dir in ["valid", "invalid", "warnings", "semantic"] {
-        let expected: Value =
-            serde_json::from_str(&std::fs::read_to_string(fixtures().join("expected").join(format!("{dir}.json"))).unwrap())
-                .unwrap();
+        let expected: Value = serde_json::from_str(
+            &std::fs::read_to_string(fixtures().join("expected").join(format!("{dir}.json")))
+                .unwrap(),
+        )
+        .unwrap();
         let found = files(dir);
         assert!(!found.is_empty(), "{dir}");
-        assert_eq!(expected.as_object().unwrap().len(), found.len(), "{dir}: a fixture and its expected entry go together");
+        assert_eq!(
+            expected.as_object().unwrap().len(),
+            found.len(),
+            "{dir}: a fixture and its expected entry go together"
+        );
         for (file, text) in found {
             let stem = file.trim_end_matches(".toml");
             let got = serde_json::to_value(validate(&text, stem, &roster())).unwrap();
@@ -151,5 +178,8 @@ fn save_writes_the_golden_file_byte_for_byte_on_a_fixed_clock() {
     let golden = std::fs::read_to_string(fixtures().join("saved/review.toml")).unwrap();
     assert_eq!(std::fs::read_to_string(path).unwrap(), golden);
     // What `save` wrote is a valid workflow with the same steps as the example.
-    assert_eq!(Workflow::parse("review", &golden), Workflow::parse("review", EXAMPLES[2].1));
+    assert_eq!(
+        Workflow::parse("review", &golden),
+        Workflow::parse("review", EXAMPLES[2].1)
+    );
 }

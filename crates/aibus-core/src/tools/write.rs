@@ -30,7 +30,9 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
         .parent()
         .ok_or_else(|| std::io::Error::other("path has no parent directory"))?;
     fs::create_dir_all(dir)?;
-    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let tmp = dir.join(format!(".{name}.aibus-{}", Ulid::new()));
     let result = (|| {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -79,7 +81,8 @@ impl Tool for Write {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "write".into(),
-            description: "Create a file or replace it with `content`. Parent directories are created.".into(),
+            description:
+                "Create a file or replace it with `content`. Parent directories are created.".into(),
             schema: json!({"type":"object","required":["path","content"],"additionalProperties":false,"properties":{
                 "path":{"type":"string","minLength":1},
                 "content":{"type":"string"}}}),

@@ -42,7 +42,9 @@ fn script(steps: impl IntoIterator<Item = Step>) -> Script {
 
 fn registry() -> Arc<AccountRegistry> {
     let cfg: Config = toml::from_str(CONFIG).unwrap();
-    let providers = ProviderRegistry::new(&[Box::new(aibus_provider::fake::Factory)], &BTreeMap::new()).unwrap();
+    let providers =
+        ProviderRegistry::new(&[Box::new(aibus_provider::fake::Factory)], &BTreeMap::new())
+            .unwrap();
     Arc::new(AccountRegistry::new(&cfg, Arc::new(providers)))
 }
 
@@ -77,7 +79,12 @@ impl Done {
     }
 
     fn transcript(&self) -> String {
-        let path = self.dir.path().join("runs").join(self.run.to_string()).join("conversation.jsonl");
+        let path = self
+            .dir
+            .path()
+            .join("runs")
+            .join(self.run.to_string())
+            .join("conversation.jsonl");
         std::fs::read_to_string(path).unwrap_or_default()
     }
 }
@@ -85,18 +92,26 @@ impl Done {
 /// Runs a lead on account `a` with `b` as its fallback for `on`.
 async fn run(a: Script, b: Script, on: &[FallbackKind]) -> Done {
     let _clock = FakeClock::new();
-    let (a, b) = (Arc::new(FakeProvider::new(a)), Arc::new(FakeProvider::new(b)));
+    let (a, b) = (
+        Arc::new(FakeProvider::new(a)),
+        Arc::new(FakeProvider::new(b)),
+    );
     let registry = registry();
     let dir = xdg_temp();
     std::fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
-    let path_env = vec![("PATH".to_string(), std::env::var("PATH").unwrap_or_default())];
-    let tools = Arc::new(ToolExecutor::new(ToolRegistry::standard(Arc::new(Bash::new(
-        20,
-        vec![],
-        path_env.clone(),
-        dir.path().to_path_buf(),
-        "s".into(),
-    )))));
+    let path_env = vec![(
+        "PATH".to_string(),
+        std::env::var("PATH").unwrap_or_default(),
+    )];
+    let tools = Arc::new(ToolExecutor::new(ToolRegistry::standard(Arc::new(
+        Bash::new(
+            20,
+            vec![],
+            path_env.clone(),
+            dir.path().to_path_buf(),
+            "s".into(),
+        ),
+    ))));
     let hooks = Arc::new(HookRunner::new(
         &Hooks::default(),
         path_env,
@@ -146,7 +161,11 @@ async fn run(a: Script, b: Script, on: &[FallbackKind]) -> Done {
             hooks,
             compactor: None,
             assist: None,
-            fallback: Some(Arc::new(Fallback { chain: vec![to_b], on: on.to_vec(), accounts: registry.clone() })),
+            fallback: Some(Arc::new(Fallback {
+                chain: vec![to_b],
+                on: on.to_vec(),
+                accounts: registry.clone(),
+            })),
         },
     );
     let mut msgs = Vec::new();
@@ -158,10 +177,21 @@ async fn run(a: Script, b: Script, on: &[FallbackKind]) -> Done {
         }
     }
     handle.join.await.unwrap();
-    Done { a, b, registry, msgs, dir, run }
+    Done {
+        a,
+        b,
+        registry,
+        msgs,
+        dir,
+        run,
+    }
 }
 
-const DEFAULT_ON: [FallbackKind; 3] = [FallbackKind::Quota, FallbackKind::Auth, FallbackKind::Overloaded];
+const DEFAULT_ON: [FallbackKind; 3] = [
+    FallbackKind::Quota,
+    FallbackKind::Auth,
+    FallbackKind::Overloaded,
+];
 
 #[tokio::test]
 async fn a_quota_before_the_first_token_continues_on_the_next_account_with_the_same_conversation() {
@@ -172,14 +202,25 @@ async fn a_quota_before_the_first_token_continues_on_the_next_account_with_the_s
     )
     .await;
     let r = done.finished();
-    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Completed, "from b"));
+    assert_eq!(
+        (r.status, r.summary.as_str()),
+        (RunStatus::Completed, "from b")
+    );
     assert_eq!(done.switches(), [(name("a"), name("b"))]);
     let (first, second) = (done.a.requests(), done.b.requests());
     assert_eq!((first.len(), second.len()), (1, 1));
-    assert_eq!(first[0].request.messages, second[0].request.messages, "b sees the same conversation");
+    assert_eq!(
+        first[0].request.messages, second[0].request.messages,
+        "b sees the same conversation"
+    );
     // The transcript keeps the account the run began on and records the switch.
     let t = done.transcript();
-    assert!(t.contains(r#""account":"a""#) && t.contains(r#""type":"switch""#) && t.contains(r#""account":"b""#), "{t}");
+    assert!(
+        t.contains(r#""account":"a""#)
+            && t.contains(r#""type":"switch""#)
+            && t.contains(r#""account":"b""#),
+        "{t}"
+    );
     // The account that gave way sits out of selection.
     assert!(done.registry.cooled(&name("a")) && !done.registry.cooled(&name("b")));
 }
@@ -187,7 +228,10 @@ async fn a_quota_before_the_first_token_continues_on_the_next_account_with_the_s
 #[tokio::test]
 async fn a_quota_after_the_first_token_does_not_switch() {
     let done = run(
-        script([Step::Text("partial".into()), err(ProviderErrorKind::Quota, "monthly cap")]),
+        script([
+            Step::Text("partial".into()),
+            err(ProviderErrorKind::Quota, "monthly cap"),
+        ]),
         script([Step::Text("from b".into())]),
         &DEFAULT_ON,
     )
@@ -197,13 +241,23 @@ async fn a_quota_after_the_first_token_does_not_switch() {
     assert_eq!(r.error.as_ref().unwrap().kind, RunErrorKind::Quota);
     assert!(done.switches().is_empty());
     assert!(done.b.requests().is_empty());
-    assert!(!done.registry.cooled(&name("a")), "only a switch cools an account");
+    assert!(
+        !done.registry.cooled(&name("a")),
+        "only a switch cools an account"
+    );
 }
 
 #[tokio::test]
 async fn an_overload_retries_five_times_on_the_account_and_then_moves() {
-    let a: Vec<Step> = (0..6).map(|_| err(ProviderErrorKind::Overloaded, "busy")).collect();
-    let done = run(script(a), script([Step::Text("from b".into())]), &DEFAULT_ON).await;
+    let a: Vec<Step> = (0..6)
+        .map(|_| err(ProviderErrorKind::Overloaded, "busy"))
+        .collect();
+    let done = run(
+        script(a),
+        script([Step::Text("from b".into())]),
+        &DEFAULT_ON,
+    )
+    .await;
     assert_eq!(done.finished().status, RunStatus::Completed);
     assert_eq!(done.a.requests().len(), 6, "the first try and five retries");
     assert_eq!(done.b.requests().len(), 1);
@@ -212,8 +266,15 @@ async fn an_overload_retries_five_times_on_the_account_and_then_moves() {
 
 #[tokio::test]
 async fn fallback_on_without_overloaded_keeps_the_retry_in_place_and_the_end_as_before() {
-    let a: Vec<Step> = (0..6).map(|_| err(ProviderErrorKind::Overloaded, "busy")).collect();
-    let done = run(script(a), script([Step::Text("from b".into())]), &[FallbackKind::Quota]).await;
+    let a: Vec<Step> = (0..6)
+        .map(|_| err(ProviderErrorKind::Overloaded, "busy"))
+        .collect();
+    let done = run(
+        script(a),
+        script([Step::Text("from b".into())]),
+        &[FallbackKind::Quota],
+    )
+    .await;
     assert_eq!(done.finished().status, RunStatus::Failed);
     assert_eq!(done.a.requests().len(), 6);
     assert!(done.b.requests().is_empty() && done.switches().is_empty());
@@ -245,7 +306,11 @@ async fn a_chain_that_is_used_up_ends_the_run_with_the_last_error() {
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Failed);
     assert_eq!(r.error.as_ref().unwrap().kind, RunErrorKind::Quota);
-    assert_eq!((done.a.requests().len(), done.b.requests().len()), (1, 1), "never back to a");
+    assert_eq!(
+        (done.a.requests().len(), done.b.requests().len()),
+        (1, 1),
+        "never back to a"
+    );
 }
 
 // ---- the advisor and router seats ----------------------------------------------------------
@@ -268,10 +333,14 @@ fn request() -> aibus_provider::ChatRequest {
 }
 
 #[tokio::test]
-async fn a_seat_falls_back_without_the_caller_doing_anything_and_a_seat_without_a_chain_just_fails() {
+async fn a_seat_falls_back_without_the_caller_doing_anything_and_a_seat_without_a_chain_just_fails()
+{
     let _clock = FakeClock::new();
     let (a, b) = (
-        Arc::new(FakeProvider::new(script([err(ProviderErrorKind::Quota, "spent")]))),
+        Arc::new(FakeProvider::new(script([err(
+            ProviderErrorKind::Quota,
+            "spent",
+        )]))),
         Arc::new(FakeProvider::new(script([Step::Text("go ahead".into())]))),
     );
     let registry = registry();
@@ -286,20 +355,31 @@ async fn a_seat_falls_back_without_the_caller_doing_anything_and_a_seat_without_
         creds: Arc::new(fake_credential()),
         model: ModelId("fake-small".into()),
         account: name("a"),
-        fallback: Some(Arc::new(Fallback { chain: vec![to_b], on: DEFAULT_ON.to_vec(), accounts: registry.clone() })),
+        fallback: Some(Arc::new(Fallback {
+            chain: vec![to_b],
+            on: DEFAULT_ON.to_vec(),
+            accounts: registry.clone(),
+        })),
     };
     let cancel = tokio_util::sync::CancellationToken::new();
-    let (resp, _) = aibus_core::assist::complete(&seat, request(), &cancel).await.unwrap();
+    let (resp, _) = aibus_core::assist::complete(&seat, request(), &cancel)
+        .await
+        .unwrap();
     assert!(format!("{:?}", resp.message).contains("go ahead"));
     assert_eq!((a.requests().len(), b.requests().len()), (1, 1));
     assert!(registry.cooled(&name("a")));
 
     // No chain: the error comes back as it did before F9, for the caller to report.
     let lone = Seat {
-        provider: Arc::new(FakeProvider::new(script([err(ProviderErrorKind::Quota, "spent")]))),
+        provider: Arc::new(FakeProvider::new(script([err(
+            ProviderErrorKind::Quota,
+            "spent",
+        )]))),
         fallback: None,
         ..seat
     };
-    let e = aibus_core::assist::complete(&lone, request(), &cancel).await.unwrap_err();
+    let e = aibus_core::assist::complete(&lone, request(), &cancel)
+        .await
+        .unwrap_err();
     assert_eq!(e.kind, ProviderErrorKind::Quota);
 }

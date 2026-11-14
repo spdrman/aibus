@@ -19,7 +19,11 @@ use crossterm::event::{Event, KeyModifiers, MouseEvent, MouseEventKind};
 fn rig(size: (u16, u16)) -> Rig {
     let mut app = replay_app();
     for i in 0..40 {
-        app.step(Msg::IoError { context: format!("ctx {i}"), error: "e".into() }).unwrap();
+        app.step(Msg::IoError {
+            context: format!("ctx {i}"),
+            error: "e".into(),
+        })
+        .unwrap();
     }
     Rig::new(app, size, Theme::recording())
 }
@@ -70,9 +74,15 @@ fn a_double_click_inside_400_ms_opens_the_transcript_and_a_slow_one_does_not() {
     let msgs = r.down(c, row);
     assert_eq!(
         names(&msgs),
-        ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(2)))", "Ui(Open(Cards))"],
+        [
+            "Ui(Focus(Cards))",
+            "Ui(Select(Cards, Index(2)))",
+            "Ui(Open(Cards))"
+        ],
     );
-    let Some(Value::Str(modal)) = r.app.graph.read_key(MODAL) else { panic!("no modal") };
+    let Some(Value::Str(modal)) = r.app.graph.read_key(MODAL) else {
+        panic!("no modal")
+    };
     assert_eq!(modal.to_string(), format!("transcript:{}", testkit_run(4)));
 
     // Close it, then click twice more than 400 ms apart.
@@ -85,7 +95,10 @@ fn a_double_click_inside_400_ms_opens_the_transcript_and_a_slow_one_does_not() {
     // The double click is spent: a third press right after is a single click again.
     r.advance(50);
     let msgs = r.down(c, row);
-    assert!(names(&msgs).iter().any(|m| m.contains("Open")), "second of a new pair");
+    assert!(
+        names(&msgs).iter().any(|m| m.contains("Open")),
+        "second of a new pair"
+    );
 }
 
 fn testkit_run(seq: u128) -> RunId {
@@ -95,11 +108,18 @@ fn testkit_run(seq: u128) -> RunId {
 #[test]
 fn the_wheel_scrolls_the_pane_under_the_pointer_three_lines_a_notch() {
     let mut r = rig((98, 46));
-    assert_eq!(focus(&r), "input", "the focused pane is not the one that scrolls");
+    assert_eq!(
+        focus(&r),
+        "input",
+        "the focused pane is not the one that scrolls"
+    );
     let before = r.text();
     let (c, row) = r.centre(HitId::LogRow(r.ui.drawn.log.total - 1));
     let msgs = r.mouse(MouseEventKind::ScrollUp, c, row);
-    assert_eq!(names(&msgs), ["Ui(Scroll { pane: Log, lines: 3, sideways: false })"]);
+    assert_eq!(
+        names(&msgs),
+        ["Ui(Scroll { pane: Log, lines: 3, sideways: false })"]
+    );
     assert_eq!(r.int(&scroll_key("log")), Some(3));
     assert_ne!(r.text(), before, "the log moved");
     assert_eq!(focus(&r), "input");
@@ -112,9 +132,15 @@ fn the_wheel_scrolls_the_pane_under_the_pointer_three_lines_a_notch() {
     // Over the cards the wheel is for the cards, with Shift sideways.
     let (c, row) = r.centre(HitId::Card(0));
     let msgs = r.mouse_with(MouseEventKind::ScrollDown, c, row, KeyModifiers::SHIFT);
-    assert_eq!(names(&msgs), ["Ui(Scroll { pane: Cards, lines: -3, sideways: true })"]);
+    assert_eq!(
+        names(&msgs),
+        ["Ui(Scroll { pane: Cards, lines: -3, sideways: true })"]
+    );
     let msgs = r.mouse(MouseEventKind::ScrollUp, c, row);
-    assert_eq!(names(&msgs), ["Ui(Scroll { pane: Cards, lines: 3, sideways: false })"]);
+    assert_eq!(
+        names(&msgs),
+        ["Ui(Scroll { pane: Cards, lines: 3, sideways: false })"]
+    );
 }
 
 #[test]
@@ -132,7 +158,10 @@ fn the_scrollbar_pages_on_the_track_and_follows_the_thumb() {
     let msgs = r.down(track.x, track.y);
     assert_eq!(
         names(&msgs),
-        [format!("Ui(Scroll {{ pane: Log, lines: {}, sideways: false }})", log.visible)],
+        [format!(
+            "Ui(Scroll {{ pane: Log, lines: {}, sideways: false }})",
+            log.visible
+        )],
     );
     r.up(track.x, track.y);
     assert_eq!(r.int(&scroll_key("log")), Some(log.visible as i64));
@@ -142,7 +171,10 @@ fn the_scrollbar_pages_on_the_track_and_follows_the_thumb() {
     r.down(thumb.x, thumb.y);
     r.drag(thumb.x, track.y);
     r.up(thumb.x, track.y);
-    assert_eq!(r.int(&scroll_key("log")), Some((log.total - log.visible) as i64));
+    assert_eq!(
+        r.int(&scroll_key("log")),
+        Some((log.total - log.visible) as i64)
+    );
     // And the whole way back down.
     let thumb = r.ui.drawn.hits.find(HitId::Thumb(Pane::Log)).unwrap().rect;
     assert_eq!(thumb.y, track.y);
@@ -173,7 +205,13 @@ fn the_border_between_the_rail_and_the_centre_drags_and_clamps() {
     assert!(!r.layout_done);
     r.up(rail_x + 30, row);
     assert!(r.layout_done, "the sizes are final when the button goes up");
-    assert_eq!(Chrome::read(&r.app.graph).layout, Layout { rail: Some(30), log: None });
+    assert_eq!(
+        Chrome::read(&r.app.graph).layout,
+        Layout {
+            rail: Some(30),
+            log: None
+        }
+    );
 
     // Too far either way stops at the minimum and the maximum.
     r.down(rail_x + 30, row);
@@ -194,7 +232,10 @@ fn the_border_above_the_log_drags_and_clamps() {
     assert_eq!(names(&msgs), ["Ui(SetLogRows(10))"]);
     assert_eq!(r.ui.drawn.areas.log.height, 10);
     // Hovering it lights the border row.
-    assert_eq!(r.cell(10, r.ui.drawn.areas.log.y).fg, Theme::recording().focus);
+    assert_eq!(
+        r.cell(10, r.ui.drawn.areas.log.y).fg,
+        Theme::recording().focus
+    );
     r.up(10, log.y - 4);
     assert!(r.layout_done);
     // Dragging it down to nothing leaves the 3-row minimum, and up to the top keeps main rows.
@@ -222,7 +263,10 @@ fn dragged_sizes_survive_a_restart_through_ui_toml() {
 
     // A fresh session applies it the way the loop does, as messages.
     let mut again = Rig::new(replay_app(), (120, 50), Theme::recording());
-    again.app.step(Msg::Ui(UiIntent::SetRailWidth(saved.rail.unwrap()))).unwrap();
+    again
+        .app
+        .step(Msg::Ui(UiIntent::SetRailWidth(saved.rail.unwrap())))
+        .unwrap();
     again.settle();
     assert_eq!(again.ui.drawn.areas.rail.width, 28);
 }
@@ -264,7 +308,10 @@ fn a_modal_keeps_every_click_from_the_dashboard_under_it() {
     // Inside the box, on the backdrop over a card, over a log row, and in a corner.
     for (x, y) in [(c, row), (c, 20), (50, 44), (0, 0), (97, 45)] {
         let msgs = r.down(x, y);
-        assert!(msgs.is_empty(), "({x}, {y}) reached the dashboard or closed the modal: {msgs:?}");
+        assert!(
+            msgs.is_empty(),
+            "({x}, {y}) reached the dashboard or closed the modal: {msgs:?}"
+        );
         r.up(x, y);
     }
     assert_eq!(r.int(SELECTED_CARD), before);
@@ -286,7 +333,10 @@ fn the_rail_strip_opens_on_a_click_and_a_checkpoint_opens_its_advice() {
     let mut r = Rig::new(replay_app(), (80, 24), Theme::recording());
     assert_eq!(r.ui.drawn.areas.rail.width, 3);
     let msgs = r.click(HitId::RailStrip);
-    assert!(names(&msgs).contains(&"Ui(ToggleRail)".to_owned()), "{msgs:?}");
+    assert!(
+        names(&msgs).contains(&"Ui(ToggleRail)".to_owned()),
+        "{msgs:?}"
+    );
     assert!(r.ui.drawn.areas.rail_open.is_some());
     assert!(r.text().contains("OPUS 5.5 ─"), "{}", r.text());
     let msgs = r.click(HitId::Checkpoint(0));
@@ -340,39 +390,64 @@ fn every_mouse_action_has_a_keyboard_equivalent_with_the_same_message() {
     assert_eq!(names(&k.press('l')), [select_card_1]);
 
     // Double click / Enter.
-    assert_eq!(names(&k.key(crossterm::event::KeyCode::Enter)), ["Ui(Open(Cards))"]);
+    assert_eq!(
+        names(&k.key(crossterm::event::KeyCode::Enter)),
+        ["Ui(Open(Cards))"]
+    );
 
     // Click a pane / Tab.
     let mut k = rig((98, 46));
-    assert_eq!(names(&k.key(crossterm::event::KeyCode::Tab)), ["Ui(FocusNext)"]);
+    assert_eq!(
+        names(&k.key(crossterm::event::KeyCode::Tab)),
+        ["Ui(FocusNext)"]
+    );
     assert_eq!(focus(&k), "cards");
 
     // Click the strip / `a`.
     let mut k = Rig::new(replay_app(), (80, 24), Theme::recording());
     k.app.step(Msg::Ui(UiIntent::Focus(Pane::Cards))).unwrap();
     k.settle();
-    assert_eq!(names(&k.press('a')), ["Ui(Focus(Advisor))", "Ui(ToggleRail)"]);
+    assert_eq!(
+        names(&k.press('a')),
+        ["Ui(Focus(Advisor))", "Ui(ToggleRail)"]
+    );
 
     // Click a checkpoint / Enter on the rail.
-    assert_eq!(names(&k.key(crossterm::event::KeyCode::Enter)), ["Ui(Open(Advisor))"]);
+    assert_eq!(
+        names(&k.key(crossterm::event::KeyCode::Enter)),
+        ["Ui(Open(Advisor))"]
+    );
 
     // The wheel / `k` and `j` in the log.
     let mut k = rig((98, 46));
     k.app.step(Msg::Ui(UiIntent::Focus(Pane::Log))).unwrap();
     k.settle();
-    assert_eq!(names(&k.press('k')), ["Ui(Scroll { pane: Log, lines: 1, sideways: false })"]);
-    assert_eq!(names(&k.press('j')), ["Ui(Scroll { pane: Log, lines: -1, sideways: false })"]);
+    assert_eq!(
+        names(&k.press('k')),
+        ["Ui(Scroll { pane: Log, lines: 1, sideways: false })"]
+    );
+    assert_eq!(
+        names(&k.press('j')),
+        ["Ui(Scroll { pane: Log, lines: -1, sideways: false })"]
+    );
 }
 
 // ---- #89: mouse ownership and overflow on the card canvas ------------------------------------
 //
 // The hit map resolves first on both paths, the flow is never handed an event, and the row pans a
-// card at a time through `ctrl:scroll:cards:x`. 
+// card at a time through `ctrl:scroll:cards:x`.
 
 fn eight(size: (u16, u16)) -> Rig {
     let mut app = session();
     for k in 0..8u128 {
-        worker(&mut app, 2 + k, &format!("w{k}"), "does a thing", Some(0.5), "running");
+        worker(
+            &mut app,
+            2 + k,
+            &format!("w{k}"),
+            "does a thing",
+            Some(0.5),
+            "running",
+        );
     }
     Rig::new(app, size, Theme::recording())
 }
@@ -388,14 +463,19 @@ fn empty_canvas(r: &Rig) -> (u16, u16) {
 }
 
 fn card_rects(r: &Rig) -> Vec<(usize, ratatui::layout::Rect)> {
-    (0..8).filter_map(|i| r.ui.drawn.hits.find(HitId::Card(i)).map(|h| (i, h.rect))).collect()
+    (0..8)
+        .filter_map(|i| r.ui.drawn.hits.find(HitId::Card(i)).map(|h| (i, h.rect)))
+        .collect()
 }
 
 #[test]
 fn click_on_a_card_selects_it_on_the_canvas() {
     let mut r = eight((98, 46));
     let msgs = r.click(HitId::Card(1));
-    assert_eq!(names(&msgs), ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(1)))"]);
+    assert_eq!(
+        names(&msgs),
+        ["Ui(Focus(Cards))", "Ui(Select(Cards, Index(1)))"]
+    );
     assert_eq!(r.int(SELECTED_CARD), Some(1));
 }
 
@@ -405,7 +485,10 @@ fn right_click_on_a_card_opens_its_menu() {
     let (c, row) = r.centre(HitId::Card(2));
     let msgs = names(&r.right_down(c, row));
     assert_eq!(msgs[0], "Ui(Focus(Cards))");
-    assert!(msgs.iter().any(|m| m.starts_with("Ui(OpenMenu")), "{msgs:?}");
+    assert!(
+        msgs.iter().any(|m| m.starts_with("Ui(OpenMenu")),
+        "{msgs:?}"
+    );
     assert_eq!(r.int(SELECTED_CARD), Some(2));
 }
 
@@ -417,7 +500,11 @@ fn double_click_opens_the_transcript() {
     r.up(c, row);
     r.advance(100);
     let msgs = names(&r.down(c, row));
-    assert_eq!(msgs.last().map(String::as_str), Some("Ui(Open(Cards))"), "{msgs:?}");
+    assert_eq!(
+        msgs.last().map(String::as_str),
+        Some("Ui(Open(Cards))"),
+        "{msgs:?}"
+    );
 }
 
 #[test]
@@ -431,7 +518,11 @@ fn left_drag_on_a_card_never_moves_it() {
     }
     r.up(c.saturating_sub(30), row);
     assert_eq!(card_rects(&r), before, "the cards stayed put");
-    assert_eq!(first_card(&r), 0, "and a drag that starts on a card does not pan");
+    assert_eq!(
+        first_card(&r),
+        0,
+        "and a drag that starts on a card does not pan"
+    );
 }
 
 #[test]
@@ -445,19 +536,35 @@ fn wheel_over_the_cards_scrolls_not_zooms() {
     for _ in 0..10 {
         r.mouse(MouseEventKind::ScrollDown, c, row);
     }
-    let widths = |v: &[(usize, ratatui::layout::Rect)]| v.iter().map(|(_, r)| (r.width, r.height)).collect::<Vec<_>>();
-    assert_eq!(widths(&card_rects(&r)), widths(&before), "the boxes kept their size");
+    let widths = |v: &[(usize, ratatui::layout::Rect)]| {
+        v.iter()
+            .map(|(_, r)| (r.width, r.height))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        widths(&card_rects(&r)),
+        widths(&before),
+        "the boxes kept their size"
+    );
     assert_eq!(first_card(&r), 0, "a plain wheel is not a sideways pan");
 }
 
 #[test]
 fn shift_wheel_pans_eight_cards() {
     let mut r = eight((98, 46));
-    assert!(r.text().contains("w0") && !r.text().contains("w5"), "{}", r.text());
+    assert!(
+        r.text().contains("w0") && !r.text().contains("w5"),
+        "{}",
+        r.text()
+    );
     let (c, row) = r.centre(HitId::Card(0));
     r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
     assert_eq!(first_card(&r), 3);
-    assert!(r.text().contains("w5") && r.text().contains("◂ 3 more"), "{}", r.text());
+    assert!(
+        r.text().contains("w5") && r.text().contains("◂ 3 more"),
+        "{}",
+        r.text()
+    );
     r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
     assert_eq!(first_card(&r), 5, "the last window starts at card 5, not 6");
     assert!(r.text().contains("w7"), "{}", r.text());
@@ -467,10 +574,17 @@ fn shift_wheel_pans_eight_cards() {
 fn drag_on_empty_canvas_pans() {
     let mut r = eight((98, 46));
     let (c, row) = empty_canvas(&r);
-    assert_eq!(r.ui.drawn.hits.at(c, row).map(|h| h.id), Some(HitId::Pane(Pane::Cards)));
+    assert_eq!(
+        r.ui.drawn.hits.at(c, row).map(|h| h.id),
+        Some(HitId::Pane(Pane::Cards))
+    );
     r.down(c, row);
     r.drag(c - 20, row);
-    assert_eq!(first_card(&r), 1, "a card and its gap to the left is one card in");
+    assert_eq!(
+        first_card(&r),
+        1,
+        "a card and its gap to the left is one card in"
+    );
     r.drag(c - 45, row);
     assert_eq!(first_card(&r), 2);
     r.drag(c, row);
@@ -485,7 +599,11 @@ fn pan_is_clamped_at_both_ends() {
     for _ in 0..6 {
         r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
     }
-    assert_eq!(first_card(&r), 5, "no further than the window that ends on the last card");
+    assert_eq!(
+        first_card(&r),
+        5,
+        "no further than the window that ends on the last card"
+    );
     for _ in 0..6 {
         r.mouse_with(MouseEventKind::ScrollDown, c, row, KeyModifiers::SHIFT);
     }
@@ -509,9 +627,17 @@ fn selecting_the_eighth_card_by_key_brings_it_into_view() {
             r.press('l');
         }
         assert_eq!(r.int(SELECTED_CARD), Some(7), "{size:?}");
-        let card = r.ui.drawn.hits.find(HitId::Card(7)).unwrap_or_else(|| panic!("{size:?}: card 7 is off screen")).rect;
+        let card =
+            r.ui.drawn
+                .hits
+                .find(HitId::Card(7))
+                .unwrap_or_else(|| panic!("{size:?}: card 7 is off screen"))
+                .rect;
         let centre = r.ui.drawn.areas.centre;
-        assert!(card.x >= centre.x && card.right() <= centre.right(), "{size:?}: {card:?} in {centre:?}");
+        assert!(
+            card.x >= centre.x && card.right() <= centre.right(),
+            "{size:?}: {card:?} in {centre:?}"
+        );
         assert!(r.text().contains("w7"), "{size:?}");
     }
 }
@@ -525,7 +651,10 @@ fn resize_keeps_the_selected_card_visible() {
     }
     for size in [(120, 50), (98, 46), (110, 40)] {
         r.resize(size);
-        assert!(r.ui.drawn.hits.find(HitId::Card(7)).is_some(), "{size:?}: the selected card left the view");
+        assert!(
+            r.ui.drawn.hits.find(HitId::Card(7)).is_some(),
+            "{size:?}: the selected card left the view"
+        );
     }
 }
 
@@ -535,7 +664,10 @@ fn rail_handle_drag_still_resizes_the_rail_with_the_canvas_present() {
     let handle = r.ui.drawn.hits.find(HitId::RailHandle).unwrap().rect;
     let rail_x = r.ui.drawn.areas.rail.x;
     let row = handle.y + 5;
-    assert!(r.down(handle.x, row).is_empty(), "a press on a handle only arms the drag");
+    assert!(
+        r.down(handle.x, row).is_empty(),
+        "a press on a handle only arms the drag"
+    );
     assert_eq!(names(&r.drag(rail_x + 30, row)), ["Ui(SetRailWidth(30))"]);
     r.up(rail_x + 30, row);
     assert_eq!(r.ui.drawn.areas.rail.width, 30);
@@ -548,12 +680,21 @@ fn rail_handle_drag_still_resizes_the_rail_with_the_canvas_present() {
 fn replaying_eight_runs_gives_the_same_view_nodes_before_and_after_a_pan() {
     let mut r = eight((98, 46));
     let views = |r: &Rig| -> Vec<String> {
-        r.app.keys.iter().filter(|k| k.starts_with("view:")).map(|k| format!("{k}={:?}", r.app.graph.read_key(k))).collect()
+        r.app
+            .keys
+            .iter()
+            .filter(|k| k.starts_with("view:"))
+            .map(|k| format!("{k}={:?}", r.app.graph.read_key(k)))
+            .collect()
     };
     let before = views(&r);
     let (c, row) = r.centre(HitId::Card(0));
     r.mouse_with(MouseEventKind::ScrollUp, c, row, KeyModifiers::SHIFT);
     assert_eq!(first_card(&r), 3);
     let cards = |v: &[String]| v.iter().find(|s| s.starts_with("view:cards=")).cloned();
-    assert_eq!(cards(&views(&r)), cards(&before), "view:cards does not depend on the pan");
+    assert_eq!(
+        cards(&views(&r)),
+        cards(&before),
+        "view:cards does not depend on the pan"
+    );
 }

@@ -20,7 +20,9 @@ cat >"$t/bin/rustfmt" <<'FAKE'
 echo "$*" >>"$FAKE_RUSTFMT_LOG"
 case "$*" in "--check --edition 2021") ;; *) echo "unexpected rustfmt arguments: $*" >&2; exit 3 ;; esac
 # real rustfmt exits 0 on stdin even with --check and says so only in its output
-if grep -q '^UNFORMATTED' ; then echo "Diff in <stdin>:1:" ; fi
+in=$(cat)
+case $in in *RUSTFMTERR*) echo "error: 'rustfmt' is not installed for the toolchain 'fake'" >&2; exit 1 ;; esac
+case $in in *UNFORMATTED*) echo "Diff in <stdin>:1:" ;; esac
 exit 0
 FAKE
 chmod +x "$t/bin/rustfmt"
@@ -108,6 +110,29 @@ mkrepo "$r"; printf 'UNFORMATTED\n' >"$r/clean.rs"; git -C "$r" add clean.rs; : 
 expect "while merging the hook does nothing" hook "$r"
 mkrepo "$r"; printf 'UNFORMATTED\n' >"$r/clean.rs"; git -C "$r" add clean.rs
 expect "without rustfmt on PATH the hook passes" bash -c 'cd "$1" && ! PATH=/usr/bin:/bin command -v rustfmt && PATH=/usr/bin:/bin ./.githooks/pre-commit' _ "$r"
+
+# rustfmt itself failing (no diff, non-zero exit) must refuse, on either side, never read as "not clean"
+mkrepo "$r"; printf 'RUSTFMTERR\n' >"$r/clean.rs"; git -C "$r" commit -q --no-verify -am brokenhead; printf 'fn clean() {}\n' >"$r/clean.rs"; git -C "$r" add clean.rs
+refuse "rustfmt errors on the HEAD side: refused, not skipped" hook "$r"
+out=$(hook "$r" 2>&1); expect "rustfmt errors on the HEAD side: no skip line, and the message says rustfmt failed" bash -c '! printf "%s\n" "$1" | grep -q "format check skipped" && printf "%s\n" "$1" | grep -qi "rustfmt failed"' _ "$out"
+mkrepo "$r"; printf 'RUSTFMTERR\n' >"$r/clean.rs"; git -C "$r" add clean.rs
+refuse "rustfmt errors on the staged side: refused" hook "$r"
+out=$(hook "$r" 2>&1); expect "rustfmt errors on the staged side: the message says rustfmt failed" bash -c 'printf "%s\n" "$1" | grep -qi "rustfmt failed"' _ "$out"
+mkrepo "$r"; printf 'RUSTFMTERR\n' >"$r/new.rs"; git -C "$r" add new.rs
+refuse "rustfmt errors on a new file: refused" hook "$r"
+
+# newlines in staged paths
+nl=$(printf 'a\nb')
+mkrepo "$r"; printf 'x\n' >"$r/$nl.txt"; git -C "$r" add -A
+expect "a staged .txt with a newline in its name passes" hook "$r"
+mkrepo "$r"; printf 'fn n() {}\n' >"$r/$nl.rs"; git -C "$r" add -A
+expect "a new formatted .rs with a newline in its name passes" hook "$r"
+mkrepo "$r"; printf 'UNFORMATTED\n' >"$r/$nl.rs"; git -C "$r" add -A
+refuse "a new unformatted .rs with a newline in its name is refused" hook "$r"
+mkrepo "$r"; printf 'fn n() {}\n' >"$r/$nl.rs"; git -C "$r" add -A; git -C "$r" commit -q --no-verify -m nl; printf 'UNFORMATTED\n' >"$r/$nl.rs"; git -C "$r" add -A
+refuse "a .rs with a newline in its name, clean at HEAD, made unformatted: refused" hook "$r"
+mkrepo "$r"; printf 'UNFORMATTED\n' >"$r/$nl.rs"; git -C "$r" add -A; git -C "$r" commit -q --no-verify -m nl; printf 'UNFORMATTED\nmore\n' >"$r/$nl.rs"; git -C "$r" add -A
+expect "a .rs with a newline in its name, unformatted at HEAD, edited: passes" hook "$r"
 
 echo "$n tests, $fails failed"
 [ $fails = 0 ]

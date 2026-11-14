@@ -11,6 +11,7 @@ pub mod input;
 pub mod keys;
 pub mod layout;
 pub mod prompt;
+pub mod remote;
 pub mod screens;
 pub mod theme;
 pub mod transcript;

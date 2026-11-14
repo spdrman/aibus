@@ -153,12 +153,7 @@ fn the_screen_shows_the_badge_and_who_is_connected() {
         let log = r.ui.drawn.areas.log;
         let status = r.ui.drawn.areas.status;
         assert_crop(&r.frame(), log, &format!("remote_274_log_{name}"));
-        assert_crop(
-            &r.frame(),
-            status,
-            &format!("remote_274_status_{name}"),
-            true,
-        );
+        assert_crop(&r.frame(), status, &format!("remote_274_status_{name}"));
 
         deliver(
             &mut r,
@@ -286,14 +281,7 @@ fn send_takes_no_slash_line_and_command_takes_only_one() {
 #[test]
 fn cancel_names_a_run_the_way_a_target_does() {
     let mut r = rig();
-    worker(
-        &mut r.app,
-        2,
-        "search",
-        "maps the repo",
-        Some(0.5),
-        "running",
-    );
+    worker(&mut r.app, 2, "search", "maps the repo", 0.5, "running");
     r.settle();
     let msgs = remote::msgs(
         &Ask::Cancel {
@@ -337,14 +325,7 @@ fn cancel_names_a_run_the_way_a_target_does() {
 #[test]
 fn status_and_transcript_are_what_the_screen_holds() {
     let mut r = rig();
-    worker(
-        &mut r.app,
-        2,
-        "search",
-        "maps the repo",
-        Some(0.5),
-        "running",
-    );
+    worker(&mut r.app, 2, "search", "maps the repo", 0.5, "running");
     text_stream(&mut r.app, 1, "I'll run the tests first.");
     let id = ask(&mut r.app, 1, "lead", 1, "cargo test");
     r.settle();

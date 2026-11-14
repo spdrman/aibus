@@ -1,0 +1,1 @@
+  swarm [idle]   subagents [0/0]   opus [on call]   jev [ 0 forks]                                           mcp editor

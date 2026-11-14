@@ -274,7 +274,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
                     // The prompt on the command line is the lead's; a child has its own.
                     if let Msg::RunStarted { run, .. } = &msg {
                         if *run == handle.id {
-                            writer.prompt(*run, at, prompt)?;
+                            writer.prompt(*run, at, prompt, None)?;
                         }
                     }
                     pump.handle(msg, redactor, app)?;

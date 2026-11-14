@@ -12,6 +12,7 @@ XDG on every platform. On macOS aibus still uses the XDG layout under `$HOME` (`
 | caches (model tables, tokenizer, worktrees) | `~/.cache/aibus/` | `XDG_CACHE_HOME` |
 | project scope | `<project>/.aibus/` | |
 | continuity files | `<project>/thoughts/` | `continuity.dir` in config |
+| a live session's control socket, token and info (#274) | `$XDG_RUNTIME_DIR/aibus/sessions/`, else `$TMPDIR/aibus-<uid>/sessions/` | `XDG_RUNTIME_DIR` |
 
 Full tree:
 
@@ -85,6 +86,8 @@ Full tree:
 {"t":"…","type":"hook","event":"pre_tool_use","command":"./scripts/guard.sh","exit":0,"ms":12}
 {"t":"…","type":"end","status":"completed","turns":7}
 ```
+
+A user message that a client of `aibus mcp` sent into a live session (#274) carries `"via":"mcp","client":"<name>"`; one typed at the keyboard carries neither. A message to the running lead gets a user line too, tagged the same way.
 
 Tool result content over `limits.transcript_result_max_bytes` (64 KiB) is stored as the first 64 KiB plus `"truncated": true, "full": "runs/<id>/results/<call>.txt"`.
 

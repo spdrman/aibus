@@ -123,7 +123,7 @@ fn a_transcript_has_the_07_line_types_and_meta_json() {
     let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
     let run = *run;
     drive(&mut w, &mut a, msgs[..1].to_vec());
-    w.prompt(run, SystemTime::now(), "map this repo").unwrap();
+    w.prompt(run, SystemTime::now(), "map this repo", None).unwrap();
     drive(&mut w, &mut a, msgs[1..].to_vec());
     w.finish(&mut a).unwrap();
 
@@ -177,7 +177,7 @@ fn a_registered_secret_never_reaches_the_transcript_or_msgs() {
     let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
     let run = *run;
     drive(&mut w, &mut a, msgs[..1].to_vec());
-    w.prompt(run, SystemTime::now(), "use sk-test-SECRET-0123456789 please").unwrap();
+    w.prompt(run, SystemTime::now(), "use sk-test-SECRET-0123456789 please", None).unwrap();
     drive(
         &mut w,
         &mut a,
@@ -220,7 +220,7 @@ fn every_credential_kind_stays_out_of_the_transcript_msgs_and_every_file() {
     let Msg::RunStarted { run, .. } = &msgs[0] else { panic!() };
     let run = *run;
     drive(&mut w, &mut a, msgs[..1].to_vec());
-    w.prompt(run, SystemTime::now(), &planted).unwrap();
+    w.prompt(run, SystemTime::now(), &planted, None).unwrap();
     drive(
         &mut w,
         &mut a,

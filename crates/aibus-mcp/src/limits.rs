@@ -14,6 +14,12 @@ pub const WRITES_PER_MINUTE: u32 = 10;
 /// Run starts per minute, per process.
 pub const RUNS_PER_MINUTE: u32 = 5;
 
+/// The longest text a live-session tool sends (a prompt, a command line), like a written workflow.
+pub const SESSION_TEXT_MAX: usize = 64 * 1024;
+
+/// Calls that change a live session (send, command, cancel, permission) per minute, per process.
+pub const SESSION_CHANGES_PER_MINUTE: u32 = 10;
+
 /// A token bucket: `per_minute` tokens, refilled evenly. The caller says what time it is, so a
 /// test can move the clock without sleeping.
 pub struct RateLimiter {

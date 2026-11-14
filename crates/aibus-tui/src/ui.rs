@@ -196,6 +196,8 @@ pub struct Scene<'a> {
     pub copied: bool,
     /// What the last action on the agents or accounts screen said.
     pub note: &'a str,
+    /// The client of `aibus mcp` connected to this session, if any (#274).
+    pub remote: Option<&'a str>,
 }
 
 /// Dotted cells in `dim`, with a brighter `●` at step `at` of the path when there is one. Only
@@ -428,7 +430,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     if hint {
         widgets::hint_row(buf, hint_area, th, sc.prompt.notice.as_deref());
     }
-    let segments = widgets::status_bar(buf, a.status, v.status, th);
+    let segments = widgets::status_bar(buf, a.status, v.status, th, sc.remote);
     // Drawn over the centre column, so what is under it goes first.
     let open_marks = a.rail_open.map(|r| {
         Clear.render(r, buf);
@@ -663,6 +665,8 @@ pub struct Ui {
     pub selection: Option<Cells>,
     pub copied: bool,
     pub note: String,
+    /// The client of `aibus mcp` connected to this session, for the status bar (#274).
+    pub remote: Option<String>,
     /// Ticks reach the screen (a run is running, advice is typing). Off, the tick counter only
     /// matters through the prompt's cursor, so a frame is drawn when that blinks and no oftener.
     pub animating: bool,
@@ -686,6 +690,7 @@ struct State {
     selection: Option<Cells>,
     copied: bool,
     note: String,
+    remote: Option<String>,
 }
 
 impl Ui {
@@ -701,6 +706,7 @@ impl Ui {
             selection: None,
             copied: false,
             note: String::new(),
+            remote: None,
             animating: true,
             seen: 0,
             pending: false,
@@ -736,6 +742,7 @@ impl Ui {
             selection: self.selection,
             copied: self.copied,
             note: self.note.clone(),
+            remote: self.remote.clone(),
         };
         if !self.animating {
             state.chrome.tick = chrome.tick / crate::prompt::BLINK_TICKS;
@@ -756,6 +763,7 @@ impl Ui {
             selection: self.selection,
             copied: self.copied,
             note: &self.note,
+            remote: self.remote.as_deref(),
         };
         let mut drawn = None;
         term.draw(|f| drawn = Some(render(f.buffer_mut(), &scene)))?;

@@ -100,6 +100,8 @@ pub fn options(
             .map(|p| p.id.clone())
             .collect(),
         workflows: None,
+        remote: None,
+        remote_permission: false,
     };
     (opts, warnings)
 }
@@ -254,6 +256,38 @@ impl std::io::Write for Lines {
     }
 }
 
+/// The session's control socket for `aibus mcp --session` (#274), served on `rt`: what a client
+/// sends reaches the loop through `opts.remote`. A socket that cannot be opened is a line in the
+/// log, not a reason to refuse the session.
+#[cfg(unix)]
+fn control(ctx: &Ctx, rt: &tokio::runtime::Runtime, opts: &mut Options) -> Option<aibus_control::Endpoint> {
+    let id = ctx.session.as_ref()?.id.to_string();
+    let dir = aibus_control::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), &std::env::temp_dir());
+    let info = serde_json::json!({
+        "id": id,
+        "pid": std::process::id(),
+        "cwd": tilde(&ctx.cwd, std::env::var("HOME").ok().as_deref()),
+        "lead": ctx.global.agent.as_deref().unwrap_or("lead"),
+        "model": ctx.global.model,
+        "started": aibus_core::persist::time::rfc3339(std::time::SystemTime::now()),
+    });
+    let opened = aibus_control::Endpoint::open(&dir, &id, &info).and_then(|mut ep| {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        let _in = rt.enter();
+        ep.serve(tx, ctx.redactor.clone())?;
+        opts.remote = Some(rx);
+        Ok(ep)
+    });
+    opts.remote_permission = ctx.global.control_permission;
+    match opened {
+        Ok(ep) => Some(ep),
+        Err(e) => {
+            tracing::warn!("no control socket for this session: {e}");
+            None
+        }
+    }
+}
+
 /// Returns the process exit code.
 pub fn run(global: Global, prompt: Option<String>, redactor: Redactor) -> Result<u8, AibusError> {
     let args = RunArgs { prompt, ..RunArgs::default() };
@@ -396,6 +430,9 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     let launcher = ctx.launcher.clone();
     let mut login = None;
     opts.account = Some(Box::new(move |op, tx| account_op(op, tx, &g, &project_settings, &r, launcher.clone(), &mut login)));
+    // Held until the loop ends: dropping it closes the socket and removes its files.
+    #[cfg(unix)]
+    let _control = if ctx.global.no_control { None } else { control(ctx, rt, &mut opts) };
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();

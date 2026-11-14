@@ -35,6 +35,13 @@ use crate::Server;
 /// The tools that change the disk or spend money, the ones the epic puts a human in front of.
 const GATED: [&str; 3] = ["workflow_create", "workflow_update", "workflow_run"];
 
+/// The live-session tools that change the session (#274): the same question, with the session's
+/// short id to retype in place of a workflow name.
+const SESSION_GATED: [&str; 4] = ["session_send", "session_command", "session_cancel", "session_permission"];
+
+/// How much of a session id the form asks for.
+const SESSION_SHORT: usize = 8;
+
 /// How long a legacy client has to answer the form.
 const ASK_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -112,16 +119,22 @@ impl Server {
     /// keyword, so the exact text is enforced here on the answer; the length bounds only stop a
     /// form that cannot match.
     pub fn confirmation_form(&self, tool: &str, args: &Value) -> Option<ElicitRequestParams> {
-        if !self.confirm.config.elicit || !GATED.contains(&tool) {
+        if !self.confirm.config.elicit || !(GATED.contains(&tool) || SESSION_GATED.contains(&tool)) {
             return None;
         }
-        let name = args.get("name")?.as_str().filter(|n| !n.is_empty())?;
+        let name = self.confirmation_target(tool, args)?;
+        let name = name.as_str();
         let len = name.chars().count();
+        let session = SESSION_GATED.contains(&tool);
+        let (title, description) = match session {
+            true => ("Session", "Type the session id shown above again to confirm."),
+            false => ("Workflow name", "Type the name of the workflow again to confirm."),
+        };
         let mut properties = json!({
             "name": {
                 "type": "string",
-                "title": "Workflow name",
-                "description": "Type the name of the workflow again to confirm.",
+                "title": title,
+                "description": description,
                 "minLength": len,
                 "maxLength": len,
             },
@@ -140,16 +153,30 @@ impl Server {
         }
         let schema = json!({ "type": "object", "properties": properties, "required": required });
         let schema = ElicitationSchema::from_json_schema(schema.as_object()?.clone()).ok()?;
-        let what = match tool {
-            "workflow_run" => "start a run of",
-            "workflow_update" => "overwrite",
-            _ => "create",
+        let message = match tool {
+            "session_send" => format!("Confirm: send a prompt to the live aibus session {name}."),
+            "session_command" => format!("Confirm: run a command in the live aibus session {name}."),
+            "session_cancel" => format!("Confirm: cancel a run in the live aibus session {name}."),
+            "session_permission" => format!("Confirm: answer a permission prompt of the live aibus session {name}."),
+            "workflow_run" => format!("Confirm: start a run of the workflow {name}."),
+            "workflow_update" => format!("Confirm: overwrite the workflow {name}."),
+            _ => format!("Confirm: create the workflow {name}."),
         };
         Some(ElicitRequestParams::FormElicitationParams {
             meta: None,
-            message: self.redactor.redact(&format!("Confirm: {what} the workflow {name}.")).into_owned(),
+            message: self.redactor.redact(&message).into_owned(),
             requested_schema: schema,
         })
+    }
+
+    /// What the form asks the user to retype: the workflow's name, or the first eight characters
+    /// of the live session's id.
+    fn confirmation_target(&self, tool: &str, args: &Value) -> Option<String> {
+        if SESSION_GATED.contains(&tool) {
+            let id = self.session.as_ref()?.target().ok()?;
+            return Some(id.chars().take(SESSION_SHORT).collect());
+        }
+        args.get("name")?.as_str().filter(|n| !n.is_empty()).map(str::to_owned)
     }
 
     /// Whether the user's answer lets the call go on. `Err` is the sentence for the `isError`
@@ -162,8 +189,12 @@ impl Server {
         }
         let content = answer.content.as_ref().and_then(Value::as_object);
         let typed = content.and_then(|c| c.get("name")).and_then(Value::as_str);
-        if typed.is_none() || typed != args.get("name").and_then(Value::as_str) {
-            return Err("the name typed in the confirmation is not the workflow's name, so nothing was written or started".into());
+        let want = self.confirmation_target(tool, args);
+        if typed.is_none() || typed != want.as_deref() {
+            return Err(match SESSION_GATED.contains(&tool) {
+                true => "the id typed in the confirmation is not the session's, so nothing was sent".into(),
+                false => "the name typed in the confirmation is not the workflow's name, so nothing was written or started".into(),
+            });
         }
         if let Some(cap) = self.confirm.config.run_cap_usd.filter(|_| tool == "workflow_run") {
             let cost = content.and_then(|c| c.get("max_cost_usd")).and_then(Value::as_f64);
@@ -234,7 +265,8 @@ impl Server {
         addr: Option<SocketAddr>,
     ) -> Option<CallToolResponse> {
         let tool = request.name.as_ref();
-        if !self.confirm.config.elicit || !GATED.contains(&tool) || !self.tools().iter().any(|t| t.name == tool) {
+        let gated = GATED.contains(&tool) || SESSION_GATED.contains(&tool);
+        if !self.confirm.config.elicit || !gated || !self.tools().iter().any(|t| t.name == tool) {
             return None;
         }
         let declared = context.client_capabilities().and_then(|c| c.elicitation);
@@ -250,7 +282,7 @@ impl Server {
             match request.request_state.as_deref() {
                 None => {
                     let asked = self.confirmation_ask(tool, &args, client)?;
-                    self.audit.record(client, addr, "confirm/ask", Some(tool), None, &args, true, started.elapsed());
+                    self.audit.record(client, addr, "confirm/ask", Some(tool), None, None, &args, true, started.elapsed());
                     return Some(CallToolResponse::InputRequired(asked));
                 }
                 Some(state) => {
@@ -269,7 +301,7 @@ impl Server {
         match verdict {
             Ok(()) => None,
             Err(why) => {
-                self.audit.record(client, addr, "confirm/refused", Some(tool), None, &args, false, started.elapsed());
+                self.audit.record(client, addr, "confirm/refused", Some(tool), None, None, &args, false, started.elapsed());
                 Some(CallToolResponse::from(CallToolResult::error(vec![ContentBlock::text(why)])))
             }
         }

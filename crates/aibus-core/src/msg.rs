@@ -761,6 +761,29 @@ pub enum Msg {
     /// The persist effect finished a snapshot. Not in 02 section 3.1: something has to reset
     /// `model:persist:due`, and only a commit can do it.
     Persisted,
+    /// A message a client of `aibus mcp` sent through the session's control socket (#274). `msg`
+    /// is exactly what the keyboard would have produced for the same line, and the reducer runs
+    /// it through the same arm; `client` is the name the client gave (control characters taken
+    /// out), and everything `msg` writes to the log or a run's meta carries `via: "mcp"` with it.
+    Via {
+        client: String,
+        msg: Box<Msg>,
+    },
+    /// A client of the control socket connected, went away, or had a line refused. The session
+    /// log says so, tagged like `Via`.
+    Client {
+        name: String,
+        event: ClientEvent,
+    },
+}
+
+/// What `Msg::Client` reports.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ClientEvent {
+    Connected,
+    Disconnected,
+    /// A line the session would not take, and why (already free of anything secret).
+    Refused(String),
 }
 
 impl Msg {
@@ -799,6 +822,17 @@ impl Msg {
             Msg::RunSwitched { .. } => "RunSwitched",
             Msg::WorkflowsLoaded { .. } => "WorkflowsLoaded",
             Msg::Persisted => "Persisted",
+            // A client's message is the keyboard's message: the same intent in the commit log.
+            Msg::Via { msg, .. } => msg.name(),
+            Msg::Client { .. } => "Client",
+        }
+    }
+
+    /// The message a key would have sent: itself, or what a `Via` carries.
+    pub fn inner(&self) -> &Msg {
+        match self {
+            Msg::Via { msg, .. } => msg.inner(),
+            other => other,
         }
     }
 
@@ -937,6 +971,19 @@ impl Msg {
             Msg::ModelSwitched { id, to, .. } => map([("msg", name), ("id", n(*id)), ("ok", Value::Bool(to.is_ok()))]),
             Msg::WorkflowsLoaded { rows, shown, .. } => {
                 map([("msg", name), ("rows", n(rows.len())), ("shown", Value::Bool(shown.is_some()))])
+            }
+            Msg::Via { client, msg } => {
+                let inner = msg.summary();
+                let inner = crate::state::value::with(&inner, "via", s("mcp"));
+                crate::state::value::with(&inner, "client", s(client))
+            }
+            Msg::Client { name: client, event } => {
+                let what = match event {
+                    ClientEvent::Connected => "connected",
+                    ClientEvent::Disconnected => "disconnected",
+                    ClientEvent::Refused(_) => "refused",
+                };
+                map([("msg", name), ("event", s(what)), ("via", s("mcp")), ("client", s(client))])
             }
         }
     }

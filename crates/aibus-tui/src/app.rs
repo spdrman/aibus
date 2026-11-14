@@ -9,6 +9,7 @@ use aibus_core::persist::session::SessionWriter;
 use aibus_core::state::store::Store;
 use aibus_core::state::value::{as_str, get};
 use aibus_core::state::{run_key, ANIMATING, MODAL};
+use aibus_core::remote::Remote;
 use aibus_core::{
     AibusError, App, Command, KeyCode, KeyEvent, Msg, RunId, Ticker, UiIntent, MSG_CAPACITY,
 };
@@ -76,6 +77,11 @@ pub struct Options {
     pub oauth_providers: Vec<String>,
     /// Where `/workflow list`, `show` and `save` find the files. Without it they do nothing.
     pub workflows: Option<crate::workflows::WorkflowFiles>,
+    /// What a client of `aibus mcp` sends through the session's control socket (#274). Its
+    /// messages take the same `step` as the keyboard's.
+    pub remote: Option<mpsc::Receiver<Remote>>,
+    /// `--control-permission`: a client may answer a permission prompt. Off, only the keyboard can.
+    pub remote_permission: bool,
 }
 
 /// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
@@ -416,6 +422,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let supported = input::mouse_supported(opts.term.as_deref());
     let mut mode = MouseMode::Off;
     let mut runs = opts.msgs.take();
+    let mut remote = opts.remote.take();
     let mut watch = opts.watch.take();
     let mut mem = tokio::time::interval(Duration::from_secs(aibus_core::mem::SAMPLE_SECS));
 
@@ -456,6 +463,12 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                 None => std::future::pending().await,
             }
         };
+        let next_remote = async {
+            match remote.as_mut() {
+                Some(r) => r.recv().await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             Some(m) = rx.recv() => {
                 input.observe(&m);
@@ -467,6 +480,10 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                 }
                 step_written(&mut app, &mut writer, m)?;
             }
+            Some(r) = next_remote => {
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), &mut writer);
+                crate::remote::handle(&mut app, &mut ui, r, opts.remote_permission, &mut step)?;
+            }
             Some(first) = ev_rx.recv() => {
                 // Everything that piled up while the last frame drew is one batch.
                 let mut batch = vec![first];
@@ -474,18 +491,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                     let Ok(e) = ev_rx.try_recv() else { break };
                     batch.push(e);
                 }
-                let mut step = |app: &mut App<G>, m: Msg| -> Result<(), AibusError> {
-                    user(&m);
-                    // A workflow file command is answered with what the files say.
-                    let answer = match (&m, &workflows) {
-                        (Msg::Command(Command::WorkflowFile(op)), Some(files)) => {
-                            crate::workflows::apply(op, app, files, std::time::SystemTime::now())
-                        }
-                        _ => Vec::new(),
-                    };
-                    step_written(app, &mut writer, m)?;
-                    answer.into_iter().try_for_each(|a| step_written(app, &mut writer, a))
-                };
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), &mut writer);
                 done = terminal_events(
                     batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(), &mut step,
                 )?;
@@ -566,6 +572,27 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     Ok(())
 }
 
+/// Steps what a key or a client of the control socket sent: the run's mailbox hears it (through
+/// `user`), a workflow file command is answered with what the files say, and the writer records
+/// it. A client's message arrives in `Msg::Via` and is handled as the message it carries.
+fn step_user<G: Graph>(
+    app: &mut App<G>,
+    m: Msg,
+    user: &mut dyn FnMut(&Msg),
+    workflows: Option<&crate::workflows::WorkflowFiles>,
+    writer: &mut Option<SessionWriter>,
+) -> Result<(), AibusError> {
+    user(m.inner());
+    let answer = match (m.inner(), workflows) {
+        (Msg::Command(Command::WorkflowFile(op)), Some(files)) => {
+            crate::workflows::apply(op, app, files, std::time::SystemTime::now())
+        }
+        _ => Vec::new(),
+    };
+    step_written(app, writer, m)?;
+    answer.into_iter().try_for_each(|a| step_written(app, writer, a))
+}
+
 /// Steps one message from outside the loop, and has the writer record it and what it did.
 fn step_written<G: Graph>(app: &mut App<G>, writer: &mut Option<SessionWriter>, m: Msg) -> Result<(), AibusError> {
     let Some(w) = writer.as_mut() else { return app.step(m) };
@@ -580,8 +607,10 @@ fn step_written<G: Graph>(app: &mut App<G>, writer: &mut Option<SessionWriter>, 
             Some(v) => as_str(&v).map(str::to_owned),
             None => None,
         };
+        // A run a client of `aibus mcp` started says so in its transcript too.
+        let client = app.graph.read_key(&run_key(run, "meta")).and_then(|meta| get(meta, "client")).and_then(as_str).map(str::to_owned);
         if let Some(t) = text.filter(|t| !t.is_empty()) {
-            w.prompt(*run, at, &t)?;
+            w.prompt(*run, at, &t, client.as_deref())?;
         }
     } else {
         app.step(m)?;

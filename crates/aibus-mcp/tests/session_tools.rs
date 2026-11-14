@@ -123,10 +123,7 @@ fn what_the_session_answers_is_redacted() {
         let got = s.call(None, tool, args(a), Instant::now()).unwrap();
         let text = serde_json::to_string(&got).unwrap();
         assert!(!text.contains(KEY), "{tool}: {text}");
-        assert!(
-            text.contains("[redacted]") || text.contains("REDACTED"),
-            "{tool}: {text}"
-        );
+        assert!(text.contains("[redacted"), "{tool}: {text}");
     }
     let listed = s
         .call(None, "session_list", args(json!({})), Instant::now())
@@ -167,7 +164,7 @@ fn each_tool_sends_the_request_its_arguments_name() {
         (
             "session_permission",
             json!({"id": id, "decision": "deny"}),
-            json!({"op": "permission", "id": id, "decision": "deny"}),
+            json!({"op": "permission", "prompt": id, "decision": "deny"}),
         ),
     ];
     for (tool, a, _) in &calls {
@@ -319,10 +316,8 @@ fn the_confirmation_asks_to_retype_the_session_short_id() {
         s.confirmation_form("session_status", &json!({})).is_none(),
         "reading asks nothing"
     );
-    let answer = |typed: &str| ElicitResult {
-        action: ElicitationAction::Accept,
-        content: Some(json!({"name": typed})),
-        meta: None,
+    let answer = |typed: &str| {
+        ElicitResult::new(ElicitationAction::Accept).with_content(json!({"name": typed}))
     };
     assert!(s
         .confirmation_check("session_send", &a, &answer(&SESSION[..8]))

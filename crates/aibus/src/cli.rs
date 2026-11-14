@@ -111,6 +111,15 @@ pub struct Global {
     /// Write a Chrome trace of commits and effects
     #[arg(long, global = true, value_name = "FILE")]
     pub trace: Option<PathBuf>,
+    /// Open no control socket for `aibus mcp --session` in this terminal session
+    #[arg(long, global = true)]
+    pub no_control: bool,
+    /// Let a client of `aibus mcp --allow permission` answer this session's permission prompts
+    ///
+    /// Off by default: a prompt is answered at the keyboard. An answer from a client is tagged
+    /// and logged like everything else it sends.
+    #[arg(long, global = true)]
+    pub control_permission: bool,
 }
 
 impl Global {
@@ -188,17 +197,27 @@ pub enum Command {
 /// starts and nothing the client sends can raise it.
 #[derive(Args, Debug)]
 pub struct McpArgs {
-    /// Add to what the server may do (repeatable): write, gates (needs write) or run
+    /// Add to what the server may do (repeatable): write, gates (needs write), run, or a live
+    /// session tool: session-list, session-status, session-send, session-command,
+    /// session-cancel, session-transcript, permission
     ///
     /// Same name as the global `--allow`, which this shadows for `mcp`; the values are text in
-    /// both so clap can share the argument.
+    /// both so clap can share the argument. Each session value lists one tool that acts on a
+    /// terminal session that is already open (docs/MCP.md, Live sessions).
     #[arg(
         long,
         value_name = "CAP",
-        value_parser = ["write", "gates", "run"],
+        value_parser = [
+            "write", "gates", "run", "session-list", "session-status", "session-send",
+            "session-command", "session-cancel", "session-transcript", "permission",
+        ],
         action = ArgAction::Append
     )]
     pub allow: Vec<String>,
+    /// The live terminal session the session tools act on (its id); without it, the only one
+    /// that is live, and a refusal that lists them when there are several
+    #[arg(long, value_name = "ID")]
+    pub session: Option<String>,
     /// Pre-approve a tool for runs started through MCP (repeatable)
     #[arg(long, value_name = "PATTERN", action = ArgAction::Append)]
     pub allow_tool: Vec<String>,
@@ -534,6 +553,8 @@ mod tests {
         "ascii",
         "no-mouse",
         "trace",
+        "no-control",
+        "control-permission",
     ];
 
     fn leaves(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {

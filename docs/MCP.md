@@ -36,6 +36,14 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 | `--max-runs N`, `--max-concurrent-runs N`, `--max-cost-usd X` | the run caps below (10, 1 and `limits.max_cost_usd`); need `--allow run` | yes |
 | `--no-provenance` | leave the `# written through aibus mcp` line out of written files | yes |
 | `--confirm elicit\|never` | whether a write or a run asks you first when the client can be asked; `elicit` is the default, see Confirmation | yes |
+| `--allow session-list` | `session_list`: the live terminal sessions you can reach | yes |
+| `--allow session-status` | `session_status`: lead, model, cards and open permission prompts of a live session | yes |
+| `--allow session-send` | `session_send`: a prompt to the lead of a live session, as if typed | yes |
+| `--allow session-command` | `session_command`: a slash command line in a live session, through the same parser as typing | yes |
+| `--allow session-cancel` | `session_cancel`: cancel a run of a live session | yes |
+| `--allow session-transcript` | `session_transcript`: a run's transcript and the session log, redacted | yes |
+| `--allow permission` | `session_permission`: answer a permission prompt, only in a session started with `--control-permission` | yes |
+| `--session <id>` | the live session the session tools act on; without it, the only live one (see Live sessions) | yes |
 | `--http <ip:port>` | the same server over Streamable HTTP on loopback, see below | yes |
 | `--origin <value>` | one more `Origin` the HTTP server accepts (repeatable, needs `--http`) | yes |
 
@@ -102,12 +110,42 @@ The caps are process flags, so a model can neither see nor change them:
 
 When stdin closes (or the HTTP server stops) every live run gets SIGINT, 10 seconds to write its snapshot, and then a kill. Handles live as long as the process; a handle from an earlier process is an unknown one.
 
+## Live sessions (`--allow session-*`)
+
+The session tools act on a terminal session that is already open (`aibus` on a terminal), not on a run the server starts. Whatever a client sends goes into my session as if I had typed it, shows on my screen at once and is tagged as sent through MCP. Each tool has its own `--allow` value (table above) and is not listed without it; calling one that is off is `-32602`.
+
+| Tool | What it does |
+|---|---|
+| `session_list` | `{sessions:[{id, cwd, lead, model, started}]}`, oldest first |
+| `session_status` | `{lead, cards:[{run, agent, model, status, via?, client?}], permissions:[{id, run, agent, tool, summary}], client}` |
+| `session_send {text}` | the text as a prompt on my prompt line: a message to the running lead, or the lead's first prompt. A slash line is refused (use `session_command`) |
+| `session_command {line}` | a slash line through the parser the prompt line uses, so the same refusals apply: `/login <provider> <key>` is refused with the key `[redacted]`, and `/login <provider>` is refused too because it opens a masked key entry, which is for the keyboard only |
+| `session_cancel {run}` | `/cancel @<run>` as typed: an id, a prefix of one, an agent or `lead`. On the lead my screen asks first, and only the keyboard can answer that |
+| `session_transcript {run?}` | the run's transcript (the lead's without `run`), its last 32 KiB, wrapped as data with aibus's markers escaped, and the last 200 session log rows |
+| `session_permission {id, decision}` | answers the permission prompt my screen shows (`allow`, `allow_session`, `deny`). Only with `--allow permission` here **and** a session started with `aibus --control-permission`; without the second, the session refuses and the prompt stays mine |
+
+**Which session.** `--session <id>` names one. Without it the server uses the only live session, and when there are several it refuses each call and lists them (id, directory, start time), so a client never lands in the wrong one by accident. No session is looked up or connected to until the first session call.
+
+**The socket.** A terminal session opens a Unix socket at `$XDG_RUNTIME_DIR/aibus/sessions/<session>.sock` (where there is no `XDG_RUNTIME_DIR`, as on macOS, `$TMPDIR/aibus-<uid>/sessions/`). The directory is 0700 and has to be mine, the socket and the two files next to it are 0600: `<session>.token` (32 random bytes as hex) and `<session>.json` (id, pid, directory, lead, model, start time). All three go when the session ends, and a session that died without cleaning up leaves a socket nobody answers on, which the next session to start removes, along with its two files. There is no TCP and no remote option. `aibus --no-control` opens no socket at all.
+
+**Who gets in.** In this order: the peer has to be my own user (the kernel's peer credentials on the connection), its first line has to be `{"hello":1, "token":..., "client":...}` with the token from the file (compared in constant time, within 5 seconds), and no other client may hold the session: one controlling client at a time, and a second one is refused until the first goes. The screen says when a client connects and when it goes (`mcp <client> connected`), and the status bar shows `mcp <client>` while it is there.
+
+**Framing and limits.** One JSON object per line each way, like the headless control channel: `{"id":n, "op":"status"|"send"|"command"|"cancel"|"transcript"|"permission", ...}` and `{"id":n, "ok":true, "result":...}` or `{"id":n, "ok":false, "error":"..."}`. A line is at most 400 KiB (a 64 KiB text even with every character escaped, plus the envelope); a longer one is refused and the connection closed. A client may send 60 lines a minute, and 10 of them may change the session. On the server, a text or a line over 64 KiB is an `isError` that sends nothing, and `session_send`, `session_command`, `session_cancel` and `session_permission` share a limit of 10 a minute per process.
+
+**The tag.** Everything a client sends reaches the session as `Msg::Via { client, msg }`, where `msg` is exactly what the keyboard would have produced for the same line, and it takes the same path a key does. Its session log rows carry `via: "mcp"` and the client's name and show an `mcp` badge in the actor column; a run it starts carries the same two fields in its meta; the transcript line of its prompt or message has them too, and `aibus session export --format md` heads that message `user, via mcp (<client>)`. The commit log has them in `model:last_msg`. The server's audit line for a session tool adds `via: "mcp"` and `session`.
+
+**Redaction.** The session redacts every answer with its own redactor (the patterns and every secret the session has registered) before it writes it to the socket, and the server redacts it again before it leaves, like `run_status`. The transcript is wrapped as data. What this leaves: text that no pattern recognises and that the session never registered as a secret (a password typed into a prompt, say) is shown as it is, as it would be on the screen; and the transcript is the last 32 KiB of the run's text, so a long secret cut at that edge loses its start, which can leave the rest unrecognisable.
+
+Answering a permission prompt from a client is not the relay that E12 in `DECISIONS.md` rules out for the runs the server starts: those stay on `dont_ask`. Here it is my own session, it takes an opt-in at both ends (`--allow permission` on the server, `--control-permission` on the session), a client can only answer the prompt my screen shows, and the answer is tagged like everything else.
+
+**Untrusted input.** A client is not me. Its text is a user message from a client, tagged as such; a tool result that quotes it is data like any other; and with `--confirm elicit` the four tools that change the session ask first (see Confirmation).
+
 ## Confirmation
 
-`workflow_create`, `workflow_update` and `workflow_run` can stop and ask you before they do anything. This is a second check on top of the flags, not a replacement: a tool that is off is still not listed, whatever you answer.
+`workflow_create`, `workflow_update` and `workflow_run` can stop and ask you before they do anything, and so can the four session tools that change a live session. This is a second check on top of the flags, not a replacement: a tool that is off is still not listed, whatever you answer.
 
 * **When.** Only when the tool is listed (its flag is on) and the client declared `elicitation` in form mode when it connected. A client that did not declare it is never asked, and the call goes on as it always did, because the flags are then the only gate. A bare `elicitation: {}` counts as form mode.
-* **What is asked.** A form with one field, the workflow name, which you have to retype exactly. For `workflow_run` under a cost cap it also holds `max_cost_usd`, with the cap as its maximum, so the cost line of a run is in front of you before it starts. Only `accept` with the exact name goes on. `decline`, `cancel`, a different name or a cost that is missing or over the cap ends the call as an `isError` and nothing is written or started. The form never asks for a credential, and the answer is compared on the server.
+* **What is asked.** A form with one field, the workflow name, which you have to retype exactly. For `session_send`, `session_command`, `session_cancel` and `session_permission` it is the first 8 characters of the live session's id, which the form shows. For `workflow_run` under a cost cap it also holds `max_cost_usd`, with the cap as its maximum, so the cost line of a run is in front of you before it starts. Only `accept` with the exact name goes on. `decline`, `cancel`, a different name or a cost that is missing or over the cap ends the call as an `isError` and nothing is written or started. The form never asks for a credential, and the answer is compared on the server.
 * **How, per protocol.** A `2025-11-25` client gets an `elicitation/create` request in the middle of the call. A `2026-07-28` client gets an `input_required` result (multi round-trip requests, MRTR) carrying a `requestState`, and retries the same call with its answer. The `requestState` is sealed with an HMAC under a key made when the process starts and never stored. It is bound to the tool, the exact arguments and the client, it is good once for 10 minutes, and a state that was edited, expired, replayed or taken from another client is one `isError`.
 * **Turning it off.** `aibus mcp --confirm never` skips the form, for scripted use where nobody is there to answer. The flags stay the only gate. The default is `--confirm elicit`.
 
@@ -146,7 +184,7 @@ There are no subscriptions. A client that wants to follow a run polls `run_statu
 
 * At most 60 tool calls a minute per process, and within that 10 writes and 5 run starts. Past that the call is an `isError` result saying how many seconds to wait. A call that is refused does not spend a call.
 * Arguments are capped at 256 KiB. Resource reads and prompt gets are audited but do not use the tool-call budget.
-* Every call leaves one line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (one file per process, mode 0600): `{t, client:{name, version}, addr, method, tool, run, args, ok, ms}` (`run` is the run handle on the run tools). The first line is `server/start` with the flags. Arguments are redacted and cut at 4 KiB. A resource read has `method: "resources/read"` and the uri as its argument, a prompt `method: "prompts/get"`.
+* Every call leaves one line in `~/.local/state/aibus/logs/mcp/<ulid>.jsonl` (one file per process, mode 0600): `{t, client:{name, version}, addr, method, tool, run, args, ok, ms}` (`run` is the run handle on the run tools; a session tool adds `via: "mcp"` and `session`). The first line is `server/start` with the flags. Arguments are redacted and cut at 4 KiB. A resource read has `method: "resources/read"` and the uri as its argument, a prompt `method: "prompts/get"`.
 * Nothing that came out of a file, an agent definition or an argument reaches a client, the audit file or stderr without going through the redactor. stdout carries JSON-RPC and nothing else.
 
 ## What is not in this release

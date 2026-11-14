@@ -124,6 +124,9 @@ pub struct SessionWriter {
     runs: HashMap<RunId, Transcript>,
     store_thinking: bool,
     result_max: usize,
+    /// The lead while it runs: a prompt typed (or sent by a client) then is a message to it, and
+    /// its transcript records it.
+    lead: Option<RunId>,
 }
 
 impl SessionWriter {
@@ -145,13 +148,15 @@ impl SessionWriter {
             runs: HashMap::new(),
             store_thinking: persist.store_thinking,
             result_max,
+            lead: None,
         })
     }
 
-    /// The message a run was started with (the lead's prompt, or a worker's task).
-    pub fn prompt(&mut self, run: RunId, at: SystemTime, text: &str) -> io::Result<()> {
+    /// The message a run was started with (the lead's prompt, or a worker's task). `via` is the
+    /// client that sent it, from the run's meta (#274).
+    pub fn prompt(&mut self, run: RunId, at: SystemTime, text: &str, via: Option<&str>) -> io::Result<()> {
         match self.runs.get_mut(&run) {
-            Some(t) => t.user(at, text),
+            Some(t) => t.user(at, text, via),
             None => Ok(()),
         }
     }
@@ -168,6 +173,24 @@ impl SessionWriter {
 
     /// Records `msg` in `msgs.jsonl.zst` (redacted) and in its run's transcript.
     pub fn msg(&mut self, msg: &Msg, at: SystemTime) -> io::Result<()> {
+        // A prompt while the lead runs is mailed to it, from the keyboard or from a client: its
+        // transcript gets the line, with the client's tag when there is one. A slash line and an
+        // `@agent-` mention are commands, not messages.
+        if let Msg::SubmitPrompt { text } = msg.inner() {
+            let via = match msg {
+                Msg::Via { client, .. } => Some(client.as_str()),
+                _ => None,
+            };
+            let message = !text.starts_with('/') && crate::orchestrator::parse_mention(text).is_none();
+            if let (true, Some(t)) = (message, self.lead.and_then(|l| self.runs.get_mut(&l))) {
+                t.user(at, text, via)?;
+            }
+        }
+        match msg {
+            Msg::RunStarted { run, role: crate::Role::Lead, .. } => self.lead = Some(*run),
+            Msg::RunFinished { run, .. } | Msg::RunFailed { run, .. } if self.lead == Some(*run) => self.lead = None,
+            _ => {}
+        }
         if let Some(mut line) = msg_to_json(msg) {
             self.redactor.redact_json(&mut line);
             self.msgs.append(&line.to_string(), Instant::now())?;

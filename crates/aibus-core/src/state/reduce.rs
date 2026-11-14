@@ -16,7 +16,7 @@ use super::*;
 use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{AgentName, PermissionId, RunId};
-use crate::msg::{AccountView, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
+use crate::msg::{AccountView, ClientEvent, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
 use crate::orchestrator::parse_mention;
 use crate::run::{Progress, RunStatus, Usage};
 use crate::workflow::{self, WorkflowRow};
@@ -77,6 +77,9 @@ struct R<'a> {
     store: &'a Store,
     env: Env,
     out: IndexMap<NodeKey, Value>,
+    /// The client a `Msg::Via` or `Msg::Client` came from: every log row and every run this
+    /// message writes carries `via: "mcp"` and its name.
+    via: Option<String>,
 }
 
 impl R<'_> {
@@ -118,6 +121,10 @@ impl R<'_> {
             ("text", s(text)),
         ];
         fields.extend(extra);
+        if let Some(client) = &self.via {
+            fields.push(("via", s("mcp")));
+            fields.push(("client", s(client)));
+        }
         let h = self.store.log_push(map_of(fields));
         self.out.insert(LOG.into(), Value::Handle(h));
         // A log that is not following holds its place while rows arrive below it.
@@ -254,6 +261,11 @@ impl R<'_> {
             with(&meta, "fork", Value::Bool(true))
         } else {
             meta
+        };
+        // A run a client of the control socket started says so on its card and in its meta.
+        let meta = match &self.via {
+            Some(client) => with(&with(&meta, "via", s("mcp")), "client", s(client)),
+            None => meta,
         };
         // A parent that already ended can no longer take the result: the run is never started.
         let orphan = q.parent.is_some_and(|p| {
@@ -1042,6 +1054,7 @@ pub fn reduce(g: &dyn Graph, store: &Store, msg: &Msg, env: Env) -> Result<Write
         store,
         env,
         out: IndexMap::new(),
+        via: None,
     };
     arm(&mut r, msg)?;
 
@@ -1096,6 +1109,27 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             }
         }
         Msg::Command(c) => r.command(c),
+        Msg::Via { client, msg } => {
+            r.via = Some(client.clone());
+            let what = match msg.inner() {
+                Msg::SubmitPrompt { .. } => "sent a prompt".to_owned(),
+                Msg::Command(Command::Permission { .. }) => "answered a permission prompt".to_owned(),
+                Msg::Command(Command::Cancel { .. }) => "cancelled a run".to_owned(),
+                Msg::Command(c) => format!("ran {}", crate::msg::command_name(c)),
+                other => format!("sent {}", other.name()),
+            };
+            r.log_row("info", "mcp", None, &format!("{client} {what}"), Vec::new());
+            arm(r, msg)?;
+        }
+        Msg::Client { name, event } => {
+            r.via = Some(name.clone());
+            let (level, text) = match event {
+                ClientEvent::Connected => ("info", format!("{name} connected")),
+                ClientEvent::Disconnected => ("info", format!("{name} disconnected")),
+                ClientEvent::Refused(why) => ("warn", format!("{name}: refused {why}")),
+            };
+            r.log_row(level, "mcp", None, &text, Vec::new());
+        }
         Msg::RunStarted {
             run,
             agent,
@@ -1132,6 +1166,11 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
             let meta = match get(&old, "fork") {
                 Some(f) => with(&meta, "fork", f.clone()),
                 None => meta,
+            };
+            // A run a client started keeps saying so.
+            let meta = match (get(&old, "via"), get(&old, "client")) {
+                (Some(via), Some(client)) => with(&with(&meta, "via", via.clone()), "client", client.clone()),
+                _ => meta,
             };
             if had {
                 r.put(run_key(&id, "meta"), meta);

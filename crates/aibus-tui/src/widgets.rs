@@ -517,9 +517,13 @@ pub fn session_log(
     for (y, line) in lines[first..end].iter().enumerate() {
         let y = y as u16;
         put(buf, inner, 0, y, text(line, "time"), Style::new().fg(th.dim_text));
-        let colour = role_colour(text(line, "actor_colour"), th);
-        let actor = clip(text(line, "actor"), 10);
-        put(buf, inner, 10, y, &actor, Style::new().fg(colour));
+        // What a client of `aibus mcp` caused wears the `mcp` badge in place of the actor (#274).
+        if text(line, "via").is_empty() {
+            let colour = role_colour(text(line, "actor_colour"), th);
+            put(buf, inner, 10, y, &clip(text(line, "actor"), 10), Style::new().fg(colour));
+        } else {
+            put(buf, inner, 10, y, "mcp", badge(th));
+        }
         let p = real(line, "p");
         let verdict = text(line, "verdict");
         let (cols, split) = match (p, verdict) {
@@ -651,8 +655,14 @@ pub fn popup(buf: &mut Buffer, full: Rect, above: Rect, items: &[String], sel: u
     (rect, rows)
 }
 
-/// The status bar. Returns where each clickable segment went.
-pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<(Segment, Rect)> {
+/// The `mcp` badge: what a client of `aibus mcp` did, and who is connected (#274).
+fn badge(th: &Theme) -> Style {
+    Style::new().fg(th.warn).add_modifier(Modifier::BOLD)
+}
+
+/// The status bar. Returns where each clickable segment went. `remote` is the client of the
+/// control socket, while one is connected.
+pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, remote: Option<&str>) -> Vec<(Segment, Rect)> {
     fill(buf, area, th.bg);
     let sw = get(v, "swarm").unwrap_or(&Value::Null);
     let sub = get(v, "subagents").unwrap_or(&Value::Null);
@@ -699,6 +709,9 @@ pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme) -> Vec<(S
         *right = right.saturating_sub(2);
         Some(rect)
     };
+    if let Some(client) = remote {
+        place(buf, &mut right, &format!("mcp {client}"), badge(th));
+    }
     if let Some(mem) = get(v, "mem").and_then(as_str) {
         place(buf, &mut right, mem, Style::new().fg(th.dim_text));
     }

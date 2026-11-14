@@ -16,7 +16,7 @@ aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
 aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
 aibus config path | show | init | validate | edit
-aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
+aibus mcp [--allow write|gates|run|session-*|permission]... [--session <id>] [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
 aibus doctor
 aibus completions <bash|zsh|fish|powershell>
 aibus version
@@ -42,6 +42,8 @@ Global options (before or after the subcommand):
 | `--theme <name>`, `--ascii`, `--no-mouse` | UI |
 | `-v`, `-vv`, `-q` | log verbosity to the log file (never to the terminal in TUI mode) |
 | `--trace <file>` | write a Chrome trace of commits and effects (08 section 6) |
+| `--no-control` | the terminal session opens no control socket for `aibus mcp --session` (section 8) |
+| `--control-permission` | a client of `aibus mcp --allow permission` may answer this session's permission prompts; off, only the keyboard can |
 
 ## 2. `aibus run`
 
@@ -150,9 +152,13 @@ An MCP server for other programs to read workflows through. It starts read-only,
 | Flag | Meaning |
 |---|---|
 | `--allow write\|gates\|run` | add to what the server may do (repeatable); `gates` needs `write`, otherwise exit 2 |
+| `--allow session-list\|session-status\|session-send\|session-command\|session-cancel\|session-transcript\|permission` | one live-session tool each, acting on a terminal session that is already open (#274) |
+| `--session <id>` | the live session those tools act on; without it the only live one, and a refusal listing them when there are several; needs a session tool, otherwise exit 2 |
 | `--allow-tool <pattern>` | pre-approve a tool for runs (repeatable) |
 | `--http <ip:port>` | Streamable HTTP on a loopback address instead of stdio; any other address is exit 2 |
 | `--origin <origin>` | accept this `Origin` as well as the loopback ones (needs `--http`) |
 | `--max-runs`, `--max-concurrent-runs`, `--max-cost-usd` | parse, and exit 2 with "not available yet" |
 
 The tools, resources and prompts are in `docs/MCP.md`. Logging goes to stderr, and each call leaves a redacted line under `<state>/logs/mcp/`.
+
+A terminal session (`aibus` with no subcommand) opens a control socket for the session tools unless `--no-control` is given: `$XDG_RUNTIME_DIR/aibus/sessions/<session>.sock`, or `$TMPDIR/aibus-<uid>/sessions/` without `XDG_RUNTIME_DIR`, with a token file and an info file next to it, all removed on exit. One JSON object per line each way, like the headless control channel in section 2. What a client sends is stepped as if typed and tagged `via: "mcp"` (05 section 2.7, 07 section 2.2). docs/MCP.md, Live sessions, has the checks and the limits.

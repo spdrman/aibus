@@ -1,0 +1,9 @@
+00 00..02 fg=#c0caf5 bg=#1a1b26
+00 02..14 fg=#7aa2f7 bg=#1a1b26
+00 14..35 fg=#c0caf5 bg=#1a1b26
+00 35..49 fg=#bb9af7 bg=#1a1b26
+00 49..52 fg=#c0caf5 bg=#1a1b26
+00 52..66 fg=#9ece6a bg=#1a1b26
+00 66..109 fg=#c0caf5 bg=#1a1b26
+00 109..119 fg=#e0af68 bg=#1a1b26 BOLD
+00 119..120 fg=#c0caf5 bg=#1a1b26

@@ -111,12 +111,15 @@ impl Transcript {
         writeln!(self.file, "{v}")
     }
 
-    /// The user's message: the prompt that started the run, or one mailed to it.
-    pub fn user(&mut self, at: SystemTime, text: &str) -> io::Result<()> {
-        self.line(
-            at,
-            json!({"type": "message", "role": "user", "blocks": [{"type": "text", "text": text}]}),
-        )
+    /// The user's message: the prompt that started the run, or one mailed to it. `via` is the
+    /// client of `aibus mcp` that sent it (#274); a typed one has none.
+    pub fn user(&mut self, at: SystemTime, text: &str, via: Option<&str>) -> io::Result<()> {
+        let mut line = json!({"type": "message", "role": "user", "blocks": [{"type": "text", "text": text}]});
+        if let Some(client) = via {
+            line["via"] = "mcp".into();
+            line["client"] = client.into();
+        }
+        self.line(at, line)
     }
 
     fn assistant(&mut self, at: SystemTime) -> io::Result<()> {

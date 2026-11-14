@@ -23,7 +23,7 @@ const KEY: &str = "sk-test-CONTROL-0123456789abcdef";
 type Seen = Arc<Mutex<Vec<String>>>;
 
 struct Live {
-    rt: tokio::runtime::Runtime,
+    _rt: tokio::runtime::Runtime,
     dir: PathBuf,
     _home: aibus_testkit::Xdg,
     seen: Seen,
@@ -50,25 +50,23 @@ fn info(id: &str) -> Value {
 
 /// The stand-in loop: every call is answered with `{"ask": <debug>, "key": KEY}`, so a test can
 /// see that the answer is redacted on the way out.
-fn stand_in(mut rx: mpsc::Receiver<Remote>, seen: Seen) -> impl std::future::Future<Output = ()> {
-    async move {
-        while let Some(event) = rx.recv().await {
-            let line = match event {
-                Remote::Connected { client } => format!("connected {client}"),
-                Remote::Disconnected { client } => format!("disconnected {client}"),
-                Remote::Call { client, ask, reply } => {
-                    let said = format!("{ask:?}");
-                    let _ = reply.send(match &ask {
-                        Ask::Command { line } if line.starts_with("/login") => {
-                            Err(format!("refused {KEY}"))
-                        }
-                        _ => Ok(json!({"ask": said, "key": KEY})),
-                    });
-                    format!("call {client} {said}")
-                }
-            };
-            seen.lock().unwrap().push(line);
-        }
+async fn stand_in(mut rx: mpsc::Receiver<Remote>, seen: Seen) {
+    while let Some(event) = rx.recv().await {
+        let line = match event {
+            Remote::Connected { client } => format!("connected {client}"),
+            Remote::Disconnected { client } => format!("disconnected {client}"),
+            Remote::Call { client, ask, reply } => {
+                let said = format!("{ask:?}");
+                let _ = reply.send(match &ask {
+                    Ask::Command { line } if line.starts_with("/login") => {
+                        Err(format!("refused {KEY}"))
+                    }
+                    _ => Ok(json!({"ask": said, "key": KEY})),
+                });
+                format!("call {client} {said}")
+            }
+        };
+        seen.lock().unwrap().push(line);
     }
 }
 
@@ -89,7 +87,7 @@ fn live_with(id: &str, tweak: impl FnOnce(&mut Endpoint)) -> (Live, Endpoint) {
     }
     (
         Live {
-            rt,
+            _rt: rt,
             dir,
             _home: home,
             seen,
@@ -362,7 +360,7 @@ fn the_link_round_trips_and_every_answer_is_redacted() {
         json!({"op": "status"}),
         json!({"op": "cancel", "run": "search"}),
         json!({"op": "transcript"}),
-        json!({"op": "permission", "id": "x", "decision": "deny"}),
+        json!({"op": "permission", "prompt": "x", "decision": "deny"}),
     ] {
         link.call("editor", request.clone())
             .unwrap_or_else(|e| panic!("{request}: {e}"));

@@ -21,6 +21,7 @@ pub mod orchestrator;
 pub mod permission;
 pub mod persist;
 pub mod redact;
+pub mod remote;
 pub mod replay;
 pub mod router;
 pub mod run;

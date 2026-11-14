@@ -10,6 +10,7 @@ pub mod prompts;
 mod read;
 pub mod resources;
 mod run;
+mod session;
 mod write;
 
 use std::net::SocketAddr;
@@ -33,8 +34,11 @@ use serde_json::{json, Map, Value};
 use audit::AuditLog;
 pub use confirm::ConfirmConfig;
 use confirm::Confirm;
-pub use limits::{CALLS_PER_MINUTE, MAX_ARGS_BYTES, RUNS_PER_MINUTE, WRITES_PER_MINUTE};
-use limits::RateLimiter;
+pub use limits::{
+    RateLimiter, CALLS_PER_MINUTE, MAX_ARGS_BYTES, RUNS_PER_MINUTE, SESSION_CHANGES_PER_MINUTE, SESSION_TEXT_MAX,
+    WRITES_PER_MINUTE,
+};
+pub use session::SessionLink;
 pub use run::RunConfig;
 
 /// Tools per `tools/list` page.
@@ -72,6 +76,17 @@ pub struct Caps {
     pub allow_tools: Vec<String>,
     /// `--no-provenance`: do not put the `# written through aibus mcp` line in written files.
     pub no_provenance: bool,
+    /// `--allow session-list`, `session-status`, `session-send`, `session-command`,
+    /// `session-cancel` and `session-transcript`: one live-session tool each (#274).
+    pub session_list: bool,
+    pub session_status: bool,
+    pub session_send: bool,
+    pub session_command: bool,
+    pub session_cancel: bool,
+    pub session_transcript: bool,
+    /// `--allow permission`: `session_permission`, which the session itself also has to allow
+    /// (`aibus --control-permission`).
+    pub permission: bool,
 }
 
 impl Caps {
@@ -81,7 +96,48 @@ impl Caps {
         if gates && !write {
             return Err("--allow gates needs --allow write: a gate is part of a written workflow".into());
         }
-        Ok(Self { write, gates, run, allow_tools, no_provenance: false })
+        Ok(Self { write, gates, run, allow_tools, ..Self::default() })
+    }
+
+    /// Turns on what one `--allow` value names. `Err` is a value the server does not know.
+    pub fn allow(&mut self, cap: &str) -> Result<(), String> {
+        let flag = match cap {
+            "write" => &mut self.write,
+            "gates" => &mut self.gates,
+            "run" => &mut self.run,
+            "session-list" => &mut self.session_list,
+            "session-status" => &mut self.session_status,
+            "session-send" => &mut self.session_send,
+            "session-command" => &mut self.session_command,
+            "session-cancel" => &mut self.session_cancel,
+            "session-transcript" => &mut self.session_transcript,
+            "permission" => &mut self.permission,
+            other => return Err(format!("--allow {other:?} is not something the server can allow")),
+        };
+        *flag = true;
+        Ok(())
+    }
+
+    /// Whether the `--allow` value `cap` is on.
+    pub fn on(&self, cap: &str) -> bool {
+        match cap {
+            "write" => self.write,
+            "gates" => self.gates,
+            "run" => self.run,
+            "session-list" => self.session_list,
+            "session-status" => self.session_status,
+            "session-send" => self.session_send,
+            "session-command" => self.session_command,
+            "session-cancel" => self.session_cancel,
+            "session-transcript" => self.session_transcript,
+            "permission" => self.permission,
+            _ => false,
+        }
+    }
+
+    /// Some live-session tool is on, so the server needs a way into a session.
+    pub fn session(&self) -> bool {
+        session::TOOLS.iter().any(|(_, flag, ..)| self.on(flag))
     }
 }
 
@@ -98,6 +154,9 @@ pub struct Server {
     /// pass the check.
     write_lock: Mutex<()>,
     runs: Option<Arc<run::Runs>>,
+    /// The way into a live session, for the session tools (#274).
+    session: Option<Arc<dyn SessionLink>>,
+    session_limiter: Mutex<RateLimiter>,
     redactor: Redactor,
     confirm: Confirm,
 }
@@ -120,11 +179,19 @@ impl Server {
             "server/start",
             None,
             None,
+            None,
             &json!({
                 "write": caps.write,
                 "gates": caps.gates,
                 "run": caps.run,
                 "allow_tool": caps.allow_tools,
+                "session_list": caps.session_list,
+                "session_status": caps.session_status,
+                "session_send": caps.session_send,
+                "session_command": caps.session_command,
+                "session_cancel": caps.session_cancel,
+                "session_transcript": caps.session_transcript,
+                "permission": caps.permission,
             }),
             true,
             std::time::Duration::ZERO,
@@ -140,6 +207,8 @@ impl Server {
             run_limiter: Mutex::new(RateLimiter::new(RUNS_PER_MINUTE, Instant::now())),
             write_lock: Mutex::new(()),
             runs: None,
+            session: None,
+            session_limiter: Mutex::new(RateLimiter::new(SESSION_CHANGES_PER_MINUTE, Instant::now())),
             redactor,
             confirm: Confirm::new(ConfirmConfig::default()),
         })
@@ -149,6 +218,13 @@ impl Server {
     /// so a client that only reads never causes a session or a credential lookup.
     pub fn with_runs(mut self, config: RunConfig) -> Self {
         self.runs = Some(Arc::new(run::Runs::new(config)));
+        self
+    }
+
+    /// The way into a live session (#274). Without it no session tool is listed, whatever the
+    /// flags say.
+    pub fn with_session(mut self, link: Arc<dyn SessionLink>) -> Self {
+        self.session = Some(link);
         self
     }
 
@@ -219,6 +295,9 @@ impl Server {
         if self.caps.run {
             tools.extend(run::tools());
         }
+        if self.session.is_some() {
+            tools.extend(session::tools(|cap| self.caps.on(cap)));
+        }
         tools
     }
 
@@ -251,14 +330,25 @@ impl Server {
     ) -> Result<CallToolResult, ErrorData> {
         let started = Instant::now();
         let args = args.map_or(Value::Null, Value::Object);
-        let mut run = None;
-        let result = self.dispatch(name, &args, now, &mut run);
+        let (mut run, mut session) = (None, None);
+        let who = client.map_or("client", |c| c.name.as_str());
+        let result = self.dispatch(name, &args, who, now, &mut run, &mut session);
         let ok = result.as_ref().is_ok_and(|r| r.is_error != Some(true));
         let run = run.or_else(|| {
             let given = args.get("run")?.as_str()?;
             (given.starts_with("run-") && given.len() <= 40).then(|| given.to_owned())
         });
-        self.audit.record(client, addr, "tools/call", Some(name), run.as_deref(), &args, ok, started.elapsed());
+        self.audit.record(
+            client,
+            addr,
+            "tools/call",
+            Some(name),
+            run.as_deref(),
+            session.as_deref(),
+            &args,
+            ok,
+            started.elapsed(),
+        );
         result
     }
 
@@ -298,8 +388,10 @@ impl Server {
         &self,
         name: &str,
         args: &Value,
+        client: &str,
         now: Instant,
         run: &mut Option<String>,
+        session: &mut Option<String>,
     ) -> Result<CallToolResult, ErrorData> {
         if args.to_string().len() > MAX_ARGS_BYTES {
             return Err(ErrorData::invalid_params(
@@ -333,6 +425,7 @@ impl Server {
             "workflow_update" => self.workflow_write(true, args, now),
             "workflow_run" => self.workflow_run(args, now, run),
             "run_status" | "run_cancel" => self.run_tool(name, args, run),
+            n if n.starts_with("session_") => self.session_tool(n, args, client, now, session),
             // The read tools; it answers `-32602` for a name it does not know either.
             other => self.read_tool(other, args),
         }
@@ -461,6 +554,7 @@ impl ServerHandler for Server {
             "resources/read",
             None,
             request.uri.strip_prefix("aibus://runs/").and_then(|r| r.split('/').next()).filter(|r| r.starts_with("run-") && r.len() <= 40),
+            None,
             &json!({ "uri": uri }),
             read.is_ok(),
             started.elapsed(),
@@ -491,6 +585,7 @@ impl ServerHandler for Server {
             peer(&context),
             "prompts/get",
             Some(&name),
+            None,
             None,
             &Value::Object(args),
             got.is_ok(),

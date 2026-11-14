@@ -18,7 +18,15 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
     let has = |cap: &str| args.allow.iter().any(|a| a == cap);
     let mut caps = Caps::new(has("write"), has("gates"), has("run"), args.allow_tool.clone())
         .map_err(AibusError::Usage)?;
+    for cap in &args.allow {
+        caps.allow(cap).map_err(AibusError::Usage)?;
+    }
     caps.no_provenance = args.no_provenance;
+    if args.session.is_some() && !caps.session() {
+        return Err(AibusError::Usage(
+            "--session needs a session tool: --allow session-status, session-send, ... (docs/MCP.md)".into(),
+        ));
+    }
     let capped = args.max_runs.is_some() || args.max_concurrent_runs.is_some() || args.max_cost_usd.is_some();
     if capped && !caps.run {
         return Err(AibusError::Usage(
@@ -45,7 +53,8 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
         tracing::warn!("log directive {d:?} ignored");
     }
 
-    tracing::info!(write = caps.write, gates = caps.gates, run = caps.run, "aibus mcp starting");
+    tracing::info!(write = caps.write, gates = caps.gates, run = caps.run, session = caps.session(), "aibus mcp starting");
+    let caps_session = caps.session();
     let (project, paths) = (g.project_dir()?, g.paths()?);
     // `--max-cost-usd` defaults to the configured per-run limit. Reading the config reads no
     // credential; the first run's own process does that, when it starts.
@@ -76,6 +85,17 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
     .with_confirm(confirm);
     if let Some(runs) = runs {
         server = server.with_runs(runs);
+    }
+    // The live-session tools reach a terminal session through its control socket (#274). Nothing
+    // connects until the first call.
+    #[cfg(not(unix))]
+    if caps_session {
+        return Err(AibusError::Usage("the live-session tools talk over a Unix socket, which this platform does not have".into()));
+    }
+    #[cfg(unix)]
+    if caps_session {
+        let dir = aibus_control::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), &std::env::temp_dir());
+        server = server.with_session(std::sync::Arc::new(aibus_control::Link::new(dir, args.session.clone())));
     }
     match http {
         Some((bind, token)) => mcp_http::serve(server, bind, args.origin.clone(), token),

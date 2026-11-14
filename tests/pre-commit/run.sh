@@ -30,8 +30,8 @@ mkrepo() { # dir : a repo with the hook and a base commit holding clean.rs, dirt
   git -C "$d" init -q -b main
   git -C "$d" config user.email t@example.com; git -C "$d" config user.name t
   cp -R "$src/.githooks" "$d/"
-  printf 'fn clean() {}\n' >"$d/clean.rs"
-  printf 'UNFORMATTED\nfn dirty() {}\n' >"$d/dirty.rs"
+  for i in 1 2 3 4 5 6 7 8; do echo "fn clean$i() {}"; done >"$d/clean.rs"
+  { echo UNFORMATTED; for i in 1 2 3 4 5 6 7 8; do echo "fn dirty$i() {}"; done; } >"$d/dirty.rs"
   printf 'fn spaced() {}\n' >"$d/with space.rs"
   git -C "$d" add -A; git -C "$d" commit -q --no-verify -m base
 }
@@ -67,10 +67,10 @@ mkrepo "$r"; printf 'fn u() {}\n' >"$r/caf\303\251.rs"; git -C "$r" add .
 expect "a non-ASCII file name does not crash the hook" hook "$r"
 
 # renames compare against the old path
-mkrepo "$r"; git -C "$r" mv dirty.rs moved.rs; printf 'UNFORMATTED\nfn dirty() { 3; }\n' >"$r/moved.rs"; git -C "$r" add -A
+mkrepo "$r"; git -C "$r" mv dirty.rs moved.rs; echo 'fn more() {}' >>"$r/moved.rs"; git -C "$r" add -A
 expect "rename of a file that was not clean: passes" hook "$r"
 out=$(hook "$r" 2>&1); expect "rename of a file that was not clean: skip line names the new path" bash -c 'printf "%s\n" "$1" | grep -q "moved.rs was not rustfmt-clean"' _ "$out"
-mkrepo "$r"; git -C "$r" mv clean.rs moved.rs; printf 'UNFORMATTED\nfn clean() {}\n' >"$r/moved.rs"; git -C "$r" add -A
+mkrepo "$r"; git -C "$r" mv clean.rs moved.rs; echo UNFORMATTED >>"$r/moved.rs"; git -C "$r" add -A
 refuse "rename of a clean file to an unformatted one: refused" hook "$r"
 mkrepo "$r"; git -C "$r" mv clean.rs moved.rs; git -C "$r" add -A
 expect "pure rename of a clean file: passes" hook "$r"

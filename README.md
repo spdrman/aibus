@@ -147,6 +147,9 @@ Everything below is typed in the prompt line of the dashboard. `/` and then `Tab
 | `/background` | `[@target]` | move the run's wait to the background | no |
 | `/login` | `[provider]` | add an account: pick a provider, name it, type the key | no |
 | `/logout` | `<account>` | remove an account and its key (asks first) | yes, before it removes the key |
+| `/quit` |  | quit | no |
+| `/exit` |  | quit (same as /quit) | no |
+| `/q` |  | quit (same as /quit) | no |
 <!-- aibus:commands:end -->
 
 The ones that act on a run take an optional `@target` first: `@lead`, `@advisor` or `@router`, an agent name for its newest run (`@grep`), or a prefix of a run id. With no target they act on the focused card, and on the lead when no card is focused.

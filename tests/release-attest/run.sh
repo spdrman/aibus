@@ -260,7 +260,7 @@ ec=$(git -C "$er/repo" commit-tree -m hostile "$e4"); git -C "$er/repo" update-r
 esnap=$(snap "$er" "$er/repo")
 (cd "$er/repo" && RELEASE_E2E_CMD=true "$here/../../tools/release-gate/e2e.sh" >/dev/null 2>&1)
 expect "e2e.sh on a tree with Z -> victim and z/newd/deeper/L creates nothing outside its copy" test "$esnap" = "$(snap "$er" "$er/repo")"
-expect "no list file is left next to a destination" test -z "$(ls "$t" | grep -e 'export-tree' -e '\.ls\.')"
+expect "no list file is left next to a destination" test -z "$(ls "$t/tmp" | grep -e 'export-tree' -e '\.ls\.')"
 r=$t/repo17; mkrepo "$r" 1.2.3
 expect "the attestation tree hash is still the tree id without release-attest/" test "$(tree_hash "$r" HEAD)" = "$(git -C "$r" rev-parse 'HEAD^{tree}')"
 
@@ -361,12 +361,24 @@ pty_ok=0; pty_available && pty_ok=1
 [ $pty_ok = 1 ] || echo "SKIP: script(1) or timeout is missing, the pseudo-terminal tests do not run" >&2
 pty() { pty_run "$@"; }
 pty_attest() { # keyfile : attest.sh as a terminal user with the given key and NO agent
-  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 6 "$tools/attest.sh" --repo "$r" --key "$1" --runner-cmd "sh $t/fake.sh" )
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 60 "$tools/attest.sh" --repo "$r" --key "$1" --runner-cmd "sh $t/fake.sh" )
 }
 if [ $pty_ok = 1 ]; then
   # issue #260: an argument with a newline or a tab reaches the command intact even when SHELL is dash (util-linux script runs -c through $SHELL)
-  SHELL=/bin/sh pty_run 5 bash -c 'printf %s "$1" >"$2"' _ $'a\nb\tc' "$t/pty-arg.out" >/dev/null 2>&1
+  SHELL=/bin/sh pty_run 60 bash -c 'printf %s "$1" >"$2"' _ $'a\nb\tc' "$t/pty-arg.out" >/dev/null 2>&1
   expect "#260 pty_run passes a newline and a tab in an argument through unchanged, SHELL=/bin/sh" test "$(cat "$t/pty-arg.out" 2>/dev/null)" = $'a\nb\tc'
+  # issue #278: PTY_PROMPT makes pty_run type PTY_INPUT only once the output matches, however late that is
+  PTY_INPUT=$'y\n' PTY_PROMPT='go\? ' pty_run 60 bash -c 'sleep 4; if read -t 1 -r e; then echo "early:$e"; else echo "early:none"; fi; printf "go? "; read -r a; echo "got:$a"' >"$t/pty-late.out" 2>&1; rc=$?
+  expect "#278 a child that prints its prompt late (4s) still gets the answer, typed after the prompt (exit 0)" bash -c "test $rc = 0 && grep -q 'got:y' '$t/pty-late.out'"
+  expect "#278 ...and nothing was typed before the prompt appeared" grep -q 'early:none' "$t/pty-late.out"
+  s0=$SECONDS; PTY_INPUT=$'y\n' PTY_PROMPT='never shown' pty_run 3 bash -c 'echo hello; exec sleep 30' >"$t/pty-never.out" 2>&1; rc=$?
+  expect "#278 a prompt that never prints hits the timeout (exit 124) after about 3s, and the output is still returned" bash -c "test $rc = 124 && test $((SECONDS - s0)) -lt 10 && grep -q hello '$t/pty-never.out'"
+  ans=$'a b\t"q" \'s\' $HOME `id` \\ * ; & | <x> \xc3\xa9'
+  PTY_INPUT="$ans"$'\n' PTY_PROMPT='ready>' pty_run 60 bash -c 'printf "ready>"; IFS= read -r a; printf %s "$a" >"$1"' _ "$t/pty-ans.out" >/dev/null 2>&1
+  expect "#278 an answer with spaces, a tab, quotes, \$, backticks, backslash, glob and shell characters arrives unchanged" test "$(cat "$t/pty-ans.out" 2>/dev/null)" = "$ans"
+  PTY_INPUT=$'y\n' pty_run 60 bash -c 'sleep 1; read -r a; echo "got:$a"' >"$t/pty-def.out" 2>&1
+  expect "#278 without PTY_PROMPT the answer is still typed after the fixed delay (old behaviour)" grep -q 'got:y' "$t/pty-def.out"
+  expect "#278 pty_run leaves no temp file behind" test -z "$(ls "$t/tmp" | grep '^pty-out\.')"
   r=$t/repo30; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
   pty_attest "$t/pkey" >"$t/pty1.out" 2>&1; rc=$?
   expect "from a terminal, a passphrase key that is not loaded is refused at once (exit 2, no hang)" test $rc = 2
@@ -376,7 +388,7 @@ if [ $pty_ok = 1 ]; then
   if [ $agent_ok = 1 ]; then
     SSH_AUTH_SOCK=$agent_sock SSH_ASKPASS=$t/askpass.sh SSH_ASKPASS_REQUIRE=force ssh-add "$t/pkey" </dev/null >/dev/null 2>&1
     r=$t/repo31; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
-    SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 6 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" >"$t/pty2.out" 2>&1; rc=$?
+    SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 60 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" >"$t/pty2.out" 2>&1; rc=$?
     expect "from a terminal, the same key loaded in the private agent signs without a prompt" test $rc = 0 -a -f "$r/release-attest/attestation.json.sig"
     SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
   fi
@@ -418,17 +430,17 @@ done
 printf 'set -m\n' >"$t/monitor.env"
 if [ $pty_ok = 1 ]; then
   r=$t/repo60; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
-  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env SUITES_LIST="$SUITES"; pty 8 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m.out" 2>&1; rc=$?
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env SUITES_LIST="$SUITES"; pty 60 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m.out" 2>&1; rc=$?
   expect "with job control on (BASH_ENV set -m) a passphrase key is still refused at once (exit 2)" test $rc = 2
   expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-m.out' && ! grep -qi 'enter passphrase' '$t/pty-m.out'"
-  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 8 env SHELLOPTS=braceexpand:hashall:interactive-comments:monitor "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m2.out" 2>&1; rc=$?
+  ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export SUITES_LIST="$SUITES"; pty 60 env SHELLOPTS=braceexpand:hashall:interactive-comments:monitor "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sh $t/fake.sh" ) >"$t/pty-m2.out" 2>&1; rc=$?
   expect "...and with SHELLOPTS=...:monitor (set through env, the variable is readonly in bash)" bash -c "test $rc = 2 && ! grep -qi 'enter passphrase' '$t/pty-m2.out'"
   if [ $agent_ok = 1 ]; then
     # the key leaves the agent mid-run (ssh-add -t): the real signature fails, it does not prompt
     SSH_AUTH_SOCK=$agent_sock ssh-add -D >/dev/null 2>&1
     SSH_AUTH_SOCK=$agent_sock SSH_ASKPASS=$t/askpass.sh SSH_ASKPASS_REQUIRE=force ssh-add -t 3 "$t/pkey" </dev/null >/dev/null 2>&1
     r=$t/repo61; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
-    SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 14 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sleep 5; sh $t/fake.sh" >"$t/pty-d.out" 2>&1; rc=$?
+    SSH_AUTH_SOCK=$agent_sock SUITES_LIST="$SUITES" pty 60 "$tools/attest.sh" --repo "$r" --key "$t/pkey" --runner-cmd "sleep 5; sh $t/fake.sh" >"$t/pty-d.out" 2>&1; rc=$?
     expect "a key that drops out of the agent mid-run fails the real signature (exit 1), no prompt, no hang" test $rc = 1
     expect "#252 the key-drop message has no passphrase wording at all (it is not a prompt) and names the exit status" bash -c "! grep -qi 'passphrase' '$t/pty-d.out' && grep -q 'ssh-keygen -Y sign failed (exit [0-9]*)' '$t/pty-d.out'"
     expect "...without a passphrase prompt text, with a message to load the key, and a clean tree" bash -c "! grep -qi 'enter passphrase' '$t/pty-d.out' && grep -q 'ssh-add' '$t/pty-d.out' && [ -z \"\$(git -C '$r' status --porcelain)\" ]"

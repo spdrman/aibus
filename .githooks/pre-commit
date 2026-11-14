@@ -4,10 +4,63 @@
 set -eu
 [ -e "$(git rev-parse --git-dir)/MERGE_HEAD" ] && exit 0
 [ "$(git symbolic-ref --short -q HEAD || true)" = release ] && exit 0
-rs=$(git diff --cached --name-only --diff-filter=ACM -z -- '*.rs' | tr '\0' ' ')
-if [ -n "$rs" ] && command -v rustfmt >/dev/null 2>&1; then
-  # shellcheck disable=SC2086
-  rustfmt --check --edition 2021 $rs >/dev/null || { echo "pre-commit: rustfmt would change the staged Rust files (run rustfmt on them)" >&2; exit 1; }
+# rustfmt ratchet (#272): the repo is not rustfmt-clean, so a file is only held to the check when it can
+# be. A new file must pass; a file that was clean at HEAD (its old path, for a rename) must stay clean;
+# a file that was not clean at HEAD is skipped with a note. The staged blob is checked (on stdin), never
+# the working copy, and nothing is formatted or written here.
+if command -v rustfmt >/dev/null 2>&1; then
+  fmt_bad=0 fmt_state=status
+  # rustfmt on stdin exits 0 even with --check; a difference shows only as a "Diff in" line on stdout. Only
+  # stdout is judged: stderr (a warning from the user's own rustfmt.toml, say) is replayed to the user and
+  # never changes a verdict. Returns 0 clean, 1 not clean, 2 when rustfmt itself failed (non-zero exit and
+  # no "Diff in" line: a missing component, a syntax error, a signal), which must never read as "not clean".
+  fmt_err=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/pre-commit-rustfmt.XXXXXX") || exit 1
+  trap 'rm -f "$fmt_err"' EXIT
+  fmt_clean() {
+    fmt_xrc=0; fmt_out=$(git cat-file blob "$1" | rustfmt --check --edition 2021 2>"$fmt_err") || fmt_xrc=$?
+    [ ! -s "$fmt_err" ] || cat "$fmt_err" >&2
+    if printf '%s\n' "$fmt_out" | grep -q '^Diff in '; then return 1; fi
+    [ "$fmt_xrc" = 0 ] || return 2
+  }
+  fmt_fail() {
+    fmt_why=$(head -1 "$fmt_err")
+    if [ -z "$fmt_why" ]; then
+      if [ "$fmt_xrc" -gt 128 ]; then fmt_why="killed by signal $((fmt_xrc - 128))"; else fmt_why="rustfmt exited $fmt_xrc"; fi
+    fi
+    echo "pre-commit: rustfmt failed on $1, cannot check it: $fmt_why" >&2
+  }
+  git diff --cached --name-status -z -M --diff-filter=ACMR | {
+    while IFS= read -r -d '' tok; do
+      case $fmt_state in
+        status)
+          case $tok in
+            [ACMR]|[CR][0-9]*) fmt_status=$tok; fmt_state=path; continue ;;
+            *) echo "pre-commit: cannot read the staged file list" >&2; exit 1 ;;
+          esac ;;
+        path)
+          fmt_new=$tok fmt_old=$tok fmt_state=status
+          case $fmt_status in [CR]*) fmt_old=$tok; fmt_state=newpath ;; esac
+          [ $fmt_state = status ] || continue ;;
+        newpath) fmt_new=$tok; fmt_state=status ;;
+      esac
+      case $fmt_new in *.rs) ;; *) continue ;; esac
+      fmt_head=0
+      if git cat-file -e "HEAD:$fmt_old" 2>/dev/null; then
+        fmt_clean "HEAD:$fmt_old" && fmt_head=clean || fmt_head=$?
+        if [ "$fmt_head" = 2 ]; then fmt_fail "$fmt_old at HEAD"; fmt_bad=1; continue; fi
+      fi
+      if [ "$fmt_head" = 1 ]; then
+        echo "$fmt_new was not rustfmt-clean before this commit, format check skipped" >&2
+      else
+        fmt_rc=0; fmt_clean ":$fmt_new" || fmt_rc=$?
+        if [ "$fmt_rc" = 2 ]; then fmt_fail "$fmt_new"; fmt_bad=1
+        elif [ "$fmt_rc" = 1 ]; then
+          echo "pre-commit: $fmt_new is not rustfmt-clean (run rustfmt --edition 2021 on it)" >&2; fmt_bad=1
+        fi
+      fi
+    done
+    exit $fmt_bad
+  } || exit 1
 fi
 git diff --cached --name-only --diff-filter=ACM -z -- '*.sh' .githooks | while IFS= read -r -d '' f; do
   if head -1 "$f" | grep -q 'sh'; then bash -n "$f" || { echo "pre-commit: syntax error in $f" >&2; exit 1; }; fi   # no `&&`: a file without a shebang must not fail the hook

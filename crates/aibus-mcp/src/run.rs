@@ -817,7 +817,7 @@ impl Server {
         }
         // A gate from a bundle runs only once the user has installed it with --allow gates.
         if let Err(why) = winner.runnable() {
-            return Ok(self.fail(format!("no run was started: {why}")));
+            return Ok(self.fail(format!("no run was started: {}", self.shorten(&why))));
         }
         let roster = match self.roster() {
             Ok(r) => r,

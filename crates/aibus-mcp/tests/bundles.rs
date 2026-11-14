@@ -155,4 +155,9 @@ fn workflow_run_does_not_start_a_bundled_gate() {
         "{r}"
     );
     assert!(!fake_dir.join("argv.txt").exists(), "nothing was started");
+    // The refusal names the bundle by a short path, never the machine's absolute one.
+    assert!(
+        !r.to_string().contains(&home.path().display().to_string()),
+        "{r}"
+    );
 }

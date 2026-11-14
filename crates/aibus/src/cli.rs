@@ -535,6 +535,8 @@ mod tests {
         "workflow validate",
         "workflow show",
         "workflow run",
+        "workflow pack",
+        "workflow install",
         "init",
         "config path",
         "config show",

@@ -55,7 +55,8 @@ pub fn workflow_list(g: &Global, names: bool) -> Result<u8, AibusError> {
     let dirs = aibus_core::workflow::dirs(&g.project_dir()?, Some(&g.paths()?.config));
     let found = aibus_core::workflow::list(&dirs);
     if names {
-        for f in &found {
+        // A refused bundle's row is named after its file, which is nothing to complete.
+        for f in found.iter().filter(|f| f.bundle.is_none() || f.parsed.is_ok()) {
             println!("{}", f.name);
         }
         return Ok(0);

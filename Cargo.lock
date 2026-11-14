@@ -69,6 +69,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-control"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-mcp",
+ "aibus-testkit",
+ "rand 0.9.5",
+ "rustix 1.1.6",
+ "serde_json",
+ "subtle",
+ "tokio",
+]
+
+[[package]]
 name = "aibus-core"
 version = "0.2.1"
 dependencies = [

@@ -1,0 +1,26 @@
+[package]
+name = "aibus-control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# The control endpoint of a live session (#274): the Unix socket a terminal session listens on and
+# the client `aibus mcp --session` talks to it with. Both ends live here so the socket, its files,
+# the framing and the checks are in one place, and `aibus-mcp` stays without a transport.
+[dependencies]
+aibus-core.workspace = true
+aibus-mcp.workspace = true
+rand = "0.9"
+serde_json = "1"
+subtle = "2"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net", "io-util"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
+[dev-dependencies]
+aibus-testkit.workspace = true
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }

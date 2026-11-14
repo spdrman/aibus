@@ -41,7 +41,7 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 
 ## Read tools
 
-All six are read-only (`readOnlyHint`), never destructive and never open-world. Each has an `outputSchema`, and the result is in `structuredContent`. The text block holds the same JSON under a one-line header saying it is data, with aibus's own markers escaped and a "cut at" note past 32 KiB. `structuredContent` is never cut.
+All seven are read-only (`readOnlyHint`), never destructive and never open-world. Each has an `outputSchema`, and the result is in `structuredContent`. The text block holds the same JSON under a one-line header saying it is data, with aibus's own markers escaped and a "cut at" note past 32 KiB. `structuredContent` is never cut.
 
 | Tool | What it does |
 |---|---|
@@ -51,6 +51,9 @@ All six are read-only (`readOnlyHint`), never destructive and never open-world. 
 | `workflow_validate {name?, scope?, toml?}` | an existing workflow or a draft `toml`, checked against the real roster (built-in, project, user); same shape as `aibus workflow validate --json`, so a draft that names an unknown agent is `ok: false` with the step number |
 | `workflow_dry_run {name, scope?, input}` | each prompt rendered with the input (a later step's summary shows as `<summary of step N (agent)>`), the gates as text, the agent each step resolves to, and the budgets |
 | `agent_list` | the agents a step can name, as `aibus agent list --json` |
+| `workflow_plan {name?, scope?, toml?}` | the compiled plan of an existing workflow or a draft, the same JSON `aibus workflow plan --dry-run --json` prints (`docs/schemas/workflow/plan-v1.json`): steps with prompt and agent hashes, typed edges, fan-out, envelope, approvals, the invocation each step would get, the routing decisions and a `plan_hash`. A workflow that does not validate, misses a capability or carries something credential-shaped gets an `isError` and no plan |
+
+`workflow_plan` came with the compiler (#283) and is listed after the six older tools, which keep their names, arguments and output schemas. For a workflow that uses routes they answer inside the same schemas: `workflow_get` shows the steps' four old fields, and `workflow_explain` and `workflow_dry_run` follow the routes (a step's `{{prev.summary}}` is the step its one route comes from). `workflow_validate` also reports a step that `requires` a capability its agent has no tool for. `workflow_run` refuses a workflow that only the scheduler (#288) can run, before it starts anything.
 
 `scope` is `project` or `user`; left out, the project's file wins. Budgets in `workflow_dry_run` are the built-in defaults, because the server does not read `config.toml`. Likewise, `agents.extra_dirs` is not on the roster.
 

@@ -93,3 +93,45 @@ fn the_graph_fixtures_pass_the_v1_schema_and_closed_sets_are_enforced() {
         assert!(Workflow::parse("t", &text).is_err(), "{file}");
     }
 }
+
+/// #283: the committed plans fit `plan-v1.json`, a run manifest of each fits
+/// `run-manifest-v1.json`, the Jev fixtures fit the two Jev schemas, and every one of these
+/// schemas is one the checker understands in full.
+#[test]
+fn plans_manifests_and_jev_records_fit_their_schemas() {
+    use aibus_core::workflow::manifest::{run_manifest, RunFacts};
+    let plan_schema = load_from("workflow", "plan-v1");
+    let manifest_schema = load_from("workflow", "run-manifest-v1");
+    let (request, decision) = (load_from("jev", "decision-request-v1"), load_from("jev", "decision-v1"));
+    for s in [&plan_schema, &manifest_schema, &request, &decision] {
+        assert_eq!(common::schema::lint_2020_12(s), Vec::<String>::new(), "{}", s["$id"]);
+    }
+    let mut n = 0;
+    for e in std::fs::read_dir(repo("fixtures/workflows/plans")).unwrap() {
+        let path = e.unwrap().path();
+        let plan: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(check_against(&plan_schema, &plan), Vec::<String>::new(), "{}", path.display());
+        for (input, commit) in [(Some("task".to_owned()), Ok("abc".to_owned())), (None, Err("not a repository".to_owned()))] {
+            let facts = RunFacts {
+                input,
+                aibus_version: "0.0.0".into(),
+                os: "linux".into(),
+                arch: "x86_64".into(),
+                base_commit: commit,
+                dirty: Ok(false),
+                env_names: vec!["PATH".into()],
+                budgets: serde_json::json!({}),
+            };
+            let m = run_manifest(&plan, &facts);
+            assert_eq!(check_against(&manifest_schema, &m), Vec::<String>::new(), "{}", path.display());
+        }
+        n += 1;
+    }
+    assert!(n >= 7);
+    for e in std::fs::read_dir(repo("fixtures/jev")).unwrap() {
+        let path = e.unwrap().path();
+        let case: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(check_against(&request, &case["request"]), Vec::<String>::new(), "{}", path.display());
+        assert_eq!(check_against(&decision, &case["decision"]), Vec::<String>::new(), "{}", path.display());
+    }
+}

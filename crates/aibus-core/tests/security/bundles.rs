@@ -675,3 +675,345 @@ fn random_and_mutated_tar_bytes_never_panic_and_never_write() {
     assert!(ok > 0 && ok < ITERATIONS, "{ok} of {ITERATIONS} read");
     assert!(installed <= ok);
 }
+
+// --- Review of #277: install, listing and terminal output. ---
+
+fn install_into(
+    root: &Path,
+    bytes: &[u8],
+    force: bool,
+    gates: bool,
+) -> Result<Vec<std::path::PathBuf>, bundle::InstallError> {
+    let roster = roster();
+    let to = Install {
+        workflows_dir: root.join(".aibus/workflows"),
+        agents_dir: root.join(".aibus/agents"),
+        roster: &roster,
+        force,
+        allow_gates: gates,
+    };
+    bundle::install(bytes, &to, redactor())
+}
+
+fn with_agent(name: &str, def: &str) -> Vec<u8> {
+    let m = format!("format = 1\nname = \"kit\"\nworkflows = [\"x\"]\nagents = [\"{name}\"]\n");
+    let flow = format!("[[step]]\nagent = \"{name}\"\nprompt = \"{{{{input}}}}\"\n");
+    tar(&[
+        entry("manifest.toml", b'0', m.as_bytes()),
+        entry("workflows/x.toml", b'0', flow.as_bytes()),
+        entry(&format!("agents/{name}.md"), b'0', def.as_bytes()),
+    ])
+}
+
+#[cfg(unix)]
+#[test]
+fn install_never_writes_through_a_planted_temp_file_symlink() {
+    let root = tempfile::tempdir().unwrap();
+    let victim = root.path().join("victim.txt");
+    fs::write(&victim, "precious\n").unwrap();
+    let wd = root.path().join(".aibus/workflows");
+    fs::create_dir_all(&wd).unwrap();
+    // The name the old atomic write used for its temp file, pointing out of the directory.
+    std::os::unix::fs::symlink(&victim, wd.join(".review.toml.tmp")).unwrap();
+    install_into(root.path(), &good(), false, false).unwrap();
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "precious\n");
+    let md = fs::symlink_metadata(wd.join("review.toml")).unwrap();
+    assert!(
+        md.is_file() && !md.file_type().is_symlink(),
+        "review.toml is a plain file"
+    );
+    assert_eq!(fs::read_to_string(wd.join("review.toml")).unwrap(), REVIEW);
+}
+
+#[test]
+fn a_bundle_cannot_shadow_a_built_in_agent_without_force() {
+    let builtins = aibus_core::agent::builtin::names();
+    assert!(
+        builtins.iter().any(|n| n.as_str() == "lead"),
+        "{builtins:?}"
+    );
+    for name in &builtins {
+        let def = format!("---\nname: {name}\ndescription: replaced\n---\nDo something else.\n");
+        let root = tempfile::tempdir().unwrap();
+        let err =
+            install_into(root.path(), &with_agent(name.as_str(), &def), false, true).unwrap_err();
+        assert!(
+            matches!(&err, bundle::InstallError::ShadowsBuiltin(n) if n == name.as_str()),
+            "{name}: {err}"
+        );
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert!(
+            !root.path().join(".aibus").exists(),
+            "{name}: nothing written"
+        );
+    }
+    let root = tempfile::tempdir().unwrap();
+    let def = "---\nname: lead\ndescription: replaced\n---\nDo something else.\n";
+    install_into(root.path(), &with_agent("lead", def), true, true).unwrap();
+    assert!(root.path().join(".aibus/agents/lead.md").is_file());
+}
+
+#[test]
+fn a_bundled_agent_with_an_account_or_an_initial_prompt_needs_the_gates_flag() {
+    for extra in ["account: work", "initial_prompt: run the deploy script"] {
+        let def = format!("---\nname: helper\ndescription: helps\n{extra}\n---\nHelp.\n");
+        let root = tempfile::tempdir().unwrap();
+        let err = install_into(root.path(), &with_agent("helper", &def), false, false).unwrap_err();
+        assert!(
+            matches!(&err, bundle::InstallError::AgentPowers(n) if n == "helper"),
+            "{extra}: {err}"
+        );
+        assert!(!root.path().join(".aibus").exists());
+        install_into(root.path(), &with_agent("helper", &def), false, true).unwrap();
+    }
+}
+
+#[test]
+fn control_characters_in_bundled_text_are_refused_and_never_echoed() {
+    // TOML escapes put an OSC title and a clear-screen into the parsed strings.
+    for flow in [
+        "description = \"ok\\u001b]0;pwned\\u0007\"\n[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n",
+        "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\\u001b[2J\"\n",
+        "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\ngate = \"true\\u001b[2J\"\n",
+    ] {
+        let bytes = tar(&[entry("manifest.toml", b'0', &manifest(&["x"])), entry("workflows/x.toml", b'0', flow.as_bytes())]);
+        let err = refused(&bytes);
+        assert!(matches!(err, BundleError::Control(_)), "{flow}: {err:?}");
+    }
+    // Raw bytes too, in a README and the manifest's description.
+    let _ = refused(&with(entry("README", b'0', b"hi \x1b[2J")));
+    let m = b"format = 1\nname = \"kit\"\ndescription = \"a\\u001b]0;t\\u0007\"\nworkflows = [\"review\"]\n";
+    assert!(matches!(
+        refused(&tar(&[
+            entry("manifest.toml", b'0', m),
+            entry("workflows/review.toml", b'0', REVIEW.as_bytes())
+        ])),
+        BundleError::Control(_)
+    ));
+    // An entry name with an escape in it reaches the error text escaped.
+    let err = refused(&with(entry(
+        "workflows/a\x1b]0;x\x07.toml",
+        b'0',
+        SMALL.as_bytes(),
+    )));
+    assert!(
+        !err.to_string().contains('\u{1b}') && !err.to_string().contains('\u{7}'),
+        "{err}"
+    );
+    let err = refused(&with(entry("notes\x1b[2J.txt", b'0', b"x")));
+    assert!(!err.to_string().contains('\u{1b}'), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_a_device_link_or_a_huge_file_never_hangs_or_is_read() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let root = tempfile::tempdir().unwrap();
+    let d = root.path().to_path_buf();
+    assert!(std::process::Command::new("mkfifo")
+        .arg(d.join("kit.aibus"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new("mkfifo")
+        .arg(d.join("loose.toml"))
+        .status()
+        .unwrap()
+        .success());
+    std::os::unix::fs::symlink("/dev/zero", d.join("zero.aibus")).unwrap();
+    std::os::unix::fs::symlink("/dev/zero", d.join("zero.toml")).unwrap();
+    let huge = fs::File::create(d.join("huge.toml")).unwrap();
+    huge.set_len(10 << 30).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let d2 = d.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(aibus_core::workflow::list_in(&d2, "project"));
+    });
+    let found = match rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(f) => f,
+        Err(_) => {
+            // Unblock whatever is stuck before failing.
+            let _ = fs::OpenOptions::new().write(true).open(d.join("kit.aibus"));
+            let _ = fs::OpenOptions::new()
+                .write(true)
+                .open(d.join("loose.toml"));
+            panic!("listing blocked on a fifo");
+        }
+    };
+    let why = |n: &str| {
+        found
+            .iter()
+            .find(|f| f.name == n)
+            .and_then(|f| f.parsed.as_ref().err())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| panic!("{n} is a refused row in {found:?}"))
+    };
+    for n in ["kit.aibus", "zero.aibus", "loose", "zero"] {
+        assert!(why(n).contains("not a regular file"), "{n}: {}", why(n));
+    }
+    assert!(why("huge").contains("bytes"), "{}", why("huge"));
+}
+
+#[cfg(unix)]
+#[test]
+fn read_file_checks_the_type_and_the_size_before_reading() {
+    let root = tempfile::tempdir().unwrap();
+    let big = root.path().join("big.aibus");
+    fs::File::create(&big).unwrap().set_len(10 << 30).unwrap();
+    // The size from the file, not from what was read: nothing past the cap is read.
+    assert_eq!(
+        bundle::read_file(&big, redactor()),
+        Err(BundleError::TooBig(10 << 30))
+    );
+    std::os::unix::fs::symlink("/dev/zero", root.path().join("zero.aibus")).unwrap();
+    let err = bundle::read_file(&root.path().join("zero.aibus"), redactor()).unwrap_err();
+    assert!(
+        matches!(&err, BundleError::Io(_, why) if why == "not a regular file"),
+        "{err:?}"
+    );
+    let err = bundle::read_file(root.path(), redactor()).unwrap_err();
+    assert!(
+        matches!(&err, BundleError::Io(_, why) if why == "not a regular file"),
+        "{err:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn install_refuses_a_symlinked_aibus_or_workflows_directory() {
+    for link in [".aibus", ".aibus/workflows"] {
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = root.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::create_dir_all(root.path().join(link).parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.path().join(link)).unwrap();
+        let err = install_into(root.path(), &good(), true, true).unwrap_err();
+        assert!(
+            matches!(err, bundle::InstallError::NotPlain(_)),
+            "{link}: {err:?}"
+        );
+        assert!(
+            fs::read_dir(&elsewhere).unwrap().next().is_none(),
+            "{link}: nothing written through it"
+        );
+    }
+}
+
+#[test]
+fn install_refuses_a_workflows_dir_or_target_that_is_not_plain() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join(".aibus")).unwrap();
+    fs::write(root.path().join(".aibus/workflows"), "a file").unwrap();
+    let err = install_into(root.path(), &good(), true, true).unwrap_err();
+    assert_eq!(
+        err,
+        bundle::InstallError::NotPlain(root.path().join(".aibus/workflows"))
+    );
+
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join(".aibus/workflows/review.toml")).unwrap();
+    let err = install_into(root.path(), &good(), true, true).unwrap_err();
+    assert_eq!(
+        err,
+        bundle::InstallError::NotPlain(root.path().join(".aibus/workflows/review.toml"))
+    );
+}
+
+/// Run as a user who cannot write a 0500 directory (root can, so this is skipped there; the gate
+/// runs this test binary once more as `nobody`).
+#[cfg(unix)]
+#[test]
+fn a_failed_install_leaves_nothing_behind() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let ad = root.path().join(".aibus/agents");
+    fs::create_dir_all(&ad).unwrap();
+    fs::set_permissions(&ad, fs::Permissions::from_mode(0o500)).unwrap();
+    if fs::write(ad.join("probe"), "x").is_ok() {
+        eprintln!("this user can write a 0500 directory (root?), skipping");
+        return;
+    }
+    let def = "---\nname: helper\ndescription: helps\n---\nHelp.\n";
+    let err = install_into(root.path(), &with_agent("helper", def), false, false);
+    fs::set_permissions(&ad, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(err.is_err());
+    let wd = root.path().join(".aibus/workflows");
+    let left: Vec<_> = fs::read_dir(&wd)
+        .map(|d| d.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(left.is_empty(), "left behind: {left:?}");
+}
+
+#[test]
+fn the_manifest_agents_list_has_to_match_the_agent_files() {
+    let def = "---\nname: helper\ndescription: helps\n---\nHelp.\n";
+    let unlisted = tar(&[
+        entry("manifest.toml", b'0', &manifest(&["review"])),
+        entry("workflows/review.toml", b'0', REVIEW.as_bytes()),
+        entry("agents/helper.md", b'0', def.as_bytes()),
+    ]);
+    assert!(matches!(refused(&unlisted), BundleError::Manifest(_)));
+    let m = b"format = 1\nname = \"kit\"\nworkflows = [\"review\"]\nagents = [\"helper\"]\n";
+    let absent = tar(&[
+        entry("manifest.toml", b'0', m),
+        entry("workflows/review.toml", b'0', REVIEW.as_bytes()),
+    ]);
+    assert!(matches!(refused(&absent), BundleError::Manifest(_)));
+}
+
+#[test]
+fn a_directory_entry_whose_data_is_a_hidden_header_is_refused() {
+    // The data block of `agents/` is itself a valid header: skipping it as padding would read it
+    // as an entry.
+    let hidden = entry("workflows/evil.toml", b'0', SMALL.as_bytes());
+    let mut dir = header(b"agents/", b'5', 512, "", None).to_vec();
+    dir.extend_from_slice(&hidden[..512]);
+    let bytes = with(dir);
+    assert!(matches!(refused(&bytes), BundleError::BadHeader(_)));
+}
+
+#[test]
+fn bytes_after_a_nul_in_a_name_and_a_stray_byte_after_a_size_are_bad_headers() {
+    let nul = raw_entry(
+        b"workflows/review.toml\0../evil",
+        b'0',
+        REVIEW.as_bytes(),
+        "",
+    );
+    let bytes = tar(&[entry("manifest.toml", b'0', &manifest(&["review"])), nul]);
+    assert!(matches!(refused(&bytes), BundleError::BadHeader(_)));
+    let mut size = [0u8; 12];
+    size[..11].copy_from_slice(format!("{:011o}", REVIEW.len()).as_bytes());
+    size[11] = 0x01;
+    let mut review = header(b"workflows/review.toml", b'0', 0, "", Some(size)).to_vec();
+    review.extend_from_slice(REVIEW.as_bytes());
+    review.resize(review.len().div_ceil(512) * 512, 0);
+    let bytes = tar(&[entry("manifest.toml", b'0', &manifest(&["review"])), review]);
+    assert!(matches!(refused(&bytes), BundleError::BadHeader(_)));
+}
+
+#[test]
+fn only_so_many_bundles_in_one_directory_are_read() {
+    let root = tempfile::tempdir().unwrap();
+    for i in 0..bundle::MAX_BUNDLES_PER_DIR + 3 {
+        fs::write(root.path().join(format!("b{i:03}.aibus")), b"not a tar").unwrap();
+    }
+    let found = aibus_core::workflow::list_in(root.path(), "project");
+    let read = found
+        .iter()
+        .filter(|f| {
+            f.parsed
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("cut short"))
+        })
+        .count();
+    assert_eq!(read, bundle::MAX_BUNDLES_PER_DIR);
+    assert!(
+        found.iter().any(|f| f
+            .parsed
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains("more than"))),
+        "{found:?}"
+    );
+}

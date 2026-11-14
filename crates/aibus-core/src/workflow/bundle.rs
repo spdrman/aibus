@@ -38,6 +38,9 @@ pub const MAX_BUNDLE_BYTES: usize = 1024 * 1024;
 /// The most entries (files and the two directories) a bundle may hold.
 pub const MAX_ENTRIES: usize = 64;
 
+/// The most bundles one directory is read for; past this a bundle is a row that says so.
+pub const MAX_BUNDLES_PER_DIR: usize = 64;
+
 /// The most any one file inside a bundle may be: the `workflow_create` cap.
 pub const MAX_FILE_BYTES: usize = super::MAX_BYTES;
 
@@ -105,6 +108,8 @@ pub enum BundleError {
     Agent(String, String),
     #[error("{0}: {1}")]
     Io(String, String),
+    #[error("{0} holds a control character (an escape sequence would reach a terminal)")]
+    Control(String),
 }
 
 /// A tar block.
@@ -521,6 +526,8 @@ pub enum InstallError {
     AgentPowers(String),
     #[error("{} exist(s), install with --force to replace", .0.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))]
     Exists(Vec<PathBuf>),
+    #[error("the bundle's agent {0} has the name of a built-in agent and would replace it for every session; install with --force to do that")]
+    ShadowsBuiltin(String),
     #[error("{0} is not a plain file or directory, refusing to write through it")]
     NotPlain(PathBuf),
     #[error("{0}")]

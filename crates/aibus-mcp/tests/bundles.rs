@@ -61,7 +61,8 @@ fn workflow_list_shows_bundled_workflows_with_their_bundle_and_a_refused_bundle_
         "{path}"
     );
     assert_eq!(by("ship")["runnable"], true);
-    assert_eq!(by("check")["ok"], true);
+    // An older client reads `ok` as "can run", so a gated bundle is not ok.
+    assert_eq!(by("check")["ok"], false);
     assert_eq!(by("check")["runnable"], false);
     assert!(by("check")["error"]
         .as_str()
@@ -160,4 +161,28 @@ fn workflow_run_does_not_start_a_bundled_gate() {
         !r.to_string().contains(&home.path().display().to_string()),
         "{r}"
     );
+}
+
+/// Review of #277: the atomic write never follows a symlink planted where its temp file goes.
+#[cfg(unix)]
+#[test]
+fn workflow_create_never_writes_through_a_planted_temp_file_symlink() {
+    let (server, home) = common::server(
+        Caps::new(true, false, false, vec![]).unwrap(),
+        Redactor::new(),
+    );
+    let project = home.path().join("proj/.aibus/workflows");
+    fs::create_dir_all(&project).unwrap();
+    let victim = home.path().join("victim.txt");
+    fs::write(&victim, "precious\n").unwrap();
+    std::os::unix::fs::symlink(&victim, project.join(".ship.toml.tmp")).unwrap();
+    let r = call(
+        &server,
+        "workflow_create",
+        json!({ "name": "ship", "scope": "project", "toml": SHIP }),
+    );
+    assert_ne!(r.is_error, Some(true), "{r:?}");
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "precious\n");
+    let md = fs::symlink_metadata(project.join("ship.toml")).unwrap();
+    assert!(md.is_file() && !md.file_type().is_symlink());
 }

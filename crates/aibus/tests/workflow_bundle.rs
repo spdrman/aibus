@@ -322,3 +322,77 @@ fn validate_reads_a_bundle_file_and_a_hostile_one_is_refused_and_writes_nothing(
     let out = aibus(h, &["workflow", "validate", "../evil.aibus"]);
     assert_eq!(out.status.code(), Some(12), "{}", stdout(&out));
 }
+
+/// Review of #277: text from a workflow file (loose or bundled) reaches the terminal with no
+/// escape sequence in it, and installing over a built-in agent needs `--force` and says so.
+#[test]
+fn workflow_text_reaches_the_terminal_without_escape_sequences() {
+    let home = xdg_temp();
+    let h = home.path();
+    fs::create_dir_all(project_flows(h)).unwrap();
+    let flow = "description = \"ok\\u001b]0;pwned\\u0007\\u001b[2J\"\n[[step]]\nagent = \"explore\"\nprompt = \"look\\u001b]0;t\\u0007 at {{input}}\\u001b[2J\"\n";
+    fs::write(project_flows(h).join("esc.toml"), flow).unwrap();
+    for args in [
+        &["workflow", "list"][..],
+        &["workflow", "show", "esc"],
+        &["workflow", "validate", "esc"],
+    ] {
+        let out = aibus(h, args);
+        let all = format!("{}{}", stdout(&out), stderr(&out));
+        assert!(
+            !all.contains('\u{1b}') && !all.contains('\u{7}'),
+            "{args:?}: {all:?}"
+        );
+        assert!(
+            all.contains("ok") || args[1] == "validate",
+            "{args:?}: {all}"
+        );
+    }
+}
+
+#[test]
+fn installing_over_a_built_in_agent_needs_force_and_says_which() {
+    let home = xdg_temp();
+    let h = home.path();
+    let agents = h.join("proj/.aibus/agents");
+    fs::create_dir_all(&agents).unwrap();
+    fs::write(
+        agents.join("plan.md"),
+        "---\nname: plan\ndescription: my planner\n---\nPlan.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project_flows(h)).unwrap();
+    fs::write(
+        project_flows(h).join("p.toml"),
+        "[[step]]\nagent = \"plan\"\nprompt = \"{{input}}\"\n",
+    )
+    .unwrap();
+    ok(
+        h,
+        &[
+            "workflow",
+            "pack",
+            "p",
+            "--with-agents",
+            "-o",
+            "../kit.aibus",
+        ],
+    );
+    let out = aibus(h, &["workflow", "install", "../kit.aibus", "--user"]);
+    assert_ne!(out.status.code(), Some(0));
+    assert!(
+        stderr(&out).contains("built-in") && stderr(&out).contains("plan"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!h.join(".config/aibus/agents/plan.md").exists());
+    let out = ok(
+        h,
+        &["workflow", "install", "../kit.aibus", "--user", "--force"],
+    );
+    assert!(
+        stderr(&out).contains("replaces the built-in plan"),
+        "{}",
+        stderr(&out)
+    );
+}

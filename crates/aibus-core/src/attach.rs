@@ -163,7 +163,7 @@ pub struct Attachments {
 
 /// Printable text only: no control character (an escape sequence cannot be drawn), no bidi or
 /// zero-width mark, cut to `max` characters. `lines` keeps newlines.
-fn clean(text: &str, max: usize, lines: bool) -> String {
+pub fn clean(text: &str, max: usize, lines: bool) -> String {
     text.chars()
         .filter(|c| {
             (*c == '\n' && lines)

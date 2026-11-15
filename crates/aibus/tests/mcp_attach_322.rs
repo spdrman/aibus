@@ -129,6 +129,16 @@ fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
     panic!("never saw {what}");
 }
 
+/// The code on the user's screen (the last `code XXXX` of the log), once it is there.
+fn screen_code(l: &Loop) -> String {
+    wait_for("a code on screen", || {
+        l.log.lock().unwrap().iter().any(|t| t.contains("code "))
+    });
+    let log = l.log.lock().unwrap().join("\n");
+    let at = log.rfind("code ").unwrap() + 5;
+    log[at..at + 4].to_owned()
+}
+
 fn typed(l: &Loop, line: &str) -> Result<String, String> {
     let before = l.notes.lock().unwrap().len();
     l.keyboard.send(line.into()).unwrap();
@@ -149,10 +159,11 @@ fn one_step_goes_out_to_the_attached_session_and_a_result_comes_back() {
             .call("aibus_attach", json!({"label": "reviewer"}))
             .expect("aibus_attach");
         assert_ne!(a["isError"], true, "{p:?}: {a}");
-        let code = a["structuredContent"]["code"]
-            .as_str()
-            .expect("a code")
-            .to_owned();
+        assert!(
+            a["structuredContent"].get("code").is_none(),
+            "the agent is not given the code: {a}"
+        );
+        let code = screen_code(&l);
         let early = typed(&l, "/attach step too early").unwrap_err();
         assert!(early.contains("no attached session"), "{early}");
         typed(&l, &format!("/attach accept {code}")).unwrap();
@@ -230,10 +241,8 @@ fn a_declined_step_and_a_vanished_agent_are_results_not_hangs() {
     let run = short_run();
     let (_ep, l) = start(run.path(), "01JCATT0000000000000000001");
     let mut c = agent(home.path(), run.path(), Protocol::V2026_07_28);
-    let code = c.call("aibus_attach", json!({})).unwrap()["structuredContent"]["code"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    c.call("aibus_attach", json!({})).unwrap();
+    let code = screen_code(&l);
     typed(&l, &format!("/attach accept {code}")).unwrap();
     typed(&l, "/attach step first").unwrap();
     let pulled = c.call("next_step", json!({})).unwrap();
@@ -279,7 +288,8 @@ fn the_agent_presents_a_plan_after_the_keyboard_allows_the_first_one() {
         )
         .unwrap();
     assert_eq!(p["structuredContent"]["status"], "pending", "{p}");
-    let code = p["structuredContent"]["code"].as_str().unwrap().to_owned();
+    assert!(p["structuredContent"].get("code").is_none(), "{p}");
+    let code = screen_code(&l);
     typed(&l, &format!("/attach accept {code}")).unwrap();
     let p = c
         .call(

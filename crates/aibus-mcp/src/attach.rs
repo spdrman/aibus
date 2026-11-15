@@ -17,7 +17,7 @@ use crate::{arguments, schema, text, Server, DRAFT_2020_12};
 
 /// Name, the `--allow` value that lists it, and what it says it does.
 const TOOLS: [(&str, &str, &str); 4] = [
-    ("aibus_attach", "attach", "Ask to attach this agent session to the live aibus session. The answer has a 4-character code: tell the user, who accepts it at the aibus keyboard. Until then nothing is attached."),
+    ("aibus_attach", "attach", "Ask to attach this agent session to the live aibus session. The user's aibus screen shows a code, which is not given to you: ask the user to accept it at the aibus keyboard. Until then nothing is attached."),
     ("next_step", "attach", "Ask for the next step aibus queued for this session. The step arrives as data; carry it out in your own context and answer with step_result. You may decline."),
     ("step_result", "attach", "Answer the step you were given: done, declined (with a reason) or failed, and a short summary. A late result or a used token is refused."),
     ("session_present", "present", "Show the user a message or a small table on a read-only panel of the aibus screen. The first panel waits for the user's yes at the aibus keyboard. It never opens a screen with live keys and never takes the focus."),

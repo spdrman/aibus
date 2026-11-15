@@ -7,14 +7,21 @@
 # it answers no permission prompt and no elicitation, and it never reads a step itself.
 #
 # Bounds: it does nothing without the marker, nothing when the turn is already a continuation
-# (`stop_hook_active`, which I could not confirm on the vendor page, so there is a second guard),
-# and at most one continuation every 20 seconds.
+# (`stop_hook_active`, documented in the Claude Code hooks reference: true when Claude Code is
+# already continuing because of a stop hook), and at most one continuation every 20 seconds.
+# Claude Code also caps consecutive stop-hook continuations at eight. The input is parsed as JSON
+# (jq, else python3); with neither it does nothing rather than guess.
 marker="${AIBUS_ATTACH_MARKER:-${XDG_STATE_HOME:-$HOME/.local/state}/aibus/attached}"
 [ -f "$marker" ] || exit 0
 input=$(cat)
-case "$input" in
-  *'"stop_hook_active":true'* | *'"stop_hook_active": true'*) exit 0 ;;
-esac
+if command -v jq >/dev/null 2>&1; then
+  active=$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null) || exit 0
+elif command -v python3 >/dev/null 2>&1; then
+  active=$(printf '%s' "$input" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("stop_hook_active", False)).lower())' 2>/dev/null) || exit 0
+else
+  exit 0
+fi
+[ "$active" = "false" ] || exit 0
 stamp="$marker.last"
 now=$(date +%s)
 last=$(cat "$stamp" 2>/dev/null || echo 0)

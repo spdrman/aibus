@@ -525,6 +525,8 @@ fn note_row<G: Graph>(
 
 /// `text` cut to `max` characters, for a log row.
 fn short(text: &str, max: usize) -> String {
+    // Escape and bidi characters go before the text is stored, not only before it is drawn.
+    let text = aibus_core::attach::clean(text, usize::MAX, false);
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     match flat.char_indices().nth(max) {
         Some((end, _)) => format!("{}...", &flat[..end]),
@@ -557,9 +559,13 @@ fn attached<G: Graph>(
                 (*pid, cwd.as_deref()),
                 now,
             ) {
-                Ok(out) => {
+                Ok(mut out) => {
                     if let Some(banner) = ui.attach.banner() {
                         note_row(app, step, client, banner)?;
+                    }
+                    // The code is for the user's screen: the agent is not given it.
+                    if let Some(o) = out.as_object_mut() {
+                        o.remove("code");
                     }
                     Ok(out)
                 }
@@ -623,7 +629,8 @@ fn attached<G: Graph>(
                     if let Some(banner) = ui.attach.banner() {
                         note_row(app, step, client, banner)?;
                     }
-                    Ok(json!({"status": "pending", "code": code}))
+                    let _ = code;
+                    Ok(json!({"status": "pending"}))
                 }
                 Err(why) => Err(why),
             }

@@ -155,7 +155,7 @@ An agent session that is already open (Claude Code, say) can attach to a live ai
 pull leg only, tested against a stand-in client, and no workflow schema promise yet.
 
 **Attaching.** The agent calls `aibus_attach {label?, lineage?}`. The session needs `--control-attach`. The screen
-logs `<client> wants to attach (pid, cwd), code 7Q2K` and the tool answers with the same code. Only a typed
+logs `<client> wants to attach (pid, cwd), code 7Q2K`; the tool's answer does not carry it, so the user reads it off the screen. Only a typed
 `/attach accept 7Q2K` at the aibus keyboard attaches it (60 s, then nothing changed); `/attach deny` refuses. A client has
 no way to send that line: `session_command` goes through the prompt's parser, which has no `/attach`. One agent holds a
 session at a time.

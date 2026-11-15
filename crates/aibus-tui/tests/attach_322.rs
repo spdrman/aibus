@@ -88,12 +88,21 @@ fn log_text(r: &Rig) -> String {
         .join("\n")
 }
 
+/// The code the screen shows (the last `code XXXX` of the log): the agent is never given it.
+fn screen_code(r: &Rig) -> String {
+    let log = log_text(r);
+    let at = log.rfind("code ").expect("a code on screen") + 5;
+    log[at..at + 4].to_owned()
+}
+
 fn attached(r: &mut Rig) {
     connect(r);
-    let code = call(r, attach_ask()).unwrap()["code"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let out = call(r, attach_ask()).unwrap();
+    assert!(
+        out.get("code").is_none(),
+        "the agent is not given the code: {out}"
+    );
+    let code = screen_code(r);
     type_line(r, &format!("/attach accept {code}")).unwrap();
 }
 
@@ -121,7 +130,11 @@ fn an_attach_request_shows_a_code_and_only_the_keyboard_can_accept_it() {
     let mut r = rig(true, false);
     connect(&mut r);
     let out = call(&mut r, attach_ask()).unwrap();
-    let code = out["code"].as_str().unwrap().to_owned();
+    assert!(
+        out.get("code").is_none(),
+        "the agent is not given the code: {out}"
+    );
+    let code = screen_code(&r);
     let log = log_text(&r);
     assert!(
         log.contains("wants to attach") && log.contains(&code) && log.contains("4123"),
@@ -284,14 +297,15 @@ fn the_first_present_waits_for_the_keyboard_then_shows_an_inert_badged_panel() {
     let out = call(&mut r, present_ask("the plan")).unwrap();
     assert_eq!(out["status"], "pending");
     assert!(
+        out.get("code").is_none(),
+        "the agent is not given the code: {out}"
+    );
+    assert!(
         !r.text().contains("the plan"),
         "nothing is drawn before the keyboard says yes"
     );
-    type_line(
-        &mut r,
-        &format!("/attach accept {}", out["code"].as_str().unwrap()),
-    )
-    .unwrap();
+    let code = screen_code(&r);
+    type_line(&mut r, &format!("/attach accept {code}")).unwrap();
     let screen = r.text();
     assert!(
         screen.contains("the plan")
@@ -332,12 +346,9 @@ fn the_first_present_waits_for_the_keyboard_then_shows_an_inert_badged_panel() {
 fn a_panel_never_opens_over_what_the_user_is_doing() {
     let mut r = rig(false, true);
     connect(&mut r);
-    let out = call(&mut r, present_ask("first")).unwrap();
-    type_line(
-        &mut r,
-        &format!("/attach accept {}", out["code"].as_str().unwrap()),
-    )
-    .unwrap();
+    let _ = call(&mut r, present_ask("first")).unwrap();
+    let code = screen_code(&r);
+    type_line(&mut r, &format!("/attach accept {code}")).unwrap();
     r.ui.presented = None;
     r.type_text("half a prompt");
     let why = call(&mut r, present_ask("busy one")).unwrap_err();
@@ -367,4 +378,29 @@ fn a_typed_attach_line_never_reaches_the_lead_and_a_bad_one_says_why() {
         "other lines take the prompt's path"
     );
     let _ = Duration::ZERO;
+}
+
+#[test]
+fn a_result_with_escape_and_bidi_characters_is_clean_in_the_stored_log() {
+    let mut r = rig(true, false);
+    attached(&mut r);
+    type_line(&mut r, "/attach step go").unwrap();
+    let step = call(&mut r, Ask::NextStep).unwrap();
+    let token = step["step"]["token"].as_str().unwrap().to_owned();
+    call(
+        &mut r,
+        Ask::StepResult {
+            token,
+            status: "done".into(),
+            summary: "ok\x1b[2J\u{202e}evil\x07".into(),
+        },
+    )
+    .unwrap();
+    let log = log_text(&r);
+    assert!(log.contains("okevil") || log.contains("ok[2J"), "{log:?}");
+    assert!(
+        !log.chars()
+            .any(|c| c == '\x1b' || c == '\x07' || c == '\u{202e}'),
+        "{log:?}"
+    );
 }

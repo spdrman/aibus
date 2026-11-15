@@ -234,11 +234,21 @@ pub async fn supervise(
     let mut stopped: Option<Ending> = None;
     let mut kill_at: Option<tokio::time::Instant> = None;
     let mut exit: Option<std::process::ExitStatus> = None;
-    let mut drain_until: Option<tokio::time::Instant> = None;
+    // After exit: the drain ends when nothing has been read for `drain_stall`, or `drain_max` after
+    // the exit whatever keeps arriving. Both are deadlines, so the drain always ends.
+    // Set when the drain was cut off: true if it hit `drain_max` (lines were still arriving).
+    let mut drained: Option<bool> = None;
+    let mut stall_at: Option<tokio::time::Instant> = None;
+    let mut cap_at: Option<tokio::time::Instant> = None;
     let (mut window, mut in_window) = (tokio::time::Instant::now(), 0u32);
 
     loop {
         if exit.is_some() && open_pipes == 0 {
+            break;
+        }
+        // The bound is checked on every pass too, so a steady flow cannot starve its timer arm.
+        if cap_at.is_some_and(|c| tokio::time::Instant::now() >= c) {
+            drained = Some(true);
             break;
         }
         tokio::select! {
@@ -272,11 +282,17 @@ pub async fn supervise(
                     window = tokio::time::Instant::now();
                     in_window = 0;
                 }
+                if exit.is_some() {
+                    stall_at = Some(tokio::time::Instant::now() + limits.drain_stall);
+                }
             }
             status = child.wait(), if exit.is_none() => {
                 exit = Some(status.map_err(SupervisorError::Spawn)?);
-                // A descendant may still hold the pipes; give it a moment, then end the group.
-                drain_until = Some(tokio::time::Instant::now() + Duration::from_secs(2));
+                // The pipes may still hold output, or a descendant may hold them open. Keep reading
+                // while lines arrive; end the group when they stop or the bound is reached.
+                let now = tokio::time::Instant::now();
+                stall_at = Some(now + limits.drain_stall);
+                cap_at = Some(now + limits.drain_max);
             }
             _ = cancel.cancelled(), if stopped.is_none() && exit.is_none() => {
                 stopped = Some(Ending::Cancelled);
@@ -298,9 +314,17 @@ pub async fn supervise(
                 #[cfg(not(unix))]
                 let _ = child.start_kill();
             }
-            _ = tokio::time::sleep_until(drain_until.unwrap_or(deadline)), if drain_until.is_some() => {
-                #[cfg(unix)]
-                signal_group(pid, rustix::process::Signal::KILL);
+            _ = tokio::time::sleep_until(stall_at.unwrap_or(deadline)), if stall_at.is_some() => {
+                // Slow storing, not silence: lines are waiting, so the stall has not happened.
+                if !rx.is_empty() {
+                    stall_at = Some(tokio::time::Instant::now() + limits.drain_stall);
+                    continue;
+                }
+                drained = Some(false);
+                break;
+            }
+            _ = tokio::time::sleep_until(cap_at.unwrap_or(deadline)), if cap_at.is_some() => {
+                drained = Some(true);
                 break;
             }
         }
@@ -308,6 +332,37 @@ pub async fn supervise(
     // Whatever the CLI left in its group goes with it.
     #[cfg(unix)]
     signal_group(pid, rustix::process::Signal::KILL);
+    if let Some(hit_bound) = drained {
+        // Count what was already read off the pipes but not yet recorded. What is still in the
+        // kernel pipe is not counted (the host does not read it), so the count is a lower bound.
+        rx.close();
+        let (mut lines, mut bytes) = (0u64, 0u64);
+        while let Ok(piece) = rx.try_recv() {
+            match piece {
+                Piece::Line(_, l) => {
+                    lines += 1;
+                    bytes += l.len() as u64;
+                }
+                Piece::TooLong(_, b) => {
+                    lines += 1;
+                    bytes += b;
+                }
+                _ => {}
+            }
+        }
+        // A quiet stall with nothing queued means a descendant held the pipes and nothing was
+        // lost. Anything queued, or lines still arriving at the bound, is reported.
+        if hit_bound || lines > 0 {
+            let mut gap = norm.gap(Channel::Host, "unread_after_exit", bytes, SystemTime::now());
+            gap.events[0].data["lines"] = json!(lines);
+            gap.events[0].data["bound"] = json!(if hit_bound {
+                "drain_max"
+            } else {
+                "drain_stall"
+            });
+            store.append(gap)?;
+        }
+    }
     guard.0 = None;
 
     let ending = stopped.unwrap_or_else(|| match exit.and_then(|s| s.code()) {

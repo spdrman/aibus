@@ -370,15 +370,22 @@ impl Attachments {
     pub fn banner(&self) -> Option<String> {
         let p = self.pending.as_ref()?;
         Some(match &p.wants {
-            Wants::Attach { label, pid, cwd } => format!(
-                "{} wants to attach{}{}{}, code {}: type /attach accept {} to allow, /attach deny to refuse",
-                p.client,
-                if label.is_empty() { String::new() } else { format!(" as {label}") },
-                pid.map_or(String::new(), |p| format!(" (pid {p}")),
-                if pid.is_some() { format!(", {cwd})") } else { String::new() },
-                p.code,
-                p.code
-            ),
+            // The code comes first: a long directory would push it off a log row otherwise.
+            Wants::Attach { label, pid, cwd } => {
+                let mut who = Vec::new();
+                if !label.is_empty() {
+                    who.push(format!("as {label}"));
+                }
+                if let Some(pid) = pid {
+                    who.push(format!("pid {pid}"));
+                    who.push(cwd.clone());
+                }
+                let who = if who.is_empty() { String::new() } else { format!(" ({})", who.join(", ")) };
+                format!(
+                    "{} wants to attach, code {}: type /attach accept {} to allow, /attach deny to refuse{who}",
+                    p.client, p.code, p.code
+                )
+            }
             Wants::Present(_) => format!(
                 "{} wants to show a panel, code {}: type /attach accept {} to allow it and later ones, /attach deny to refuse",
                 p.client, p.code, p.code

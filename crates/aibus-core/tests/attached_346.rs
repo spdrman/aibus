@@ -319,3 +319,27 @@ fn one_step_at_a_time_and_a_check_that_says_why() {
     a.handle(Dispatch::Check(check), now);
     assert!(got.try_recv().unwrap().unwrap_err().contains("busy"));
 }
+
+#[test]
+fn the_banner_shows_the_code_before_a_long_directory_can_push_it_off_the_row() {
+    let now = Instant::now();
+    let mut a = Attachments::new(true, false);
+    let cwd = format!("/private/tmp/{}", "deep/".repeat(40));
+    a.request_attach(
+        "claude-code",
+        Some("claude-live"),
+        &[],
+        (Some(4123), Some(&cwd)),
+        now,
+    )
+    .unwrap();
+    let banner = a.banner().unwrap();
+    let at = banner.find("code ").unwrap();
+    assert!(at < 40, "{banner}");
+    assert!(
+        banner.contains("/attach accept")
+            && banner.contains("4123")
+            && banner.contains("claude-live"),
+        "{banner}"
+    );
+}

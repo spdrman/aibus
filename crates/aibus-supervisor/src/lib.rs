@@ -23,6 +23,8 @@ use aibus_trace::Batch;
 /// built-in Claude normaliser and the declarative one of an extension (#286) both implement it, and
 /// `supervise` runs either, so the supervisor never knows which provider it is supervising.
 pub trait Engine: Send {
+    /// Makes the next event id sort after `id` (`supervise` seeds it from the run it writes to).
+    fn observe(&mut self, id: uuid::Uuid);
     fn start(&mut self, at: SystemTime, info: serde_json::Value) -> Batch;
     fn stream_line(&mut self, line: &[u8], at: SystemTime) -> Batch;
     fn hook_line(&mut self, line: &[u8], at: SystemTime) -> Batch;

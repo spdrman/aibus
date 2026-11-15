@@ -1292,6 +1292,9 @@ impl Normalizer {
 }
 
 impl crate::Engine for Normalizer {
+    fn observe(&mut self, id: Uuid) {
+        Self::observe(self, id);
+    }
     fn start(&mut self, at: SystemTime, info: Value) -> Batch {
         Self::start(self, at, info)
     }

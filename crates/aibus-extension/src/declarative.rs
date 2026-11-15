@@ -140,6 +140,10 @@ fn metric(v: &Value, pointer: Option<&String>, name: &str, quality: UsageQuality
 }
 
 impl Engine for Declarative {
+    fn observe(&mut self, id: uuid::Uuid) {
+        self.ids.observe(id);
+    }
+
     fn start(&mut self, at: SystemTime, info: Value) -> Batch {
         let mut e = self.host_event(
             EventKind::AttemptStarted,

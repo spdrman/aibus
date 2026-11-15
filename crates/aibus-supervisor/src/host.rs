@@ -156,7 +156,7 @@ fn signal_group(pid: Option<u32>, sig: rustix::process::Signal) {
 fn put(
     store: &mut TraceStore,
     batch: Batch,
-    norm: &mut Normalizer,
+    norm: &mut dyn Engine,
 ) -> Result<Vec<TraceEvent>, StoreError> {
     let out = store.append(batch)?;
     if let Some(id) = store.last_id() {

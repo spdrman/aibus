@@ -317,14 +317,19 @@ fn https(field: &str, s: &str) -> Result<(), ManifestError> {
 /// what is known, not a proof: the user sees the whole argv at install, and the real boundary is
 /// the host's allowlist of programs (`sandbox::OFFICIAL_CLIS`).
 fn unattended(tokens: &[String]) -> Option<&str> {
-    const NAMES: [&str; 14] = [
+    // Flags that say it in their name, with any value.
+    const NAMES: [&str; 20] = [
         "dangerously",
         "skip-permissions",
         "yolo",
         "bypass",
         "no-sandbox",
         "auto-approve",
+        "auto-accept",
+        "approve-all",
+        "yes-always",
         "allow-all",
+        "allow-tools",
         "full-auto",
         "trust-all",
         "trust-tools",
@@ -332,26 +337,38 @@ fn unattended(tokens: &[String]) -> Option<&str> {
         "allowed-tools",
         "allowed_tools",
         "auto-edit",
+        "permission-prompt-tool",
+        "dangerously-skip",
     ];
-    const MODE_FLAGS: [&str; 7] = [
+    // Flags that change what runs or what is reachable, so a manifest does not pass them.
+    const NEVER: [&str; 3] = ["settings", "mcp-config", "add-dir"];
+    // Flags that take a mode, and the modes that skip the prompts.
+    const MODE_FLAGS: [&str; 9] = [
         "permission-mode",
         "approval-mode",
         "approval-policy",
         "ask-for-approval",
         "sandbox",
+        "sandbox-mode",
+        "profile",
         "a",
         "s",
     ];
-    const RISKY_VALUES: [&str; 9] = [
+    const RISKY_VALUES: [&str; 14] = [
         "acceptedits",
         "bypasspermissions",
         "dontask",
         "never",
         "yolo",
-        "auto_edit",
+        "auto",
+        "autoedit",
         "auto-edit",
+        "auto-edit",
+        "on-failure",
         "danger-full-access",
+        "full-access",
         "unrestricted",
+        "full-auto",
     ];
     const ALWAYS_RISKY: [&str; 4] = [
         "acceptedits",
@@ -359,6 +376,18 @@ fn unattended(tokens: &[String]) -> Option<&str> {
         "dontask",
         "danger-full-access",
     ];
+    // `--config key=value` and `-c key=value` set what the CLI would ask about.
+    let sets_policy = |v: &str| {
+        let v = v.to_ascii_lowercase().replace('_', "-");
+        [
+            "approval-policy",
+            "sandbox-mode",
+            "approval-mode",
+            "full-auto",
+        ]
+        .iter()
+        .any(|k| v.contains(k))
+    };
     for (i, t) in tokens.iter().enumerate() {
         let is_flag = t.starts_with('-');
         let body = t.trim_start_matches('-');
@@ -366,18 +395,35 @@ fn unattended(tokens: &[String]) -> Option<&str> {
             .split_once('=')
             .map_or((body, None), |(n, v)| (n, Some(v)));
         let name = name.to_ascii_lowercase();
+        let next = tokens
+            .get(i + 1)
+            .filter(|n| !n.starts_with('-'))
+            .map(String::as_str);
+        let value = inline.or(next).unwrap_or_default();
+        let normal = value.to_ascii_lowercase().replace('_', "-");
         if NAMES.iter().any(|w| name.contains(w))
+            || NEVER.contains(&name.as_str())
             || (is_flag && matches!(name.as_str(), "y" | "yes"))
         {
             return Some(t);
         }
-        if is_flag && MODE_FLAGS.contains(&name.as_str()) {
-            let next = tokens
-                .get(i + 1)
-                .filter(|n| !n.starts_with('-'))
-                .map(String::as_str);
-            let value = inline.or(next).unwrap_or_default().to_ascii_lowercase();
-            if RISKY_VALUES.contains(&value.as_str()) {
+        if is_flag && MODE_FLAGS.contains(&name.as_str()) && RISKY_VALUES.contains(&normal.as_str())
+        {
+            return Some(t);
+        }
+        if is_flag && matches!(name.as_str(), "config" | "c") && sets_policy(value) {
+            return Some(t);
+        }
+        // A short flag with its value attached: `-anever`, `-sdanger-full-access`, `-capproval_policy=never`.
+        if is_flag && !t.starts_with("--") && body.len() > 1 {
+            let (short, rest) = body.split_at(1);
+            let rest = rest
+                .trim_start_matches('=')
+                .to_ascii_lowercase()
+                .replace('_', "-");
+            if (matches!(short, "a" | "s") && RISKY_VALUES.contains(&rest.as_str()))
+                || (short == "c" && sets_policy(&rest))
+            {
                 return Some(t);
             }
         }
@@ -452,7 +498,12 @@ pub fn forbidden_program(name: &str) -> bool {
     FORBIDDEN.contains(&lower.as_str()) || FORBIDDEN.contains(&base)
 }
 
-fn argv_tokens(field: &str, tokens: &[String], max: usize) -> Result<(), ManifestError> {
+fn argv_tokens(
+    field: &str,
+    tokens: &[String],
+    max: usize,
+    shape: bool,
+) -> Result<(), ManifestError> {
     if tokens.len() > max {
         return Err(bad(field, format!("more than {max} tokens")));
     }
@@ -463,21 +514,24 @@ fn argv_tokens(field: &str, tokens: &[String], max: usize) -> Result<(), Manifes
             t,
             "a plain token (no space, slash, quote, $, `, ~, @ or braces)",
         )?;
-        // The shapes of an install, an eval and a one-liner: not what an official CLI is launched with.
-        if matches!(
-            t.as_str(),
-            "install"
-                | "uninstall"
-                | "add"
-                | "exec"
-                | "eval"
-                | "-c"
-                | "-e"
-                | "-m"
-                | "--eval"
-                | "--exec"
-                | "--command"
-        ) {
+        // The shapes of an install, an eval and a one-liner. Only for a program that is not one of
+        // the host's own official CLIs: `codex exec --json` is Codex's own headless mode.
+        if shape
+            && matches!(
+                t.as_str(),
+                "install"
+                    | "uninstall"
+                    | "add"
+                    | "exec"
+                    | "eval"
+                    | "-c"
+                    | "-e"
+                    | "-m"
+                    | "--eval"
+                    | "--exec"
+                    | "--command"
+            )
+        {
             return Err(bad(
                 field,
                 format!("{t:?} is the shape of an install, an exec or an eval"),
@@ -593,11 +647,16 @@ impl Manifest {
         if self.auth.credential_access != "forbidden" {
             return Err(bad("auth.credential_access", "must be \"forbidden\""));
         }
-        argv_tokens("auth.login_argv", &self.auth.login_argv, 16)?;
-        argv_tokens("auth.status_argv", &self.auth.status_argv, 16)?;
+        let shape = !self
+            .cli
+            .executable_candidates
+            .iter()
+            .all(|e| crate::sandbox::OFFICIAL_CLIS.contains(&e.as_str()));
+        argv_tokens("auth.login_argv", &self.auth.login_argv, 16, shape)?;
+        argv_tokens("auth.status_argv", &self.auth.status_argv, 16, shape)?;
 
         let ex = &self.execution;
-        argv_tokens("execution.argv", &ex.argv, 32)?;
+        argv_tokens("execution.argv", &ex.argv, 32, shape)?;
         if ex.prompt != "stdin" {
             return Err(bad(
                 "execution.prompt",

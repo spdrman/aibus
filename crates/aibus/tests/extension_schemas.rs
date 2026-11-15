@@ -65,7 +65,8 @@ fn the_template_and_the_reference_manifest_validate() {
 fn the_schema_refuses_what_the_host_refuses() {
     let s = schema("manifest-v1");
     let base = manifest_json(EXAMPLES[0]);
-    let cases: [(&str, fn(&mut Value)); 7] = [
+    type Edit = fn(&mut Value);
+    let cases: [(&str, Edit); 7] = [
         ("an extra key", |v| v["surprise"] = json!(1)),
         ("credential access", |v| {
             v["permissions"]["read_provider_credentials"] = json!(true)

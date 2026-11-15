@@ -23,4 +23,5 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 
 [dev-dependencies]
 aibus-testkit.workspace = true
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }

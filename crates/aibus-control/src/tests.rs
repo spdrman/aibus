@@ -39,7 +39,11 @@ fn runtime() -> tokio::runtime::Runtime {
 
 /// A session directory in a throwaway home, made the way the binary makes it.
 fn sessions(home: &aibus_testkit::Xdg) -> PathBuf {
-    let dir = runtime_dir(Some(home.path().join("run").as_os_str()), home.path());
+    let dir = runtime_dir(
+        Some(home.path().join("run").as_os_str()),
+        home.path(),
+        home.path(),
+    );
     private_dir(&dir).unwrap();
     dir
 }
@@ -473,7 +477,7 @@ fn every_directory_on_the_way_to_the_sockets_has_to_be_private_and_mine() {
     let tmp = home.path().join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o1777)).unwrap();
-    let dir = runtime_dir(None, &tmp);
+    let dir = runtime_dir(None, &tmp, &tmp);
     let parent = dir.parent().unwrap().to_owned();
     // Somebody else made the parent first, open to everyone: refused, never repaired.
     std::fs::create_dir_all(&parent).unwrap();
@@ -496,11 +500,11 @@ fn every_directory_on_the_way_to_the_sockets_has_to_be_private_and_mine() {
     std::fs::create_dir_all(&open).unwrap();
     std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
     assert!(
-        private_dir(&runtime_dir(None, &open)).is_err(),
+        private_dir(&runtime_dir(None, &open, &open)).is_err(),
         "a parent anyone can rename in was accepted"
     );
     // The good case: made fresh under a sticky shared directory, every level 0700 and mine.
-    let fresh = runtime_dir(None, &tmp.join("again"));
+    let fresh = runtime_dir(None, &tmp.join("again"), &tmp.join("again"));
     std::fs::create_dir_all(tmp.join("again")).unwrap();
     std::fs::set_permissions(tmp.join("again"), std::fs::Permissions::from_mode(0o1777)).unwrap();
     private_dir(&fresh).unwrap();
@@ -745,4 +749,122 @@ fn the_link_refuses_a_socket_of_mine_served_by_another_uid() {
         "the token went out"
     );
     drop(ep);
+}
+
+// ---- #320: the socket path has to fit sun_path on macOS too ---------------------------------
+
+/// A shared directory like `/tmp`: mine, mode 1777, short.
+fn short_base() -> tempfile::TempDir {
+    let base = tempfile::Builder::new()
+        .prefix("ab")
+        .tempdir_in("/tmp")
+        .unwrap();
+    std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+    base
+}
+
+/// A shared temp directory of `len` characters, like macOS's `/var/folders/xx/.../T` (49), or
+/// the test root plus a name where the root is already longer than that.
+fn long_tmp(home: &aibus_testkit::Xdg, len: usize) -> PathBuf {
+    let root = home.path().display().to_string().len();
+    let tmp = home
+        .path()
+        .join("t".repeat(len.saturating_sub(root + 1).max(1)));
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o1777)).unwrap();
+    assert!(tmp.as_os_str().len() >= len);
+    tmp
+}
+
+const ID_36: &str = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+#[test]
+fn issue_320_a_macos_length_temp_dir_opens_and_the_socket_fits_sun_path() {
+    // The root of a test home is long on a Mac and short on Linux, so the temp dir is padded to
+    // at least 49 characters and the test means the same on both.
+    let home = aibus_testkit::xdg_temp();
+    let tmp = long_tmp(&home, 49);
+    let short = short_base();
+    let dir = runtime_dir(None, &tmp, short.path());
+    let ep = Endpoint::open(&dir, ID_36, &info("x"))
+        .unwrap_or_else(|e| panic!("open in {} failed: {e}", dir.display()));
+    let sock = ep.socket();
+    assert!(
+        sock.as_os_str().len() < 100,
+        "{} is {} bytes, past what sun_path takes",
+        sock.display(),
+        sock.as_os_str().len()
+    );
+    assert!(sock.exists());
+}
+
+#[test]
+fn issue_320_a_default_that_fits_is_kept() {
+    let tmp = Path::new("/tmp");
+    let dir = runtime_dir(None, tmp, Path::new("/elsewhere"));
+    assert_eq!(dir, tmp.join(format!("aibus-{}", uid())).join("sessions"));
+}
+
+#[test]
+fn issue_320_xdg_runtime_dir_still_wins_however_long_the_temp_dir_is() {
+    let home = aibus_testkit::xdg_temp();
+    let tmp = long_tmp(&home, 49);
+    let short = short_base();
+    let run = Path::new("/run/user/1000");
+    let dir = runtime_dir(Some(run.as_os_str()), &tmp, short.path());
+    assert_eq!(dir, run.join("aibus").join("sessions"));
+    // A relative one is still ignored, so the fallback applies.
+    let dir = runtime_dir(Some(OsStr::new("run")), &tmp, short.path());
+    assert!(dir.starts_with(short.path()), "{}", dir.display());
+}
+
+#[test]
+fn issue_320_the_fallback_dir_gets_the_same_checks_as_the_default() {
+    let home = aibus_testkit::xdg_temp();
+    let tmp = long_tmp(&home, 49);
+    let short = short_base();
+    let dir = runtime_dir(None, &tmp, short.path());
+    assert!(
+        dir.starts_with(short.path()),
+        "{} is not under the short base",
+        dir.display()
+    );
+    let parent = dir.parent().unwrap().to_owned();
+    // Somebody else made the per-user directory first, open to everyone: refused, not repaired.
+    std::fs::create_dir_all(&parent).unwrap();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(private_dir(&dir).is_err(), "an open parent was accepted");
+    assert!(Endpoint::open(&dir, ID_36, &info("x")).is_err());
+    assert_eq!(mode(&parent), 0o777, "a parent that fails is not repaired");
+    // Private but another user's.
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+    if chown_to_stranger(&parent) {
+        assert!(
+            private_dir(&dir).is_err(),
+            "a parent of another user was accepted"
+        );
+    }
+    // A short base anyone can rename in is refused.
+    let open = tempfile::Builder::new()
+        .prefix("ab")
+        .tempdir_in("/tmp")
+        .unwrap();
+    std::fs::set_permissions(open.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+    let dir = runtime_dir(None, &tmp, open.path());
+    assert!(dir.starts_with(open.path()), "{}", dir.display());
+    assert!(
+        private_dir(&dir).is_err(),
+        "a base without the sticky bit was accepted"
+    );
+    // The good case: every level 0700 and mine.
+    let fresh = tempfile::Builder::new()
+        .prefix("ab")
+        .tempdir_in("/tmp")
+        .unwrap();
+    std::fs::set_permissions(fresh.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+    let dir = runtime_dir(None, &tmp, fresh.path());
+    assert!(dir.starts_with(fresh.path()), "{}", dir.display());
+    private_dir(&dir).unwrap();
+    assert_eq!(mode(&dir), 0o700);
+    assert_eq!(mode(dir.parent().unwrap()), 0o700);
 }

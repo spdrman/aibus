@@ -47,7 +47,7 @@ pub(crate) fn uid() -> u32 {
 
 /// `$XDG_RUNTIME_DIR/aibus/sessions`, or `<tmp>/aibus-<uid>/sessions` where there is none (macOS).
 #[cfg(unix)]
-pub fn runtime_dir(xdg_runtime: Option<&OsStr>, tmp: &Path) -> PathBuf {
+pub fn runtime_dir(xdg_runtime: Option<&OsStr>, tmp: &Path, _short: &Path) -> PathBuf {
     match xdg_runtime.map(Path::new).filter(|p| p.is_absolute()) {
         Some(run) => run.join("aibus").join("sessions"),
         None => tmp.join(format!("aibus-{}", uid())).join("sessions"),

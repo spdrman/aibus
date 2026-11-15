@@ -25,7 +25,7 @@ fn run_dir(home: &Path) -> PathBuf {
 
 /// A live session `id` in `home`'s runtime directory, answered by a stand-in loop.
 fn session(rt: &Rt, home: &Path, id: &str, seen: Seen) -> Endpoint {
-    let dir = runtime_dir(Some(run_dir(home).as_os_str()), home);
+    let dir = runtime_dir(Some(run_dir(home).as_os_str()), home, home);
     private_dir(&dir).unwrap();
     let info = json!({"id": id, "cwd": "~/app", "lead": "lead", "model": "sonnet", "started": "2026-11-14T10:00:00Z"});
     let mut ep = Endpoint::open(&dir, id, &info).unwrap();

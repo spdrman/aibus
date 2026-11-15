@@ -259,7 +259,7 @@ impl std::io::Write for Lines {
 
 /// The session's control socket for `aibus mcp --session` (#274), served on `rt`: what a client
 /// sends reaches the loop through `opts.remote`. A socket that cannot be opened is a line in the
-/// log, not a reason to refuse the session.
+/// log and a line on the screen, not a reason to refuse the session.
 #[cfg(unix)]
 fn control(
     ctx: &Ctx,
@@ -289,7 +289,12 @@ fn control(
         Ok(ep) => Some(ep),
         Err(e) => {
             tracing::warn!("no control socket for this session: {e}");
-            let _ = app;
+            // The log line is for the file; the session's own screen says it too, so a missing
+            // socket is never silent. The reducer logs `io error in <context>`.
+            let _ = app.step(Msg::IoError {
+                context: format!("control socket, so `aibus mcp` will not find this session: {e}"),
+                error: String::new(),
+            });
             None
         }
     }

@@ -23,6 +23,7 @@ const KEY: &str = "sk-test-CONTROL-0123456789abcdef";
 type Seen = Arc<Mutex<Vec<String>>>;
 
 struct Live {
+    _run: tempfile::TempDir,
     _rt: tokio::runtime::Runtime,
     dir: PathBuf,
     _home: aibus_testkit::Xdg,
@@ -37,15 +38,16 @@ fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-/// A session directory in a throwaway home, made the way the binary makes it.
-fn sessions(home: &aibus_testkit::Xdg) -> PathBuf {
-    let dir = runtime_dir(
-        Some(home.path().join("run").as_os_str()),
-        home.path(),
-        home.path(),
-    );
+/// A session directory made the way the binary makes it, under a short `XDG_RUNTIME_DIR` (the
+/// throwaway home's own path is too long for a socket on macOS, see #320).
+fn sessions() -> (tempfile::TempDir, PathBuf) {
+    let run = tempfile::Builder::new()
+        .prefix("ab")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let dir = runtime_dir(Some(run.path().as_os_str()), run.path(), run.path());
     private_dir(&dir).unwrap();
-    dir
+    (run, dir)
 }
 
 fn info(id: &str) -> Value {
@@ -76,7 +78,7 @@ async fn stand_in(mut rx: mpsc::Receiver<Remote>, seen: Seen) {
 
 fn live_with(id: &str, tweak: impl FnOnce(&mut Endpoint)) -> (Live, Endpoint) {
     let home = aibus_testkit::xdg_temp();
-    let dir = sessions(&home);
+    let (run, dir) = sessions();
     let rt = runtime();
     let seen: Seen = Arc::default();
     let redactor = Redactor::new();
@@ -91,6 +93,7 @@ fn live_with(id: &str, tweak: impl FnOnce(&mut Endpoint)) -> (Live, Endpoint) {
     }
     (
         Live {
+            _run: run,
             _rt: rt,
             dir,
             _home: home,
@@ -159,8 +162,7 @@ fn the_socket_token_and_info_are_private_and_gone_after_drop() {
 
 #[test]
 fn a_stale_socket_from_a_crash_is_replaced_and_swept() {
-    let home = aibus_testkit::xdg_temp();
-    let dir = sessions(&home);
+    let (_run, dir) = sessions();
     // A session that died without cleaning up: its socket file is there but nobody listens.
     for stale in ["01JCSTALE0000000000000000A", "01JCSTALE0000000000000000B"] {
         let listener =
@@ -389,8 +391,7 @@ fn the_link_round_trips_and_every_answer_is_redacted() {
 
 #[test]
 fn without_an_id_the_link_takes_the_only_live_session_and_refuses_when_there_are_several() {
-    let home = aibus_testkit::xdg_temp();
-    let dir = sessions(&home);
+    let (_run, dir) = sessions();
     let rt = runtime();
     let none = Link::new(dir.clone(), None);
     assert!(
@@ -514,8 +515,7 @@ fn every_directory_on_the_way_to_the_sockets_has_to_be_private_and_mine() {
 
 #[test]
 fn a_sessions_directory_of_another_user_is_refused() {
-    let home = aibus_testkit::xdg_temp();
-    let dir = sessions(&home);
+    let (_run, dir) = sessions();
     if chown_to_stranger(&dir) {
         assert!(private_dir(&dir).is_err());
         assert!(Endpoint::open(&dir, "01JCOWNER0000000000000000A", &info("x")).is_err());
@@ -676,8 +676,7 @@ fn a_storm_of_silent_connections_is_capped_and_the_session_recovers() {
 
 #[test]
 fn two_sessions_starting_together_never_sweep_each_other() {
-    let home = aibus_testkit::xdg_temp();
-    let dir = sessions(&home);
+    let (_run, dir) = sessions();
     for round in 0..40 {
         let ids = [
             format!("01JCRACE{round:02}00000000000000A"),
@@ -709,8 +708,7 @@ fn two_sessions_starting_together_never_sweep_each_other() {
 
 #[test]
 fn dropping_an_endpoint_never_removes_a_socket_it_did_not_make() {
-    let home = aibus_testkit::xdg_temp();
-    let dir = sessions(&home);
+    let (_run, dir) = sessions();
     let ep = Endpoint::open(&dir, "01JCMINE00000000000000000A", &info("x")).unwrap();
     // Somebody replaced the file at our path (a new session with the same id after a sweep).
     std::fs::remove_file(ep.socket()).unwrap();

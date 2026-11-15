@@ -593,3 +593,298 @@ async fn a_store_error_mid_run_still_ends_the_cli_and_its_children() {
     }
     assert!(!alive(&pid), "the child {pid} was orphaned");
 }
+
+// ---- #324: output still queued when the CLI exits is read, or a gap says it was not ----
+
+/// A stand-in that writes `n` distinct stderr lines at once and exits. The host reads them at
+/// `lines_per_second`, so most are still queued in the pipe when the CLI is gone.
+fn flood_body(n: u32) -> String {
+    format!("i=0; while [ $i -lt {n} ]; do echo \"queued line $i\" >&2; i=$((i+1)); done")
+}
+
+fn drain_limits(lines_per_second: u32, stall_ms: u64, max_ms: u64) -> Limits {
+    Limits {
+        lines_per_second,
+        drain_stall: Duration::from_millis(stall_ms),
+        drain_max: Duration::from_millis(max_ms),
+        ..Limits::default()
+    }
+}
+
+fn on_channel<'a>(events: &'a [TraceEvent], kind: EventKind, ch: &str) -> Vec<&'a TraceEvent> {
+    events
+        .iter()
+        .filter(|e| e.kind == kind && e.data["channel"] == ch)
+        .collect()
+}
+
+#[tokio::test]
+async fn issue_324_output_queued_at_exit_is_read_to_the_end() {
+    let rig = Rig::new();
+    let started = Instant::now();
+    let (out, events) = rig
+        .plain(&flood_body(600), drain_limits(200, 1_500, 20_000))
+        .await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let read = on_channel(&events, EventKind::TraceWarning, "stderr").len();
+    assert_eq!(read, 600, "only {read} of 600 queued lines were read");
+    assert!(started.elapsed() < Duration::from_secs(15));
+}
+
+#[tokio::test]
+async fn issue_324_a_flood_after_exit_hits_the_bound_and_says_so() {
+    let rig = Rig::new();
+    let started = Instant::now();
+    let (out, events) = rig
+        .plain(&flood_body(3_000), drain_limits(20, 400, 1_000))
+        .await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "the drain after exit has to end at its bound, took {:?}",
+        started.elapsed()
+    );
+    let read = on_channel(&events, EventKind::TraceWarning, "stderr").len();
+    assert!(read < 3_000, "the bound was never reached ({read} read)");
+    let gaps: Vec<_> = events
+        .iter()
+        .filter(|e| e.kind == EventKind::GapDetected && e.data["reason"] == "unread_after_exit")
+        .collect();
+    assert_eq!(gaps.len(), 1, "one gap says output was left unread");
+    let d = &gaps[0].data;
+    assert_eq!(d["bound"], "drain_max", "{d}");
+    assert!(d["lines"].as_u64().unwrap() > 0, "lines were counted: {d}");
+    assert!(d["bytes"].as_u64().unwrap() > 0, "bytes were counted: {d}");
+}
+
+#[tokio::test]
+async fn issue_324_a_cli_that_exits_mid_line_still_has_its_last_line_read() {
+    let rig = Rig::new();
+    let body = format!("{}\nprintf 'cut off by exit' >&2", flood_body(500));
+    let (out, events) = rig.plain(&body, drain_limits(200, 1_500, 20_000)).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let warnings = on_channel(&events, EventKind::TraceWarning, "stderr");
+    assert_eq!(warnings.len(), 501, "{} of 501 lines read", warnings.len());
+}
+
+#[tokio::test]
+async fn issue_324_overlapping_output_on_both_pipes_at_exit_is_all_read() {
+    let rig = Rig::new();
+    let body =
+        "i=0; while [ $i -lt 300 ]; do echo \"err $i\" >&2; echo \"not json $i\"; i=$((i+1)); done";
+    let (_, events) = rig.plain(body, drain_limits(200, 1_500, 20_000)).await;
+    let err = on_channel(&events, EventKind::TraceWarning, "stderr").len();
+    let out = on_channel(&events, EventKind::GapDetected, "stdout").len();
+    assert_eq!((err, out), (300, 300), "stderr and stdout lines read");
+}
+
+#[tokio::test]
+async fn issue_324_a_descendant_holding_the_pipes_is_still_cut_off_quickly() {
+    let rig = Rig::new();
+    let started = Instant::now();
+    let (out, events) = rig
+        .plain(
+            "sleep 30 &\necho hello >&2",
+            drain_limits(2_000, 500, 5_000),
+        )
+        .await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(
+        !events
+            .iter()
+            .any(|e| e.data["reason"] == "unread_after_exit"),
+        "nothing was queued, so there is nothing to report"
+    );
+}
+
+const DRIP: &str = "( while :; do echo drip >&2; sleep 0.2; done ) &";
+
+fn unread_gaps(events: &[TraceEvent]) -> Vec<&TraceEvent> {
+    events
+        .iter()
+        .filter(|e| e.kind == EventKind::GapDetected && e.data["reason"] == "unread_after_exit")
+        .collect()
+}
+
+#[tokio::test]
+async fn issue_324_a_slow_drip_after_exit_ends_at_drain_max_with_a_gap() {
+    let rig = Rig::new();
+    let started = Instant::now();
+    let (out, events) = rig.plain(DRIP, drain_limits(2_000, 500, 2_000)).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(1_900),
+        "ended early: {took:?}"
+    );
+    assert!(took < Duration::from_secs(6), "ended late: {took:?}");
+    let gaps = unread_gaps(&events);
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].data["bound"], "drain_max");
+}
+
+#[tokio::test]
+async fn issue_324_cancel_during_the_drain_ends_it_as_cancelled() {
+    let rig = Rig::new();
+    let exe = rig.cli(DRIP);
+    let cancel = CancellationToken::new();
+    let c = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        c.cancel();
+    });
+    let started = Instant::now();
+    let (out, _) = rig
+        .run(
+            rig.launch(exe, drain_limits(2_000, 5_000, 20_000)),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.ending, Ending::Cancelled);
+    assert_eq!(out.status, AttemptStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn issue_324_cancel_during_the_drain_records_what_was_left_unread() {
+    let rig = Rig::new();
+    let pidfile = rig.root.join("cli.pid");
+    let exe = rig.cli(&format!(
+        "echo $$ > {}\n{}",
+        pidfile.display(),
+        flood_body(3_000)
+    ));
+    let cancel = CancellationToken::new();
+    let c = cancel.clone();
+    // Cancel only once the CLI process is gone, so the cancel lands in the drain.
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let Ok(pid) = fs::read_to_string(&pidfile) else {
+                continue;
+            };
+            let gone = !std::process::Command::new("kill")
+                .args(["-0", pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            if gone {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        c.cancel();
+    });
+    let started = Instant::now();
+    let (out, events) = rig
+        .run(
+            rig.launch(exe, drain_limits(20, 5_000, 20_000)),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.ending, Ending::Cancelled);
+    let gaps = unread_gaps(&events);
+    assert_eq!(gaps.len(), 1, "pending lines are a gap");
+    assert!(gaps[0].data["lines"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn issue_324_the_wall_deadline_during_the_drain_ends_it_as_wall_time() {
+    let rig = Rig::new();
+    let limits = Limits {
+        wall_time: Duration::from_secs(1),
+        ..drain_limits(2_000, 5_000, 20_000)
+    };
+    let started = Instant::now();
+    let (out, _) = rig.plain(DRIP, limits).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.ending, Ending::WallTime);
+}
+
+/// A CLI that stops on SIGTERM while a descendant that ignores it keeps writing: the drain after
+/// the exit has to end at the grace period, not at `drain_max`.
+const STOPPABLE_WITH_DRIP: &str =
+    "( trap '' TERM; while :; do echo drip >&2; sleep 0.2; done ) &\n\
+     echo xxxxxxxxxxxxxxxxxxxxxxxx\ntrap 'exit 0' TERM\nwhile :; do sleep 0.1; done";
+
+fn stopped_limits() -> Limits {
+    Limits {
+        grace: Duration::from_millis(700),
+        max_stdout_bytes: 10_000,
+        ..drain_limits(2_000, 10_000, 20_000)
+    }
+}
+
+async fn stopped_before_exit(limits: Limits, cancel_at: Option<u64>) -> (Ending, Duration, usize) {
+    let rig = Rig::new();
+    let exe = rig.cli(STOPPABLE_WITH_DRIP);
+    let cancel = CancellationToken::new();
+    if let Some(ms) = cancel_at {
+        let c = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            c.cancel();
+        });
+    }
+    let started = Instant::now();
+    let (out, events) = rig
+        .run(
+            rig.launch(exe, limits),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    (out.ending, started.elapsed(), unread_gaps(&events).len())
+}
+
+#[tokio::test]
+async fn issue_324_cancel_before_exit_drains_only_for_the_grace_period() {
+    let (ending, took, gaps) = stopped_before_exit(stopped_limits(), Some(400)).await;
+    assert_eq!(ending, Ending::Cancelled);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(gaps, 1, "the drip was still arriving when the drain ended");
+}
+
+#[tokio::test]
+async fn issue_324_wall_time_before_exit_drains_only_for_the_grace_period() {
+    let limits = Limits {
+        wall_time: Duration::from_millis(400),
+        ..stopped_limits()
+    };
+    let (ending, took, gaps) = stopped_before_exit(limits, None).await;
+    assert_eq!(ending, Ending::WallTime);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(gaps, 1);
+}
+
+#[tokio::test]
+async fn issue_324_output_limit_before_exit_drains_only_for_the_grace_period() {
+    let limits = Limits {
+        max_stdout_bytes: 10,
+        ..stopped_limits()
+    };
+    let (ending, took, gaps) = stopped_before_exit(limits, None).await;
+    assert_eq!(ending, Ending::OutputLimit);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(gaps, 1);
+}

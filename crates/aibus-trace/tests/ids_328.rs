@@ -363,3 +363,38 @@ fn an_event_in_the_same_millisecond_as_the_stores_own_gap_is_accepted_328() {
             .unwrap_or_else(|e| panic!("{i}: {e}"));
     }
 }
+
+#[test]
+fn a_refused_batch_does_not_swallow_the_payload_budget_gap_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let (mut s, _) = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::Retain { max_bytes: 1 },
+        StoreLimits::default(),
+    )
+    .unwrap();
+    s.append(batch(vec![ev(v7(MS + 100, 0), EventKind::AttemptStarted)]))
+        .unwrap();
+    let with_payload = |events| Batch {
+        events,
+        payload: Some(serde_json::json!({ "big": "payload over one byte" })),
+    };
+    let err = s
+        .append(with_payload(vec![ev(v7(MS, 1), EventKind::MessageChunk)]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    s.append(with_payload(vec![ev(
+        v7(MS + 200, 0),
+        EventKind::MessageChunk,
+    )]))
+    .unwrap();
+    drop(s);
+    let (events, _) = TraceStore::read(&dir).unwrap();
+    let gaps = events
+        .iter()
+        .filter(|e| e.data["reason"] == "payload_budget_exhausted")
+        .count();
+    assert_eq!(gaps, 1, "the refused batch used up the gap flag");
+}

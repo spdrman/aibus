@@ -450,3 +450,47 @@ pub async fn supervise(
         .unwrap_or(AttemptStatus::Failed);
     Ok(Outcome { ending, status })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aibus_trace::{AttemptRef, PayloadPolicy, StoreLimits};
+    use std::time::Duration;
+
+    #[test]
+    fn put_keeps_the_normaliser_after_the_stores_own_gap_328() {
+        let tmp = tempfile::tempdir().unwrap();
+        let limits = StoreLimits {
+            soft_max_bytes: 0,
+            ..StoreLimits::default()
+        };
+        let (mut store, _) = TraceStore::open(
+            &tmp.path().join("run"),
+            aibus_core::Redactor::new(),
+            PayloadPolicy::MetadataOnly,
+            limits,
+        )
+        .unwrap();
+        let mut norm = Normalizer::new(AttemptRef {
+            workflow_run_id: uuid::Uuid::from_u128(1),
+            attempt_id: uuid::Uuid::from_u128(2),
+            parent_attempt_id: None,
+            provider_extension: "org.aibus.test".into(),
+        });
+        // In the past, so the store's gap (stamped with its own clock) lands in a later millisecond.
+        let then = SystemTime::now() - Duration::from_secs(5);
+        put(&mut store, norm.start(then, json!({})), &mut norm).unwrap();
+        // Past the soft limit a stderr warning is dropped and the store writes its own gap.
+        put(&mut store, norm.stderr_line(b"dropped", then), &mut norm).unwrap();
+        let gap = store.last_id().unwrap();
+        let gap_ms = gap.as_bytes()[..6]
+            .iter()
+            .fold(0u64, |a, x| a << 8 | u64::from(*x));
+        let next = norm.stderr_line(
+            b"next",
+            SystemTime::UNIX_EPOCH + Duration::from_millis(gap_ms),
+        );
+        // Time and counter, not the hash tail, put the next event after the gap.
+        assert!(next.events[0].event_id.as_bytes()[..8] > gap.as_bytes()[..8]);
+    }
+}

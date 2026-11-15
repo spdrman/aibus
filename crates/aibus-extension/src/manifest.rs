@@ -823,19 +823,21 @@ impl Manifest {
                 }
             }
         }
-        // What the host fills is never also written by the manifest.
+        // What the host fills is never also written by the manifest, in any spelling.
         if schema_2 {
-            let static_tokens = ex
-                .argv
-                .iter()
-                .chain(&self.auth.login_argv)
-                .chain(&self.auth.status_argv);
-            let optional = ex.optional.iter().map(|o| &o.flag);
-            for t in static_tokens.chain(optional) {
-                let name = t.split('=').next().unwrap_or_default();
-                if exes
+            let groups = [
+                &ex.argv,
+                &self.auth.login_argv,
+                &self.auth.status_argv,
+                &ex.optional
                     .iter()
-                    .any(|cli| crate::flags::typed(cli, name).is_some())
+                    .map(|o| o.flag.clone())
+                    .collect::<Vec<_>>(),
+            ];
+            for tokens in groups {
+                if let Some(t) = exes
+                    .iter()
+                    .find_map(|cli| crate::flags::writes_typed(cli, tokens))
                 {
                     return Err(bad(
                         "execution.argv",

@@ -139,7 +139,7 @@ fn issue_334_a_schema_1_manifest_cannot_carry_typed_flags() {
 }
 
 /// A schema 1 host reads `compat.protocol` before anything else and the host speaks 1.0.0, so a
-/// schema 2 manifest has to ask for 1.1.0 or later: that is how the old host says no, cleanly.
+/// schema 2 manifest has to ask for 1.1.0 or later: a host that reads protocols tells itself apart this way (a host from before schema 2 fails closed earlier, at the unknown field).
 #[test]
 fn issue_334_a_schema_2_manifest_asks_for_a_protocol_a_schema_1_host_does_not_speak() {
     let m = Manifest::parse(&reference_v2(&both())).unwrap();
@@ -651,4 +651,51 @@ async fn issue_334_the_launch_check_refuses_a_typed_flag_with_a_value_the_host_w
     // A manifest that declares no typed flag takes none.
     let plain = Manifest::parse(&reference_v1()).unwrap();
     assert!(check_launch(&plain, &with(&["--model", "gpt-5"]), &[]).is_err());
+}
+
+/// Review of #345: the short alias and the config key of a typed flag are the host's too.
+#[test]
+fn issue_334_a_typed_flags_alias_or_config_key_cannot_be_written_as_a_static_token() {
+    for (cli, argv) in [
+        ("codex", r#"["exec", "-m", "gpt-x"]"#),
+        ("codex", r#"["exec", "-mgpt-x"]"#),
+        ("codex", r#"["exec", "-c", "model=x"]"#),
+        ("codex", r#"["exec", "-cmodel=x"]"#),
+        ("codex", r#"["exec", "--config", "model=x"]"#),
+        ("codex", r#"["exec", "--config=model=x"]"#),
+        ("codex", r#"["exec", "--model", "x"]"#),
+        ("gemini", r#"["-m", "x"]"#),
+        ("kimi", r#"["--print", "-m", "x"]"#),
+    ] {
+        let (field, _) = refused(&as_cli(cli, argv, &typed("--model", "model_id")));
+        assert_eq!(field, "execution.argv", "{cli} {argv}");
+    }
+    // Other config keys are still the manifest's to set.
+    let ok = as_cli(
+        "codex",
+        r#"["exec", "-c", "model_reasoning_effort=low"]"#,
+        &typed("--model", "model_id"),
+    );
+    assert!(Manifest::parse(&ok).is_ok());
+}
+
+/// The plain-relative-path rule in `typed_args` holds on its own, not only through the directory check.
+#[test]
+fn issue_334_a_path_has_to_be_plain_and_relative_even_when_it_points_inside() {
+    let (_t, work) = workdir();
+    let m = codex_path_manifest();
+    let inside = work.join("reports/x.txt").to_string_lossy().into_owned();
+    for bad in [
+        inside.as_str(),
+        "./x.txt",
+        "reports/./x.txt",
+        "reports//x.txt",
+    ] {
+        let r = typed_args(
+            &m,
+            &values("--output-last-message", TypedValue::Path(bad.into())),
+            &work,
+        );
+        assert!(r.is_err(), "{bad:?} was accepted: {r:?}");
+    }
 }

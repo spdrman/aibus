@@ -717,7 +717,6 @@ fn an_official_clis_own_subcommands_are_not_refused_for_their_name() {
     for argv in [
         r#"["exec", "--json"]"#,
         r#"["exec", "--json", "--skip-git-repo-check"]"#,
-        r#"["run", "--json"]"#,
     ] {
         assert!(Manifest::parse(&as_codex(argv)).is_ok(), "{argv}");
     }
@@ -1041,4 +1040,49 @@ fn issue_339_the_launch_check_applies_the_list_too() {
         err.contains("--profile") && err.contains("allowlist"),
         "{err}"
     );
+}
+
+/// Review of #342: subcommands are on the list too, and a grouped short switch is not read.
+#[test]
+fn issue_339_a_subcommand_that_is_not_on_the_list_is_refused() {
+    for (cli, argv) in [
+        ("claude", r#"["mcp", "add", "evil", "npx", "evilpkg"]"#),
+        ("claude", r#"["update"]"#),
+        ("claude", r#"["-p", "mcp"]"#),
+        ("codex", r#"["apply", "task1"]"#),
+        ("codex", r#"["run", "--json"]"#),
+        (
+            "gemini",
+            r#"["--output-format", "json", "mcp", "add", "x"]"#,
+        ),
+        ("kimi", r#"["--print", "web"]"#),
+    ] {
+        assert_eq!(
+            refused(&for_clis(&[cli], argv)).0,
+            "execution.argv",
+            "{cli} {argv}"
+        );
+    }
+    let m = edit(
+        &for_clis(&["claude"], r#"["-p"]"#),
+        "login_argv = [\"login\"]",
+        "login_argv = [\"mcp\", \"add\"]",
+    );
+    assert_eq!(refused(&m).0, "auth.login_argv");
+}
+
+#[test]
+fn issue_339_a_grouped_short_switch_is_refused() {
+    for (cli, argv) in [
+        ("gemini", r#"["-dy"]"#),
+        ("claude", r#"["-pc"]"#),
+        ("claude", r#"["-pverbose"]"#),
+        ("claude", r#"["--verbose=true"]"#),
+    ] {
+        assert_eq!(
+            refused(&for_clis(&[cli], argv)).0,
+            "execution.argv",
+            "{cli} {argv}"
+        );
+    }
 }

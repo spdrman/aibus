@@ -224,6 +224,7 @@ pub fn typed_args(
             }
             (ValueKind::WorkdirPath, TypedValue::Path(rel)) => {
                 let plain = !rel.is_empty()
+                    && rel.split('/').all(|p| !p.is_empty() && p != ".")
                     && Path::new(rel).is_relative()
                     && Path::new(rel)
                         .components()

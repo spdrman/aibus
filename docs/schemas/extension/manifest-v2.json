@@ -92,7 +92,7 @@
       "properties": {
         "protocol": {
           "type": "string",
-          "description": "A range such as >=1.1.0, <2.0.0 that does not contain 1.0.0, so a host that speaks 1.0.0 (schema 1 only) refuses the manifest as a protocol mismatch. This host speaks 1.1.0."
+          "description": "A range such as >=1.1.0, <2.0.0 that does not contain 1.0.0, so a host that reads protocol 1.0.0 only can tell it is not for it (a host from before schema 2 refuses it earlier, as an unknown field). This host speaks 1.1.0."
         },
         "os": {
           "type": "array",
@@ -313,8 +313,15 @@
           "type": "string",
           "enum": [
             "builtin:claude-stream-json",
-            "declarative-jsonl"
-          ]
+            "declarative-jsonl",
+            "wasm-module"
+          ],
+          "description": "wasm-module names a guest in `module`. It is refused by a build of aibus without the `wasm` feature."
+        },
+        "module": {
+          "type": "string",
+          "pattern": "^wasm/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.wasm$",
+          "description": "Only with engine wasm-module: the guest, a .wasm file directly under wasm/. It is part of the package, so the content hash and the signature cover it. It may import only aibus.read_line, aibus.emit and aibus.next_seq."
         },
         "rule": {
           "type": "array",

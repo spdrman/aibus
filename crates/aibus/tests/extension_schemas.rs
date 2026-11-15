@@ -249,3 +249,16 @@ fn issue_334_manifest_v2_accepts_typed_flags_and_v1_refuses_them() {
         assert!(!check_against(&v2, &v).is_empty(), "v2 accepted {what}");
     }
 }
+
+/// #345 review: schema 2 carries the WASM engine fields schema 1 has (#344), so a schema 2 WASM
+/// manifest does not fail the published schema.
+#[test]
+fn issue_334_manifest_v2_names_the_wasm_module_engine_and_its_module() {
+    let n = &schema("manifest-v2")["properties"]["normalizer"]["properties"];
+    let engines = n["engine"]["enum"].as_array().unwrap();
+    assert!(engines.iter().any(|e| e == "wasm-module"));
+    assert!(n["module"]["pattern"]
+        .as_str()
+        .unwrap()
+        .starts_with("^wasm/"));
+}

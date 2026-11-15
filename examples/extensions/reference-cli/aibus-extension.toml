@@ -20,7 +20,7 @@ name = "devshell"
 url = "https://devshell.org"
 
 [compat]
-# Schema 2 needs a host that speaks protocol 1.1.0; an older host refuses it as a protocol mismatch.
+# Schema 2 needs a host that speaks protocol 1.1.0; a host from before schema 2 refuses it (as an unknown field).
 protocol = ">=1.1.0, <2.0.0"
 os = ["macos", "linux"]
 # 2.1.0 is the oldest the probe accepts; 2.1.311 is the only version tested (#281, #285).

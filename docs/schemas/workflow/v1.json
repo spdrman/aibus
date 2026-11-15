@@ -2,17 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/workflow/v1.json",
   "title": "aibus workflow v1",
-  "description": "A workflow file (.aibus/workflows/<name>.toml, or workflows/<name>.toml inside a .aibus bundle) read as JSON: a named chain of delegations. This schema covers the shape only. It cannot express the template rules (a {{...}} must close, be one of input, prev.summary or steps.<agent>.summary, have no prev.summary in the first step, and name an agent that comes earlier), and it cannot know which agents exist. `aibus workflow validate` checks both.",
+  "description": "A workflow file (.aibus/workflows/<name>.toml, or workflows/<name>.toml inside a .aibus bundle) read as JSON: a named chain of delegations, or with [[route]] a graph of them. Every field added for the compiler (#283) is optional, and a file that uses none of them is the chain it always was. This schema covers the shape only. It cannot express the template rules (a {{...}} must close, be one of input, prev.summary or steps.<key>.summary, and read a step that runs before this one), the graph rules (routes name steps, forward routes make a DAG from the first step that reaches every scheduled step, a route back needs max_iterations, a native subagent has a parent on its own runtime and is never routed to), or which agents exist and what their tools grant. `aibus workflow validate` and `aibus workflow plan --dry-run` check all of them.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["step"],
+  "required": [
+    "step"
+  ],
   "properties": {
+    "schema_version": {
+      "description": "Optional. \"1\" is this format; a file without it is read the same way.",
+      "enum": [
+        "1"
+      ]
+    },
     "name": {
       "description": "The workflow's name; the file name is used when this is left out.",
       "type": "string"
     },
     "description": {
       "type": "string"
+    },
+    "revision": {
+      "description": "The author's label for this version of the file, shown in a plan.",
+      "type": "string",
+      "pattern": "^[0-9A-Za-z._+-]{1,64}$"
     },
     "step": {
       "description": "The chain, run in order.",
@@ -21,7 +34,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["agent", "prompt"],
+        "required": [
+          "agent",
+          "prompt"
+        ],
         "properties": {
           "agent": {
             "description": "The agent that runs this step.",
@@ -42,6 +58,139 @@
             "description": "When this step fails, the step before it and this one run again, at most N times.",
             "type": "string",
             "pattern": "^retry:[1-5]$"
+          },
+          "id": {
+            "description": "A name for the step when its agent is not enough; the step's key. Unique, and not another step's agent.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "runtime": {
+            "description": "Where the step runs: aibus (this binary, the default) or cli.claude (the official Claude Code CLI, experimental: it plans and does not run yet).",
+            "enum": [
+              "aibus",
+              "cli.claude"
+            ]
+          },
+          "mode": {
+            "description": "aibus_managed (the default), native (a subagent inside its parent's vendor process) or native_or_managed (the routing policy picks).",
+            "enum": [
+              "aibus_managed",
+              "native",
+              "native_or_managed"
+            ]
+          },
+          "parent": {
+            "description": "The key of the step that launches this one; it comes earlier in the file.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "requires": {
+            "description": "Capabilities the step's agent must have tools for.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "repo_read",
+                "repo_write",
+                "shell",
+                "network",
+                "delegate",
+                "network_write",
+                "git_merge",
+                "destructive_tool"
+              ]
+            }
+          },
+          "isolation": {
+            "description": "git_worktree runs the step in its own worktree (aibus-managed steps only).",
+            "enum": [
+              "none",
+              "git_worktree"
+            ]
+          },
+          "output": {
+            "description": "summary (the default) or json, which a route can check with <step>.artifact_valid.",
+            "enum": [
+              "summary",
+              "json"
+            ]
+          }
+        }
+      }
+    },
+    "route": {
+      "description": "Explicit edges. With any route the file order is no longer the run order: the first step starts, and control follows the routes.",
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "when": {
+            "description": "<step>.completed, <step>.failed or <step>.artifact_valid joined with !, && and ||; the default is <from>.completed.",
+            "type": "string",
+            "maxLength": 256
+          },
+          "max_iterations": {
+            "description": "Makes the route a loop back to an earlier step, taken at most this often in a run.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        }
+      }
+    },
+    "limits": {
+      "description": "The envelope a scheduler holds the whole workflow to.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_agent_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_parallel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "max_wall_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        }
+      }
+    },
+    "approvals": {
+      "description": "What needs a person's yes before it happens.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required_for": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "repo_read",
+              "repo_write",
+              "shell",
+              "network",
+              "delegate",
+              "network_write",
+              "git_merge",
+              "destructive_tool"
+            ]
           }
         }
       }

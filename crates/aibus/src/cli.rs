@@ -463,6 +463,35 @@ pub enum WorkflowCmd {
         #[arg(long, value_name = "WHAT", value_parser = ["gates"])]
         allow: Vec<String>,
     },
+    /// Compile a workflow (a name or a .toml path) and print its plan; nothing runs
+    Plan {
+        target: String,
+        /// Print the plan and run nothing (required: running a plan is the scheduler's, #288)
+        #[arg(long)]
+        dry_run: bool,
+        /// A saved plan (`plan --dry-run --json`) this one must match; exit 13 when it does not
+        #[arg(long, value_name = "FILE")]
+        locked: Option<PathBuf>,
+    },
+    /// Compare two workflows or saved plans (names, .toml paths or .json plans)
+    Diff { a: String, b: String },
+    /// Print the run-manifest.json a run of the workflow starts from
+    Manifest {
+        target: String,
+        /// The task input, or - to read it from stdin; only its hash and length are kept
+        #[arg(long, value_name = "TEXT")]
+        input: Option<String>,
+    },
+    /// Show, then write with --apply, the workflow's native subagents as Claude Code agent files
+    Export {
+        target: String,
+        /// Where the files go, relative to the project (default .claude/agents)
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+        /// Write the files: the hash the preview printed
+        #[arg(long, value_name = "HASH")]
+        apply: Option<String>,
+    },
     Run {
         name: String,
         input: String,
@@ -537,6 +566,10 @@ mod tests {
         "workflow run",
         "workflow pack",
         "workflow install",
+        "workflow plan",
+        "workflow diff",
+        "workflow manifest",
+        "workflow export",
         "init",
         "config path",
         "config show",

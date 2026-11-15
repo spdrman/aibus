@@ -1,0 +1,15 @@
+# expect: route 1: max_iterations is for a route that goes back to an earlier step
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+
+[[route]]
+from = "a"
+to = "b"
+max_iterations = 3

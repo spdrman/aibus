@@ -17,6 +17,7 @@ aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
 aibus workflow list | show <name> | validate [<name>|<path>|<file>.aibus] | run <name> <input>
                pack <name>... -o <file>.aibus [--description T] [--with-agents] [--force]
                install <file>.aibus [--user] [--force] [--allow gates]
+               plan <target> --dry-run [--locked <plan.json>] | diff <a> <b> | manifest <target> [--input <text>|-] | export <target> [--dir <dir>] [--apply <hash>]
 aibus config path | show | init | validate | edit
 aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
 aibus doctor
@@ -90,7 +91,8 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | 8 | token or cost budget exceeded | `Budget` |
 | 10 | the lead run ended `Failed`, `Partial` or `Cancelled` | `Run` |
 | 11 | `doctor` found problems | |
-| 12 | `agent validate` or `workflow validate` found errors | |
+| 12 | `agent validate`, `workflow validate`, or `workflow plan`, `diff`, `manifest` or `export` found errors (the workflow gets no plan) | |
+| 13 | `workflow plan --locked` found the plan differs from the saved one (drift) | |
 
 `session list --json` and friends exit 0 even when the list is empty.
 
@@ -104,6 +106,10 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | `workflow list` | `[{name, path, description, steps, scope, bundle, source, runnable, not_runnable?}]`, or `{name, path, error, scope, bundle, source, runnable}` for a broken file or a refused bundle |
 | `workflow show` | `{name, path, description, steps:[{agent, prompt, gate?, on_fail?}], source, not_runnable?}` |
 | `workflow validate` | `{ok, errors:[{path, step, field, message}], warnings:[..]}` |
+| `workflow plan --dry-run` | the compiled plan, `docs/schemas/workflow/plan-v1.json` (or the validate shape with `ok: false` and exit 12) |
+| `workflow diff` | `{same, a, b, changes:[{path, a, b}]}`, `a` and `b` the two plan hashes |
+| `workflow manifest` | `run-manifest.json`, `docs/schemas/workflow/run-manifest-v1.json` (always JSON) |
+| `workflow export` | `{dir, files, diff, hash}`, or `{written}` with `--apply` |
 | `account list` | `[{name, provider, label, auth:"keyring|env|file|none", default_model, status}]` |
 | `account test` | `{name, ok, label, org, models:[..], latency_ms}` or `{name, ok:false, error:{kind, message}}` |
 | `session list` | `[{id, started_at, ended_at, topic, runs, outcome, cost_usd}]` |
@@ -186,3 +192,18 @@ A bundled workflow with a `gate` is listed but does not run (`workflow run`, `ru
 - `workflow pack <name>... -o <file>.aibus` puts the named workflows (whichever source wins each name) into a bundle named after the file. `--with-agents` adds the project or user definition of each agent the steps name (built-ins need none). It never replaces a file without `--force`, and the bundle it writes is read back through every check first. The output is deterministic: the same files give the same bytes.
 - `workflow install <file>.aibus` writes the workflows (and agents) into the project's `.aibus/` or, with `--user`, the user's config directory, through the checks of `workflow_create`: the name rule, 64 KiB, 32 steps, `workflow validate` against the agents you have plus the bundle's own, the redactor, and the gate rule. `--allow gates` is also what an agent needs that has hooks, a permission mode, an `account`, a non-empty `fallback`, `memory: user` or an `initial_prompt` (`memory: project` and `local` stay in the project and are not gated); its `tools` are not gated, since every tool call still goes through the permission rules. An agent with a built-in's name (`lead`, `explore`, ...) replaces that built-in for every session, so it needs `--force` and install says which built-in it replaces. Every check runs before anything is written. A file that is already there is only replaced with `--force`. The workflows and agents directories, and the `.aibus` (or config) directory above them, have to be real directories: a symlink at any of them is refused (the user's config directory itself may be a link, which install resolves first). Install stages every file under a random name made with `O_CREAT|O_EXCL` (which never follows a symlink), mode 0600, then renames them into place, and a failure removes the files and directories it made, but a file replaced with `--force` before a later rename failed cannot be put back. The files are byte for byte as in the bundle, so pack then install gives identical files.
 - `workflow validate <file>.aibus` checks a bundle; `workflow validate` with no argument checks every loose file and bundle in both directories.
+
+## 10. Compiling a workflow (#283)
+
+`aibus workflow plan <target> --dry-run` compiles a workflow (a name, found as `workflow run` finds it, or a path) against the agents discovery finds and prints the plan: every step with its key, agent, runtime, resolved mode, prompt hash and the invocation it would get, the typed edges, fan-out groups, the envelope, the approval boundary and the routing decisions, under one `plan_hash`. Nothing runs, no gate included. `--dry-run` is required: running a plan is the scheduler's (#288), and plan without it is exit 2. A workflow that does not validate, has a step that `requires` what its agent's tools don't grant, has more than 256 steps or holds something credential-shaped gets no plan and exit 12. The same input gives the same bytes on any host (`fixtures/workflows/plans/` is checked on each one).
+
+`--locked <plan.json>` holds the plan to one saved earlier with `plan --dry-run --json`; any difference (a prompt edited, an agent definition changed, a route added) is printed as paths like `steps.tests.prompt.sha256` and is exit 13. A saved plan whose `plan_hash` does not match its content was edited by hand, which is said on stderr.
+
+`aibus workflow diff <a> <b>` compares two workflows or saved plans (`.json`). Steps are matched by key and edges by their ends, so moving a step in the file is not a change. It always exits 0.
+
+`aibus workflow manifest <target> [--input <text>|-]` prints the `run-manifest.json` a run of the plan starts from (spec section 4.3): the plan hash and every prompt and agent hash, the task input as a hash and a length (`-` reads it from stdin), the aibus version, OS and architecture, the runtimes, configured models, the routing decisions, the repository's commit and whether it is dirty (git runs with the repository's hooks and filesystem monitor off), and environment variable names, never values. What only a started run can know is `{"unknown": "<why>"}`; what does not apply is `{"not_applicable": "<why>"}`. Writing one per attempt lands with the attempt store (#282).
+
+`aibus workflow export <target>` shows the Claude Code agent files (`.claude/agents/<key>.md`, or `--dir`) the workflow's native subagents would become, as a diff against what is there, and writes nothing. `--apply <hash>` writes them only when `<hash>` is the hash of the diff that preview printed and the files are still what it showed; a symlink or anything not a plain file is refused. A plan needs none of this: the invocation passes native subagents inline with `--agents`, which writes no file.
+
+The format is in `docs/spec/01-agents-and-continuity.md` section 8.4 and `docs/schemas/workflow/v1.json`.
+

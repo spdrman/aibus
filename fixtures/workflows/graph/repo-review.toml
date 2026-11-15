@@ -1,0 +1,49 @@
+schema_version = "1"
+name = "repo-review"
+revision = "1.0.0"
+description = "Review a pull request and produce a verified recommendation"
+
+# The lead runs in the official Claude Code CLI and hands the repository search to a native
+# subagent of its own (passed inline with --agents, so no file is written).
+[[step]]
+id = "lead"
+agent = "general"
+runtime = "cli.claude"
+requires = ["repo_read", "delegate"]
+prompt = """
+Lead the review of a pull request. Ask the search subagent for the code the change touches, \
+wait for it in the foreground, and hand back what changed and where.
+Pull request: {{input}}"""
+
+[[step]]
+id = "search"
+agent = "explore"
+runtime = "cli.claude"
+parent = "lead"
+mode = "native_or_managed"
+requires = ["repo_read"]
+prompt = "Find the code the change touches, its callers and its tests. Quote paths and lines."
+
+# An independent review aibus starts itself, in its own worktree, after the lead completes.
+[[step]]
+id = "audit"
+agent = "plan"
+parent = "lead"
+mode = "aibus_managed"
+isolation = "git_worktree"
+requires = ["repo_read"]
+output = "json"
+prompt = "Review this change on your own and answer in JSON with keys verdict and reasons. What changed: {{steps.lead.summary}}"
+
+[[route]]
+from = "lead"
+to = "audit"
+when = "lead.completed"
+
+[limits]
+max_agent_runs = 8
+max_parallel = 3
+max_wall_seconds = 1800
+
+[approvals]
+required_for = ["network_write", "git_merge", "destructive_tool"]

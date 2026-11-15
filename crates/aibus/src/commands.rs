@@ -280,10 +280,15 @@ pub fn workflow_validate(g: &Global, target: Option<&str>) -> Result<u8, AibusEr
         }
     }
     let env = crate::agent_cmd::Env::load(g)?;
-    let roster: Vec<_> = env.discover(g)?.agents.into_keys().collect();
+    let agents = env.discover(g)?.agents;
+    let roster: Vec<_> = agents.keys().cloned().collect();
     let mut warnings = Vec::new();
     for (path, stem, text, from) in &units {
-        let v = workflow::validate(text, stem, &roster);
+        let mut v = workflow::validate(text, stem, &roster);
+        // A step that requires what its agent can't do (#283) is an error too.
+        if let Ok(wf) = workflow::Workflow::parse(stem, text) {
+            v.errors.extend(workflow::compile::capability_problems(&wf, &agents));
+        }
         let tag = |list: Vec<Problem>| list.into_iter().map(|p| (path.clone(), p)).collect::<Vec<_>>();
         errors.extend(tag(v.errors));
         warnings.extend(tag(v.warnings));

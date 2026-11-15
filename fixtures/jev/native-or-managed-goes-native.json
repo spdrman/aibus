@@ -1,0 +1,20 @@
+{
+  "about": "native_or_managed under a parent on the same runtime, which shows native child lineage: native.",
+  "request": {
+    "task_id": "search",
+    "requires": ["one_shot", "headless"],
+    "candidates": ["cli.claude"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "bounded",
+    "risk_class": "read_only",
+    "requested_mode": "native_or_managed",
+    "parent_runtime": "cli.claude"
+  },
+  "decision": {
+    "selected_runtime": "cli.claude",
+    "execution_mode": "native",
+    "reason_code": "pinned_runtime",
+    "policy_evidence": ["risk:read_only", "status:cli.claude=experimental", "mode:native_child_lineage"],
+    "decision_source": "jev_deterministic"
+  }
+}

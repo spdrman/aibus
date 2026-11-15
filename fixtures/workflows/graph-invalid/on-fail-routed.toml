@@ -1,0 +1,15 @@
+# expect: step 2: on_fail retries the step before in a chain; with routes, write a route back with max_iterations
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+on_fail = "retry:1"
+
+[[route]]
+from = "a"
+to = "b"

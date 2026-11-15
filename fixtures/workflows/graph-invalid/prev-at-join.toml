@@ -1,0 +1,27 @@
+# expect: step 3: `{{prev.summary}}` needs exactly one route into this step
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+
+[[step]]
+id = "c"
+agent = "explore"
+prompt = "r {{prev.summary}}"
+
+[[route]]
+from = "a"
+to = "b"
+
+[[route]]
+from = "a"
+to = "c"
+
+[[route]]
+from = "b"
+to = "c"

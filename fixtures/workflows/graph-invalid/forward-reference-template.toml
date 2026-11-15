@@ -1,0 +1,23 @@
+# expect: `steps.c.summary` names a step that does not run before this one
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q {{steps.c.summary}}"
+
+[[step]]
+id = "c"
+agent = "explore"
+prompt = "r"
+
+[[route]]
+from = "a"
+to = "b"
+
+[[route]]
+from = "b"
+to = "c"

@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/workflow/run-manifest-v1.json",
+  "title": "aibus run manifest v1",
+  "description": "run-manifest.json (spec section 4.3, #283): what a run of a compiled plan starts from. Every value that a person could mistake for a fact is wrapped: {\"value\": ...} when known, {\"unknown\": \"<why>\"} when nobody knows it yet, {\"not_applicable\": \"<why>\"} when it does not apply. The task input is kept as a hash and a length, never as text; environment variables by name, never by value; no credential, cookie or provider session id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "manifest_version",
+    "trace_schema_version",
+    "workflow",
+    "steps",
+    "task_input",
+    "aibus",
+    "host",
+    "runtimes",
+    "models",
+    "jev",
+    "repository",
+    "environment",
+    "budgets",
+    "approvals",
+    "execution",
+    "artifacts",
+    "provider_session_id"
+  ],
+  "properties": {
+    "kind": {
+      "const": "aibus.run-manifest"
+    },
+    "manifest_version": {
+      "const": 1
+    },
+    "trace_schema_version": {
+      "$ref": "#/$defs/known"
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "revision",
+        "plan_hash",
+        "source_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/$defs/known"
+        },
+        "plan_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "prompt_sha256",
+          "agent_sha256",
+          "runtime",
+          "mode"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "prompt_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "agent_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "task_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/known"
+        },
+        "bytes": {
+          "$ref": "#/$defs/known"
+        }
+      }
+    },
+    "aibus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/known"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "arch"
+      ],
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/known"
+        },
+        "arch": {
+          "$ref": "#/$defs/known"
+        }
+      }
+    },
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status",
+          "capabilities",
+          "executable",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "executable": {
+            "$ref": "#/$defs/known"
+          },
+          "version": {
+            "$ref": "#/$defs/known"
+          }
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "configured",
+          "reported"
+        ],
+        "properties": {
+          "step": {
+            "type": "string"
+          },
+          "configured": {
+            "$ref": "#/$defs/known"
+          },
+          "reported": {
+            "$ref": "#/$defs/known"
+          }
+        }
+      }
+    },
+    "jev": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_revision",
+        "decisions"
+      ],
+      "properties": {
+        "policy_revision": {
+          "$ref": "#/$defs/known"
+        },
+        "decisions": {
+          "type": "array"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_commit",
+        "dirty_before",
+        "dirty_after",
+        "worktree_id"
+      ],
+      "properties": {
+        "base_commit": {
+          "$ref": "#/$defs/known"
+        },
+        "dirty_before": {
+          "$ref": "#/$defs/known"
+        },
+        "dirty_after": {
+          "$ref": "#/$defs/known"
+        },
+        "worktree_id": {
+          "$ref": "#/$defs/known"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "variable_names",
+        "fingerprint"
+      ],
+      "properties": {
+        "variable_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "budgets": {
+      "type": "object"
+    },
+    "approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_for",
+        "outcomes"
+      ],
+      "properties": {
+        "required_for": {
+          "type": "array"
+        },
+        "outcomes": {
+          "$ref": "#/$defs/known"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runnable_now",
+        "attempt_id",
+        "started_at",
+        "ended_at"
+      ],
+      "properties": {
+        "runnable_now": {
+          "type": "boolean"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/known"
+        },
+        "started_at": {
+          "$ref": "#/$defs/known"
+        },
+        "ended_at": {
+          "$ref": "#/$defs/known"
+        }
+      }
+    },
+    "artifacts": {
+      "$ref": "#/$defs/known"
+    },
+    "provider_session_id": {
+      "$ref": "#/$defs/known"
+    }
+  },
+  "$defs": {
+    "known": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {
+              "description": "Known."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unknown"
+          ],
+          "properties": {
+            "unknown": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "not_applicable"
+          ],
+          "properties": {
+            "not_applicable": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

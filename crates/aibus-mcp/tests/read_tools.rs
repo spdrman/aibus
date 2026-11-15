@@ -31,12 +31,12 @@ fn structured(server: &aibus_mcp::Server, tool: &str, args: Value) -> Value {
 }
 
 #[test]
-fn the_default_flags_list_the_six_read_tools_in_order() {
+fn the_default_flags_list_the_seven_read_tools_in_order() {
     let (server, _home) = common::server(Caps::default(), Redactor::new());
     let names: Vec<_> = server.tools().iter().map(|t| t.name.to_string()).collect();
     assert_eq!(
         names,
-        ["workflow_list", "workflow_get", "workflow_explain", "workflow_validate", "workflow_dry_run", "agent_list"]
+        ["workflow_list", "workflow_get", "workflow_explain", "workflow_validate", "workflow_dry_run", "agent_list", "workflow_plan"]
     );
     for t in server.tools() {
         let a = t.annotations.expect("annotations");

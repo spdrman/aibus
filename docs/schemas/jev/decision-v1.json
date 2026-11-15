@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/jev/decision-v1.json",
+  "title": "Jev decision v1",
+  "description": "What Jev decided for one request and why. selected_runtime null means no candidate fits and a person decides.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selected_runtime",
+    "execution_mode",
+    "reason_code",
+    "policy_evidence",
+    "decision_source"
+  ],
+  "properties": {
+    "selected_runtime": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "execution_mode": {
+      "anyOf": [
+        {
+          "enum": [
+            "aibus_managed",
+            "native"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reason_code": {
+      "enum": [
+        "pinned_runtime",
+        "capability_match",
+        "no_candidate",
+        "stale_policy",
+        "unknown_risk_class"
+      ]
+    },
+    "policy_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decision_source": {
+      "const": "jev_deterministic"
+    }
+  }
+}

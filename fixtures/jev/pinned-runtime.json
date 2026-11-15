@@ -1,0 +1,18 @@
+{
+  "about": "One candidate that fits: it is used, and the decision says it was pinned by the author.",
+  "request": {
+    "task_id": "lead",
+    "requires": ["one_shot", "headless"],
+    "candidates": ["cli.claude"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "bounded",
+    "risk_class": "read_only"
+  },
+  "decision": {
+    "selected_runtime": "cli.claude",
+    "execution_mode": "aibus_managed",
+    "reason_code": "pinned_runtime",
+    "policy_evidence": ["risk:read_only", "status:cli.claude=experimental", "mode:as_requested"],
+    "decision_source": "jev_deterministic"
+  }
+}

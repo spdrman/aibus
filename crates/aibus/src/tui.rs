@@ -104,6 +104,7 @@ pub fn options(
         remote: None,
         remote_permission: false,
         remote_attach: (false, false),
+        steps: None,
     };
     (opts, warnings)
 }
@@ -343,6 +344,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
         return Err(not_ready("runtime"));
     };
     let mut opts = opts;
+    opts.steps = ctx.attached_steps.take();
     // What the runs the orchestrator starts say arrives here, and the first prompt starts the
     // lead through the launcher like any other run.
     opts.msgs = ctx.rx.take();

@@ -780,6 +780,22 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 
 **Why.** The pull leg works with any client that has tools, and every rule that matters (who accepts, one at a time, deadlines, no loops) is enforced on aibus's side, where the agent cannot skip it.
 
+## D-353: `runtime = "attached"` hands a step to the attached session through the pull leg that already exists (#353, phase 1 of #346)
+
+**Context.** After D-322 a step could reach an attached agent session only when the keyboard typed `/attach step`, which kept that session out of the workflow compiler, the plan hash and the graph views. D-322 left `runtime = "attached"` for phase 2.
+
+**Decision.**
+
+1. `attached` is a third runtime id next to `aibus` and `cli.claude`, status `experimental`, capabilities `headless`, `one_shot` and `pull_delivery` (headless here means aibus drives no terminal for it). It claims nothing else: no cancel, no tool events, no usage. Adding a row to the runtime table changes `policy_revision`, so every plan hash changes once; the golden plans were regenerated and only those two lines moved.
+2. The plan carries the step with invocation kind `attached_session` and a note that the step runs under the attached session's own permissions. Jev's risk class for it is `side_effects` whatever the agent definition grants, because aibus cannot bound that session. `isolation` on an attached step is an error (aibus does not put the other session in a worktree). A workflow with an attached step is not plan-only.
+3. Delivery reuses `Attachments::dispatch`, `next_step` and `step_result`. The `workflow` tool holds a channel to the session loop, which owns the registry (the loop is the only place the keyboard's acceptance lives), and sends it a `Dispatch`: a check before the workflow starts, or a step with a reply that fires when the step ends. The channel exists only in an interactive session started with `--control-attach`, so opt-in at both ends is unchanged: the session flag, the client's `--allow attach`, and the typed code.
+4. No session, no start. The `workflow` tool checks first and refuses the whole workflow (nothing started, including the steps before the attached one) when there is no channel, nobody is attached, or a step is in flight. `aibus run --workflow` and `workflow_run` refuse before they spawn, because a child run has no attached session.
+5. Safety stays where D-322 put it: one attachment and one step in flight, a 10 minute deadline, late results refused, no loops (the client's own `workflow_run`, `session_send` and `session_command` are refused while its step is in flight), prompts redacted and wrapped as data by `aibus mcp` on the way down and results redacted on the way up, every row tagged `mcp`. A declined answer is a result (`denied`), and a retry on `on_fail` asks the session again. Cancelling the workflow cancels the step on aibus's side and says the session cannot be interrupted.
+
+**Alternatives.** Run the step by driving the CLI directly (rejected: that is `cli.claude`, and it would put a second controller on a session the user already has open). Let `aibus run --workflow` wait for an attachment (rejected: nobody is at a keyboard to accept it, and a run that hangs on a prompt is worse than a refusal). A shared `Arc<Mutex<Attachments>>` between the tool and the loop (rejected: the registry takes time as an argument and is single-owner on purpose, and a lock would let a tool task act while the keyboard is mid-edit). Leaving `requires` and approvals to apply to the agent definition (kept, but the plan says they do not bound the attached step).
+
+**Why.** The registry already enforces every rule that matters, so the workflow runtime only has to ask it and wait. What stays open on #346: channels, Codex push, `step_ack`, tool-call correlation, a real interrupt and the non-letter chord.
+
 ## D-335: A trusted signing key is bound to the extension ids it may sign, and the scope lives only in the user's policy file (#335)
 
 **Context.** After #332 any key in `trusted_keys` could sign any extension id, so one leaked key could publish as every extension. The issue asks for a scope per key, refusal outside it, a revoked key that takes only its own ids, and a record of who signs and hosts a curated catalog.

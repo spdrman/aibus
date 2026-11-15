@@ -223,14 +223,78 @@ impl Attachments {
     }
 
     /// A workflow run asks for a check or hands over a step. The returned line is for the log.
-    pub fn handle(&mut self, _ask: Dispatch, _now: Instant) -> Option<String> {
-        None
+    pub fn handle(&mut self, ask: Dispatch, now: Instant) -> Option<String> {
+        match ask {
+            Dispatch::Check(reply) => {
+                self.expire(now);
+                let free = match (&self.attachment, self.steps.iter().find(|s| s.state.open())) {
+                    _ if !self.attach_on => {
+                        Err("this session was not started with --control-attach".to_owned())
+                    }
+                    (None, _) => Err(
+                        "no attached session: a session attaches with aibus_attach and the keyboard accepts it"
+                            .to_owned(),
+                    ),
+                    (_, Some(s)) => {
+                        Err(format!("busy: step {} is in flight on the attached session", s.token))
+                    }
+                    _ => Ok(()),
+                };
+                let _ = reply.send(free);
+                None
+            }
+            Dispatch::Step {
+                name,
+                prompt,
+                within,
+                reply,
+            } => match self.dispatch(&name, &prompt, within, now) {
+                Ok(token) => {
+                    self.waiting.push((token.clone(), reply));
+                    Some(format!(
+                        "workflow step {token} ({}) queued for the attached session",
+                        clean(&name, 40, false)
+                    ))
+                }
+                Err(why) => {
+                    let _ = reply.send(Err(why));
+                    None
+                }
+            },
+        }
     }
 
-    /// Ends what ran out of time, then answers every workflow step that has ended. The lines are
-    /// for the log.
-    pub fn settle(&mut self, _now: Instant) -> Vec<String> {
-        Vec::new()
+    /// Ends what ran out of time, then answers every workflow step that has ended. A step whose
+    /// workflow stopped waiting (it was cancelled) is cancelled here, and says it cannot interrupt
+    /// the other session. The lines are for the log.
+    pub fn settle(&mut self, now: Instant) -> Vec<String> {
+        let mut notes = self.expire(now);
+        let mut i = 0;
+        while i < self.waiting.len() {
+            let Some(step) = self.steps.iter_mut().find(|s| s.token == self.waiting[i].0) else {
+                self.waiting.remove(i);
+                continue;
+            };
+            if step.state.open() && self.waiting[i].1.is_closed() {
+                step.state = StepState::Cancelled;
+                step.ended = Some(now);
+                notes.push(format!(
+                    "step {} cancelled with its workflow; cancel requested, session not interruptible (a late result is refused)",
+                    step.token
+                ));
+            }
+            if step.state.open() {
+                i += 1;
+                continue;
+            }
+            let end = StepEnd {
+                token: step.token.clone(),
+                state: step.state,
+                summary: step.summary.clone(),
+            };
+            let _ = self.waiting.remove(i).1.send(Ok(end));
+        }
+        notes
     }
 
     /// This session's token in the chain of sessions that drive each other.

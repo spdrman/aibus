@@ -7,3 +7,7 @@ and answers with `step_result`.
 
 To have a finished turn pull the next step, install `stop-hook.sh` as a `Stop` command hook in your own settings
 and `touch ~/.local/state/aibus/attached` (remove the file to switch it off). aibus installs nothing.
+
+A workflow step can name this session too: `runtime = "attached"` (see `fixtures/workflows/attached/review-attached.toml`
+and `docs/MCP.md`). Run it from the aibus session you attached to (`/workflow run review-attached <input>`); it is
+refused when nobody is attached.

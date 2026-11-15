@@ -11,7 +11,7 @@
 //! prompt is answered by a client only when the session was started with `--control-permission`,
 //! and `/login` opens a masked key entry, which is the keyboard's too.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use aibus_core::attach::{Accepted, Shown};
 use aibus_core::remote::{client_name, Ask, Remote};
@@ -445,7 +445,8 @@ pub fn handle<G: Graph>(
                     name,
                     event: ClientEvent::Disconnected,
                 },
-            )
+            )?;
+            settle(app, ui, step)
         }
         Remote::Call { client, ask, reply } => {
             let name = client_name(&client);
@@ -534,19 +535,44 @@ pub fn handle<G: Graph>(
             };
             // A client that has gone away no longer waits for the answer.
             let _ = reply.send(answer);
-            Ok(())
+            settle(app, ui, step)
         }
     }
 }
 
-/// A workflow run asks about the attachment or hands it a step (#353). `settle` runs in the loop
-/// as well, so a step that times out is answered without waiting for the agent's next call.
+/// A workflow run asks about the attachment or hands it a step (#353). The step then goes the
+/// way a keyboard's `/attach step` goes: pulled with `next_step`, answered with `step_result`.
 pub fn workflow_step<G: Graph>(
-    _app: &mut App<G>,
-    _ui: &mut Ui,
-    _ask: aibus_core::attach::Dispatch,
-    _step: &mut StepFn<G>,
+    app: &mut App<G>,
+    ui: &mut Ui,
+    ask: aibus_core::attach::Dispatch,
+    step: &mut StepFn<G>,
 ) -> Result<(), AibusError> {
+    if let Some(note) = ui.attach.handle(ask, Instant::now()) {
+        let client = ui
+            .attach
+            .attached()
+            .map_or_else(|| "attached".to_owned(), |(_, c)| c.to_owned());
+        note_row(app, step, &client, note)?;
+    }
+    settle(app, ui, step)
+}
+
+/// Answers the workflow steps that ended (a result, a deadline, a cancel, a client that left)
+/// and logs what ended on its own. The loop calls it on a timer too, so a step that nobody
+/// answers does not hold its workflow past the deadline.
+pub fn settle<G: Graph>(
+    app: &mut App<G>,
+    ui: &mut Ui,
+    step: &mut StepFn<G>,
+) -> Result<(), AibusError> {
+    let client = ui
+        .attach
+        .attached()
+        .map_or_else(|| "attached".to_owned(), |(_, c)| c.to_owned());
+    for note in ui.attach.settle(Instant::now()) {
+        note_row(app, step, &client, note)?;
+    }
     Ok(())
 }
 
@@ -683,9 +709,6 @@ fn attached<G: Graph>(
     })
 }
 
-/// How long a step has to be answered when the keyboard queues one without saying.
-const STEP_WITHIN: Duration = Duration::from_secs(10 * 60);
-
 /// A line the keyboard typed that is the attachment's, not the prompt's: `/attach accept <code>`,
 /// `deny`, `step <text>`, `cancel` and `status`. `None` is any other line. A client has no way
 /// to send this: `session_command` goes through the parser, which has no such command, and the
@@ -744,7 +767,7 @@ pub fn keyboard<G: Graph>(
         "step" if arg.is_empty() => Err("/attach step <what the session should do>".into()),
         "step" => ui
             .attach
-            .dispatch("step", arg, STEP_WITHIN, now)
+            .dispatch("step", arg, aibus_core::attach::STEP_WITHIN, now)
             .map(|token| {
                 let _ = row(
                     app,
@@ -764,7 +787,7 @@ pub fn keyboard<G: Graph>(
         "status" => Ok(ui.attach.status().to_string()),
         _ => Err("/attach: accept <code>, deny, step <text>, cancel or status".into()),
     };
-    for note in ui.attach.expire(now) {
+    for note in ui.attach.settle(now) {
         let _ = row(app, step, who.as_deref(), note);
     }
     Some(out)

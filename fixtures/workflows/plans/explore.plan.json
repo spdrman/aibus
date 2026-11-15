@@ -107,7 +107,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -136,7 +136,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -165,7 +165,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -177,12 +177,12 @@
         "step": "plan"
       }
     ],
-    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+    "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8"
   },
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:4d6dd7cebc268fec6567de24b2a818c028fe75116dc37b63f62b147dc856b441",
+  "plan_hash": "sha256:3695a7dbbfc51b9ac092e1fa941e4b250fd907afae051b4e205b36737aa8dc1e",
   "plan_only_because": null,
   "prompts": {
     "sha256:3210248d918cd22c6e0298105892f6195d304bf300e55db1dc13bc9b7a216b64": "Find the call sites and tests that touch what was found: {{prev.summary}}",

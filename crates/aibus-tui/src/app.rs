@@ -87,6 +87,9 @@ pub struct Options {
     /// `--control-attach` and `--control-present` (#322): an agent session may attach, and may
     /// put a panel on the screen. Off, only the keyboard decides what is on it.
     pub remote_attach: (bool, bool),
+    /// What a workflow run asks of the attachment: a check, or a step with `runtime = "attached"`
+    /// (#353). The run's `workflow` tool holds the other end.
+    pub steps: Option<mpsc::Receiver<aibus_core::attach::Dispatch>>,
 }
 
 /// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
@@ -443,6 +446,9 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut mode = MouseMode::Off;
     let mut runs = opts.msgs.take();
     let mut remote = opts.remote.take();
+    let mut steps = opts.steps.take();
+    // A step nobody answers ends at its deadline, so the workflow waiting on it is told.
+    let mut attach_clock = tokio::time::interval(Duration::from_secs(1));
     let mut watch = opts.watch.take();
     let mut mem = tokio::time::interval(Duration::from_secs(aibus_core::mem::SAMPLE_SECS));
 
@@ -489,6 +495,19 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                 None => std::future::pending().await,
             }
         };
+        let next_step = async {
+            match steps.as_mut() {
+                Some(r) => r.recv().await,
+                None => std::future::pending().await,
+            }
+        };
+        let attach_tick = async {
+            if opts.remote_attach.0 {
+                attach_clock.tick().await;
+            } else {
+                std::future::pending().await
+            }
+        };
         tokio::select! {
             Some(m) = rx.recv() => {
                 input.observe(&m);
@@ -503,6 +522,14 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
             Some(r) = next_remote => {
                 let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
                 crate::remote::handle(&mut app, &mut ui, r, opts.remote_permission, &mut step)?;
+            }
+            Some(ask) = next_step => {
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
+                crate::remote::workflow_step(&mut app, &mut ui, ask, &mut step)?;
+            }
+            () = attach_tick => {
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
+                crate::remote::settle(&mut app, &mut ui, &mut step)?;
             }
             Some(first) = ev_rx.recv() => {
                 // Everything that piled up while the last frame drew is one batch.

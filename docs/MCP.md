@@ -151,8 +151,9 @@ Answering a permission prompt from a client is not the relay that E12 in `DECISI
 
 ## Attached sessions (Phase 1 spike, #322)
 
-An agent session that is already open (Claude Code, say) can attach to a live aibus session. It is a spike: the
-pull leg only, tested against a stand-in client, and no workflow schema promise yet.
+An agent session that is already open (Claude Code, say) can attach to a live aibus session. It is still
+experimental: the pull leg only. #353 adds `runtime = "attached"` to workflows (below) and a live check against Claude
+Code (`docs/spikes/A346-attached-claude-code.md`).
 
 **Attaching.** The agent calls `aibus_attach {label?, lineage?}`. The session needs `--control-attach`. The screen
 logs `<client> wants to attach (pid, cwd), code 7Q2K`; the tool's answer does not carry it, so the user reads it off the screen. Only a typed
@@ -169,6 +170,19 @@ away the step is `unavailable`. The answer carries the evidence: `dispatched` ob
 answered), `started` and `tool_calls` unavailable, `summary` inferred (the agent said so), tokens and cost unavailable with
 quality `unknown`, duration observed with quality `derived`. Every row it causes is tagged `mcp` and the status bar says
 `mcp <client> attached`.
+
+**A workflow step can name the attached session (#353).** In a workflow file a step with `runtime = "attached"` is not
+started as a run: the `workflow` tool hands its rendered prompt to the attached session, which pulls it with `next_step`
+and answers with `step_result`, exactly like a step queued with `/attach step`. The step's `agent` is only its name (the
+key `{{steps.<agent>.summary}}` reads); the agent's tools, `requires` and `[approvals]` do not bound what the attached
+session does, and its permission prompts stay with you in that session. The plan shows the step (`workflow plan
+--dry-run`: runtime `attached`, invocation `attached_session`, a note about permissions) and it is in the plan hash. A
+workflow with such a step starts nothing, and says why, when the session was not started with `--control-attach`, nobody
+is attached, or a step is already in flight. `aibus run --workflow` and `workflow_run` refuse it too: they have no
+attached session to give the step to. The answer comes back wrapped as data and redacted, as a result always does; a
+`declined` answer ends the step as `denied`, `failed` as `failed`, and a deadline (10 minutes) or an agent that left as a
+failed step with the reason. Cancelling the workflow cancels the step and says `session not interruptible`. The step is
+one at a time like every step here, and it carries the same `mcp` tag and audit lines as a keyboard-queued one.
 
 **The agent controls aibus.** Besides the #274 tools, `session_present {title, message?, columns?, rows?}` (with
 `--allow present` and a session started with `--control-present`) shows plain, capped, redacted text on a panel over the

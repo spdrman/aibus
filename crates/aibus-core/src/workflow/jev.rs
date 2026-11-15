@@ -54,6 +54,11 @@ pub struct Decision {
 /// native child lineage, cancel only for the whole process, usage as a list-price estimate, no
 /// session resume, no host-side approval prompt and no workspace control (aibus owns worktrees).
 /// It stays `experimental` until #285 rules on the spike.
+///
+/// `attached` is the agent session attached to this one (#322, #353). It is `experimental` until
+/// the live check has run more than once. It can run with no terminal of aibus's own and does one
+/// step at a time (`headless`, `one_shot`); everything else is the agent's, so aibus claims
+/// nothing more: no cancel (the session cannot be interrupted), no tool events, no usage.
 pub fn runtime_info(rt: Runtime) -> RuntimeInfo {
     match rt {
         Runtime::Aibus => RuntimeInfo {
@@ -84,6 +89,11 @@ pub fn runtime_info(rt: Runtime) -> RuntimeInfo {
                 "tool_events",
                 "usage_report",
             ],
+        },
+        Runtime::Attached => RuntimeInfo {
+            id: "attached",
+            status: "experimental",
+            capabilities: &["headless", "one_shot", "pull_delivery"],
         },
     }
 }
@@ -123,6 +133,7 @@ pub fn policy_revision() -> String {
     let table = serde_json::to_string(&[
         runtime_info(Runtime::Aibus),
         runtime_info(Runtime::ClaudeCli),
+        runtime_info(Runtime::Attached),
     ])
     .unwrap_or_default();
     super::compile::content_hash(&format!("{RULES}\n{table}\n"))
@@ -158,7 +169,7 @@ pub fn decide(req: &Request) -> Decision {
         needs.push("native_child_lineage");
     }
     let known = |id: &str| {
-        [Runtime::Aibus, Runtime::ClaudeCli]
+        [Runtime::Aibus, Runtime::ClaudeCli, Runtime::Attached]
             .into_iter()
             .find(|rt| rt.as_str() == id)
     };

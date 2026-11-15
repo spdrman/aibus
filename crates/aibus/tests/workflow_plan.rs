@@ -468,7 +468,7 @@ fn an_attached_step_plans_and_a_headless_run_refuses_it_before_anything_starts()
             .iter()
             .filter(|e| e["kind"] == "data")
             .count(),
-        3
+        2
     );
 
     let script = h.join("s.ron");

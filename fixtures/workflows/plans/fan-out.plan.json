@@ -172,7 +172,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -201,7 +201,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -230,7 +230,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -259,7 +259,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -271,12 +271,12 @@
         "step": "build"
       }
     ],
-    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+    "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8"
   },
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:708a264e361a04b0faada786ac1a9ca7289488046e79ecd310077d6b4d5056c1",
+  "plan_hash": "sha256:f74509cf759a3250bab6415cf0c3ee798f20165d5afc09861cf5ca2c8cf1cd70",
   "plan_only_because": "workflow fan-out uses [[route]], [limits], [approvals], which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan fan-out --dry-run shows the plan)",
   "prompts": {
     "sha256:08269f2c3d3d2a6a5b7737608ed69e126479ff271b2c0cfc4e4b8dee75a62e94": "Find the code this plan touches: {{prev.summary}}",

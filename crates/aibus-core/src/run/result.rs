@@ -27,7 +27,15 @@ pub fn cap(summary: String, max: usize, dir: &Path) -> io::Result<(String, Optio
 /// from a child, a web page or an MCP server cannot pass for the user's or for aibus's.
 pub fn escape_markers(text: &str) -> String {
     // Line starts that belong to aibus and so must not appear unescaped in text it did not write.
-    const MARKERS: [&str; 6] = ["[advisor]", "[hint]", "[run ", "[web ", "[mcp ", "[hook "];
+    const MARKERS: [&str; 7] = [
+        "[advisor]",
+        "[hint]",
+        "[run ",
+        "[web ",
+        "[mcp ",
+        "[hook ",
+        "[attached ",
+    ];
     text.split('\n')
         .map(|line| {
             let lead = line.trim_start();

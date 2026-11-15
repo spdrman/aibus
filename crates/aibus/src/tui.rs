@@ -103,6 +103,7 @@ pub fn options(
         recorded: None,
         remote: None,
         remote_permission: false,
+        remote_attach: (false, false),
     };
     (opts, warnings)
 }
@@ -285,6 +286,7 @@ fn control(
         Ok(ep)
     });
     opts.remote_permission = ctx.global.control_permission;
+    opts.remote_attach = (ctx.global.control_attach, ctx.global.control_present);
     match opened {
         Ok(ep) => Some(ep),
         Err(e) => {

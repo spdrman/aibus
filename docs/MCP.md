@@ -43,6 +43,8 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 | `--allow session-cancel` | `session_cancel`: cancel a run of a live session | yes |
 | `--allow session-transcript` | `session_transcript`: a run's transcript and the session log, redacted | yes |
 | `--allow permission` | `session_permission`: answer a permission prompt, only in a session started with `--control-permission` | yes |
+| `--allow attach` | `aibus_attach`, `next_step`, `step_result`: attach an open agent session to a live session and run steps on it, only in a session started with `--control-attach` (see Attached sessions) | yes |
+| `--allow present` | `session_present`: a read-only panel on the screen, only in a session started with `--control-present` (see Attached sessions) | yes |
 | `--session <id>` | the live session the session tools act on; without it, the only live one (see Live sessions) | yes |
 | `--http <ip:port>` | the same server over Streamable HTTP on loopback, see below | yes |
 | `--origin <value>` | one more `Origin` the HTTP server accepts (repeatable, needs `--http`) | yes |
@@ -146,6 +148,44 @@ The session tools act on a terminal session that is already open (`aibus` on a t
 Answering a permission prompt from a client is not the relay that E12 in `DECISIONS.md` rules out for the runs the server starts: those stay on `dont_ask`. Here it is my own session, it takes an opt-in at both ends (`--allow permission` on the server, `--control-permission` on the session), a client can only answer the prompt my screen shows, and the answer is tagged like everything else.
 
 **Untrusted input.** A client is not me. Its text is a user message from a client, tagged as such; a tool result that quotes it is data like any other; and with `--confirm elicit` the four tools that change the session ask first (see Confirmation). Its name is cut to ASCII letters, digits, space, `.`, `_` and `-` (32 at most) before it reaches my screen, the log or an export heading, and what it sends wears an `[mcp <client>]` badge in the run's transcript on screen.
+
+## Attached sessions (Phase 1 spike, #322)
+
+An agent session that is already open (Claude Code, say) can attach to a live aibus session. It is a spike: the
+pull leg only, tested against a stand-in client, and no workflow schema promise yet.
+
+**Attaching.** The agent calls `aibus_attach {label?, lineage?}`. The session needs `--control-attach`. The screen
+logs `<client> wants to attach (pid, cwd), code 7Q2K`; the tool's answer does not carry it, so the user reads it off the screen. Only a typed
+`/attach accept 7Q2K` at the aibus keyboard attaches it (60 s, then nothing changed); `/attach deny` refuses. A client has
+no way to send that line: `session_command` goes through the prompt's parser, which has no `/attach`. One agent holds a
+session at a time.
+
+**aibus runs a step on the agent.** `/attach step <text>` queues one step (10 minutes to answer). The agent pulls it
+with `next_step {wait_ms?}` (it asks the session every 3 s for up to 20 s) and gets it redacted and wrapped as data. It
+carries the step out in its own context and answers `step_result {token, status, summary}` with `done`, `declined` or
+`failed`. `/attach cancel` marks the step cancelled and says `cancel requested, session not interruptible`: Claude Code has no
+documented interrupt, and a result that arrives after a cancel, a timeout or a first answer is refused. If the agent goes
+away the step is `unavailable`. The answer carries the evidence: `dispatched` observed, `received` observed (the pull
+answered), `started` and `tool_calls` unavailable, `summary` inferred (the agent said so), tokens and cost unavailable with
+quality `unknown`, duration observed with quality `derived`. Every row it causes is tagged `mcp` and the status bar says
+`mcp <client> attached`.
+
+**The agent controls aibus.** Besides the #274 tools, `session_present {title, message?, columns?, rows?}` (with
+`--allow present` and a session started with `--control-present`) shows plain, capped, redacted text on a panel over the
+log, badged `[mcp <client>]`. It is not a screen: no live keys, no focus change, Esc closes it. The first panel of a client
+waits for `/attach accept <code>` as well, and while the user has a screen or menu open, a field being edited or text on the
+prompt line the call is refused as busy. Nothing in #274's refusals changes. To set up a workflow the agent uses
+`workflow_validate` and `workflow_create` (`--allow write`), then `session_present` to show it; getting it into the live
+session still means the user opening it (`/workflow list` stays the keyboard's).
+
+**No loops.** While a step is in flight on a client, that client's `workflow_run`, `session_send`, `session_command` and a
+second `next_step` are refused with `would loop (step <id> is in flight on this attachment)`, in this server and again in the
+session. Every session has a lineage token and a step carries it; `aibus_attach {lineage}` from a session that echoes this
+session's token, or any lineage as long as the bound (1), is refused. The echo is cooperative, the in-flight rule is not.
+
+**Turn-end hook.** `examples/claude-code-attach/stop-hook.sh` is an example Stop hook that asks Claude Code to call
+`next_step` when a turn ends, bounded and off until you create a marker file. aibus never installs it, and it never answers a
+permission prompt or an elicitation. Channels (`--dangerously-load-development-channels`) are a later opt-in and are not here.
 
 ## Confirmation
 

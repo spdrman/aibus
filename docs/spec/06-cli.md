@@ -49,6 +49,8 @@ Global options (before or after the subcommand):
 | `--trace <file>` | write a Chrome trace of commits and effects (08 section 6) |
 | `--no-control` | the terminal session opens no control socket for `aibus mcp --session` (section 8) |
 | `--control-permission` | a client of `aibus mcp --allow permission` may answer this session's permission prompts; off, only the keyboard can |
+| `--control-attach` | an agent session may attach through `aibus mcp --allow attach`, accepted by a typed `/attach accept <code>` (#322) |
+| `--control-present` | a client of `aibus mcp --allow present` may put a read-only panel on the screen, the first one accepted at the keyboard (#322) |
 
 ## 2. `aibus run`
 

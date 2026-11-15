@@ -22,6 +22,28 @@ pub enum Ask {
     Permission { id: String, decision: String },
     /// A run's transcript (the lead's without `run`) and the session log rows.
     Transcript { run: Option<String> },
+    /// An agent session asks to attach (#322). The keyboard accepts it with the code it is given.
+    Attach {
+        label: Option<String>,
+        lineage: Vec<String>,
+        pid: Option<u32>,
+        cwd: Option<String>,
+    },
+    /// The attached session pulls the next step aibus queued for it.
+    NextStep,
+    /// The attached session's answer to a step: `done`, `declined` or `failed`.
+    StepResult {
+        token: String,
+        status: String,
+        summary: String,
+    },
+    /// A read-only panel on the screen: a message and a table, never a screen with live keys.
+    Present {
+        title: String,
+        message: String,
+        columns: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
 }
 
 /// The answer to an `Ask`: the result, or the sentence saying why not.

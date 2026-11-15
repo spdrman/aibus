@@ -660,6 +660,36 @@ fn badge(th: &Theme) -> Style {
     Style::new().fg(th.warn).add_modifier(Modifier::BOLD)
 }
 
+/// A panel an attached agent asked for (#322): read only, plain text, drawn over `area` and badged
+/// `[mcp <client>]`. It takes no key; Esc closes it and the keyboard has the focus throughout.
+pub fn presented(buf: &mut Buffer, area: Rect, p: &aibus_core::attach::Presented, th: &Theme) {
+    Clear.render(area, buf);
+    let title = format!("[mcp {}] {} · read only · Esc closes", p.client, clip(&p.title, 60));
+    let inner = padded(buf, area, &title, th.warn, th);
+    let mut y = 0u16;
+    for line in p.message.lines() {
+        put(buf, inner, 0, y, &clip(line, usize::from(inner.width)), Style::new().fg(th.fg));
+        y += 1;
+    }
+    if !p.columns.is_empty() || !p.rows.is_empty() {
+        let cols = p.columns.len().max(p.rows.iter().map(Vec::len).max().unwrap_or(0)).max(1);
+        let w = (usize::from(inner.width) / cols).max(4);
+        let row = |buf: &mut Buffer, y: u16, cells: &[String], style: Style| {
+            for (i, c) in cells.iter().enumerate() {
+                put(buf, inner, (i * w) as u16, y, &clip(c, w.saturating_sub(1)), style);
+            }
+        };
+        if !p.columns.is_empty() {
+            row(buf, y, &p.columns, Style::new().fg(th.dim_text).add_modifier(Modifier::BOLD));
+            y += 1;
+        }
+        for r in &p.rows {
+            row(buf, y, r, Style::new().fg(th.fg));
+            y += 1;
+        }
+    }
+}
+
 /// The status bar. Returns where each clickable segment went. `remote` is the client of the
 /// control socket, while one is connected.
 pub fn status_bar(buf: &mut Buffer, area: Rect, v: &Value, th: &Theme, remote: Option<&str>) -> Vec<(Segment, Rect)> {

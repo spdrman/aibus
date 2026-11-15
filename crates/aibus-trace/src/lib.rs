@@ -253,7 +253,8 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// keeps one of each (idempotent append is keyed on the id). That does not hold for one generator
 /// fed the same line twice, nor for one seeded from a store (`TraceStore::ids`): each moves on and
 /// makes a new id. The counter only breaks ties inside one writer; the order of a trace is the id.
-/// The time saturates at 2^48 - 1 (a planted maximum id), it never wraps to 0.
+/// The time saturates at 2^48 - 1 (a planted maximum id) with a full counter, it never wraps to 0;
+/// the store then refuses an id that does not sort after the last one (`StoreError::OutOfOrder`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EventIds {
     ms: u64,

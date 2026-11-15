@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime};
 use aibus_core::Redactor;
 use aibus_trace::view::Recorded;
 use aibus_trace::{
-    AttemptRef, Batch, EventIds, EventKind, Origin, PayloadPolicy, StoreLimits, TraceEvent,
-    TraceStore, Visibility,
+    AttemptRef, Batch, EventIds, EventKind, Origin, PayloadPolicy, StoreError, StoreLimits,
+    TraceEvent, TraceStore, Visibility,
 };
 use uuid::Uuid;
 
@@ -33,6 +33,10 @@ fn time_of(id: Uuid) -> u64 {
     id.as_bytes()[..6]
         .iter()
         .fold(0, |a, x| a << 8 | u64::from(*x))
+}
+
+fn counter_of(id: Uuid) -> u16 {
+    u16::from(id.as_bytes()[6] & 0x0f) << 8 | u16::from(id.as_bytes()[7])
 }
 
 fn ev(id: Uuid, kind: EventKind) -> TraceEvent {
@@ -108,8 +112,8 @@ fn a_late_writers_events_never_sort_before_earlier_ones_328() {
 
 #[test]
 fn a_planted_maximum_id_does_not_wrap_the_next_id_to_time_zero_328() {
-    // Decision: clamp. The time saturates at 2^48 - 1 and the counter stays full, so ids keep
-    // their order by their hash tail, never by a restart from time 0.
+    // The generator saturates at 2^48 - 1 with a full counter, never a restart from time 0 (the
+    // store then refuses such an id, see the test below).
     let planted = Uuid::from_bytes([
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
         0xff,
@@ -118,38 +122,74 @@ fn a_planted_maximum_id_does_not_wrap_the_next_id_to_time_zero_328() {
     for i in 0..3u8 {
         let next = ids.next(at(MS), &[&[i]]);
         assert_eq!(time_of(next), MAX_MS, "{next} wrapped");
+        assert_eq!(counter_of(next), 0x0fff, "{next} reset its counter");
         assert_eq!(next.get_version_num(), 7);
     }
 }
 
 #[test]
-fn a_store_whose_last_id_is_the_maximum_writes_its_own_events_last_328() {
+fn a_store_whose_last_id_is_the_maximum_refuses_what_would_sort_before_it_328() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("run");
+    let max = Uuid::from_bytes([
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ]);
     let mut s = open(&dir, StoreLimits::default());
-    s.append(batch(vec![ev(
-        v7(MAX_MS, 0x0fff),
-        EventKind::AttemptStarted,
-    )]))
-    .unwrap();
+    s.append(batch(vec![ev(max, EventKind::AttemptStarted)]))
+        .unwrap();
+    // A writer at the ceiling: its id is at (MAX_MS, full counter), never a restart from 0.
+    let mut ids = s.ids();
+    let next = ids.next(at(MS), &[b"x"]);
+    assert_eq!((time_of(next), counter_of(next)), (MAX_MS, 0x0fff));
+    // Whatever the tail, an id that does not sort after the last one is refused, and nothing is written.
+    let before = fs::read(dir.join("events.jsonl")).unwrap();
+    let err = s
+        .append(batch(vec![ev(v7(MS, 1), EventKind::MessageChunk)]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    assert!(err.to_string().contains("does not sort after"), "{err}");
     drop(s);
+    assert_eq!(fs::read(dir.join("events.jsonl")).unwrap(), before);
+    // The run still reads with the planted id last, and a torn tail cannot be repaired by an
+    // event that would sort first: open says so instead of reordering the run.
+    let (events, _) = TraceStore::read(&dir).unwrap();
+    assert_eq!(events.last().unwrap().event_id, max);
     fs::OpenOptions::new()
         .append(true)
         .open(dir.join("events.jsonl"))
         .unwrap()
         .write_all(b"{\"torn")
         .unwrap();
-    drop(open(&dir, StoreLimits::default()));
-    let (events, _) = TraceStore::read(&dir).unwrap();
-    let warning = events
-        .iter()
-        .find(|e| e.kind == EventKind::TraceWarning)
-        .unwrap();
-    assert_eq!(
-        time_of(warning.event_id),
-        MAX_MS,
-        "the warning wrapped to time 0"
-    );
+    let err = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::MetadataOnly,
+        StoreLimits::default(),
+    )
+    .err()
+    .expect("open refuses");
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+}
+
+#[test]
+fn an_unseeded_writer_behind_the_run_is_refused_not_interleaved_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let mut s = open(&dir, StoreLimits::default());
+    s.append(batch(vec![ev(
+        v7(MS + 5_000, 0),
+        EventKind::AttemptStarted,
+    )]))
+    .unwrap();
+    let late = EventIds::default().next(at(MS), &[b"x"]);
+    let err = s
+        .append(batch(vec![ev(late, EventKind::MessageChunk)]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    // A duplicate is skipped before the order check, so idempotent append still works.
+    let again = ev(v7(MS + 5_000, 0), EventKind::AttemptStarted);
+    assert!(s.append(batch(vec![again])).unwrap().is_empty());
 }
 
 #[test]

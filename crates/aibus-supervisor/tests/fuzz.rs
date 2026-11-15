@@ -205,7 +205,7 @@ fn forty_thousand_hostile_lines_never_panic_and_stay_bounded() {
     .unwrap();
     let mut inputs = 0u64;
     for round in 0..40 {
-        let mut n = Normalizer::new(common::attempt());
+        let mut n = Normalizer::with_ids(common::attempt(), store.ids());
         n.start(at, json!({}));
         for i in 0..1_000 {
             let line = match r.below(4) {

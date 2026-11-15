@@ -84,6 +84,12 @@ pub enum StoreError {
     },
     /// An event whose id is not a uuid v7, the key the trace orders by.
     NotUuidV7(Uuid),
+    /// An event that would not sort after the last one written: the id space is exhausted (a
+    /// maximum id in the run) or a writer was not seeded from the store. Nothing is written.
+    OutOfOrder {
+        id: Uuid,
+        last: Uuid,
+    },
 }
 
 impl std::fmt::Display for StoreError {
@@ -101,6 +107,10 @@ impl std::fmt::Display for StoreError {
             Self::NotUuidV7(id) => write!(
                 f,
                 "event id {id} is not a uuid v7, and a trace orders by that id"
+            ),
+            Self::OutOfOrder { id, last } => write!(
+                f,
+                "event id {id} does not sort after {last}, the last id in the run"
             ),
         }
     }
@@ -135,6 +145,8 @@ pub struct TraceStore {
     limits: StoreLimits,
     /// Makes the ids of the store's own events, after every id seen so far.
     ids: EventIds,
+    /// The largest id written so far: every new id must sort after it.
+    last: Option<Uuid>,
     seen: HashSet<Uuid>,
     bytes: u64,
     payload_bytes: u64,
@@ -267,6 +279,7 @@ impl TraceStore {
             policy,
             limits,
             ids: last_id.map_or_else(EventIds::default, EventIds::after),
+            last: last_id,
             seen,
             bytes: good_len,
             payload_bytes: 0,
@@ -404,6 +417,17 @@ impl TraceStore {
             _ => None,
         };
 
+        let mut prev = self.last;
+        for e in &keep {
+            if let Some(p) = prev.filter(|p| e.event_id <= *p) {
+                return Err(StoreError::OutOfOrder {
+                    id: e.event_id,
+                    last: p,
+                });
+            }
+            prev = Some(e.event_id);
+        }
+        self.last = prev;
         let mut out = Vec::with_capacity(keep.len());
         let mut buf = Vec::new();
         for mut e in keep {

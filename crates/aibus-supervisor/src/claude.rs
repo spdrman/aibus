@@ -179,6 +179,8 @@ impl Normalizer {
         }
     }
 
+    /// A normaliser for a run with no store yet. Against a store use `with_ids(attempt, store.ids())`:
+    /// an unseeded one that falls behind the run is refused by `TraceStore::append` (`OutOfOrder`).
     pub fn new(attempt: AttemptRef) -> Self {
         Self {
             attempt,

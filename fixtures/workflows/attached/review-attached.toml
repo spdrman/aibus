@@ -1,0 +1,16 @@
+schema_version = "1"
+name = "review-attached"
+revision = "1.0.0"
+description = "Map the code with aibus, then hand the review to the agent session attached to this one"
+
+[[step]]
+agent = "search"
+prompt = "Map the parts of the repository that matter for: {{input}}"
+
+# This step does not start a run. It is handed to the agent session that is attached to this aibus
+# session (aibus --control-attach, accepted at the keyboard), which pulls it with next_step and
+# answers with step_result. The agent may decline, and its permission prompts stay with you.
+[[step]]
+agent = "plan"
+runtime = "attached"
+prompt = "Review what was found and say what you would change. Map: {{prev.summary}}"

@@ -27,6 +27,9 @@ const MESSAGE_MAX: usize = 4096;
 const ROWS_MAX: usize = 30;
 const COLS_MAX: usize = 8;
 const CELL_MAX: usize = 80;
+/// How long a step has to be answered when nobody says otherwise (the keyboard's `/attach step`
+/// and a workflow's attached step).
+pub const STEP_WITHIN: Duration = Duration::from_secs(10 * 60);
 /// The most a step's summary keeps.
 const SUMMARY_MAX: usize = 16 * 1024;
 
@@ -150,6 +153,27 @@ struct Attachment {
     client: String,
 }
 
+/// What a workflow run asks the session's loop, which owns the registry (#353).
+pub enum Dispatch {
+    /// Is a session attached and free? Asked before a workflow with an attached step starts.
+    Check(tokio::sync::oneshot::Sender<Result<(), String>>),
+    /// One step for the attached session. The reply comes when the step ends, whichever way.
+    Step {
+        name: String,
+        prompt: String,
+        within: Duration,
+        reply: tokio::sync::oneshot::Sender<Result<StepEnd, String>>,
+    },
+}
+
+/// How a step the workflow handed to the attached session ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StepEnd {
+    pub token: String,
+    pub state: StepState,
+    pub summary: String,
+}
+
 pub struct Attachments {
     attach_on: bool,
     present_on: bool,
@@ -159,6 +183,11 @@ pub struct Attachments {
     /// The client whose first panel the keyboard allowed.
     presenter: Option<String>,
     steps: Vec<Step>,
+    /// Workflow steps waiting for their end, by step token.
+    waiting: Vec<(
+        String,
+        tokio::sync::oneshot::Sender<Result<StepEnd, String>>,
+    )>,
 }
 
 /// Printable text only: no control character (an escape sequence cannot be drawn), no bidi or
@@ -189,7 +218,19 @@ impl Attachments {
             attachment: None,
             presenter: None,
             steps: Vec::new(),
+            waiting: Vec::new(),
         }
+    }
+
+    /// A workflow run asks for a check or hands over a step. The returned line is for the log.
+    pub fn handle(&mut self, _ask: Dispatch, _now: Instant) -> Option<String> {
+        None
+    }
+
+    /// Ends what ran out of time, then answers every workflow step that has ended. The lines are
+    /// for the log.
+    pub fn settle(&mut self, _now: Instant) -> Vec<String> {
+        Vec::new()
     }
 
     /// This session's token in the chain of sessions that drive each other.

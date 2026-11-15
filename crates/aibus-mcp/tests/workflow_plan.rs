@@ -231,3 +231,43 @@ fn workflow_run_refuses_a_plan_only_workflow_before_spawning_anything() {
     );
     assert!(!fake_dir.join("argv.txt").exists(), "no run was started");
 }
+
+// #353: a child run has no attached session to hand an attached step to, so workflow_run refuses
+// the workflow before it spawns anything.
+#[cfg(unix)]
+#[test]
+fn workflow_run_refuses_a_workflow_with_an_attached_step_before_spawning_anything() {
+    let (server, home) = common::server(
+        Caps::new(false, false, true, vec![]).unwrap(),
+        Redactor::new(),
+    );
+    project_workflow(
+        &home,
+        "review-attached",
+        &fixture("fixtures/workflows/attached/review-attached.toml"),
+    );
+    let fake_dir = home.path().join("fake");
+    fs::create_dir_all(&fake_dir).unwrap();
+    let fake = common::fake_aibus(&fake_dir);
+    let server = server.with_runs(aibus_mcp::RunConfig::new(fake, 20.0));
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let r = rt
+        .block_on(
+            server.call_async(
+                None,
+                None,
+                "workflow_run",
+                json!({ "name": "review-attached", "scope": "project", "input": "ok" })
+                    .as_object()
+                    .cloned(),
+                Instant::now(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(r.is_error, Some(true));
+    assert!(text_of(&r).contains("attached step"), "{}", text_of(&r));
+    assert!(!fake_dir.join("argv.txt").exists(), "no run was started");
+}

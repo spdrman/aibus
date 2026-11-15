@@ -26,11 +26,18 @@ pub struct RunWorkflow {
     hooks: Arc<HookRunner>,
     /// Where workflow files are looked for, project first (`workflow::dirs`).
     dirs: Vec<PathBuf>,
+    /// The session's attachment, when it was started with `--control-attach` (#353).
+    attached: Option<tokio::sync::mpsc::Sender<crate::attach::Dispatch>>,
 }
 
 impl RunWorkflow {
     pub fn new(orch: Arc<Orchestrator>, hooks: Arc<HookRunner>, dirs: Vec<PathBuf>) -> Self {
-        Self { orch, hooks, dirs }
+        Self { orch, hooks, dirs, attached: None }
+    }
+
+    /// Lets a step with `runtime = "attached"` reach the session's attached agent.
+    pub fn with_attached(self, _to: tokio::sync::mpsc::Sender<crate::attach::Dispatch>) -> Self {
+        self
     }
 }
 

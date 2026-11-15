@@ -539,6 +539,17 @@ pub fn handle<G: Graph>(
     }
 }
 
+/// A workflow run asks about the attachment or hands it a step (#353). `settle` runs in the loop
+/// as well, so a step that times out is answered without waiting for the agent's next call.
+pub fn workflow_step<G: Graph>(
+    _app: &mut App<G>,
+    _ui: &mut Ui,
+    _ask: aibus_core::attach::Dispatch,
+    _step: &mut StepFn<G>,
+) -> Result<(), AibusError> {
+    Ok(())
+}
+
 /// One line of the session log about an attached session, tagged with the client like every row
 /// it causes.
 fn note_row<G: Graph>(

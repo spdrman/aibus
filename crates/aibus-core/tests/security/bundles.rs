@@ -833,11 +833,14 @@ fn a_fifo_a_device_link_or_a_huge_file_never_hangs_or_is_read() {
     let found = match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(f) => f,
         Err(_) => {
-            // Unblock whatever is stuck before failing.
-            let _ = fs::OpenOptions::new().write(true).open(d.join("kit.aibus"));
-            let _ = fs::OpenOptions::new()
-                .write(true)
-                .open(d.join("loose.toml"));
+            // Unblock whatever is stuck before failing: opening the write end of a fifo waits for
+            // a reader too, so each open gets its own thread and nothing here waits on it.
+            for f in ["kit.aibus", "loose.toml"] {
+                let p = d.join(f);
+                std::thread::spawn(move || {
+                    let _ = fs::OpenOptions::new().write(true).open(p);
+                });
+            }
             panic!("listing blocked on a fifo");
         }
     };

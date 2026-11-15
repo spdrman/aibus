@@ -215,7 +215,9 @@ pub async fn prepare(
     let probe = match m.normalizer.engine {
         // The host's own Claude gate: required flags and the bare-mode refusal.
         crate::manifest::Engine::ClaudeStreamJson => cli::probe(&version_out, &help_out)?,
-        crate::manifest::Engine::DeclarativeJsonl => cli::parse_help(&version_out, &help_out)?,
+        crate::manifest::Engine::DeclarativeJsonl | crate::manifest::Engine::WasmModule => {
+            cli::parse_help(&version_out, &help_out)?
+        }
     };
     let negotiated = negotiate(m, &grant.os, &probe)?;
 
@@ -290,7 +292,7 @@ pub fn engine(m: &Manifest, attempt: AttemptRef) -> Box<dyn Engine> {
         crate::manifest::Engine::ClaudeStreamJson => {
             Box::new(aibus_supervisor::Normalizer::new(attempt))
         }
-        crate::manifest::Engine::DeclarativeJsonl => {
+        crate::manifest::Engine::DeclarativeJsonl | crate::manifest::Engine::WasmModule => {
             Box::new(crate::declarative::Declarative::new(
                 attempt,
                 m.normalizer.rule.clone(),

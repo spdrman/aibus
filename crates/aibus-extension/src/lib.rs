@@ -23,6 +23,8 @@ pub mod registry;
 pub mod sandbox;
 pub mod store;
 pub mod version;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 pub use manifest::{Capability, Manifest, ManifestError, Support};
 pub use package::{Package, PackageError};

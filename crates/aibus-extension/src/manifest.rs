@@ -58,6 +58,8 @@ pub enum Engine {
     ClaudeStreamJson,
     #[serde(rename = "declarative-jsonl")]
     DeclarativeJsonl,
+    #[serde(rename = "wasm-module")]
+    WasmModule,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +92,8 @@ pub struct Normalizer {
     pub engine: Engine,
     #[serde(default)]
     pub rule: Vec<Rule>,
+    /// For `wasm-module`: the guest's path in the package.
+    pub module: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

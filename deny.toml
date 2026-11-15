@@ -11,7 +11,10 @@ yanked = "deny"
 
 [licenses]
 version = 2
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+# `Apache-2.0 WITH LLVM-exception` is wasmtime's and cranelift's licence (#333): Apache-2.0 plus a
+# grant that lifts the attribution duty for compiled output, so it is no stricter than Apache-2.0
+# and compatible with this repo's MIT licence.
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
 # `notify` (the agent directory watcher) is published under CC0-1.0, a public domain dedication.
 # Allowed for that crate only.
 # `arboard` (the system clipboard behind OSC 52, 05 section 6.1) brings `clipboard-win` and

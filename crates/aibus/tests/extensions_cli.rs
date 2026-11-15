@@ -390,3 +390,20 @@ fn the_docs_hedge_the_resolved_name_check_and_name_the_open_issue() {
     assert!(!spec.contains("`claude` that is really `python3` is refused"));
     assert!(!sec.contains("coordinator"));
 }
+
+/// #334: install shows the typed flags and says the host, not the extension, fills their values.
+#[test]
+fn issue_334_install_shows_the_typed_flags_the_host_will_fill() {
+    let e = Env::new();
+    let dir = repo().join("examples/extensions/reference-cli");
+    e.run(&["publish", dir.to_str().unwrap()]);
+    let out = text(&e.run(&["install", "org.devshell.aibus.reference-cli"]));
+    assert!(
+        out.contains("typed --model: model_id, filled by the host"),
+        "{out}"
+    );
+    assert!(
+        out.contains("typed --agents: agent_list, filled by the host"),
+        "{out}"
+    );
+}

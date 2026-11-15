@@ -166,6 +166,7 @@ async fn the_reference_extension_runs_a_recorded_delegation_through_the_sandbox_
         ceiling: Limits::default(),
         extra_programs: Vec::new(),
         os: "macos".into(),
+        typed: Default::default(),
     };
     let mut p = prepare(&m, &grant, &[]).await.unwrap();
     p.launch.stdin = b"review the repo\n".to_vec();
@@ -244,4 +245,32 @@ fn expected_json(o: &aibus_extension::conformance::Observed) -> String {
     .unwrap();
     text.push('\n');
     text
+}
+
+/// #334: the reference extension is regenerated as schema 2 with the typed `--model` and `--agents`
+/// the workflow compiler and the scheduler need, and nothing else about its argv changed.
+#[test]
+fn issue_334_the_reference_extension_is_schema_2_with_a_typed_model_and_agents() {
+    use aibus_extension::manifest::ValueKind;
+    let m = manifest();
+    assert_eq!(m.schema_version, "2");
+    assert_eq!(m.compat.protocol, ">=1.1.0, <2.0.0");
+    let typed: Vec<_> = m
+        .execution
+        .typed
+        .iter()
+        .map(|t| (t.flag.as_str(), t.kind))
+        .collect();
+    assert_eq!(
+        typed,
+        [
+            ("--model", ValueKind::ModelId),
+            ("--agents", ValueKind::AgentList)
+        ]
+    );
+    assert!(!m
+        .execution
+        .argv
+        .iter()
+        .any(|a| a == "--model" || a == "--agents"));
 }

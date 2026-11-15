@@ -10,7 +10,7 @@
 //! user can.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use std::time::Duration;
 
@@ -26,6 +26,24 @@ use crate::negotiate::{check_host, negotiate, Incompatible, Negotiated};
 /// file (`extra_official_clis`); a manifest never can.
 pub const OFFICIAL_CLIS: [&str; 4] = ["claude", "codex", "gemini", "kimi"];
 
+/// One agent the host defines for a run (`--agents`): the name, what it is for and its prompt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Agent {
+    pub name: String,
+    pub description: String,
+    pub prompt: String,
+}
+
+/// A value the host fills in from the plan for a typed flag (#334).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TypedValue {
+    /// A model id (`gpt-5`, `claude-sonnet-4`).
+    Model(String),
+    Agents(Vec<Agent>),
+    /// A path relative to the working directory.
+    Path(String),
+}
+
 #[derive(Clone, Debug)]
 pub struct Grant {
     /// The only directory the CLI runs in. Absolute, existing; resolved before use.
@@ -40,6 +58,8 @@ pub struct Grant {
     pub extra_programs: Vec<String>,
     /// `macos`, `linux` or `windows`.
     pub os: String,
+    /// The values of the typed flags, by flag name. A flag with no value here is left out.
+    pub typed: std::collections::BTreeMap<String, TypedValue>,
 }
 
 #[derive(Debug)]
@@ -142,6 +162,15 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
         )));
     }
     Ok(())
+}
+
+/// The argument pairs for the typed flags the manifest declared and the plan has a value for (#334).
+pub fn typed_args(
+    _m: &Manifest,
+    _values: &std::collections::BTreeMap<String, TypedValue>,
+    _workdir: &Path,
+) -> Result<Vec<OsString>, SandboxError> {
+    Ok(Vec::new())
 }
 
 /// Finds and probes the CLI, negotiates, and builds the launch. `want` are the optional

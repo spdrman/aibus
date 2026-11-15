@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const MANIFEST_FILE: &str = "aibus-extension.toml";
 /// A manifest larger than this is not read.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
-/// The only schema version this host reads.
+/// The schema versions this host reads. Schema 2 adds `[[execution.typed]]` (#334).
 pub const SCHEMA_VERSION: &str = "1";
 
 /// The capability vector of spec 3, plus `hook_channel` (A1.5 amendment E5).
@@ -137,6 +137,23 @@ pub struct OptionalFlag {
     pub capability: Capability,
 }
 
+/// What a typed flag's value is. The host fills it from the plan; a manifest never writes one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValueKind {
+    ModelId,
+    AgentList,
+    WorkdirPath,
+}
+
+/// A flag whose value the host supplies (schema 2).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedFlag {
+    pub flag: String,
+    pub kind: ValueKind,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Execution {
@@ -152,6 +169,8 @@ pub struct Execution {
     pub env_allow: Vec<String>,
     #[serde(default)]
     pub optional: Vec<OptionalFlag>,
+    #[serde(default)]
+    pub typed: Vec<TypedFlag>,
 }
 
 /// What the extension asks of the host's limits. The host's ceiling wins.

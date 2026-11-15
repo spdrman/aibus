@@ -171,6 +171,20 @@ fn reported(v: &Value, name: &str, unit: &str, source: &str) -> Metric {
 }
 
 impl Normalizer {
+    /// A normaliser whose ids come from `ids`, so a writer resuming a run orders after the earlier one.
+    pub fn with_ids(attempt: AttemptRef, ids: EventIds) -> Self {
+        Self {
+            ids,
+            ..Self::new(attempt)
+        }
+    }
+
+    /// Makes the next id sort after `id`. `supervise` calls it with the store's last id before and
+    /// after every append, so a normaliser from `new` is seeded whatever run it is given.
+    pub fn observe(&mut self, id: Uuid) {
+        self.ids.observe(id);
+    }
+
     pub fn new(attempt: AttemptRef) -> Self {
         Self {
             attempt,

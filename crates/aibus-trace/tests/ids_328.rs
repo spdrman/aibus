@@ -1,0 +1,400 @@
+//! #328: the id generator is seeded from the store, a planted maximum id does not wrap to time 0,
+//! the counter-full branch keeps order, and "the same line twice" means exactly what the spec says.
+
+use std::fs;
+use std::io::Write;
+use std::time::{Duration, SystemTime};
+
+use aibus_core::Redactor;
+use aibus_trace::view::Recorded;
+use aibus_trace::{
+    AttemptRef, Batch, EventIds, EventKind, Origin, PayloadPolicy, StoreError, StoreLimits,
+    TraceEvent, TraceStore, Visibility,
+};
+use uuid::Uuid;
+
+const MS: u64 = 1_800_000_000_000;
+const MAX_MS: u64 = 0xffff_ffff_ffff;
+
+fn at(ms: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+}
+
+fn v7(ms: u64, counter: u16) -> Uuid {
+    let mut b = [0u8; 16];
+    b[..6].copy_from_slice(&ms.to_be_bytes()[2..]);
+    b[6] = 0x70 | (counter >> 8) as u8;
+    b[7] = counter as u8;
+    b[8] = 0x80;
+    Uuid::from_bytes(b)
+}
+
+fn time_of(id: Uuid) -> u64 {
+    id.as_bytes()[..6]
+        .iter()
+        .fold(0, |a, x| a << 8 | u64::from(*x))
+}
+
+fn counter_of(id: Uuid) -> u16 {
+    u16::from(id.as_bytes()[6] & 0x0f) << 8 | u16::from(id.as_bytes()[7])
+}
+
+fn ev(id: Uuid, kind: EventKind) -> TraceEvent {
+    let attempt = AttemptRef {
+        workflow_run_id: Uuid::from_u128(1),
+        attempt_id: Uuid::from_u128(2),
+        parent_attempt_id: None,
+        provider_extension: "org.aibus.test".into(),
+    };
+    TraceEvent::new(
+        &attempt,
+        id,
+        kind,
+        Origin::CliStream,
+        Visibility::Observed,
+        at(MS),
+        "test/1",
+    )
+}
+
+fn batch(events: Vec<TraceEvent>) -> Batch {
+    Batch {
+        events,
+        payload: None,
+    }
+}
+
+fn open(dir: &std::path::Path, limits: StoreLimits) -> TraceStore {
+    TraceStore::open(dir, Redactor::new(), PayloadPolicy::MetadataOnly, limits)
+        .unwrap()
+        .0
+}
+
+#[test]
+fn a_store_holding_a_future_dated_id_seeds_the_generator_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let future = v7(MS + 60_000, 7);
+    let mut s = open(&dir, StoreLimits::default());
+    s.append(batch(vec![ev(future, EventKind::AttemptStarted)]))
+        .unwrap();
+    drop(s);
+    let mut ids = open(&dir, StoreLimits::default()).ids();
+    // A late writer: its clock is a minute behind the id on disk.
+    let next = ids.next(at(MS), &[b"late"]);
+    assert!(next > future, "{next} sorts before {future}");
+}
+
+#[test]
+fn a_late_writers_events_never_sort_before_earlier_ones_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let mut ids = EventIds::default();
+    let mut s = open(&dir, StoreLimits::default());
+    let first: Vec<TraceEvent> = (0..3u8)
+        .map(|i| ev(ids.next(at(MS + 5_000), &[&[i]]), EventKind::MessageChunk))
+        .collect();
+    s.append(batch(first)).unwrap();
+    drop(s);
+    let mut ids = open(&dir, StoreLimits::default()).ids();
+    let late = ev(ids.next(at(MS), &[b"x"]), EventKind::MessageChunk);
+    let late_id = late.event_id;
+    let mut s = open(&dir, StoreLimits::default());
+    s.append(batch(vec![late])).unwrap();
+    drop(s);
+    let (events, _) = TraceStore::read(&dir).unwrap();
+    assert_eq!(
+        events.last().unwrap().event_id,
+        late_id,
+        "the late writer sorts last"
+    );
+}
+
+#[test]
+fn a_planted_maximum_id_does_not_wrap_the_next_id_to_time_zero_328() {
+    // The generator saturates at 2^48 - 1 with a full counter, never a restart from time 0 (the
+    // store then refuses such an id, see the test below).
+    let planted = Uuid::from_bytes([
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ]);
+    let mut ids = EventIds::after(planted);
+    for i in 0..3u8 {
+        let next = ids.next(at(MS), &[&[i]]);
+        assert_eq!(time_of(next), MAX_MS, "{next} wrapped");
+        assert_eq!(counter_of(next), 0x0fff, "{next} reset its counter");
+        assert_eq!(next.get_version_num(), 7);
+    }
+}
+
+#[test]
+fn a_store_whose_last_id_is_the_maximum_refuses_what_would_sort_before_it_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let max = Uuid::from_bytes([
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ]);
+    let mut s = open(&dir, StoreLimits::default());
+    s.append(batch(vec![ev(max, EventKind::AttemptStarted)]))
+        .unwrap();
+    // A writer at the ceiling: its id is at (MAX_MS, full counter), never a restart from 0.
+    let mut ids = s.ids();
+    let next = ids.next(at(MS), &[b"x"]);
+    assert_eq!((time_of(next), counter_of(next)), (MAX_MS, 0x0fff));
+    // Whatever the tail, an id that does not sort after the last one is refused, and nothing is written.
+    let before = fs::read(dir.join("events.jsonl")).unwrap();
+    let err = s
+        .append(batch(vec![ev(v7(MS, 1), EventKind::MessageChunk)]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    assert!(err.to_string().contains("does not sort after"), "{err}");
+    drop(s);
+    assert_eq!(fs::read(dir.join("events.jsonl")).unwrap(), before);
+    // The run still reads with the planted id last, and a torn tail cannot be repaired by an
+    // event that would sort first: open says so instead of reordering the run.
+    let (events, _) = TraceStore::read(&dir).unwrap();
+    assert_eq!(events.last().unwrap().event_id, max);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("events.jsonl"))
+        .unwrap()
+        .write_all(b"{\"torn")
+        .unwrap();
+    let err = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::MetadataOnly,
+        StoreLimits::default(),
+    )
+    .err()
+    .expect("open refuses");
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+}
+
+#[test]
+fn an_unseeded_writer_behind_the_run_is_refused_not_interleaved_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let mut s = open(&dir, StoreLimits::default());
+    s.append(batch(vec![ev(
+        v7(MS + 5_000, 0),
+        EventKind::AttemptStarted,
+    )]))
+    .unwrap();
+    let late = EventIds::default().next(at(MS), &[b"x"]);
+    let err = s
+        .append(batch(vec![ev(late, EventKind::MessageChunk)]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    // A duplicate is skipped before the order check, so idempotent append still works.
+    let again = ev(v7(MS + 5_000, 0), EventKind::AttemptStarted);
+    assert!(s.append(batch(vec![again])).unwrap().is_empty());
+}
+
+#[test]
+fn a_full_counter_moves_to_the_next_millisecond_and_keeps_order_328() {
+    let mut ids = EventIds::after(v7(MS, 0x0ffe));
+    let a = ids.next(at(MS), &[b"a"]);
+    let b = ids.next(at(MS), &[b"b"]);
+    let c = ids.next(at(MS), &[b"c"]);
+    assert_eq!(time_of(a), MS);
+    assert_eq!(time_of(b), MS + 1, "full counter moves on");
+    assert_eq!(time_of(c), MS + 1);
+    assert!(a < b && b < c, "{a} {b} {c}");
+    // And a long burst in one millisecond ascends strictly across the boundary.
+    let mut ids = EventIds::default();
+    let burst: Vec<Uuid> = (0..10_000u32)
+        .map(|i| ids.next(at(MS), &[&i.to_le_bytes()]))
+        .collect();
+    assert!(burst.windows(2).all(|w| w[0] < w[1]));
+    assert!(time_of(*burst.last().unwrap()) > MS);
+}
+
+#[test]
+fn the_same_line_gives_the_same_id_only_from_a_fresh_generator_328() {
+    let parts: [&[u8]; 2] = [b"attempt", b"raw line"];
+    // A fresh generator on the same input: the same id (so a re-normalised file is the same file).
+    assert_eq!(
+        EventIds::default().next(at(MS), &parts),
+        EventIds::default().next(at(MS), &parts)
+    );
+    // One generator fed the same line twice: two ids.
+    let mut g = EventIds::default();
+    assert_ne!(g.next(at(MS), &parts), g.next(at(MS), &parts));
+    // A seeded generator: not the same id as a fresh one.
+    let mut seeded = EventIds::after(v7(MS + 1, 0));
+    assert_ne!(
+        seeded.next(at(MS), &parts),
+        EventIds::default().next(at(MS), &parts)
+    );
+}
+
+#[test]
+fn appending_an_id_twice_is_idempotent_whichever_generator_made_it_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let id = EventIds::default().next(at(MS), &[b"line"]);
+    let mut s = open(&dir, StoreLimits::default());
+    assert_eq!(
+        s.append(batch(vec![ev(id, EventKind::MessageChunk)]))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        s.append(batch(vec![ev(id, EventKind::MessageChunk)]))
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn a_storage_gap_sorts_after_the_batch_that_caused_it_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let limits = StoreLimits {
+        soft_max_bytes: 0,
+        ..StoreLimits::default()
+    };
+    let mut s = open(&dir, limits);
+    let started = v7(MS, 1);
+    s.append(batch(vec![
+        ev(started, EventKind::AttemptStarted),
+        ev(v7(MS, 2), EventKind::MessageChunk),
+    ]))
+    .unwrap();
+    drop(s);
+    let (events, _) = TraceStore::read(&dir).unwrap();
+    let gap = events
+        .iter()
+        .position(|e| e.kind == EventKind::GapDetected)
+        .unwrap();
+    assert_eq!(
+        gap,
+        events.len() - 1,
+        "the gap is last: {:?}",
+        events.iter().map(|e| e.kind).collect::<Vec<_>>()
+    );
+    assert!(events[gap].event_id > started);
+}
+
+#[test]
+fn a_recorded_view_orders_out_of_order_lines_by_id_328() {
+    let mut text = String::new();
+    for n in [3u16, 1, 2] {
+        let mut v = serde_json::to_value(ev(v7(MS, n), EventKind::MessageChunk)).unwrap();
+        v["schema_version"] = 2.into();
+        text.push_str(&format!("{v}\n"));
+    }
+    let rec = Recorded::from_bytes(std::path::Path::new("run"), text.as_bytes());
+    let got: Vec<Uuid> = rec.events.iter().map(|e| e.event_id).collect();
+    assert_eq!(got, [v7(MS, 1), v7(MS, 2), v7(MS, 3)]);
+    assert_eq!(
+        rec.events.iter().map(|e| e.position).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert!(rec.raw[0].starts_with(b"{") && rec.raw[0] != rec.raw[2]);
+}
+
+#[test]
+fn ids_inside_one_batch_must_ascend_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut s = open(&tmp.path().join("run"), StoreLimits::default());
+    let err = s
+        .append(batch(vec![
+            ev(v7(MS, 2), EventKind::AttemptStarted),
+            ev(v7(MS, 1), EventKind::MessageChunk),
+        ]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    assert!(TraceStore::read(&tmp.path().join("run"))
+        .unwrap()
+        .0
+        .is_empty());
+}
+
+#[test]
+fn a_refused_batch_does_not_swallow_the_next_gap_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let limits = StoreLimits {
+        soft_max_bytes: 0,
+        ..StoreLimits::default()
+    };
+    let mut s = open(&dir, limits);
+    s.append(batch(vec![ev(v7(MS + 100, 0), EventKind::AttemptStarted)]))
+        .unwrap();
+    // The chunk is dropped (soft limit) and the lifecycle event behind it is refused.
+    let err = s
+        .append(batch(vec![
+            ev(v7(MS + 200, 1), EventKind::MessageChunk),
+            ev(v7(MS, 1), EventKind::AttemptCompleted),
+        ]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    let out = s
+        .append(batch(vec![ev(v7(MS + 300, 0), EventKind::MessageChunk)]))
+        .unwrap();
+    assert!(
+        out.iter().any(|e| e.kind == EventKind::GapDetected),
+        "the chunk was dropped with no gap: {out:?}"
+    );
+}
+
+#[test]
+fn an_event_in_the_same_millisecond_as_the_stores_own_gap_is_accepted_328() {
+    let limits = StoreLimits {
+        soft_max_bytes: 0,
+        ..StoreLimits::default()
+    };
+    for i in 0..60u8 {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = open(&tmp.path().join("run"), limits.clone());
+        let mut ids = EventIds::default();
+        let started = ev(ids.next(at(MS), &[b"s", &[i]]), EventKind::AttemptStarted);
+        let chunk = ev(ids.next(at(MS), &[b"c", &[i]]), EventKind::MessageChunk);
+        s.append(batch(vec![started, chunk])).unwrap();
+        // What `supervise` does after every append: the writer learns the store's last id.
+        ids.observe(s.last_id().unwrap());
+        let next = ev(ids.next(at(MS), &[b"n", &[i]]), EventKind::AttemptCompleted);
+        s.append(batch(vec![next]))
+            .unwrap_or_else(|e| panic!("{i}: {e}"));
+    }
+}
+
+#[test]
+fn a_refused_batch_does_not_swallow_the_payload_budget_gap_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let (mut s, _) = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::Retain { max_bytes: 1 },
+        StoreLimits::default(),
+    )
+    .unwrap();
+    s.append(batch(vec![ev(v7(MS + 100, 0), EventKind::AttemptStarted)]))
+        .unwrap();
+    let with_payload = |events| Batch {
+        events,
+        payload: Some(serde_json::json!({ "big": "payload over one byte" })),
+    };
+    let err = s
+        .append(with_payload(vec![ev(v7(MS, 1), EventKind::MessageChunk)]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    s.append(with_payload(vec![ev(
+        v7(MS + 200, 0),
+        EventKind::MessageChunk,
+    )]))
+    .unwrap();
+    drop(s);
+    let (events, _) = TraceStore::read(&dir).unwrap();
+    let gaps = events
+        .iter()
+        .filter(|e| e.data["reason"] == "payload_budget_exhausted")
+        .count();
+    assert_eq!(gaps, 1, "the refused batch used up the gap flag");
+}

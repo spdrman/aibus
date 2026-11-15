@@ -82,3 +82,27 @@ fn the_recorded_fixture_traces_are_schema_2_with_ascending_v7_ids_319() {
     }
     assert!(checked >= 17, "only {checked} fixture traces found");
 }
+
+#[test]
+fn a_normaliser_seeded_from_the_store_orders_after_an_earlier_writer_328() {
+    let run = load("06-basic");
+    // The earlier writer's clock was a minute ahead of this one.
+    let ahead = SystemTime::UNIX_EPOCH + Duration::from_millis(1_800_000_060_000);
+    let behind = SystemTime::UNIX_EPOCH + Duration::from_millis(1_800_000_000_000);
+    let mut first = Normalizer::new(attempt());
+    let earlier = first.start(ahead, json!({})).events;
+    let mut ids = aibus_trace::EventIds::default();
+    for e in &earlier {
+        ids.observe(e.event_id);
+    }
+    let mut late = Normalizer::with_ids(attempt(), ids);
+    let mut events = late.start(behind, json!({})).events;
+    for l in &run.lines {
+        events.extend(late.stream_line(l, behind).events);
+    }
+    let last_earlier = earlier.iter().map(|e| e.event_id).max().unwrap();
+    assert!(
+        events.iter().all(|e| e.event_id > last_earlier),
+        "a late writer sorted before an earlier event"
+    );
+}

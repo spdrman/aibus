@@ -274,14 +274,18 @@ fn one_client_controls_the_session_at_a_time() {
     );
     let (_third, answer) = raw_hello(&ep.socket(), token.trim());
     assert_eq!(answer["ok"], true, "{answer}");
-    let seen = l.seen.lock().unwrap().clone();
-    assert_eq!(
+    // The stand-in records events on its own thread, so wait for the second connect to show up.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let connected = |seen: &[String]| {
         seen.iter()
             .filter(|l| l.starts_with("connected raw"))
-            .count(),
-        2,
-        "{seen:?}"
-    );
+            .count()
+    };
+    while connected(&l.seen.lock().unwrap()) < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let seen = l.seen.lock().unwrap().clone();
+    assert_eq!(connected(&seen), 2, "{seen:?}");
 }
 
 #[test]

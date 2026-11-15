@@ -471,7 +471,7 @@ fn renaming_a_key_keeps_it_trusted_and_its_new_scope_applies() {
 }
 
 #[test]
-fn an_install_from_before_signers_were_recorded_is_quarantined_while_keys_are_trusted() {
+fn an_install_from_before_signers_were_recorded_is_quarantined_only_when_a_signature_is_required() {
     let w = World::new();
     let (s, trusted) = installed_signed_by_k1(&w);
     // Make the record look like one written before this change.
@@ -483,6 +483,10 @@ fn an_install_from_before_signers_were_recorded_is_quarantined_while_keys_are_tr
         .unwrap()
         .remove("signers");
     fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    // Not required: it stays served, like a fresh unsigned install.
+    let lax = policy(&trusted.replace("require_signature = true", "require_signature = false"));
+    s.resolve(A, &lax).unwrap();
+    s.verify(A, &[], &lax).unwrap();
     let err = s.resolve(A, &policy(&trusted)).unwrap_err();
     assert_eq!(class(&err), "provenance_invalid", "{err:?}");
     assert!(err.to_string().contains("install"), "{err}");

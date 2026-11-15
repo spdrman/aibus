@@ -79,7 +79,7 @@ pub enum Refusal {
     KeyOutOfScope { key_id: String, id: String },
     #[error("key {key_id} signed this install and the policy no longer trusts it; install it again from a key you trust")]
     KeyNotTrusted { key_id: String },
-    #[error("this install was made before the signing key was recorded and the policy trusts keys; install it again so it is checked against them")]
+    #[error("this install was made before the signing key was recorded and the policy requires a signature; install it again so it is checked against them")]
     SignerUnknown,
     #[error("key {key_id} is revoked: {reason}")]
     KeyRevoked { key_id: String, reason: String },
@@ -159,14 +159,14 @@ pub struct Signer {
 /// `signer_ok` for an installed version. `recorded` is what the store kept: nothing for an install
 /// from before signers were recorded, `Some(None)` for one made unsigned, `Some(Some(_))` for one a
 /// key signed. A key the policy no longer lists (by public key, so a rename is fine) takes what it
-/// signed with it, and an install with no record is not trusted while the policy lists any key.
+/// signed with it, and an install with no record is not trusted while the policy requires a signature.
 pub fn recorded_signer_ok(
     policy: &Policy,
     id: &str,
     recorded: Option<&Option<Signer>>,
 ) -> Result<(), Refusal> {
     match recorded {
-        None if policy.trusted_keys.is_empty() => Ok(()),
+        None if !policy.require_signature => Ok(()),
         None => Err(Refusal::SignerUnknown),
         Some(None) => Ok(()),
         Some(Some(s)) => {

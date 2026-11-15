@@ -6,6 +6,7 @@ pub mod advisor;
 pub mod agent;
 pub mod app;
 pub mod assist;
+pub mod attach;
 pub mod config;
 pub mod context;
 pub mod continuity;

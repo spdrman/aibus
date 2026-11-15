@@ -11,6 +11,9 @@
 //! prompt is answered by a client only when the session was started with `--control-permission`,
 //! and `/login` opens a masked key entry, which is the keyboard's too.
 
+use std::time::{Duration, Instant};
+
+use aibus_core::attach::{Accepted, Shown};
 use aibus_core::remote::{client_name, Ask, Remote};
 use aibus_core::state::value::{as_list, as_str, get};
 use aibus_core::state::{run_key, PERMISSIONS_OPEN};
@@ -227,7 +230,13 @@ pub fn msgs(
 ) -> Result<Vec<Msg>, String> {
     let env = cx.env(&cx.workflows);
     match ask {
-        Ask::Status | Ask::Transcript { .. } => Ok(Vec::new()),
+        // The attachment calls are answered by `handle`, never turned into messages.
+        Ask::Status
+        | Ask::Transcript { .. }
+        | Ask::Attach { .. }
+        | Ask::NextStep
+        | Ask::StepResult { .. }
+        | Ask::Present { .. } => Ok(Vec::new()),
         Ask::Send { text } => {
             let text = text.trim();
             if text.is_empty() {
@@ -390,10 +399,17 @@ pub fn handle<G: Graph>(
         }
         Remote::Disconnected { client } => {
             ui.remote = None;
+            let name = client_name(&client);
+            for note in ui.attach.detach(&name) {
+                note_row(app, step, &name, note)?;
+            }
+            if ui.presented.as_ref().is_some_and(|p| p.client == name) {
+                ui.presented = None;
+            }
             step(
                 app,
                 Msg::Client {
-                    name: client_name(&client),
+                    name,
                     event: ClientEvent::Disconnected,
                 },
             )
@@ -415,7 +431,45 @@ pub fn handle<G: Graph>(
             }
             let cx = Context::read(&app.graph);
             let busy = busy(&cx, ui);
+            for note in ui.attach.expire(Instant::now()) {
+                note_row(app, step, &name, note)?;
+            }
+            // While the step aibus gave this client is in flight, the client may not start more
+            // work through the session: it would be aibus driving itself (#322).
+            let looping = matches!(ask, Ask::Send { .. } | Ask::Command { .. })
+                .then(|| ui.attach.in_flight(&name).map(|s| s.token.clone()))
+                .flatten();
             let answer = match &ask {
+                _ if looping.is_some() => {
+                    let why = format!(
+                        "would loop (step {} is in flight on this attachment)",
+                        looping.unwrap_or_default()
+                    );
+                    step(
+                        app,
+                        Msg::Client {
+                            name: name.clone(),
+                            event: ClientEvent::Refused(why.clone()),
+                        },
+                    )?;
+                    Err(why)
+                }
+                Ask::Attach { .. }
+                | Ask::NextStep
+                | Ask::StepResult { .. }
+                | Ask::Present { .. } => {
+                    let answer = attached(app, ui, &name, &ask, busy, step)?;
+                    if let Err(why) = &answer {
+                        step(
+                            app,
+                            Msg::Client {
+                                name: name.clone(),
+                                event: ClientEvent::Refused(why.clone()),
+                            },
+                        )?;
+                    }
+                    answer
+                }
                 Ask::Status => Ok(status(app, ui.remote.as_deref())),
                 Ask::Transcript { run } => transcript(app, run.as_deref()),
                 _ => match msgs(&ask, &cx, permission, busy) {
@@ -450,4 +504,217 @@ pub fn handle<G: Graph>(
             Ok(())
         }
     }
+}
+
+/// One line of the session log about an attached session, tagged with the client like every row
+/// it causes.
+fn note_row<G: Graph>(
+    app: &mut App<G>,
+    step: &mut StepFn<G>,
+    client: &str,
+    text: String,
+) -> Result<(), AibusError> {
+    step(
+        app,
+        Msg::Client {
+            name: client.to_owned(),
+            event: ClientEvent::Note(text),
+        },
+    )
+}
+
+/// `text` cut to `max` characters, for a log row.
+fn short(text: &str, max: usize) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match flat.char_indices().nth(max) {
+        Some((end, _)) => format!("{}...", &flat[..end]),
+        None => flat,
+    }
+}
+
+/// What a client asks of the attachment (#322): attach, pull a step, answer one, show a panel.
+/// The outer `Err` is the loop's (a failed step), the inner is the sentence for the client.
+fn attached<G: Graph>(
+    app: &mut App<G>,
+    ui: &mut Ui,
+    client: &str,
+    ask: &Ask,
+    busy: Option<&str>,
+    step: &mut StepFn<G>,
+) -> Result<Result<Json, String>, AibusError> {
+    let now = Instant::now();
+    Ok(match ask {
+        Ask::Attach {
+            label,
+            lineage,
+            pid,
+            cwd,
+        } => {
+            match ui.attach.request_attach(
+                client,
+                label.as_deref(),
+                lineage,
+                (*pid, cwd.as_deref()),
+                now,
+            ) {
+                Ok(out) => {
+                    if let Some(banner) = ui.attach.banner() {
+                        note_row(app, step, client, banner)?;
+                    }
+                    Ok(out)
+                }
+                Err(why) => Err(why),
+            }
+        }
+        Ask::NextStep => {
+            match ui.attach.next_step(client, now) {
+                Ok(out) => {
+                    if let Some(token) = out["step"]["token"].as_str() {
+                        note_row(app, step, client, format!("attached ({client}): step {token} delivered, waiting for its result"))?;
+                    }
+                    Ok(out)
+                }
+                Err(why) => Err(why),
+            }
+        }
+        Ask::StepResult {
+            token,
+            status,
+            summary,
+        } => match ui.attach.step_result(client, token, status, summary, now) {
+            Ok(out) => {
+                let line = format!(
+                    "attached ({client}): step {} {}: {}",
+                    out["token"].as_str().unwrap_or(""),
+                    out["state"].as_str().unwrap_or(""),
+                    short(summary, 200)
+                );
+                note_row(app, step, client, line)?;
+                Ok(out)
+            }
+            Err(why) => Err(why),
+        },
+        Ask::Present {
+            title,
+            message,
+            columns,
+            rows,
+        } => {
+            if let Some(busy) = busy {
+                return Ok(Err(format!(
+                    "busy, try later: {busy}, and a panel never opens over that"
+                )));
+            }
+            match ui
+                .attach
+                .present(client, title, message, columns, rows, now)
+            {
+                Ok(Shown::Now(panel)) => {
+                    note_row(
+                        app,
+                        step,
+                        client,
+                        format!("showed a panel: {}", short(&panel.title, 60)),
+                    )?;
+                    ui.presented = Some(panel);
+                    Ok(json!({"status": "shown"}))
+                }
+                Ok(Shown::Pending { code }) => {
+                    if let Some(banner) = ui.attach.banner() {
+                        note_row(app, step, client, banner)?;
+                    }
+                    Ok(json!({"status": "pending", "code": code}))
+                }
+                Err(why) => Err(why),
+            }
+        }
+        _ => Err("not an attachment call".into()),
+    })
+}
+
+/// How long a step has to be answered when the keyboard queues one without saying.
+const STEP_WITHIN: Duration = Duration::from_secs(10 * 60);
+
+/// A line the keyboard typed that is the attachment's, not the prompt's: `/attach accept <code>`,
+/// `deny`, `step <text>`, `cancel` and `status`. `None` is any other line. A client has no way
+/// to send this: `session_command` goes through the parser, which has no such command, and the
+/// code a request is given is only on the screen.
+pub fn keyboard<G: Graph>(
+    line: &str,
+    app: &mut App<G>,
+    ui: &mut Ui,
+    now: Instant,
+    step: &mut StepFn<G>,
+) -> Option<Result<String, String>> {
+    let rest = line.trim().strip_prefix("/attach")?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let (word, arg) = rest
+        .trim()
+        .split_once(char::is_whitespace)
+        .map_or((rest.trim(), ""), |(w, a)| (w, a.trim()));
+    let who = ui.attach.attached().map(|(_, c)| c.to_owned());
+    let row = |app: &mut App<G>, step: &mut StepFn<G>, who: Option<&str>, text: String| {
+        who.map_or(Ok(()), |c| note_row(app, step, c, text))
+    };
+    let out = match word {
+        "accept" => match ui.attach.accept(arg, now) {
+            Ok(Accepted::Attached { id, client }) => {
+                ui.remote = Some(format!("{client} attached"));
+                let _ = note_row(
+                    app,
+                    step,
+                    &client,
+                    format!("attached as {id}, accepted at the keyboard"),
+                );
+                Ok(format!("{client} attached as {id}"))
+            }
+            Ok(Accepted::Present(panel)) => {
+                let client = panel.client.clone();
+                ui.presented = Some(panel);
+                let _ = note_row(
+                    app,
+                    step,
+                    &client,
+                    "panels allowed at the keyboard, showing the first one".into(),
+                );
+                Ok(format!("showing a panel from {client}; Esc closes it"))
+            }
+            Err(why) => Err(why),
+        },
+        "deny" => {
+            if ui.attach.deny() {
+                Ok("refused, nothing changed".into())
+            } else {
+                Err("nothing is waiting".into())
+            }
+        }
+        "step" if arg.is_empty() => Err("/attach step <what the session should do>".into()),
+        "step" => ui
+            .attach
+            .dispatch("step", arg, STEP_WITHIN, now)
+            .map(|token| {
+                let _ = row(
+                    app,
+                    step,
+                    who.as_deref(),
+                    format!(
+                        "attached ({}): step {token} queued",
+                        who.as_deref().unwrap_or("")
+                    ),
+                );
+                format!("step {token} queued; the session takes it with next_step")
+            }),
+        "cancel" => ui.attach.cancel(now).map(|said| {
+            let _ = row(app, step, who.as_deref(), said.clone());
+            said
+        }),
+        "status" => Ok(ui.attach.status().to_string()),
+        _ => Err("/attach: accept <code>, deny, step <text>, cancel or status".into()),
+    };
+    for note in ui.attach.expire(now) {
+        let _ = row(app, step, who.as_deref(), note);
+    }
+    Some(out)
 }

@@ -5,14 +5,18 @@
 
 use std::time::{Duration, Instant};
 
+mod common;
+
 use aibus_core::attach::Attachments;
 use aibus_core::remote::{Ask, Remote};
 use aibus_core::state::value::{as_str, get};
+use aibus_graph::Graph;
 use aibus_testkit::tui::run_id;
+use aibus_tui::input::Context;
 use aibus_tui::{remote, Theme};
+use common::*;
 use crossterm::event::KeyCode as K;
-use rig::*;
-use serde_json::{json, Value as Json};
+use serde_json::Value as Json;
 
 const SIZE: (u16, u16) = (120, 40);
 
@@ -245,7 +249,10 @@ fn a_session_that_disconnects_mid_step_makes_the_step_unavailable() {
     );
     assert!(log_text(&r).contains("unavailable"), "{}", log_text(&r));
     assert!(r.ui.attach.attached().is_none());
-    assert!(!r.text().contains("attached"));
+    assert!(
+        r.ui.remote.is_none(),
+        "the status bar no longer names the client"
+    );
 }
 
 #[test]

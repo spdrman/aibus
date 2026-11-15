@@ -94,7 +94,7 @@ fn the_attach_tools_are_listed_only_with_their_flags() {
         "session_present",
     ] {
         assert!(!names(&none).contains(&t.into()), "{t} without a flag");
-        assert_eq!(call(&none, t, json!({})).unwrap_err().code, -32602, "{t}");
+        assert_eq!(call(&none, t, json!({})).unwrap_err().code.0, -32602, "{t}");
     }
     let (attach, ..) = server(&["attach"], Redactor::new());
     let n = names(&attach);
@@ -157,7 +157,13 @@ fn a_step_comes_back_redacted_and_wrapped_as_data() {
         "{shown}"
     );
     assert_eq!(fake.sent.lock().unwrap()[0]["op"], "next_step");
-    // Nothing queued: an empty answer, not an error.
+    // Nothing queued once the step is answered: an empty answer, not an error.
+    call(
+        &s,
+        "step_result",
+        json!({"token": "st-01A", "status": "done", "summary": "ok"}),
+    )
+    .unwrap();
     let none = call(&s, "next_step", json!({})).unwrap();
     assert_ne!(none.is_error, Some(true));
     assert!(none.structured_content.as_ref().unwrap()["step"].is_null());
@@ -197,7 +203,7 @@ fn a_result_is_redacted_capped_and_checked_before_it_goes_down() {
         json!({"token": "st-01A", "status": "approved", "summary": "x"}),
     )
     .unwrap_err();
-    assert_eq!(bad.code, -32602);
+    assert_eq!(bad.code.0, -32602);
     for tool in ["step_result"] {
         assert_eq!(
             call(
@@ -206,7 +212,8 @@ fn a_result_is_redacted_capped_and_checked_before_it_goes_down() {
                 json!({"token": "st-01A", "status": "done", "summary": "x", "extra": 1})
             )
             .unwrap_err()
-            .code,
+            .code
+            .0,
             -32602
         );
     }
@@ -271,11 +278,12 @@ fn present_is_redacted_and_leaves_the_session_to_decide() {
     assert_eq!(
         call(&s, "session_present", json!({"title": "t", "view": "keys"}))
             .unwrap_err()
-            .code,
+            .code
+            .0,
         -32602
     );
     assert_eq!(
-        call(&s, "session_present", json!({})).unwrap_err().code,
+        call(&s, "session_present", json!({})).unwrap_err().code.0,
         -32602
     );
 }

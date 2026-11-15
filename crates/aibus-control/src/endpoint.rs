@@ -286,6 +286,16 @@ async fn say(w: &mut OwnedWriteHalf, v: &Value) -> io::Result<()> {
     w.write_all(format!("{v}\n").as_bytes()).await
 }
 
+/// The strings of a JSON array; anything else in it is skipped.
+fn strings(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array).map_or_else(Vec::new, |a| {
+        a.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
 /// One request line as an `Ask`, and whether it changes the session.
 fn ask(v: &Value) -> Result<(Ask, bool), String> {
     let field = |k: &str| {
@@ -323,9 +333,39 @@ fn ask(v: &Value) -> Result<(Ask, bool), String> {
             },
             true,
         ),
+        "attach" => (
+            Ask::Attach {
+                label: v.get("label").and_then(Value::as_str).map(str::to_owned),
+                lineage: strings(v.get("lineage")),
+                pid: v.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()),
+                cwd: v.get("cwd").and_then(Value::as_str).map(str::to_owned),
+            },
+            true,
+        ),
+        "next_step" => (Ask::NextStep, false),
+        "step_result" => (
+            Ask::StepResult {
+                token: field("token")?,
+                status: field("status")?,
+                summary: field("summary")?,
+            },
+            true,
+        ),
+        "present" => (
+            Ask::Present {
+                title: field("title")?,
+                message: v.get("message").and_then(Value::as_str).unwrap_or("").to_owned(),
+                columns: strings(v.get("columns")),
+                rows: v
+                    .get("rows")
+                    .and_then(Value::as_array)
+                    .map_or_else(Vec::new, |r| r.iter().map(|row| strings(Some(row))).collect()),
+            },
+            true,
+        ),
         _ => {
             return Err(
-                "unknown op: want status, transcript, send, command, cancel or permission".into(),
+                "unknown op: want status, transcript, send, command, cancel, permission, attach, next_step, step_result or present".into(),
             )
         }
     })

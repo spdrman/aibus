@@ -913,14 +913,16 @@ async fn issue_327_a_stderr_flood_past_the_cap_records_a_gap_with_the_dropped_by
         .collect();
     assert_eq!(gaps.len(), 1, "one stderr gap says output was dropped");
     let dropped = gaps[0].data["bytes"].as_u64().unwrap();
-    // 600 lines of at least 13 bytes each, 2000 kept: well over 5000 dropped.
+    // 600 lines of at least 13 bytes each; the head up to the 2000-byte cap is kept, the rest is
+    // dropped, so kept + dropped is everything written.
     assert!(
         dropped > 5_000,
         "the dropped byte count is recorded: {dropped}"
     );
+    let kept = on_channel(&events, EventKind::TraceWarning, "stderr").len();
     assert!(
-        on_channel(&events, EventKind::TraceWarning, "stderr").len() < 600,
-        "lines past the cap are not kept"
+        (1..600).contains(&kept),
+        "the head up to the cap is kept, the rest is not ({kept} kept)"
     );
 }
 
@@ -933,4 +935,128 @@ async fn issue_327_stderr_under_the_cap_records_no_gap() {
     };
     let (_, events) = rig.plain(&flood_body(50), limits).await;
     assert!(on_channel(&events, EventKind::GapDetected, "stderr").is_empty());
+}
+
+fn stderr_gaps(events: &[TraceEvent]) -> Vec<&TraceEvent> {
+    on_channel(events, EventKind::GapDetected, "stderr")
+        .into_iter()
+        .filter(|e| e.data["reason"] == "stderr_limit")
+        .collect()
+}
+
+fn stderr_cap(bytes: u64) -> Limits {
+    Limits {
+        max_stderr_bytes: bytes,
+        ..drain_limits(2_000, 1_000, 10_000)
+    }
+}
+
+/// `n` bytes of `a` and no newline.
+fn raw(n: u32) -> String {
+    format!("head -c {n} /dev/zero | tr '\\0' a >&2")
+}
+
+#[tokio::test]
+async fn issue_327_exactly_at_the_cap_is_no_gap_and_one_past_it_is_one_byte() {
+    let rig = Rig::new();
+    let body = format!("{}; echo >&2", raw(999));
+    let (_, events) = rig.plain(&body, stderr_cap(1_000)).await;
+    assert!(stderr_gaps(&events).is_empty(), "1000 bytes at a 1000 cap");
+    assert_eq!(
+        on_channel(&events, EventKind::TraceWarning, "stderr").len(),
+        1
+    );
+
+    let body = format!("{}; echo >&2", raw(1_000));
+    let (_, events) = rig.plain(&body, stderr_cap(1_000)).await;
+    let gaps = stderr_gaps(&events);
+    assert_eq!(gaps.len(), 1, "1001 bytes at a 1000 cap");
+    assert_eq!(gaps[0].data["bytes"], 1, "only the byte past the cap");
+}
+
+#[tokio::test]
+async fn issue_327_a_drop_spread_over_two_reads_is_counted_in_full() {
+    let rig = Rig::new();
+    let body = format!("{}; sleep 0.4; {}; echo >&2", raw(600), raw(600));
+    let (_, events) = rig.plain(&body, stderr_cap(1_000)).await;
+    let gaps = stderr_gaps(&events);
+    assert_eq!(gaps.len(), 1);
+    // 1201 bytes written, 1000 kept: 201 dropped across the second read and the newline.
+    assert_eq!(gaps[0].data["bytes"], 201, "{}", gaps[0].data);
+}
+
+#[tokio::test]
+async fn issue_327_a_drain_cut_off_while_a_descendant_holds_stderr_still_says_so() {
+    let rig = Rig::new();
+    let body = format!("( {}; sleep 30 ) &", raw(3_000));
+    let started = Instant::now();
+    let (_, events) = rig.plain(&body, stderr_cap(1_000)).await;
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let gaps = stderr_gaps(&events);
+    assert_eq!(
+        gaps.len(),
+        1,
+        "the pipe never closed, the gap is still written"
+    );
+    assert_eq!(gaps[0].data["bytes"], 2_000, "{}", gaps[0].data);
+}
+
+#[tokio::test]
+async fn issue_327_output_limit_stderr_cap_and_grace_cut_all_leave_their_gap() {
+    let limits = Limits {
+        max_stdout_bytes: 10,
+        max_stderr_bytes: 10,
+        ..stopped_limits()
+    };
+    let rig = Rig::new();
+    let exe = rig.cli(STOPPABLE_WITH_DRIP);
+    let (out, events) = rig
+        .run(
+            rig.launch(exe, limits),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(out.ending, Ending::OutputLimit);
+    assert!(events.iter().any(|e| e.data["reason"] == "output_limit"));
+    assert_eq!(unread_gaps(&events).len(), 1);
+    assert_eq!(stderr_gaps(&events).len(), 1);
+}
+
+#[tokio::test]
+async fn issue_329_grace_equal_to_drain_max_is_labelled_drain_max() {
+    // Equal bounds: the long limit and the grace period are the same instant, and the label stays
+    // `drain_max` (D-324); `grace` is only for a drain the grace period shortened.
+    let limits = Limits {
+        drain_max: Duration::from_millis(700),
+        ..stopped_limits()
+    };
+    let (ending, _, bounds) = stopped_before_exit(limits, Some(400)).await;
+    assert_eq!(ending, Ending::Cancelled);
+    assert_eq!(bounds, ["drain_max"]);
+}
+
+#[tokio::test]
+async fn issue_329_a_drain_ended_by_a_cancel_after_exit_is_labelled_drain_stall() {
+    let rig = Rig::new();
+    let cancel = CancellationToken::new();
+    let c = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        c.cancel();
+    });
+    let exe = rig.cli(&flood_body(3_000));
+    let (out, events) = rig
+        .run(
+            rig.launch(exe, drain_limits(20, 5_000, 20_000)),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    assert_eq!(out.ending, Ending::Cancelled);
+    let gaps = unread_gaps(&events);
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].data["bound"], "drain_stall", "{}", gaps[0].data);
 }

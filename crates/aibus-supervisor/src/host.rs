@@ -3,6 +3,8 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use aibus_trace::{AttemptStatus, StoreError, TraceStore};
@@ -66,41 +68,42 @@ enum Piece {
     TooLong(Channel, u64),
     /// stdout passed `max_stdout_bytes`; the reader has stopped.
     OutputLimit(u64),
-    /// stderr went past `max_stderr_bytes`; this many bytes were read and dropped.
-    StderrDropped(u64),
     Eof,
 }
 
 /// Splits a pipe into lines of at most `max_line` bytes. A longer line is skipped to its newline
-/// and reported by size; stdout stops at `max_total`, stderr past it is drained and dropped, then
-/// reported once as a gap with the dropped byte count.
+/// and reported by size; stdout stops at `max_total`, stderr past it is drained and dropped (the
+/// dropped byte count goes in `dropped`, reported once by `supervise`).
 async fn read_lines(
     mut pipe: impl AsyncRead + Unpin,
     ch: Channel,
     max_line: usize,
     max_total: u64,
+    dropped: Arc<AtomicU64>,
     tx: mpsc::Sender<Piece>,
 ) {
     let mut buf = vec![0u8; 64 * 1024];
     let mut line: Vec<u8> = Vec::new();
     let mut skipping: Option<u64> = None;
     let mut total = 0u64;
-    let mut dropped = 0u64;
     loop {
         let n = match pipe.read(&mut buf).await {
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
         total += n as u64;
+        // stderr keeps the head of the read that crosses the cap, up to the cap; only the rest
+        // (and everything after) is dropped and counted.
+        let mut keep = n;
         if total > max_total {
             if ch == Channel::Stdout {
                 let _ = tx.send(Piece::OutputLimit(total)).await;
                 return;
             }
-            dropped += n as u64;
-            continue;
+            keep = max_total.saturating_sub(total - n as u64) as usize;
+            dropped.fetch_add((n - keep) as u64, Ordering::Relaxed);
         }
-        for chunk in buf[..n].split_inclusive(|b| *b == b'\n') {
+        for chunk in buf[..keep].split_inclusive(|b| *b == b'\n') {
             let ends = chunk.ends_with(b"\n");
             let body = if ends {
                 &chunk[..chunk.len() - 1]
@@ -132,9 +135,6 @@ async fn read_lines(
     };
     if let Some(p) = last {
         let _ = tx.send(p).await;
-    }
-    if dropped > 0 {
-        let _ = tx.send(Piece::StderrDropped(dropped)).await;
     }
     let _ = tx.send(Piece::Eof).await;
 }
@@ -216,6 +216,7 @@ pub async fn supervise(
     }
     let (tx, mut rx) = mpsc::channel::<Piece>(64);
     let mut open_pipes = 0;
+    let stderr_dropped = Arc::new(AtomicU64::new(0));
     if let Some(out) = child.stdout.take() {
         open_pipes += 1;
         tokio::spawn(read_lines(
@@ -223,6 +224,7 @@ pub async fn supervise(
             Channel::Stdout,
             limits.max_line_bytes,
             limits.max_stdout_bytes,
+            Arc::default(),
             tx.clone(),
         ));
     }
@@ -233,6 +235,7 @@ pub async fn supervise(
             Channel::Stderr,
             limits.max_line_bytes,
             limits.max_stderr_bytes,
+            stderr_dropped.clone(),
             tx.clone(),
         ));
     }
@@ -270,7 +273,6 @@ pub async fn supervise(
                     Some(Piece::Line(Channel::Stdout, l)) => { store.append(norm.stream_line(&l, now))?; }
                     Some(Piece::Line(_, l)) => { store.append(norm.stderr_line(&l, now))?; }
                     Some(Piece::TooLong(ch, bytes)) => { store.append(norm.gap(ch, "line_too_long", bytes, now))?; }
-                    Some(Piece::StderrDropped(bytes)) => { store.append(norm.gap(Channel::Stderr, "stderr_limit", bytes, now))?; }
                     Some(Piece::OutputLimit(bytes)) => {
                         open_pipes -= 1;
                         store.append(norm.gap(Channel::Host, "output_limit", bytes, now))?;
@@ -389,6 +391,12 @@ pub async fn supervise(
             gap.events[0].data["bound"] = json!(if hit_bound { cap_name } else { "drain_stall" });
             store.append(gap)?;
         }
+    }
+    // Written once, here, however the read ended: a drain cut off before the pipe closed still
+    // reports what was dropped so far (a lower bound, like the unread count).
+    let dropped = stderr_dropped.load(Ordering::Relaxed);
+    if dropped > 0 {
+        store.append(norm.gap(Channel::Stderr, "stderr_limit", dropped, SystemTime::now()))?;
     }
     guard.0 = None;
 

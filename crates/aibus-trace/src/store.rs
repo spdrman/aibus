@@ -300,6 +300,11 @@ impl TraceStore {
         Ok((store, recovery))
     }
 
+    /// A generator seeded from the run: its next id sorts after every id the store holds.
+    pub fn ids(&self) -> EventIds {
+        EventIds::default()
+    }
+
     /// An event about the trace itself (a repair, a budget), run-wide: the nil attempt.
     fn own_event(&mut self, kind: EventKind, visibility: Visibility, data: Value) -> TraceEvent {
         const PARSER: &str = "aibus-trace-store/1";

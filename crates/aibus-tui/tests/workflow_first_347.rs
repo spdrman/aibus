@@ -12,24 +12,35 @@ use aibus_tui::Theme;
 use common::*;
 use crossterm::event::KeyCode as K;
 
+/// What a fresh install loads: the built-in fake, standing in with no key (startup.rs).
+fn builtin_fake() -> AccountView {
+    AccountView {
+        name: AccountName("fake".into()),
+        provider: "fake".into(),
+        label: "fake".into(),
+        default_model: None,
+        key_ref: "none".into(),
+        models: vec![],
+    }
+}
+
+fn work() -> AccountView {
+    AccountView {
+        name: AccountName("work".into()),
+        provider: "anthropic".into(),
+        label: "work".into(),
+        default_model: None,
+        key_ref: "keyring:aibus/work".into(),
+        models: vec![],
+    }
+}
+
 /// A session with the views registered and no run at all, which is what `aibus` opens on.
-fn fresh(with_account: bool) -> Rig {
+fn fresh(accounts: Vec<AccountView>) -> Rig {
     let mut app = App::new(MiniGraph::new(), || aibus_testkit::tui::NOW);
     let keys = aibus_tui::register(&mut app.graph, app.store.clone());
     app.keys.extend(keys);
-    if with_account {
-        app.step(Msg::AccountsReloaded {
-            accounts: vec![AccountView {
-                name: AccountName("work".into()),
-                provider: "anthropic".into(),
-                label: "work".into(),
-                default_model: None,
-                key_ref: "keyring:aibus/work".into(),
-                models: vec![],
-            }],
-        })
-        .unwrap();
-    }
+    app.step(Msg::AccountsReloaded { accounts }).unwrap();
     Rig::new(app, (100, 40), Theme::recording())
 }
 
@@ -48,7 +59,7 @@ fn runs(r: &Rig) -> usize {
 #[test]
 fn run_as_the_first_line_starts_the_lead_with_the_workflow_call() {
     for text in ["/workflow run review the diff", "/workflow review the diff"] {
-        let mut r = fresh(true);
+        let mut r = fresh(vec![work()]);
         let sent = line(&mut r, text);
         assert!(
             r.ui.prompt.notice.is_none(),
@@ -68,7 +79,7 @@ fn run_as_the_first_line_starts_the_lead_with_the_workflow_call() {
 
 #[test]
 fn a_name_with_no_input_still_starts_the_lead() {
-    let mut r = fresh(true);
+    let mut r = fresh(vec![work()]);
     let sent = line(&mut r, "/workflow run review");
     assert!(
         names(&sent)
@@ -81,7 +92,13 @@ fn a_name_with_no_input_still_starts_the_lead() {
 
 #[test]
 fn no_account_says_to_add_one_and_starts_nothing() {
-    let mut r = fresh(false);
+    // Nothing loaded, and what a fresh install really loads: only the built-in fake.
+    for accounts in [vec![], vec![builtin_fake()]] {
+        no_account(fresh(accounts));
+    }
+}
+
+fn no_account(mut r: Rig) {
     let sent = line(&mut r, "/workflow run review the diff");
     let notice = r.ui.prompt.notice.clone().unwrap_or_default();
     assert!(notice.contains("aibus account add"), "{notice:?}");
@@ -95,7 +112,7 @@ fn no_account_says_to_add_one_and_starts_nothing() {
 
 #[test]
 fn new_and_edit_still_wait_for_a_lead_and_say_so() {
-    let mut r = fresh(true);
+    let mut r = fresh(vec![work()]);
     for text in [
         "/workflow new review a pull request",
         "/workflow edit review add a step",

@@ -133,7 +133,7 @@ mod with_the_host {
         .unwrap();
         fs::write(&index_path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
         let policy = Policy::parse(&format!(
-            "require_signature = true\n[trusted_keys]\nk1 = \"{}\"\n",
+            "require_signature = true\n[trusted_keys.k1]\nkey = \"{}\"\nids = [\"org.example.aibus.wasmcli\"]\n",
             hex(pair.public_key().as_ref())
         ))
         .unwrap();

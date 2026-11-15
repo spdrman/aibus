@@ -26,8 +26,8 @@ fn template() -> Manifest {
 }
 
 #[test]
-fn the_host_speaks_protocol_1_0_0() {
-    assert_eq!(PROTOCOL, Version(1, 0, 0));
+fn the_host_speaks_protocol_1_1_0() {
+    assert_eq!(PROTOCOL, Version(1, 1, 0));
 }
 
 #[test]

@@ -270,8 +270,15 @@ mod discovery {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
-    fn fake(dir: &Path, version: &str, mode: u32) -> PathBuf {
+    /// A directory with its mode set, not inherited from the umask (#337): discovery refuses a
+    /// directory others can write, and `create_dir_all` under umask 002 makes one.
+    fn open_dir(dir: &Path) {
         fs::create_dir_all(dir).unwrap();
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn fake(dir: &Path, version: &str, mode: u32) -> PathBuf {
+        open_dir(dir);
         let p = dir.join("claude");
         fs::write(&p, format!("#!/bin/sh\necho '{version} (Claude Code)'\n")).unwrap();
         fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
@@ -295,10 +302,10 @@ mod discovery {
         let cask = root.join("cask/2.1.311");
         let real = fake(&cask, "2.1.311", 0o755);
         let brew = root.join("brew-bin");
-        fs::create_dir_all(&brew).unwrap();
+        open_dir(&brew);
         std::os::unix::fs::symlink(&real, brew.join("claude")).unwrap();
         let empty = root.join("empty");
-        fs::create_dir_all(&empty).unwrap();
+        open_dir(&empty);
         let dirs = vec![
             PathBuf::from("relative/bin"),
             stale.clone(),
@@ -347,6 +354,45 @@ mod discovery {
             "the link is resolved to the real file"
         );
         assert_eq!(chosen.verdict, Ok(Version(2, 1, 311)));
+    }
+
+    /// #337: the discovery tests pass whatever umask the developer's shell has. They run again
+    /// in a child under umask 002 (a login user's default on Debian), where a directory made
+    /// without an explicit mode comes out group-writable and discovery rightly refuses it.
+    #[test]
+    fn issue_337_the_discovery_tests_pass_under_umask_002() {
+        let status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("umask 002; exec \"$0\" discovery:: --skip issue_337_the_discovery_tests --test-threads=1")
+            .arg(std::env::current_exe().unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stdout)
+        );
+    }
+
+    /// #337: a directory the group can write to is refused, which is why the tests above set
+    /// their modes instead of inheriting the umask.
+    #[tokio::test]
+    async fn issue_337_a_group_writable_directory_is_still_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let shared = root.join("group-dir");
+        fake(&shared, "2.1.311", 0o755);
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o775)).unwrap();
+        let d = cli::discover(std::slice::from_ref(&shared), "claude", &env()).await;
+        assert!(d.chosen.is_none());
+        assert!(
+            d.candidates[0]
+                .verdict
+                .as_ref()
+                .is_err_and(|e| e.contains("directory writable")),
+            "{:#?}",
+            d.candidates
+        );
     }
 
     #[tokio::test]

@@ -609,3 +609,14 @@ fn the_right_function_name_in_another_module_is_refused() {
         );
     }
 }
+
+#[test]
+fn an_extension_failed_reason_without_the_host_channel_is_refused_too() {
+    let w = emitting(
+        &[r#"{"kind":"gap_detected","data":{"reason":"extension_failed:trap"}}"#],
+        &[],
+    );
+    let ev = drive(&w, Limits::default(), &[LINE]);
+    assert!(gaps(&ev).is_empty(), "{:#?}", gaps(&ev));
+    assert!(ev.iter().any(|e| e.data["why"] == "reserved_reason"));
+}

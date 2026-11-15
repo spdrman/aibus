@@ -15,6 +15,7 @@
 
 pub mod conformance;
 pub mod declarative;
+pub mod flags;
 pub mod manifest;
 pub mod negotiate;
 pub mod package;

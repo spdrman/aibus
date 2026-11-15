@@ -4,7 +4,7 @@
 use std::time::{Duration, SystemTime};
 
 use aibus_trace::{
-    derived_id, project, AttemptRef, EventKind, Origin, ToolOutcome, TraceEvent, Visibility,
+    project, AttemptRef, EventIds, EventKind, Origin, ToolOutcome, TraceEvent, Visibility,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -32,14 +32,13 @@ impl T {
         let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000 + n);
         let mut e = TraceEvent::new(
             &attempt(),
-            derived_id(&[&n.to_le_bytes()]),
+            EventIds::default().next(at, &[&n.to_le_bytes()]),
             kind,
             origin,
             vis,
             at,
             "test/1",
         );
-        e.sequence = n;
         f(&mut e);
         let id = e.event_id;
         self.0.push(e);
@@ -184,14 +183,13 @@ fn every_edge_has_a_source_and_gaps_stay_labelled() {
     let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
     let mut gap = TraceEvent::new(
         &attempt(),
-        derived_id(&[b"gap"]),
+        EventIds::default().next(at + Duration::from_secs(n), &[b"gap"]),
         EventKind::GapDetected,
         Origin::CliStream,
         Visibility::Unavailable,
         at,
         "t/1",
     );
-    gap.sequence = n;
     gap.data = json!({ "reason": "reasoning_not_exposed" });
     events.push(gap);
     let p = project(&events);

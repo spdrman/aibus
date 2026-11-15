@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use aibus_trace::view::{self, Filter, Recorded, RunState};
-use aibus_trace::{derived_id, AttemptRef, EventKind, Origin, TraceEvent, Visibility};
+use aibus_trace::{AttemptRef, EventIds, EventKind, Origin, TraceEvent, Visibility};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -264,7 +264,7 @@ fn replay_emits_the_recorded_trace_byte_for_byte_and_ends_in_the_same_graph() {
             view::graph(&rec, &name),
             "{name}: the replay ends somewhere else"
         );
-        // One transition per recorded event, in sequence order.
+        // One transition per recorded event, in event id order.
         let seqs: Vec<u64> = steps
             .lines()
             .skip(1)
@@ -277,7 +277,7 @@ fn replay_emits_the_recorded_trace_byte_for_byte_and_ends_in_the_same_graph() {
                     .unwrap()
             })
             .collect();
-        let mut want: Vec<u64> = rec.events.iter().map(|e| e.sequence).collect();
+        let mut want: Vec<u64> = rec.events.iter().map(|e| e.position).collect();
         want.sort_unstable();
         assert_eq!(seqs, want, "{name}");
         assert!(steps.starts_with(&format!("replay of {name}: ")));
@@ -531,14 +531,13 @@ impl Trace {
         let at = SystemTime::UNIX_EPOCH + Duration::from_millis(1_800_000_000_000 + n * 250);
         let mut e = TraceEvent::new(
             &self.attempt,
-            derived_id(&[&n.to_le_bytes()]),
+            EventIds::default().next(at, &[&n.to_le_bytes()]),
             kind,
             Origin::CliStream,
             Visibility::Observed,
             at,
             "test/1",
         );
-        e.sequence = n;
         f(&mut e);
         e
     }
@@ -574,7 +573,7 @@ fn every_view(what: &str, rec: &Recorded) -> usize {
         out.extend(view::inspect(rec, id));
     }
     for e in rec.events.iter().take(5) {
-        out.extend(view::event(rec, e.sequence));
+        out.extend(view::event(rec, e.position));
         out.extend(view::inspect(rec, &e.attempt_id.to_string()));
     }
     for raw in rec.raw.iter().take(50) {
@@ -841,7 +840,11 @@ fn fuzz_32000_traces_through_every_view() {
                     e.parent_tool_use_id = name();
                     e.native.tool_use_id = name();
                     e.kind = kinds[rng.below(kinds.len())];
-                    e.sequence = rng.below(8) as u64;
+                    e.event_id = EventIds::default().next(
+                        SystemTime::UNIX_EPOCH
+                            + Duration::from_millis(1_800_000_000_000 + rng.below(8) as u64),
+                        &[b"fuzz"],
+                    );
                     if rng.below(3) == 0 {
                         e.event_id = Uuid::from_u128(rng.below(4) as u128);
                     }
@@ -1111,14 +1114,13 @@ fn issue_284_the_graph_and_replay_of_50000_attempts_stay_near_linear() {
             let at = SystemTime::UNIX_EPOCH + Duration::from_millis(1_800_000_000_000 + n);
             let mut e = TraceEvent::new(
                 &a,
-                derived_id(&[&n.to_le_bytes()]),
+                EventIds::default().next(at, &[&n.to_le_bytes()]),
                 EventKind::AgentStarted,
                 Origin::CliStream,
                 Visibility::Observed,
                 at,
                 "test/1",
             );
-            e.sequence = n;
             e.agent_id = Some(format!("agent{n}"));
             e
         })

@@ -334,7 +334,7 @@ fn signed(w: &World, tamper_key: bool) -> (Registry, Policy, Entry) {
         hex(pair.public_key().as_ref())
     };
     let policy = Policy::parse(&format!(
-        "require_signature = true\n[trusted_keys]\nk1 = \"{public}\"\n"
+        "require_signature = true\n[trusted_keys.k1]\nkey = \"{public}\"\nids = [\"org.example.aibus.examplecli\"]\n"
     ))
     .unwrap();
     let r = Registry::open(&w.reg()).unwrap();
@@ -403,8 +403,8 @@ fn a_publisher_outside_the_policys_allowlist_is_refused() {
 #[test]
 fn a_policy_with_an_unknown_key_or_a_bad_public_key_is_refused() {
     assert!(Policy::parse("surprise = 1").is_err());
-    assert!(Policy::parse("[trusted_keys]\nk = \"nothex\"").is_err());
-    assert!(Policy::parse("[trusted_keys]\nk = \"abcd\"").is_err());
+    assert!(Policy::parse("[trusted_keys.k]\nkey = \"nothex\"\nids = [\"org.a.b\"]").is_err());
+    assert!(Policy::parse("[trusted_keys.k]\nkey = \"abcd\"\nids = [\"org.a.b\"]").is_err());
 }
 
 // ---- #332 review, item 6: the entry cap on its own ----

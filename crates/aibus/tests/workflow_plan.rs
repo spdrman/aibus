@@ -388,3 +388,47 @@ fn validate_accepts_the_graph_fixtures_and_warns_about_the_experimental_runtime(
         "{warned:?}"
     );
 }
+
+// Combined with #271: the human plan and diff go through the same cleaner as `workflow show`, and a
+// name finds a workflow that only exists inside a `.aibus` bundle.
+#[test]
+fn plan_and_diff_print_no_escape_sequences_and_a_bundled_name_plans() {
+    let home = xdg_temp();
+    let h = home.path();
+    let dir = h.join("proj/.aibus/workflows");
+    fs::create_dir_all(&dir).unwrap();
+    let esc = "name = \"esc\"\ndescription = \"d\"\n\n[[step]]\nagent = \"explore\"\nprompt = \"look \\u001b[2J{{input}}\"\n\n[[step]]\nagent = \"plan\"\nprompt = \"{{prev.summary}}\"\ngate = \"printf '\\u001b]0;owned\\u0007'; exit 0\"\n";
+    fs::write(dir.join("esc.toml"), esc).unwrap();
+    fs::copy(
+        root().join("examples/workflows/fix.toml"),
+        dir.join("fix.toml"),
+    )
+    .unwrap();
+    for args in [
+        &["workflow", "plan", "esc", "--dry-run"][..],
+        &["workflow", "diff", "esc", "fix"][..],
+    ] {
+        let out = aibus(h, args);
+        let all = format!("{}{}", stdout(&out), stderr(&out));
+        assert!(
+            !all.contains('\u{1b}') && !all.contains('\u{7}'),
+            "{args:?}: {all:?}"
+        );
+    }
+    // Pack `fix` into a bundle and remove the loose file: `plan fix` reads it from the bundle.
+    let packed = aibus(
+        h,
+        &[
+            "workflow",
+            "pack",
+            "fix",
+            "-o",
+            ".aibus/workflows/kit.aibus",
+        ],
+    );
+    assert_eq!(packed.status.code(), Some(0), "{}", stderr(&packed));
+    fs::remove_file(dir.join("fix.toml")).unwrap();
+    let plan = aibus(h, &["--json", "workflow", "plan", "fix", "--dry-run"]);
+    assert_eq!(plan.status.code(), Some(0), "{}", stderr(&plan));
+    assert_eq!(json_of(&plan)["workflow"]["name"], "fix");
+}

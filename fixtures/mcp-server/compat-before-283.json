@@ -1237,6 +1237,9 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "bundle": {
+                  "type": "string"
+                },
                 "description": {
                   "type": "string"
                 },
@@ -1251,6 +1254,9 @@
                 },
                 "path": {
                   "type": "string"
+                },
+                "runnable": {
+                  "type": "boolean"
                 },
                 "scope": {
                   "enum": [

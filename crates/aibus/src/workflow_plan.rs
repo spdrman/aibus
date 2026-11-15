@@ -5,6 +5,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use aibus_core::text::strip_ansi;
 use aibus_core::workflow::compile::{compile, plan_hash};
 use aibus_core::workflow::manifest::{diff, run_manifest, Change, RunFacts};
 use aibus_core::workflow::{self, native, validate, Problem, Workflow};
@@ -18,8 +19,9 @@ use crate::cli::Global;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// The file `target` names: a path (it ends in `.toml` or `.json`, has a separator, or is a file
-/// in the project), else a workflow name, looked up as `workflow run` would.
-fn resolve(g: &Global, target: &str) -> Result<PathBuf, AibusError> {
+/// in the project), else a workflow name, looked up as `workflow run` would. A name also gives the
+/// text the lookup read, since a workflow from a `.aibus` bundle (#271) has no file of its own.
+fn resolve(g: &Global, target: &str) -> Result<(PathBuf, Option<String>), AibusError> {
     let cwd = g.project_dir()?;
     let is_path = target.ends_with(".toml")
         || target.ends_with(".json")
@@ -27,13 +29,13 @@ fn resolve(g: &Global, target: &str) -> Result<PathBuf, AibusError> {
         || target.contains('/')
         || cwd.join(target).is_file();
     if is_path {
-        return Ok(cwd.join(target));
+        return Ok((cwd.join(target), None));
     }
     let dirs = workflow::dirs(&cwd, Some(&g.paths()?.config));
     workflow::list(&dirs)
         .into_iter()
-        .find(|(n, _, _)| n == target)
-        .map(|(_, path, _)| path)
+        .find(|f| f.name == target)
+        .map(|f| (f.path, f.text))
         .ok_or_else(|| {
             AibusError::Usage(format!("no workflow named {target} (aibus workflow list)"))
         })
@@ -73,7 +75,11 @@ fn refuse(g: &Global, path: &Path, errors: &[Problem]) -> u8 {
                 .field
                 .as_deref()
                 .map_or(String::new(), |f| format!("{f}: "));
-            println!("error: {}: {step}{field}{}", path.display(), p.message);
+            println!(
+                "error: {}: {step}{field}{}",
+                path.display(),
+                strip_ansi(&p.message)
+            );
         }
     }
     // As `workflow validate` exits for errors.
@@ -87,12 +93,22 @@ fn plan_of(
     agents: &IndexMap<AgentName, AgentDef>,
     redactor: &Redactor,
 ) -> Result<Result<(PathBuf, Workflow, Value), u8>, AibusError> {
-    let path = resolve(g, target)?;
-    let text = read(&path)?;
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("workflow");
+    let (path, listed) = resolve(g, target)?;
+    let text = match listed {
+        Some(text) => text,
+        None => read(&path)?,
+    };
+    // A bundled workflow's path is its bundle, so a name target keeps its own name.
+    let stem = if path
+        .extension()
+        .is_some_and(|x| x == workflow::bundle::EXTENSION)
+    {
+        target
+    } else {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("workflow")
+    };
     let roster: Vec<AgentName> = agents.keys().cloned().collect();
     let checked = validate(&text, stem, &roster);
     let wf = match Workflow::parse(stem, &text) {
@@ -123,7 +139,7 @@ pub fn plan(
         println!("plan_hash {}", short(&plan["plan_hash"]));
         match plan["plan_only_because"].as_str() {
             None => println!("runs now: yes, as a chain"),
-            Some(why) => println!("runs now: no: {why}"),
+            Some(why) => println!("runs now: no: {}", strip_ansi(why)),
         }
         println!("\nsteps:");
         for s in plan["steps"].as_array().into_iter().flatten() {
@@ -169,7 +185,7 @@ pub fn plan(
                 ),
             }
             if let Some(gate) = s["gate"].as_str() {
-                println!("      gate: {gate}");
+                println!("      gate: {}", strip_ansi(gate));
             }
         }
         println!("\nedges:");
@@ -208,7 +224,7 @@ pub fn plan(
             for (step, kinds) in held {
                 let kinds: Vec<String> =
                     kinds.as_array().into_iter().flatten().map(short).collect();
-                println!("  {step}: {}", kinds.join(", "));
+                println!("  {}: {}", strip_ansi(step), kinds.join(", "));
             }
         }
         for note in plan["notes"].as_array().into_iter().flatten() {
@@ -270,11 +286,12 @@ fn saved_plan(path: &Path) -> Result<Value, AibusError> {
     Ok(plan)
 }
 
-/// A value on one line, for a person.
+/// A value on one line, for a person. Workflow text can hold escape sequences (#277), so they
+/// are taken out.
 fn short(v: &Value) -> String {
     let s = match v {
         Value::Null => "(none)".to_owned(),
-        Value::String(s) => s.clone(),
+        Value::String(s) => strip_ansi(s).into_owned(),
         other => other.to_string(),
     };
     if s.chars().count() > 120 {
@@ -294,7 +311,12 @@ fn print_changes(g: &Global, a: &Value, b: &Value, changes: &[Change]) {
         println!("same plan ({})", short(&a["plan_hash"]));
     } else {
         for c in changes {
-            println!("{}: {} -> {}", c.path, short(&c.a), short(&c.b));
+            println!(
+                "{}: {} -> {}",
+                strip_ansi(&c.path),
+                short(&c.a),
+                short(&c.b)
+            );
         }
     }
 }
@@ -305,7 +327,7 @@ pub fn diff_cmd(g: &Global, a: &str, b: &str, redactor: &Redactor) -> Result<u8,
     let mut sides = Vec::new();
     for target in [a, b] {
         if target.ends_with(".json") {
-            sides.push(saved_plan(&resolve(g, target)?)?);
+            sides.push(saved_plan(&resolve(g, target)?.0)?);
         } else {
             match plan_of(g, target, &agents, redactor)? {
                 Ok((_, _, plan)) => sides.push(plan),
@@ -431,7 +453,7 @@ pub fn export(
             preview.dir.display()
         );
     } else {
-        print!("{}", preview.diff);
+        print!("{}", strip_ansi(&preview.diff));
         println!(
             "\nnothing was written. To write these files into {}:",
             preview.dir.display()

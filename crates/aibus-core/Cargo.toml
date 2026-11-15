@@ -37,7 +37,7 @@ yaml-rust2 = "0.10"
 zstd = "0.13"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 
 [dev-dependencies]
 aibus-provider-anthropic.workspace = true

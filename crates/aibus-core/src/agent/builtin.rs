@@ -5,6 +5,17 @@
 //! resolver (A2.3) falls back to `inherit` when the key is unset. A `tools` key left out means
 //! every tool the role may use.
 
+/// The names of the built-in agents, read from their definitions.
+pub fn names() -> Vec<crate::ids::AgentName> {
+    BUILTINS
+        .iter()
+        .filter_map(|text| {
+            let name = text.lines().find_map(|l| l.strip_prefix("name: "))?;
+            crate::ids::AgentName::new(name.trim()).ok()
+        })
+        .collect()
+}
+
 pub const BUILTINS: [&str; 10] = [
     r#"---
 name: lead

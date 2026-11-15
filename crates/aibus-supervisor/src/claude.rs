@@ -172,8 +172,11 @@ fn reported(v: &Value, name: &str, unit: &str, source: &str) -> Metric {
 
 impl Normalizer {
     /// A normaliser whose ids come from `ids`, so a writer resuming a run orders after the earlier one.
-    pub fn with_ids(attempt: AttemptRef, _ids: EventIds) -> Self {
-        Self::new(attempt)
+    pub fn with_ids(attempt: AttemptRef, ids: EventIds) -> Self {
+        Self {
+            ids,
+            ..Self::new(attempt)
+        }
     }
 
     pub fn new(attempt: AttemptRef) -> Self {

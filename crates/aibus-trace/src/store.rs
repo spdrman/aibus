@@ -302,7 +302,7 @@ impl TraceStore {
 
     /// A generator seeded from the run: its next id sorts after every id the store holds.
     pub fn ids(&self) -> EventIds {
-        EventIds::default()
+        self.ids
     }
 
     /// An event about the trace itself (a repair, a budget), run-wide: the nil attempt.

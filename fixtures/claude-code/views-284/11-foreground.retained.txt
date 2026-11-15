@@ -1,0 +1,621 @@
+run 11-foreground.retained
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 40 events, observed 2026-11-14T21:19:41.292Z to 2026-11-14T21:19:45.168Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 completed  [observed 2]
+  usage input_tokens 4 tokens (reported, result.usage)
+  usage output_tokens 316 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 2223 tokens (reported, result.usage)
+  usage cache_read_input_tokens 13036 tokens (reported, result.usage)
+  usage num_turns 3 turns (reported, result.num_turns)
+  usage duration_ms 2908 ms (reported, result.duration_ms)
+  usage cost_usd 0.0010430450000000005 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 20d7adb0-33a7-4cb1-b8b8-661dcf32e384 lead, process_exited  messages 1 observed  [observed 2, correlated 1]
+  | agent a51dc098ebaef1926 reader-a, completed  messages 2 observed  [observed 4, correlated 3]
+  |   edge observed cross-checked (cli_stream, hook) via toolu_01Mogri4cjssotDxPiAw6PWk sources #3 observed/cli_stream #4 observed/cli_stream #27 correlated/hook #28 correlated/hook
+  | | tool toolu_01JeiGnoxNemZFWUdfSfJttH Read: completed  [observed 2, correlated 2]
+  | agent a8462ecb2e68a2980 reader-b, completed  messages 2 observed  [observed 4, correlated 3]
+  |   edge observed cross-checked (cli_stream, hook) via toolu_01AU2rDESJUnNTzAAvW2kqgT sources #6 observed/cli_stream #7 observed/cli_stream #29 correlated/hook #30 correlated/hook
+  | | tool toolu_01W7MEo4jNqMwkNhgW9R3Gc4 Read: completed  [observed 2, correlated 2]
+gaps (what the trace does not show)
+  #18 reasoning_not_exposed (unavailable) attempt 00000000-0000-0000-0000-000002820002
+timeline (sequence, observed by aibus, reported by the vendor, kind, level, origin)
+#1 2026-11-14T21:19:41.292Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:19:41.662Z - agent_started observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 role=lead
+#3 2026-11-14T21:19:42.528Z 2026-11-14T21:19:42.527Z task_delegated observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 tool_use=toolu_01Mogri4cjssotDxPiAw6PWk tool=Agent subagent_type=reader-a
+#4 2026-11-14T21:19:42.550Z - agent_started observed cli_stream agent=a51dc098ebaef1926 tool_use=toolu_01Mogri4cjssotDxPiAw6PWk subagent_type=reader-a
+#5 2026-11-14T21:19:42.552Z 2026-11-14T21:19:42.546Z message_chunk observed cli_stream agent=a51dc098ebaef1926 role=user
+#6 2026-11-14T21:19:42.853Z 2026-11-14T21:19:42.853Z task_delegated observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 tool_use=toolu_01AU2rDESJUnNTzAAvW2kqgT tool=Agent subagent_type=reader-b
+#7 2026-11-14T21:19:42.873Z - agent_started observed cli_stream agent=a8462ecb2e68a2980 tool_use=toolu_01AU2rDESJUnNTzAAvW2kqgT subagent_type=reader-b
+#8 2026-11-14T21:19:42.874Z 2026-11-14T21:19:42.872Z message_chunk observed cli_stream agent=a8462ecb2e68a2980 role=user
+#9 2026-11-14T21:19:43.240Z 2026-11-14T21:19:43.233Z tool_started observed cli_stream agent=a51dc098ebaef1926 tool_use=toolu_01JeiGnoxNemZFWUdfSfJttH tool=Read
+#10 2026-11-14T21:19:43.271Z 2026-11-14T21:19:43.270Z tool_completed observed cli_stream agent=a51dc098ebaef1926 tool_use=toolu_01JeiGnoxNemZFWUdfSfJttH
+#11 2026-11-14T21:19:43.613Z 2026-11-14T21:19:43.611Z tool_started observed cli_stream agent=a8462ecb2e68a2980 tool_use=toolu_01W7MEo4jNqMwkNhgW9R3Gc4 tool=Read
+#12 2026-11-14T21:19:43.634Z 2026-11-14T21:19:43.633Z tool_completed observed cli_stream agent=a8462ecb2e68a2980 tool_use=toolu_01W7MEo4jNqMwkNhgW9R3Gc4
+#13 2026-11-14T21:19:43.960Z 2026-11-14T21:19:43.960Z message_chunk observed cli_stream agent=a8462ecb2e68a2980 role=assistant
+#14 2026-11-14T21:19:43.999Z 2026-11-14T21:19:43.998Z agent_stopped observed cli_stream agent=a8462ecb2e68a2980 status=completed
+#15 2026-11-14T21:19:43.999Z - agent_stopped observed cli_stream agent=a8462ecb2e68a2980 status=completed corroborates
+#16 2026-11-14T21:19:43.999Z - usage_reported observed cli_stream agent=a8462ecb2e68a2980 scope=agent
+#17 2026-11-14T21:19:44.010Z 2026-11-14T21:19:44.010Z agent_stopped observed cli_stream agent=a8462ecb2e68a2980 tool_use=toolu_01AU2rDESJUnNTzAAvW2kqgT status=completed corroborates
+#18 2026-11-14T21:19:44.066Z 2026-11-14T21:19:44.066Z gap_detected unavailable cli_stream agent=a51dc098ebaef1926 reason=reasoning_not_exposed
+#19 2026-11-14T21:19:44.082Z 2026-11-14T21:19:44.081Z message_chunk observed cli_stream agent=a51dc098ebaef1926 role=assistant
+#20 2026-11-14T21:19:44.102Z 2026-11-14T21:19:44.102Z agent_stopped observed cli_stream agent=a51dc098ebaef1926 status=completed
+#21 2026-11-14T21:19:44.102Z - agent_stopped observed cli_stream agent=a51dc098ebaef1926 status=completed corroborates
+#22 2026-11-14T21:19:44.102Z - usage_reported observed cli_stream agent=a51dc098ebaef1926 scope=agent
+#23 2026-11-14T21:19:44.110Z 2026-11-14T21:19:44.110Z agent_stopped observed cli_stream agent=a51dc098ebaef1926 tool_use=toolu_01Mogri4cjssotDxPiAw6PWk status=completed corroborates
+#24 2026-11-14T21:19:44.489Z 2026-11-14T21:19:44.488Z message_chunk observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 role=assistant
+#25 2026-11-14T21:19:44.515Z - usage_reported observed cli_stream agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 scope=attempt
+#26 2026-11-14T21:19:45.168Z - agent_started correlated hook agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 role=lead corroborates
+#27 2026-11-14T21:19:45.168Z - task_delegated correlated hook agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 tool_use=toolu_01Mogri4cjssotDxPiAw6PWk tool=Agent subagent_type=reader-a corroborates
+#28 2026-11-14T21:19:45.168Z - agent_started correlated hook agent=a51dc098ebaef1926 subagent_type=reader-a corroborates
+#29 2026-11-14T21:19:45.168Z - task_delegated correlated hook agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 tool_use=toolu_01AU2rDESJUnNTzAAvW2kqgT tool=Agent subagent_type=reader-b corroborates
+#30 2026-11-14T21:19:45.168Z - agent_started correlated hook agent=a8462ecb2e68a2980 subagent_type=reader-b corroborates
+#31 2026-11-14T21:19:45.168Z - tool_started correlated hook agent=a51dc098ebaef1926 tool_use=toolu_01JeiGnoxNemZFWUdfSfJttH tool=Read corroborates
+#32 2026-11-14T21:19:45.168Z - tool_completed correlated hook agent=a51dc098ebaef1926 tool_use=toolu_01JeiGnoxNemZFWUdfSfJttH tool=Read corroborates
+#33 2026-11-14T21:19:45.168Z - tool_started correlated hook agent=a8462ecb2e68a2980 tool_use=toolu_01W7MEo4jNqMwkNhgW9R3Gc4 tool=Read corroborates
+#34 2026-11-14T21:19:45.168Z - tool_completed correlated hook agent=a8462ecb2e68a2980 tool_use=toolu_01W7MEo4jNqMwkNhgW9R3Gc4 tool=Read corroborates
+#35 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a8462ecb2e68a2980 status=stopped corroborates
+#36 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a8462ecb2e68a2980 tool_use=toolu_01AU2rDESJUnNTzAAvW2kqgT status=completed corroborates
+#37 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a51dc098ebaef1926 status=stopped corroborates
+#38 2026-11-14T21:19:45.168Z - agent_stopped correlated hook agent=a51dc098ebaef1926 tool_use=toolu_01Mogri4cjssotDxPiAw6PWk status=completed corroborates
+#39 2026-11-14T21:19:45.168Z - agent_stopped observed aibus_scheduler agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 status=process_exited
+#40 2026-11-14T21:19:45.168Z - attempt_completed observed aibus_scheduler agent=20d7adb0-33a7-4cb1-b8b8-661dcf32e384 status=completed reason=completed
+
+inspect 20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+agent 20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+  attempt 00000000-0000-0000-0000-000002820002
+  role lead
+  status process_exited
+  parent none: the lead is the process aibus started
+  delegated to a51dc098ebaef1926 (observed), a8462ecb2e68a2980 (observed)
+  elapsed 3.506 s (derived from aibus's clock, first to last event)
+  model claude-haiku-5-5 (reported)
+  cli_version 2.1.311 (reported)
+  permission_mode default (reported)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages:
+    payload local://objects/c07a7c0dbd269251af687f33121698fc28a498552a95f13cac4967659accbd57.json (redacted when it was stored):
+      {
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "text": "reader-a returned ALPHA-7731 + reader-b returned BETA-4410",
+              "type": "text"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "msg_011Ch3X4WXQxfntbZpAkZRyy",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 847,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 847,
+            "cache_read_input_tokens": 7206,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 7,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": null,
+        "request_id": "req_011Ch3X4WJWmbxEGpEkDp4R4",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "timestamp": "2026-11-14T21:19:44.488Z",
+        "type": "assistant",
+        "uuid": "33796d6c-29cf-44a8-91e5-064bffd8025b"
+      }
+  usage: not reported for this agent (unknown)
+  tools: none recorded
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #2 agent_started observed cli_stream native system/init parser claude-code-stream-json/1 raw sha256:b41542e7043ff3027467bd4ae4ff74822e7f1e0690a15f14cbf71744fabb8dbe payload local://objects/00d144a7ffb48636a60b6acf963c5eb0df0006c6f9ef04a4f6e0e389df1977ef.json
+  #3 task_delegated observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:338e6ed8a65407e317a5c5391c4c91ec3c451378c33ed4d2e871187077118424 payload local://objects/d55139b76169cf4f26a5b07e42247df6a4f3594ca64c180eef72c9a323c9d551.json
+  #6 task_delegated observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:614fe2f1af40556cf66238e967f1ddf829d85e2c551738be5349930bb0675559 payload local://objects/33d70acdd7c1027d00431f596265548ac73abd9bfb8c3e78120c74c77c5dff04.json
+  #24 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:1cd32d8fad0c7037fe585bf0f2a8bd798df409f96ea95e5f935475a45ca99524 payload local://objects/c07a7c0dbd269251af687f33121698fc28a498552a95f13cac4967659accbd57.json
+  #25 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:3fddc9e1ce74bb05955ba4e9d47fe7a1e1fded12c2169e40d2a5d9507dde1eab payload local://objects/c3f27786b9801ed6ee0b9ff9f61cd3c34cfa2bad9cd1b4f1f5fa42e9b980a52a.json
+  #26 agent_started correlated hook native hook/SessionStart parser claude-code-stream-json/1 raw sha256:f14bbd5381d0080228a79c66f3c2532b8bcddc2ee0e5a3ac2a68b33a253425dd payload local://objects/f47bcdd085336e9f94d6ae66f6dbbab3156d5802bd243f1df5792024f2a3b121.json confirms #2
+  #27 task_delegated correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:1cab7d41f7f670f0d85a1c5ed9f0b333d72d0decf1191c8a210f60708c6af25f payload local://objects/8aef45581ff6ecda72854ce286bbbac78f0cff7ed9a48142784665a9bc97274e.json confirms #3
+  #29 task_delegated correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:a9626ea0e4be852f9d88580d970f0827153d248e017786a9c8d3a983a51d275b payload local://objects/61331eac239394d7bf7b7445e1030b4ee21d47cc7f115ea029c0a76924f6f661.json confirms #6
+  #39 agent_stopped observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+  #40 attempt_completed observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+
+inspect a51dc098ebaef1926
+agent a51dc098ebaef1926
+  attempt 00000000-0000-0000-0000-000002820002
+  role reader-a
+  status completed
+  parent 20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+  edge observed cross-checked (cli_stream, hook) via toolu_01Mogri4cjssotDxPiAw6PWk sources #3 observed/cli_stream #4 observed/cli_stream #27 correlated/hook #28 correlated/hook
+  elapsed 2.618 s (derived from aibus's clock, first to last event)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 2 observed
+  messages:
+    payload local://objects/230fc7d2b365197261d50bc2ee8558d215440d94ba8785e769a76600d05117d4.json (redacted when it was stored):
+      {
+        "agent_id": "a51dc098ebaef1926",
+        "message": {
+          "content": [
+            {
+              "text": "Read alpha.txt and return its exact content.",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        "parent_tool_use_id": "toolu_01Mogri4cjssotDxPiAw6PWk",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-a",
+        "task_description": "Run reader-a subagent",
+        "timestamp": "2026-11-14T21:19:42.546Z",
+        "type": "user",
+        "uuid": "f7be2066-2343-46c8-83c8-d720f65d92d8"
+      }
+    payload local://objects/6df9855ae00c0262e2f23fc0cf8dace38e017bd369d8db61fc200f30faf2d930.json (redacted when it was stored):
+      {
+        "agent_id": "a51dc098ebaef1926",
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "text": "ALPHA-7731",
+              "type": "text"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "msg_011Ch3X4Sy6pXeRab1Jqpm6A",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 196
+            },
+            "cache_creation_input_tokens": 196,
+            "cache_read_input_tokens": 2095,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 4,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": "toolu_01Mogri4cjssotDxPiAw6PWk",
+        "request_id": "req_011Ch3X4SjU9MVL89kx5B4Fd",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-a",
+        "task_description": "Run reader-a subagent",
+        "timestamp": "2026-11-14T21:19:44.081Z",
+        "type": "assistant",
+        "uuid": "aa2c9502-2ce9-40fe-82ed-3bbf8c49fb99"
+      }
+  usage total_tokens 2522 tokens (reported, task_notification.usage)
+  usage tool_uses 1 calls (reported, task_notification.usage)
+  usage duration_ms 1561 ms (reported, task_notification.usage)
+  tool toolu_01JeiGnoxNemZFWUdfSfJttH Read: completed  [observed 2, correlated 2]
+  permission events: none recorded
+  gap #18 reasoning_not_exposed (unavailable)
+  evidence (open one with --event <sequence>):
+  #4 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:92be35b52432258d9155a539f9a26df8e815eb5e734a96351ea6a22c2d02b6f8 payload local://objects/408ba9c6ca02029d30387233e0fce4014f5dcff933c06da40db446dc0c63b626.json
+  #5 message_chunk observed cli_stream native user parser claude-code-stream-json/1 raw sha256:fe51940d1c8dabc1d1ac6028429432b9729a2ac71b11ccc3576df8d531f2f5cc payload local://objects/230fc7d2b365197261d50bc2ee8558d215440d94ba8785e769a76600d05117d4.json
+  #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:a2640ad8e70bb668fe9a96b057b820d7ae9ff66b3908da0624ea165e0744a870 payload local://objects/72d5f93007f2f5c5d467b6635fc041388c06ee60cdcb4cd0c59db2af8d8455dc.json
+  #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:850b55a53d31fdc8c6e71e979b230e2f666c98cee3222d25d99dbf28754bab82 payload local://objects/6c111b3ebfb4089f87443bb036d0e93a43d54208905a288b59183959f9b7a6ce.json
+  #18 gap_detected unavailable cli_stream native assistant parser claude-code-stream-json/1 raw sha256:79a41e4f34ac9f48f02cd5fda422471ef2ea7f4831a8be5c69a115a664548616 payload local://objects/9f1eb9c5ff0bb88d522d2d224b2713ee62695381a4af47e0dd328c1ef2b5a6c1.json
+  #19 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:7dedc5b4fdb69b88706c3f199d72247970fecfe852403417d982296570d9af53 payload local://objects/6df9855ae00c0262e2f23fc0cf8dace38e017bd369d8db61fc200f30faf2d930.json
+  #20 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:de11124c6dd696f2baa1212c36e4364cc5373bdcf7c08c87a40ee83c8af65a52 payload local://objects/1a41f2f3e40d6cb5e8bf25091ca7ee525391193f794bcb23b693f9aca36692f7.json
+  #21 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:0cd514311acbfa589693e02df6d4ca186bfb1d50e91b420e8185c8be637b1fae payload local://objects/092985c22242ffcfed27943de059edbe25708041df14fd8cf15f421372bc7734.json confirms #20
+  #22 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:0cd514311acbfa589693e02df6d4ca186bfb1d50e91b420e8185c8be637b1fae payload local://objects/092985c22242ffcfed27943de059edbe25708041df14fd8cf15f421372bc7734.json
+  #23 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:78176b033de9bea7458eb1f13d281636658ad4a7af898928b973ab90dc681647 payload local://objects/0633c2b1069e47e73efcedc95d703f3edec7a755b7743cc09a3e2f7f173d9dfc.json confirms #20
+  #28 agent_started correlated hook native hook/SubagentStart parser claude-code-stream-json/1 raw sha256:a354be62eb3ce42f9646727093602137e0bd6313f3fcf33b7c43e11bc097365c payload local://objects/7a4c519c967d8ace70ae395d64491aa548514d3314096990b6f67490b8baa368.json confirms #4
+  #31 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:8279429279cf23c221439f6168cc87d8746cb00f369cf0243fe3717927d209e2 payload local://objects/054d1625ba580131dcd6457ae9242c1c472310d175a5b386b3601246d8be570f.json confirms #9
+  #32 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:811bcbe57a391e28196b5f69ae11a57990097f682c7722e6f994a68b277bf779 payload local://objects/c6bf6852944368d0b948c35dc7f2fff20d87bc60b9f45cf3bcb217177de12080.json confirms #10
+  #37 agent_stopped correlated hook native hook/SubagentStop parser claude-code-stream-json/1 raw sha256:8b6491ab29775d9d0044f6b9f5e738ce70b4c7aef51849222a47d38caaa5e3be payload local://objects/044a69cf30955875abb6b4168a8fafa9e3172a72a13915838c2e1251cb54c94a.json confirms #20
+  #38 agent_stopped correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:a6690e85c047c382e2bd7067b8bad16bd1045fdbe3f4aa9883409f72151a43a1 payload local://objects/557c72d941ea0b73085b2c44a0ca53545e938347522277e2f1419a06724d7ada.json confirms #20
+
+inspect a8462ecb2e68a2980
+agent a8462ecb2e68a2980
+  attempt 00000000-0000-0000-0000-000002820002
+  role reader-b
+  status completed
+  parent 20d7adb0-33a7-4cb1-b8b8-661dcf32e384
+  edge observed cross-checked (cli_stream, hook) via toolu_01AU2rDESJUnNTzAAvW2kqgT sources #6 observed/cli_stream #7 observed/cli_stream #29 correlated/hook #30 correlated/hook
+  elapsed 2.295 s (derived from aibus's clock, first to last event)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 2 observed
+  messages:
+    payload local://objects/25b6a56cb12e7fa260b37e699af257441f0a4cfc326b499080dfa227eba166a2.json (redacted when it was stored):
+      {
+        "agent_id": "a8462ecb2e68a2980",
+        "message": {
+          "content": [
+            {
+              "text": "Read beta.txt and return its exact content.",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        "parent_tool_use_id": "toolu_01AU2rDESJUnNTzAAvW2kqgT",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-b",
+        "task_description": "Run reader-b subagent",
+        "timestamp": "2026-11-14T21:19:42.872Z",
+        "type": "user",
+        "uuid": "341cceeb-5fa9-400e-a3b3-9a8160a273cc"
+      }
+    payload local://objects/f1ffa9d83f418bad3877e6926c0154a4e6bf06b346a490acb16df01e22a06632.json (redacted when it was stored):
+      {
+        "agent_id": "a8462ecb2e68a2980",
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "text": "BETA-4410",
+              "type": "text"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "msg_011Ch3X4UU94X2f2SayD3GSy",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 189
+            },
+            "cache_creation_input_tokens": 189,
+            "cache_read_input_tokens": 2093,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 8,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": "toolu_01AU2rDESJUnNTzAAvW2kqgT",
+        "request_id": "req_011Ch3X4UFz5tF96aXZAwapM",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-b",
+        "task_description": "Run reader-b subagent",
+        "timestamp": "2026-11-14T21:19:43.960Z",
+        "type": "assistant",
+        "uuid": "ed26ba38-e152-442b-b87d-bafe4382b83c"
+      }
+  usage total_tokens 2310 tokens (reported, task_notification.usage)
+  usage tool_uses 1 calls (reported, task_notification.usage)
+  usage duration_ms 1126 ms (reported, task_notification.usage)
+  tool toolu_01W7MEo4jNqMwkNhgW9R3Gc4 Read: completed  [observed 2, correlated 2]
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #7 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:35525ed1ecd3985f2ba13d60c2f7a54ada01447654d16d41d3628ca7ce87e1ef payload local://objects/1e9d106e59d347a33198dbc18cbd883ec81249c9e9d174c4e5d7a19e1225191c.json
+  #8 message_chunk observed cli_stream native user parser claude-code-stream-json/1 raw sha256:5f374c5f33528467b68a8550eb4401b46ab910a15501cf59a715d52d46e5b222 payload local://objects/25b6a56cb12e7fa260b37e699af257441f0a4cfc326b499080dfa227eba166a2.json
+  #11 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:595b97c739a6aeab27cfe3abd2c590e835c01193adb7970cd1b4841f769000ef payload local://objects/898cc097abc42c31c84996851dd54e21da34eb6f46bee4ccb183ecabae15301d.json
+  #12 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:03406f5851a1afb8b2965671afd2a90504a103aa2505ce27514d6e1dbc888fc7 payload local://objects/a01b64b69d00008f305f76a6add2850be82a3896e8ffeb7b4ce0302611a23732.json
+  #13 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:09a10d756cec13c42db83d652bf74c5608cc8f6fed825fc078fdb52b286b6740 payload local://objects/f1ffa9d83f418bad3877e6926c0154a4e6bf06b346a490acb16df01e22a06632.json
+  #14 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:21605d94e263e5bb591359bc5a4db51fd334d6a8468524678684df7af370304e payload local://objects/2fa0b4a6b6130cd48c2eed7ca08a68c3271e7fa6ea23fa01e15516a633e81f84.json
+  #15 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:5b6fbc1bee67f9d39bc7e427fd64ac7518fc6da721fa8e16f8be3865dc498da2 payload local://objects/df7ec414d7fb192d87c88b60f0a1757c0d63fb613cc48f3d32660a3b728d92ec.json confirms #14
+  #16 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:5b6fbc1bee67f9d39bc7e427fd64ac7518fc6da721fa8e16f8be3865dc498da2 payload local://objects/df7ec414d7fb192d87c88b60f0a1757c0d63fb613cc48f3d32660a3b728d92ec.json
+  #17 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:a64cb74e6d8785bd7347134e1d1209a6389ca9f227dbb80c6d5a30eb2a0395cd payload local://objects/e7d5758f9a0fde15142ff77bb50bd8cc720e16e75354fd236751682f3c106384.json confirms #14
+  #30 agent_started correlated hook native hook/SubagentStart parser claude-code-stream-json/1 raw sha256:1e1358d13657d4036e9eb66ec1e0906bcf7d7fe5401c7c133c1d7a87444cc02d payload local://objects/44baaf92d6ad68087206450bf963520216f19b60bd0d3f3c1178e56cfb12f4e9.json confirms #7
+  #33 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:169ee6214da54858c111a1d53a399517c7d3a9f1354012309ef328c5f82eefde payload local://objects/33e33c54d3888026175b59b76ac245aaf698099247e9eaad37cbeaab638f0974.json confirms #11
+  #34 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:e9b1ceed14194018487a3e6b64ad915ea3a8f68bd8c382666b7163beff55bd11 payload local://objects/e306fb1aaf3ea2f69745638f99c15a5f466174451abe94b415938ce318db5e14.json confirms #12
+  #35 agent_stopped correlated hook native hook/SubagentStop parser claude-code-stream-json/1 raw sha256:15dfaf0be83909278d96a7b88e173bfabf14d40b4f9f4216e9615bb30afda6cb payload local://objects/d6d4e583ed4db0f1932c8bade0a27e7e6e0ec88a441edef83931b79a6d81d918.json confirms #14
+  #36 agent_stopped correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:c836db40e1a7289bf64f6be56bec73916b45363bf3385f7b3ba364c490ff251b payload local://objects/6290c1910804e17582132790ac320cd7f390b65dc79e545210123c6b58e83c62.json confirms #14
+
+inspect toolu_01JeiGnoxNemZFWUdfSfJttH
+tool toolu_01JeiGnoxNemZFWUdfSfJttH Read: completed  [observed 2, correlated 2]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent a51dc098ebaef1926
+  elapsed 1.928 s (derived from aibus's clock, first to last event)
+  input and output:
+    payload local://objects/054d1625ba580131dcd6457ae9242c1c472310d175a5b386b3601246d8be570f.json (redacted when it was stored):
+      {
+        "agent_id": "a51dc098ebaef1926",
+        "agent_type": "reader-a",
+        "cwd": "/spike/work/deleg",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "permission_mode": "default",
+        "prompt_id": "348df8a9-f9d5-40f8-875a-78931f6e7d26",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "tool_input": {
+          "file_path": "/spike/work/deleg/alpha.txt"
+        },
+        "tool_name": "Read",
+        "tool_use_id": "toolu_01JeiGnoxNemZFWUdfSfJttH",
+        "transcript_path": "<config-dir>/projects/-spike-work-deleg/20d7adb0-33a7-4cb1-b8b8-661dcf32e384.jsonl"
+      }
+    payload local://objects/6c111b3ebfb4089f87443bb036d0e93a43d54208905a288b59183959f9b7a6ce.json (redacted when it was stored):
+      {
+        "agent_id": "a51dc098ebaef1926",
+        "message": {
+          "content": [
+            {
+              "content": "1\tALPHA-7731\n2\t",
+              "tool_use_id": "toolu_01JeiGnoxNemZFWUdfSfJttH",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "parent_tool_use_id": "toolu_01Mogri4cjssotDxPiAw6PWk",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-a",
+        "task_description": "Run reader-a subagent",
+        "timestamp": "2026-11-14T21:19:43.270Z",
+        "tool_result_meta": [
+          {
+            "id": "toolu_01JeiGnoxNemZFWUdfSfJttH",
+            "permission_decision": {
+              "decision": "accept",
+              "reason_type": "rule",
+              "source": "config"
+            }
+          }
+        ],
+        "type": "user",
+        "uuid": "59c191d0-5a1f-4d23-9937-ded1cfdf8af8"
+      }
+    payload local://objects/72d5f93007f2f5c5d467b6635fc041388c06ee60cdcb4cd0c59db2af8d8455dc.json (redacted when it was stored):
+      {
+        "agent_id": "a51dc098ebaef1926",
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "caller": {
+                "type": "direct"
+              },
+              "id": "toolu_01JeiGnoxNemZFWUdfSfJttH",
+              "input": {
+                "file_path": "/spike/work/deleg/alpha.txt"
+              },
+              "name": "Read",
+              "type": "tool_use"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "msg_011Ch3X4PyX1A7JMboqKi1ra",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 2095,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 16,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": "toolu_01Mogri4cjssotDxPiAw6PWk",
+        "request_id": "req_011Ch3X4Pn7MUPP689HVg4wE",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-a",
+        "task_description": "Run reader-a subagent",
+        "timestamp": "2026-11-14T21:19:43.233Z",
+        "type": "assistant",
+        "uuid": "886b7904-71d9-4aea-a362-d3e832fcffa5"
+      }
+    payload local://objects/c6bf6852944368d0b948c35dc7f2fff20d87bc60b9f45cf3bcb217177de12080.json (redacted when it was stored):
+      {
+        "agent_id": "a51dc098ebaef1926",
+        "agent_type": "reader-a",
+        "cwd": "/spike/work/deleg",
+        "duration_ms": 1,
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "permission_mode": "default",
+        "prompt_id": "348df8a9-f9d5-40f8-875a-78931f6e7d26",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "tool_input": {
+          "file_path": "/spike/work/deleg/alpha.txt"
+        },
+        "tool_name": "Read",
+        "tool_response": {
+          "file": {
+            "content": "ALPHA-7731\n",
+            "filePath": "/spike/work/deleg/alpha.txt",
+            "numLines": 2,
+            "startLine": 1,
+            "totalLines": 2
+          },
+          "type": "text"
+        },
+        "tool_use_id": "toolu_01JeiGnoxNemZFWUdfSfJttH",
+        "transcript_path": "<config-dir>/projects/-spike-work-deleg/20d7adb0-33a7-4cb1-b8b8-661dcf32e384.jsonl"
+      }
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:a2640ad8e70bb668fe9a96b057b820d7ae9ff66b3908da0624ea165e0744a870 payload local://objects/72d5f93007f2f5c5d467b6635fc041388c06ee60cdcb4cd0c59db2af8d8455dc.json
+  #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:850b55a53d31fdc8c6e71e979b230e2f666c98cee3222d25d99dbf28754bab82 payload local://objects/6c111b3ebfb4089f87443bb036d0e93a43d54208905a288b59183959f9b7a6ce.json
+  #31 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:8279429279cf23c221439f6168cc87d8746cb00f369cf0243fe3717927d209e2 payload local://objects/054d1625ba580131dcd6457ae9242c1c472310d175a5b386b3601246d8be570f.json confirms #9
+  #32 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:811bcbe57a391e28196b5f69ae11a57990097f682c7722e6f994a68b277bf779 payload local://objects/c6bf6852944368d0b948c35dc7f2fff20d87bc60b9f45cf3bcb217177de12080.json confirms #10
+
+inspect toolu_01W7MEo4jNqMwkNhgW9R3Gc4
+tool toolu_01W7MEo4jNqMwkNhgW9R3Gc4 Read: completed  [observed 2, correlated 2]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent a8462ecb2e68a2980
+  elapsed 1.555 s (derived from aibus's clock, first to last event)
+  input and output:
+    payload local://objects/33e33c54d3888026175b59b76ac245aaf698099247e9eaad37cbeaab638f0974.json (redacted when it was stored):
+      {
+        "agent_id": "a8462ecb2e68a2980",
+        "agent_type": "reader-b",
+        "cwd": "/spike/work/deleg",
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PreToolUse",
+        "permission_mode": "default",
+        "prompt_id": "348df8a9-f9d5-40f8-875a-78931f6e7d26",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "tool_input": {
+          "file_path": "/spike/work/deleg/beta.txt"
+        },
+        "tool_name": "Read",
+        "tool_use_id": "toolu_01W7MEo4jNqMwkNhgW9R3Gc4",
+        "transcript_path": "<config-dir>/projects/-spike-work-deleg/20d7adb0-33a7-4cb1-b8b8-661dcf32e384.jsonl"
+      }
+    payload local://objects/898cc097abc42c31c84996851dd54e21da34eb6f46bee4ccb183ecabae15301d.json (redacted when it was stored):
+      {
+        "agent_id": "a8462ecb2e68a2980",
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "caller": {
+                "type": "direct"
+              },
+              "id": "toolu_01W7MEo4jNqMwkNhgW9R3Gc4",
+              "input": {
+                "file_path": "/spike/work/deleg/beta.txt"
+              },
+              "name": "Read",
+              "type": "tool_use"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "msg_011Ch3X4RGuLQRzxFgPpyVDK",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 2093,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 16,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": "toolu_01AU2rDESJUnNTzAAvW2kqgT",
+        "request_id": "req_011Ch3X4R5z2G8pGoAroLmjo",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-b",
+        "task_description": "Run reader-b subagent",
+        "timestamp": "2026-11-14T21:19:43.611Z",
+        "type": "assistant",
+        "uuid": "2a02b49f-852e-4767-9859-a126b2e611e4"
+      }
+    payload local://objects/a01b64b69d00008f305f76a6add2850be82a3896e8ffeb7b4ce0302611a23732.json (redacted when it was stored):
+      {
+        "agent_id": "a8462ecb2e68a2980",
+        "message": {
+          "content": [
+            {
+              "content": "1\tBETA-4410\n2\t",
+              "tool_use_id": "toolu_01W7MEo4jNqMwkNhgW9R3Gc4",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "parent_tool_use_id": "toolu_01AU2rDESJUnNTzAAvW2kqgT",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "subagent_type": "reader-b",
+        "task_description": "Run reader-b subagent",
+        "timestamp": "2026-11-14T21:19:43.633Z",
+        "tool_result_meta": [
+          {
+            "id": "toolu_01W7MEo4jNqMwkNhgW9R3Gc4",
+            "permission_decision": {
+              "decision": "accept",
+              "reason_type": "rule",
+              "source": "config"
+            }
+          }
+        ],
+        "type": "user",
+        "uuid": "72844574-7ca1-46a3-a924-b81236a1cdd8"
+      }
+    payload local://objects/e306fb1aaf3ea2f69745638f99c15a5f466174451abe94b415938ce318db5e14.json (redacted when it was stored):
+      {
+        "agent_id": "a8462ecb2e68a2980",
+        "agent_type": "reader-b",
+        "cwd": "/spike/work/deleg",
+        "duration_ms": 1,
+        "effort": {
+          "level": "medium"
+        },
+        "hook_event_name": "PostToolUse",
+        "permission_mode": "default",
+        "prompt_id": "348df8a9-f9d5-40f8-875a-78931f6e7d26",
+        "session_id": "20d7adb0-33a7-4cb1-b8b8-661dcf32e384",
+        "tool_input": {
+          "file_path": "/spike/work/deleg/beta.txt"
+        },
+        "tool_name": "Read",
+        "tool_response": {
+          "file": {
+            "content": "BETA-4410\n",
+            "filePath": "/spike/work/deleg/beta.txt",
+            "numLines": 2,
+            "startLine": 1,
+            "totalLines": 2
+          },
+          "type": "text"
+        },
+        "tool_use_id": "toolu_01W7MEo4jNqMwkNhgW9R3Gc4",
+        "transcript_path": "<config-dir>/projects/-spike-work-deleg/20d7adb0-33a7-4cb1-b8b8-661dcf32e384.jsonl"
+      }
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #11 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:595b97c739a6aeab27cfe3abd2c590e835c01193adb7970cd1b4841f769000ef payload local://objects/898cc097abc42c31c84996851dd54e21da34eb6f46bee4ccb183ecabae15301d.json
+  #12 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:03406f5851a1afb8b2965671afd2a90504a103aa2505ce27514d6e1dbc888fc7 payload local://objects/a01b64b69d00008f305f76a6add2850be82a3896e8ffeb7b4ce0302611a23732.json
+  #33 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:169ee6214da54858c111a1d53a399517c7d3a9f1354012309ef328c5f82eefde payload local://objects/33e33c54d3888026175b59b76ac245aaf698099247e9eaad37cbeaab638f0974.json confirms #11
+  #34 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:e9b1ceed14194018487a3e6b64ad915ea3a8f68bd8c382666b7163beff55bd11 payload local://objects/e306fb1aaf3ea2f69745638f99c15a5f466174451abe94b415938ce318db5e14.json confirms #12

@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 aibus-core.workspace = true
 aibus-graph.workspace = true
+aibus-trace = { path = "../aibus-trace" }
 aibus-provider.workspace = true
 arboard = { version = "3", default-features = false }
 crossterm = "0.29"

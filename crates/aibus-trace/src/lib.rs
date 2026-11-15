@@ -8,11 +8,14 @@
 //! thrown away and a projection never counts the fact twice.
 //!
 //! `TraceStore` is the append-only local file the events live in, `project` turns a trace back into
-//! the execution graph and timeline without any provider. Nothing here launches a process.
+//! the execution graph and timeline without any provider, and `view` (#284) renders a recorded run
+//! for a person: the fleet, the planned and execution graph, the timeline, the inspector and the
+//! offline replay. Nothing here launches a process.
 #![forbid(unsafe_code)]
 
 mod project;
 mod store;
+pub mod view;
 
 pub use project::{
     project, AgentNode, AttemptView, Edge, Evidence, GapRow, Projection, TimelineRow, ToolNode,

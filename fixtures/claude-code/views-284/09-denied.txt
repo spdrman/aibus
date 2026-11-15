@@ -1,0 +1,71 @@
+run 09-denied
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 9 events, observed 2026-11-14T21:19:06.613Z to 2026-11-14T21:19:09.058Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 completed  [observed 2]
+  usage input_tokens 4 tokens (reported, result.usage)
+  usage output_tokens 185 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 3584 tokens (reported, result.usage)
+  usage cache_read_input_tokens 6951 tokens (reported, result.usage)
+  usage num_turns 2 turns (reported, result.num_turns)
+  usage duration_ms 1649 ms (reported, result.duration_ms)
+  usage cost_usd 0.00087921 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 726b6f0a-871f-44ff-8d00-4afe98248832 lead, process_exited  messages 1 observed  [observed 2]
+  | tool toolu_01J5mV9auXr7GVpP55nLgTC7 Write: failed (permission_denied)  [observed 3]
+gaps (what the trace does not show)
+  none recorded
+timeline (sequence, observed by aibus, reported by the vendor, kind, level, origin)
+#1 2026-11-14T21:19:06.613Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:19:06.809Z - agent_started observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 role=lead
+#3 2026-11-14T21:19:07.822Z 2026-11-14T21:19:07.818Z tool_started observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 tool_use=toolu_01J5mV9auXr7GVpP55nLgTC7 tool=Write
+#4 2026-11-14T21:19:07.857Z - tool_failed observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 tool_use=toolu_01J5mV9auXr7GVpP55nLgTC7 tool=Write reason=permission_denied
+#5 2026-11-14T21:19:07.859Z 2026-11-14T21:19:07.858Z tool_failed observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 tool_use=toolu_01J5mV9auXr7GVpP55nLgTC7 corroborates
+#6 2026-11-14T21:19:08.385Z 2026-11-14T21:19:08.381Z message_chunk observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 role=assistant
+#7 2026-11-14T21:19:08.415Z - usage_reported observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 scope=attempt
+#8 2026-11-14T21:19:09.058Z - agent_stopped observed aibus_scheduler agent=726b6f0a-871f-44ff-8d00-4afe98248832 status=process_exited
+#9 2026-11-14T21:19:09.058Z - attempt_completed observed aibus_scheduler agent=726b6f0a-871f-44ff-8d00-4afe98248832 status=completed reason=completed
+
+inspect 726b6f0a-871f-44ff-8d00-4afe98248832
+agent 726b6f0a-871f-44ff-8d00-4afe98248832
+  attempt 00000000-0000-0000-0000-000002820002
+  role lead
+  status process_exited
+  parent none: the lead is the process aibus started
+  elapsed 2.249 s (derived from aibus's clock, first to last event)
+  model claude-haiku-5-5 (reported)
+  cli_version 2.1.311 (reported)
+  permission_mode default (reported)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage: not reported for this agent (unknown)
+  tool toolu_01J5mV9auXr7GVpP55nLgTC7 Write: failed (permission_denied)  [observed 3]
+  permission #4 tool_failed tool=Write reason=permission_denied
+  evidence (open one with --event <sequence>):
+  #2 agent_started observed cli_stream native system/init parser claude-code-stream-json/1 raw sha256:be13586ef2a3e05a51298abac4daed0ba7f9578da7642c10da18c60f5e890daf payload -
+  #3 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:21b87b6b344feae1ea93db6ac3118a0feeb69a985e3052d3aaff7b9bf8504c09 payload -
+  #4 tool_failed observed cli_stream native system/permission_denied parser claude-code-stream-json/1 raw sha256:7861997dfbb87e50c964e309c7f483c5815742095000a0961306d3a8b16b98dd payload -
+  #5 tool_failed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:0bc70f8f769ecda07e740ac5e11a5bb3619f2d658faff0d1b6bb5dc0f1f44902 payload - confirms #4
+  #6 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:f6b0f3a1c8404ac74dd534fda8f73e9554bc004e929ea28287d7e77f206ea298 payload -
+  #7 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:20a82e64b929cb7e409d19bcdbb98766e1fb40b6373f0a3f7c79b156f8f79ee0 payload -
+  #8 agent_stopped observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+  #9 attempt_completed observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+
+inspect toolu_01J5mV9auXr7GVpP55nLgTC7
+tool toolu_01J5mV9auXr7GVpP55nLgTC7 Write: failed (permission_denied)  [observed 3]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent 726b6f0a-871f-44ff-8d00-4afe98248832
+  elapsed 0.037 s (derived from aibus's clock, first to last event)
+  input and output: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  permission #4 tool_failed tool=Write reason=permission_denied
+  evidence (open one with --event <sequence>):
+  #3 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:21b87b6b344feae1ea93db6ac3118a0feeb69a985e3052d3aaff7b9bf8504c09 payload -
+  #4 tool_failed observed cli_stream native system/permission_denied parser claude-code-stream-json/1 raw sha256:7861997dfbb87e50c964e309c7f483c5815742095000a0961306d3a8b16b98dd payload -
+  #5 tool_failed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:0bc70f8f769ecda07e740ac5e11a5bb3619f2d658faff0d1b6bb5dc0f1f44902 payload - confirms #4

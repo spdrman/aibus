@@ -16,6 +16,7 @@ aibus-provider-anthropic.workspace = true
 aibus-provider-gemini.workspace = true
 aibus-provider-http.workspace = true
 aibus-provider-openai.workspace = true
+aibus-trace = { path = "../aibus-trace" }
 aibus-tui.workspace = true
 async-trait = "0.1"
 base64 = "0.22"

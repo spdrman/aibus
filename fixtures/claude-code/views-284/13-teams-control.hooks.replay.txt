@@ -1,0 +1,31 @@
+replay of 13-teams-control.hooks: 7 recorded events, offline (no provider, no process; the recorded run, not a new one)
+#1 observed aibus_scheduler: attempt 00000000-0000-0000-0000-000002820002 started
+#2 observed cli_stream: agent 4e7753d6-e214-44ba-ad50-7b0747e5bf1f started as lead
+#3 observed cli_stream: agent 4e7753d6-e214-44ba-ad50-7b0747e5bf1f message chunk
+#4 observed cli_stream: usage reported (attempt)
+#5 correlated hook: agent_started confirms #2; no change
+#6 observed aibus_scheduler: agent 4e7753d6-e214-44ba-ad50-7b0747e5bf1f stopped: process_exited
+#7 observed aibus_scheduler: attempt 00000000-0000-0000-0000-000002820002 ended completed
+final state
+run 13-teams-control.hooks
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 7 events, observed 2026-11-14T21:20:14.447Z to 2026-11-14T21:20:15.875Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 completed  [observed 2]
+  usage input_tokens 2 tokens (reported, result.usage)
+  usage output_tokens 4 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 6665 tokens (reported, result.usage)
+  usage cache_read_input_tokens 11382 tokens (reported, result.usage)
+  usage num_turns 1 turns (reported, result.num_turns)
+  usage duration_ms 624 ms (reported, result.duration_ms)
+  usage cost_usd 0.00144902 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 4e7753d6-e214-44ba-ad50-7b0747e5bf1f lead, process_exited  messages 1 observed  [observed 2, correlated 1]
+gaps (what the trace does not show)
+  none recorded

@@ -1,0 +1,72 @@
+replay of 07-deleg.hooks: 42 recorded events, offline (no provider, no process; the recorded run, not a new one)
+#1 observed aibus_scheduler: attempt 00000000-0000-0000-0000-000002820002 started
+#2 observed cli_stream: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 started as lead
+#3 observed cli_stream: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 delegates via toolu_01GxrovGWcky9zgEdL347ku5 (reader-a)
+#4 observed cli_stream: agent a1d31999c4945865c started, child of 66c1b90b-108d-44ea-93e8-7ca746d289c7 via toolu_01GxrovGWcky9zgEdL347ku5
+#5 observed cli_stream: agent a1d31999c4945865c stopped: async_launched
+#6 observed cli_stream: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 delegates via toolu_01R6F1drv5h48J2yGbxWSEwx (reader-b)
+#7 observed cli_stream: agent a2b043bb27fdf0eb2 started, child of 66c1b90b-108d-44ea-93e8-7ca746d289c7 via toolu_01R6F1drv5h48J2yGbxWSEwx
+#8 observed cli_stream: agent a2b043bb27fdf0eb2 stopped: async_launched
+#9 observed cli_stream: agent a1d31999c4945865c starts tool toolu_014p7gutMk723YoqaPent2Hy Read
+#10 observed cli_stream: tool toolu_014p7gutMk723YoqaPent2Hy completed
+#11 observed cli_stream: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 message chunk
+#12 observed cli_stream: agent a2b043bb27fdf0eb2 starts tool toolu_017Hoc9YLFJ4qe3rMaVk5zDL Read
+#13 observed cli_stream: tool toolu_017Hoc9YLFJ4qe3rMaVk5zDL completed
+#14 observed cli_stream: agent a1d31999c4945865c message chunk
+#15 observed cli_stream: agent_stopped confirms #5; no change
+#16 observed cli_stream: agent_stopped confirms #5; no change
+#17 observed cli_stream: usage reported (agent)
+#18 observed cli_stream: agent a2b043bb27fdf0eb2 message chunk
+#19 observed cli_stream: agent_stopped confirms #8; no change
+#20 observed cli_stream: agent_stopped confirms #8; no change
+#21 observed cli_stream: usage reported (agent)
+#22 unavailable cli_stream: gap: reasoning_not_exposed
+#23 observed cli_stream: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 message chunk
+#24 observed cli_stream: usage reported (attempt)
+#25 observed cli_stream: usage reported (attempt)
+#26 observed cli_stream: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 message chunk
+#27 observed cli_stream: usage reported (attempt)
+#28 correlated hook: agent_started confirms #2; no change
+#29 correlated hook: task_delegated confirms #3; no change
+#30 correlated hook: agent_started confirms #4; no change
+#31 correlated hook: agent_stopped confirms #5; no change
+#32 correlated hook: task_delegated confirms #6; no change
+#33 correlated hook: agent_started confirms #7; no change
+#34 correlated hook: agent_stopped confirms #8; no change
+#35 correlated hook: tool_started confirms #9; no change
+#36 correlated hook: tool_completed confirms #10; no change
+#37 correlated hook: tool_started confirms #12; no change
+#38 correlated hook: tool_completed confirms #13; no change
+#39 correlated hook: agent_stopped confirms #5; no change
+#40 correlated hook: agent_stopped confirms #8; no change
+#41 observed aibus_scheduler: agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 stopped: process_exited
+#42 observed aibus_scheduler: attempt 00000000-0000-0000-0000-000002820002 ended completed
+final state
+run 07-deleg.hooks
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 42 events, observed 2026-11-14T21:17:59.020Z to 2026-11-14T21:18:04.479Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 completed  [observed 2]
+  usage input_tokens 2 tokens (reported, result.usage)
+  usage output_tokens 18 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 709 tokens (reported, result.usage)
+  usage cache_read_input_tokens 8963 tokens (reported, result.usage)
+  usage num_turns 1 turns (reported, result.num_turns)
+  usage duration_ms 702 ms (reported, result.duration_ms)
+  usage cost_usd 0.003142075 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 lead, process_exited  messages 3 observed  [observed 2, correlated 1]
+  | agent a1d31999c4945865c reader-a, async_launched  messages 1 observed  [observed 4, correlated 3]
+  |   edge observed cross-checked (cli_stream, hook) via toolu_01GxrovGWcky9zgEdL347ku5 sources #3 observed/cli_stream #4 observed/cli_stream #29 correlated/hook #30 correlated/hook
+  | | tool toolu_014p7gutMk723YoqaPent2Hy Read: completed  [observed 2, correlated 2]
+  | agent a2b043bb27fdf0eb2 reader-b, async_launched  messages 1 observed  [observed 4, correlated 3]
+  |   edge observed cross-checked (cli_stream, hook) via toolu_01R6F1drv5h48J2yGbxWSEwx sources #6 observed/cli_stream #7 observed/cli_stream #32 correlated/hook #33 correlated/hook
+  | | tool toolu_017Hoc9YLFJ4qe3rMaVk5zDL Read: completed  [observed 2, correlated 2]
+gaps (what the trace does not show)
+  #22 reasoning_not_exposed (unavailable) attempt 00000000-0000-0000-0000-000002820002

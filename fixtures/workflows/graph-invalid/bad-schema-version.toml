@@ -1,0 +1,6 @@
+# expect: schema_version "2"
+schema_version = "2"
+
+[[step]]
+agent = "plan"
+prompt = "p"

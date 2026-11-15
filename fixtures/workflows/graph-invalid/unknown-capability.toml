@@ -1,0 +1,5 @@
+# expect: unknown variant
+[[step]]
+agent = "plan"
+requires = ["root"]
+prompt = "p"

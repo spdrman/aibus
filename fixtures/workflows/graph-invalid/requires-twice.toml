@@ -1,0 +1,5 @@
+# expect: step 1: requires lists repo_read twice
+[[step]]
+agent = "plan"
+requires = ["repo_read", "repo_read"]
+prompt = "p"

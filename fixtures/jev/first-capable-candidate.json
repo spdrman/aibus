@@ -1,0 +1,18 @@
+{
+  "about": "The author's first choice lacks a capability; the next one that has it is used.",
+  "request": {
+    "task_id": "build",
+    "requires": ["one_shot", "workspace_control"],
+    "candidates": ["cli.claude", "aibus"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "bounded",
+    "risk_class": "side_effects"
+  },
+  "decision": {
+    "selected_runtime": "aibus",
+    "execution_mode": "aibus_managed",
+    "reason_code": "capability_match",
+    "policy_evidence": ["risk:side_effects", "missing:workspace_control@cli.claude", "status:aibus=available", "mode:as_requested"],
+    "decision_source": "jev_deterministic"
+  }
+}

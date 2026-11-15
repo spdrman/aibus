@@ -9,6 +9,7 @@ use std::sync::Arc;
 use aibus_core::agent::{self, def::model_str, def::to_json, Scope};
 use aibus_core::config::Limits;
 use aibus_core::run::result::escape_markers;
+use aibus_core::workflow::compile::{capability_problems, compile};
 use aibus_core::workflow::{self, Workflow};
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool, ToolAnnotations};
 use rmcp::ErrorData;
@@ -26,6 +27,64 @@ fn schema(v: Value) -> Arc<JsonObject> {
 
 /// The five read tools, in the epic's table order (after `workflow_list`).
 pub(crate) fn tools() -> Vec<Tool> {
+    /// The shape of a compiled plan (`docs/schemas/workflow/plan-v1.json`).
+    fn plan_schema() -> Value {
+        let object = json!({ "type": "object" });
+        let list = json!({ "type": "array" });
+        let text = json!({ "type": "string" });
+        let maybe_text = json!({ "type": ["string", "null"] });
+        json!({
+            "$schema": DRAFT_2020_12,
+            "type": "object",
+            "properties": {
+                "kind": { "const": "aibus.workflow.plan" },
+                "manifest_version": { "const": 1 },
+                "compiler": text,
+                "workflow": object,
+                "entry": text,
+                "runnable_now": { "type": "boolean" },
+                "plan_only_because": maybe_text,
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": text,
+                            "agent": text,
+                            "runtime": text,
+                            "mode": text,
+                            "prompt": object,
+                            "invocation": object,
+                        },
+                        "required": ["key", "agent", "runtime", "mode", "prompt", "invocation"],
+                    },
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": { "kind": text, "from": text, "to": text },
+                        "required": ["kind", "from", "to"],
+                    },
+                },
+                "fan_out": list,
+                "envelope": object,
+                "approvals": object,
+                "agents": object,
+                "prompts": object,
+                "runtimes": object,
+                "jev": object,
+                "notes": list,
+                "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            },
+            "required": [
+                "kind", "manifest_version", "compiler", "workflow", "entry", "runnable_now", "plan_only_because",
+                "steps", "edges", "fan_out", "envelope", "approvals", "agents", "prompts", "runtimes", "jev",
+                "notes", "plan_hash",
+            ],
+            "additionalProperties": false,
+        })
+    }
     let scope = json!({ "type": "string", "enum": ["project", "user"] });
     let by_name = json!({
         "$schema": DRAFT_2020_12,
@@ -248,6 +307,22 @@ pub(crate) fn tools() -> Vec<Tool> {
             "additionalProperties": false,
         })))
         .with_annotations(read_only()),
+        Tool::new(
+            "workflow_plan",
+            "Compile a workflow, an existing one by name or a draft as `toml` text, into its plan: steps with prompt and agent hashes, typed edges, fan-out, envelope, approvals, the invocation each step would get, routing decisions and a plan_hash. Nothing runs and nothing is saved.",
+            schema(json!({
+                "$schema": DRAFT_2020_12,
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "scope": scope,
+                    "toml": { "type": "string" },
+                },
+                "additionalProperties": false,
+            })),
+        )
+        .with_raw_output_schema(schema(plan_schema()))
+        .with_annotations(read_only()),
     ]
 }
 
@@ -387,7 +462,19 @@ impl Server {
         for scope in scopes {
             let dir = &dirs[usize::from(*scope == "user")];
             let path = dir.join(format!("{name}.toml"));
-            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                // No loose file: a bundle in the same directory may carry it (read in memory,
+                // through every check of a bundle). The path shown is the bundle's.
+                let bundled = workflow::list_in(dir, scope)
+                    .into_iter()
+                    .find(|f| f.name == name && f.bundle.is_some() && f.parsed.is_ok());
+                if let Some(found) = bundled {
+                    if let Some(text) = found.text {
+                        return Ok(Some((scope, found.path, text)));
+                    }
+                }
+                continue;
+            };
             if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
                 return Err(ErrorData::invalid_params("that is not a plain workflow file of a sane size", None));
             }
@@ -405,6 +492,7 @@ impl Server {
                 Ok(self.data_result("the list of agents", json!({ "agents": self.agent_rows() })))
             }
             "workflow_validate" => self.validate_tool(args),
+            "workflow_plan" => self.plan_tool(args),
             _ => {
                 let allowed: &[&str] = if name == "workflow_dry_run" { &["name", "scope", "input"] } else { &["name", "scope"] };
                 let map = take(args, name, allowed)?;
@@ -452,29 +540,72 @@ impl Server {
         }
     }
 
+    /// The workflow a `name` (and `scope`) or a `toml` draft names: its path as shown, its stem
+    /// and its text. `Ok(Err(_))` is a name nobody has.
+    fn named_or_draft(
+        &self,
+        tool: &str,
+        map: &Map<String, Value>,
+    ) -> Result<Result<(String, String, String), CallToolResult>, ErrorData> {
+        Ok(Ok(match (text_of(map, "name"), text_of(map, "toml")) {
+            (Some(_), Some(_)) | (None, None) => {
+                return Err(ErrorData::invalid_params(format!("{tool} takes either name or toml"), None))
+            }
+            (None, Some(draft)) => ("draft".to_owned(), "draft".to_owned(), draft.to_owned()),
+            (Some(name), None) => match self.workflow_file(name, text_of(map, "scope"))? {
+                None => return Ok(Err(failed(self, &format!("no workflow named {name} (workflow_list shows what exists)")))),
+                Some((_, path, text)) => (self.shorten(&path.to_string_lossy().replace('\\', "/")), name.to_owned(), text),
+            },
+        }))
+    }
+
     fn validate_tool(&self, args: &Value) -> Result<CallToolResult, ErrorData> {
         let map = take(args, "workflow_validate", &["name", "scope", "toml"])?;
-        let (path, stem, text) = match (text_of(&map, "name"), text_of(&map, "toml")) {
-            (Some(_), Some(_)) | (None, None) => {
-                return Err(ErrorData::invalid_params("workflow_validate takes either name or toml", None))
-            }
-            (None, Some(draft)) => ("draft".to_owned(), "draft", draft.to_owned()),
-            (Some(name), None) => match self.workflow_file(name, text_of(&map, "scope"))? {
-                None => return Ok(failed(self, &format!("no workflow named {name} (workflow_list shows what exists)"))),
-                Some((_, path, text)) => (self.shorten(&path.to_string_lossy().replace('\\', "/")), name, text),
-            },
+        let (path, stem, text) = match self.named_or_draft("workflow_validate", &map)? {
+            Ok(found) => found,
+            Err(refused) => return Ok(refused),
         };
-        let roster: Vec<_> = self.agent_rows().iter().filter_map(|r| r["name"].as_str()?.parse().ok()).collect();
-        let found = workflow::validate(&text, stem, &roster);
+        let found = self.discovered();
+        let roster: Vec<_> = found.agents.keys().cloned().collect();
+        let mut checked = workflow::validate(&text, &stem, &roster);
+        // A step that requires what its agent can't do (#283) is an error too.
+        if let Ok(wf) = Workflow::parse(&stem, &text) {
+            checked.errors.extend(capability_problems(&wf, &found.agents));
+            checked.ok = checked.errors.is_empty();
+        }
         let row = |p: &workflow::Problem| json!({ "path": path, "step": p.step, "field": p.field, "message": p.message });
         Ok(self.data_result(
             "the result of checking a workflow",
             json!({
-                "ok": found.ok,
-                "errors": found.errors.iter().map(row).collect::<Vec<_>>(),
-                "warnings": found.warnings.iter().map(row).collect::<Vec<_>>(),
+                "ok": checked.ok,
+                "errors": checked.errors.iter().map(row).collect::<Vec<_>>(),
+                "warnings": checked.warnings.iter().map(row).collect::<Vec<_>>(),
             }),
         ))
+    }
+
+    /// `workflow_plan`: the compiled plan, or why there is none.
+    fn plan_tool(&self, args: &Value) -> Result<CallToolResult, ErrorData> {
+        let map = take(args, "workflow_plan", &["name", "scope", "toml"])?;
+        let (path, stem, text) = match self.named_or_draft("workflow_plan", &map)? {
+            Ok(found) => found,
+            Err(refused) => return Ok(refused),
+        };
+        let found = self.discovered();
+        let roster: Vec<_> = found.agents.keys().cloned().collect();
+        let checked = workflow::validate(&text, &stem, &roster);
+        let problems = match Workflow::parse(&stem, &text) {
+            Ok(wf) if checked.ok => match compile(&wf, &text, &found.agents, &self.redactor) {
+                Ok(plan) => return Ok(self.data_result("the compiled plan of a workflow", plan)),
+                Err(problems) => problems,
+            },
+            _ => checked.errors,
+        };
+        let why: Vec<String> = problems
+            .iter()
+            .map(|p| format!("{}{}", p.step.map_or(String::new(), |n| format!("step {n}: ")), p.message))
+            .collect();
+        Ok(failed(self, &format!("{path} gets no plan: {}", why.join("; "))))
     }
 
     fn dry_run(&self, wf: &Workflow, input: &str) -> Value {
@@ -526,14 +657,11 @@ fn explain(wf: &Workflow) -> Value {
         let mut sees = Vec::new();
         for key in &reads {
             // The latest earlier step of that agent: the one `steps.<agent>.summary` means.
-            let (from, what) = match key.as_str() {
-                "input" => (0, "the workflow input".to_owned()),
-                "prev.summary" => (n - 1, format!("the summary of step {} ({})", n - 1, wf.steps[n - 2].agent)),
-                other => {
-                    let agent = other.trim_start_matches("steps.").trim_end_matches(".summary");
-                    let from = wf.steps[..i].iter().rposition(|p| p.agent.as_str() == agent).map_or(0, |j| j + 1);
-                    (from, format!("the summary of step {from} ({agent})"))
-                }
+            // The step `source` says the read means: the one before in a chain, the one a route
+            // comes from with routes.
+            let (from, what) = match wf.source(i, key) {
+                None => (0, "the workflow input".to_owned()),
+                Some(j) => (j + 1, format!("the summary of step {} ({})", j + 1, wf.steps[j].agent)),
             };
             edges.push(json!({ "from": from, "to": n, "via": key }));
             sees.push(what);

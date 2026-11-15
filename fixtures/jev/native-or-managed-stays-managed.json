@@ -1,0 +1,20 @@
+{
+  "about": "native_or_managed under a parent on another runtime: a native subagent lives in its parent's process, so aibus manages it.",
+  "request": {
+    "task_id": "search",
+    "requires": ["one_shot", "headless"],
+    "candidates": ["cli.claude"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "unbounded",
+    "risk_class": "writes",
+    "requested_mode": "native_or_managed",
+    "parent_runtime": "aibus"
+  },
+  "decision": {
+    "selected_runtime": "cli.claude",
+    "execution_mode": "aibus_managed",
+    "reason_code": "pinned_runtime",
+    "policy_evidence": ["risk:writes", "status:cli.claude=experimental", "mode:no_native_parent"],
+    "decision_source": "jev_deterministic"
+  }
+}

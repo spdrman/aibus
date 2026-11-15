@@ -1,0 +1,15 @@
+# expect: can start up to 3 agent runs, more than limits.max_agent_runs = 2
+[[step]]
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+agent = "general"
+prompt = "q {{prev.summary}}"
+
+[[step]]
+agent = "explore"
+prompt = "r {{prev.summary}}"
+
+[limits]
+max_agent_runs = 2

@@ -1,0 +1,18 @@
+{
+  "about": "A runtime this aibus does not know is skipped and recorded, never guessed at.",
+  "request": {
+    "task_id": "audit",
+    "requires": ["one_shot"],
+    "candidates": ["org.example.unknown", "aibus"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "bounded",
+    "risk_class": "read_only"
+  },
+  "decision": {
+    "selected_runtime": "aibus",
+    "execution_mode": "aibus_managed",
+    "reason_code": "capability_match",
+    "policy_evidence": ["risk:read_only", "unknown_runtime:org.example.unknown", "status:aibus=available", "mode:as_requested"],
+    "decision_source": "jev_deterministic"
+  }
+}

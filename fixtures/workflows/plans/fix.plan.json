@@ -1,0 +1,394 @@
+{
+  "agents": {
+    "explore": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    },
+    "general": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "tools": [
+        "read",
+        "write",
+        "edit",
+        "glob",
+        "grep",
+        "ls",
+        "bash",
+        "report_artifact",
+        "web_fetch",
+        "delegate",
+        "mcp:*"
+      ]
+    },
+    "plan": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:51b7bd6f1d7643d429b07faae911593bebd5e86415bc515ef032cdb0c9840791",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    }
+  },
+  "approvals": {
+    "required_for": [],
+    "steps": {}
+  },
+  "compiler": "aibus-workflow-compiler/1",
+  "edges": [
+    {
+      "from": "explore",
+      "kind": "sequence",
+      "to": "plan"
+    },
+    {
+      "from": "plan",
+      "kind": "sequence",
+      "to": "general#3"
+    },
+    {
+      "from": "general#3",
+      "kind": "sequence",
+      "to": "general#4"
+    },
+    {
+      "from": "general#4",
+      "kind": "retry",
+      "max_iterations": 2,
+      "to": "general#3"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "explore",
+      "via": "input"
+    },
+    {
+      "from": "explore",
+      "kind": "data",
+      "to": "plan",
+      "via": "prev.summary"
+    },
+    {
+      "from": "explore",
+      "kind": "data",
+      "to": "general#3",
+      "via": "steps.explore.summary"
+    },
+    {
+      "from": "plan",
+      "kind": "data",
+      "to": "general#3",
+      "via": "steps.plan.summary"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "general#4",
+      "via": "input"
+    }
+  ],
+  "entry": "explore",
+  "envelope": {
+    "max_agent_runs": null,
+    "max_parallel": null,
+    "max_wall_seconds": null,
+    "worst_case_agent_runs": 8
+  },
+  "fan_out": [],
+  "jev": {
+    "decisions": [
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "explore"
+        },
+        "step": "explore"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "plan"
+        },
+        "step": "plan"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:side_effects",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "side_effects",
+          "task_id": "general#3"
+        },
+        "step": "general#3"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:side_effects",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "side_effects",
+          "task_id": "general#4"
+        },
+        "step": "general#4"
+      }
+    ],
+    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+  },
+  "kind": "aibus.workflow.plan",
+  "manifest_version": 1,
+  "notes": [],
+  "plan_hash": "sha256:d443494eb80a689bf813da537eeb0bf4faec054a7bf25d600313074b7d45aacb",
+  "plan_only_because": null,
+  "prompts": {
+    "sha256:3458bae05aa0b647229604f9ef2633ce10f2840dc62c610658491449d1be7062": "Verify the fix: run the project's tests and report what passed and what failed. Problem: {{input}}",
+    "sha256:95b5d10bf48c2a1de063ac754b54eda91082e248b9eeafeba8112b3a9acd19aa": "Risks of fixing it this way: {{prev.summary}}\n\nEnd your answer with one line, `RISK: LOW`, `RISK: MEDIUM` or `RISK: HIGH`.\n",
+    "sha256:e366473219fa2a827f985abe2d32ce2aae12fd448822e8c842f1e3ca37018b0f": "Diagnose this problem and say where the cause is (file paths and line numbers): {{input}}",
+    "sha256:f9422e367007a4186ad6b5c8fcb181744fb210f674103c0ad4bd3cbf075ea946": "Make the fix. Diagnosis: {{steps.explore.summary}} Risks to keep in mind: {{steps.plan.summary}}"
+  },
+  "runnable_now": true,
+  "runtimes": {
+    "aibus": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "interactive_approval",
+        "one_shot",
+        "session_resume",
+        "structured_events",
+        "tool_events",
+        "usage_report",
+        "workspace_control"
+      ],
+      "status": "available"
+    }
+  },
+  "steps": [
+    {
+      "agent": "explore",
+      "agent_sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "gate": null,
+      "invocation": {
+        "agent": "explore",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "explore",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 1,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "input"
+        ],
+        "sha256": "sha256:e366473219fa2a827f985abe2d32ce2aae12fd448822e8c842f1e3ca37018b0f",
+        "stable_prefix_bytes": 80,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "aibus"
+    },
+    {
+      "agent": "plan",
+      "agent_sha256": "sha256:51b7bd6f1d7643d429b07faae911593bebd5e86415bc515ef032cdb0c9840791",
+      "gate": "grep -q 'RISK: HIGH' && { echo \"the risk assessment ended on RISK: HIGH\" >&2; exit 2; }; exit 0",
+      "invocation": {
+        "agent": "plan",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "plan",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 2,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "prev.summary"
+        ],
+        "sha256": "sha256:95b5d10bf48c2a1de063ac754b54eda91082e248b9eeafeba8112b3a9acd19aa",
+        "stable_prefix_bytes": 29,
+        "volatile_at_end": false
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "aibus"
+    },
+    {
+      "agent": "general",
+      "agent_sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "gate": null,
+      "invocation": {
+        "agent": "general",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "general#3",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 3,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "steps.explore.summary",
+          "steps.plan.summary"
+        ],
+        "sha256": "sha256:f9422e367007a4186ad6b5c8fcb181744fb210f674103c0ad4bd3cbf075ea946",
+        "stable_prefix_bytes": 25,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "aibus"
+    },
+    {
+      "agent": "general",
+      "agent_sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "gate": null,
+      "invocation": {
+        "agent": "general",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "general#4",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 4,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "input"
+        ],
+        "sha256": "sha256:3458bae05aa0b647229604f9ef2633ce10f2840dc62c610658491449d1be7062",
+        "stable_prefix_bytes": 89,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 2,
+      "runtime": "aibus"
+    }
+  ],
+  "workflow": {
+    "description": "Diagnose, assess risk, fix, verify",
+    "name": "fix",
+    "revision": null,
+    "source_sha256": "sha256:b22822247c4f0518ab758a5b4f87ef27edd3dfe2673ede94f463072ff1db1454"
+  }
+}

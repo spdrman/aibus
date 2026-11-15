@@ -1,0 +1,686 @@
+{
+  "examples/workflows/build.toml": {
+    "parse": {
+      "description": "Plan a change, implement it, verify it",
+      "name": "build",
+      "preview": [
+        "Plan the change step by step, naming the files to touch: INPUT",
+        "Implement this plan: <summary of step 1 (plan)>",
+        "Verify the change: build the project, run its tests and report the result. Task: INPUT"
+      ],
+      "steps": [
+        {
+          "agent": "plan",
+          "gate": null,
+          "prompt": "Plan the change step by step, naming the files to touch: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Implement this plan: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Verify the change: build the project, run its tests and report the result. Task: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 2
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": null,
+          "message": "nothing after this step reads its summary ({{prev.summary}} or {{steps.general.summary}})",
+          "step": 2
+        }
+      ]
+    }
+  },
+  "examples/workflows/explore.toml": {
+    "parse": {
+      "description": "Map the code, find the call sites, summarise",
+      "name": "explore",
+      "preview": [
+        "Map the parts of the repository that matter for: INPUT",
+        "Find the call sites and tests that touch what was found: <summary of step 1 (search)>",
+        "Summarise how this works and where to start. Map: <summary of step 1 (search)> Call sites: <summary of step 2 (grep)>"
+      ],
+      "steps": [
+        {
+          "agent": "search",
+          "gate": null,
+          "prompt": "Map the parts of the repository that matter for: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "grep",
+          "gate": null,
+          "prompt": "Find the call sites and tests that touch what was found: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "plan",
+          "gate": null,
+          "prompt": "Summarise how this works and where to start. Map: {{steps.search.summary}} Call sites: {{steps.grep.summary}}",
+          "reads": [
+            "steps.search.summary",
+            "steps.grep.summary"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": []
+    }
+  },
+  "examples/workflows/fix.toml": {
+    "parse": {
+      "description": "Diagnose, assess risk, fix, verify",
+      "name": "fix",
+      "preview": [
+        "Diagnose this problem and say where the cause is (file paths and line numbers): INPUT",
+        "Risks of fixing it this way: <summary of step 1 (explore)>\n\nEnd your answer with one line, `RISK: LOW`, `RISK: MEDIUM` or `RISK: HIGH`.\n",
+        "Make the fix. Diagnosis: <summary of step 1 (explore)> Risks to keep in mind: <summary of step 2 (plan)>",
+        "Verify the fix: run the project's tests and report what passed and what failed. Problem: INPUT"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Diagnose this problem and say where the cause is (file paths and line numbers): {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "plan",
+          "gate": "grep -q 'RISK: HIGH' && { echo \"the risk assessment ended on RISK: HIGH\" >&2; exit 2; }; exit 0",
+          "prompt": "Risks of fixing it this way: {{prev.summary}}\n\nEnd your answer with one line, `RISK: LOW`, `RISK: MEDIUM` or `RISK: HIGH`.\n",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Make the fix. Diagnosis: {{steps.explore.summary}} Risks to keep in mind: {{steps.plan.summary}}",
+          "reads": [
+            "steps.explore.summary",
+            "steps.plan.summary"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Verify the fix: run the project's tests and report what passed and what failed. Problem: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 2
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": "gate",
+          "message": "runs a shell command after this step: grep -q 'RISK: HIGH' && { echo \"the risk assessment ended on RISK: HIGH\" >&2; exit 2; }; exit 0",
+          "step": 2
+        },
+        {
+          "field": null,
+          "message": "nothing after this step reads its summary ({{prev.summary}} or {{steps.general.summary}})",
+          "step": 3
+        }
+      ]
+    }
+  },
+  "examples/workflows/review.toml": {
+    "parse": {
+      "description": "Find what changed, then review it",
+      "name": "review",
+      "preview": [
+        "Find the code that changed for this and the code around it (callers, tests): INPUT",
+        "Review this change for bugs, missing tests and risks. Quote file paths and lines. Context: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Find the code that changed for this and the code around it (callers, tests): {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "plan",
+          "gate": null,
+          "prompt": "Review this change for bugs, missing tests and risks. Quote file paths and lines. Context: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/invalid/bad_agent_name.toml": {
+    "parse": {
+      "error": "step 2: invalid agent name \"Bad Name\": want [a-z0-9][a-z0-9_-]{0,63}"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "invalid agent name \"Bad Name\": want [a-z0-9][a-z0-9_-]{0,63}",
+          "step": 2
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/invalid/bad_on_fail.toml": {
+    "parse": {
+      "error": "step 2: on_fail \"retry:9\": want retry:N with N from 1 to 5"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "on_fail \"retry:9\": want retry:N with N from 1 to 5",
+          "step": 2
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/invalid/empty_gate.toml": {
+    "parse": {
+      "error": "step 2: the gate is empty"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "the gate is empty",
+          "step": 2
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/invalid/empty_prompt.toml": {
+    "parse": {
+      "error": "step 1: the prompt is empty"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "the prompt is empty",
+          "step": 1
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/invalid/no_steps.toml": {
+    "parse": {
+      "error": "a workflow needs at least one [[step]]"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "a workflow needs at least one [[step]]",
+          "step": null
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/saved/review.toml": {
+    "parse": {
+      "description": "Find what changed, then review it",
+      "name": "review",
+      "preview": [
+        "Find the code that changed for this and the code around it (callers, tests): INPUT",
+        "Review this change for bugs, missing tests and risks. Quote file paths and lines. Context: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Find the code that changed for this and the code around it (callers, tests): {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "plan",
+          "gate": null,
+          "prompt": "Review this change for bugs, missing tests and risks. Quote file paths and lines. Context: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/semantic/forward_reference.toml": {
+    "parse": {
+      "error": "step 1: `steps.general.summary` names a step that does not come before this one"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "`steps.general.summary` names a step that does not come before this one",
+          "step": 1
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/semantic/prev_in_first_step.toml": {
+    "parse": {
+      "error": "step 1: the first step has no `{{prev.summary}}`"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "the first step has no `{{prev.summary}}`",
+          "step": 1
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/semantic/unclosed_template.toml": {
+    "parse": {
+      "error": "step 1: a `{{` is never closed"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "a `{{` is never closed",
+          "step": 1
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/semantic/unknown_agent.toml": {
+    "parse": {
+      "description": "",
+      "name": "unknown_agent",
+      "preview": [
+        "Look: INPUT",
+        "Go on: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Look: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "ghost",
+          "gate": null,
+          "prompt": "Go on: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": "agent",
+          "message": "no agent named `ghost` in the roster",
+          "step": 2
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/semantic/unknown_template.toml": {
+    "parse": {
+      "error": "step 1: unknown template `{{inpt}}`"
+    },
+    "validate": {
+      "errors": [
+        {
+          "field": null,
+          "message": "unknown template `{{inpt}}`",
+          "step": 1
+        }
+      ],
+      "ok": false,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/valid/chain.toml": {
+    "parse": {
+      "description": "Two steps and a retry",
+      "name": "chain",
+      "preview": [
+        "Find it: INPUT",
+        "Fix it. Findings: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Find it: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Fix it. Findings: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 3
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/valid/minimal.toml": {
+    "parse": {
+      "description": "",
+      "name": "minimal",
+      "preview": [
+        "Look around: INPUT"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Look around: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": []
+    }
+  },
+  "fixtures/workflows/warnings/gate.toml": {
+    "parse": {
+      "description": "",
+      "name": "gate",
+      "preview": [
+        "Look: INPUT",
+        "Go on: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": "test -s /dev/stdin",
+          "prompt": "Look: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Go on: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": "gate",
+          "message": "runs a shell command after this step: test -s /dev/stdin",
+          "step": 1
+        }
+      ]
+    }
+  },
+  "fixtures/workflows/warnings/markers.toml": {
+    "parse": {
+      "description": "",
+      "name": "markers",
+      "preview": [
+        "Look at [hint] and [run ls]: INPUT"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Look at [hint] and [run ls]: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": "prompt",
+          "message": "the prompt contains `[hint]`, which has the shape of an aibus marker",
+          "step": 1
+        },
+        {
+          "field": "prompt",
+          "message": "the prompt contains `[run`, which has the shape of an aibus marker",
+          "step": 1
+        }
+      ]
+    }
+  },
+  "fixtures/workflows/warnings/on_fail_after_gate.toml": {
+    "parse": {
+      "description": "",
+      "name": "on_fail_after_gate",
+      "preview": [
+        "Look: INPUT",
+        "Go on: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": "true",
+          "prompt": "Look: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Go on: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 1
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": "gate",
+          "message": "runs a shell command after this step: true",
+          "step": 1
+        },
+        {
+          "field": "on_fail",
+          "message": "on_fail is set and the step before it has a gate, so a retry runs that gate again",
+          "step": 2
+        }
+      ]
+    }
+  },
+  "fixtures/workflows/warnings/on_fail_not_last.toml": {
+    "parse": {
+      "description": "",
+      "name": "on_fail_not_last",
+      "preview": [
+        "Look: INPUT",
+        "Go on: <summary of step 1 (explore)>"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Look: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 1
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Go on: {{prev.summary}}",
+          "reads": [
+            "prev.summary"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": "on_fail",
+          "message": "on_fail is set on a step that is not the last one",
+          "step": 1
+        }
+      ]
+    }
+  },
+  "fixtures/workflows/warnings/unread_summary.toml": {
+    "parse": {
+      "description": "",
+      "name": "unread_summary",
+      "preview": [
+        "Look: INPUT",
+        "Do it: INPUT"
+      ],
+      "steps": [
+        {
+          "agent": "explore",
+          "gate": null,
+          "prompt": "Look: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        },
+        {
+          "agent": "general",
+          "gate": null,
+          "prompt": "Do it: {{input}}",
+          "reads": [
+            "input"
+          ],
+          "retries": 0
+        }
+      ]
+    },
+    "validate": {
+      "errors": [],
+      "ok": true,
+      "warnings": [
+        {
+          "field": null,
+          "message": "nothing after this step reads its summary ({{prev.summary}} or {{steps.explore.summary}})",
+          "step": 1
+        }
+      ]
+    }
+  }
+}

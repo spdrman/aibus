@@ -431,6 +431,67 @@ pub enum WorkflowCmd {
     },
     /// Print a workflow: its steps, prompts, gates and retries
     Show { name: String },
+    /// Put workflows into one .aibus bundle file (a plain tar) to share
+    Pack {
+        /// The workflows to put in, by name
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// The bundle to write: <name>.aibus
+        #[arg(short = 'o', long = "output", value_name = "FILE")]
+        output: PathBuf,
+        /// A line saying what the bundle is for (the manifest's description)
+        #[arg(long, value_name = "TEXT", default_value = "")]
+        description: String,
+        /// Also put in the project or user definitions of the agents the workflows name
+        #[arg(long)]
+        with_agents: bool,
+        /// Replace the output file if it exists
+        #[arg(long)]
+        force: bool,
+    },
+    /// Unpack a .aibus bundle into the project's workflows (or the user's with --user)
+    Install {
+        /// The bundle file
+        file: PathBuf,
+        /// Into the user's workflows directory instead of the project's
+        #[arg(long)]
+        user: bool,
+        /// Replace workflow or agent files that are already there
+        #[arg(long)]
+        force: bool,
+        /// `gates`: trust the bundle's gates and agent hooks (shell commands that run as you)
+        #[arg(long, value_name = "WHAT", value_parser = ["gates"])]
+        allow: Vec<String>,
+    },
+    /// Compile a workflow (a name or a .toml path) and print its plan; nothing runs
+    Plan {
+        target: String,
+        /// Print the plan and run nothing (required: running a plan is the scheduler's, #288)
+        #[arg(long)]
+        dry_run: bool,
+        /// A saved plan (`plan --dry-run --json`) this one must match; exit 13 when it does not
+        #[arg(long, value_name = "FILE")]
+        locked: Option<PathBuf>,
+    },
+    /// Compare two workflows or saved plans (names, .toml paths or .json plans)
+    Diff { a: String, b: String },
+    /// Print the run-manifest.json a run of the workflow starts from
+    Manifest {
+        target: String,
+        /// The task input, or - to read it from stdin; only its hash and length are kept
+        #[arg(long, value_name = "TEXT")]
+        input: Option<String>,
+    },
+    /// Show, then write with --apply, the workflow's native subagents as Claude Code agent files
+    Export {
+        target: String,
+        /// Where the files go, relative to the project (default .claude/agents)
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+        /// Write the files: the hash the preview printed
+        #[arg(long, value_name = "HASH")]
+        apply: Option<String>,
+    },
     Run {
         name: String,
         input: String,
@@ -503,6 +564,12 @@ mod tests {
         "workflow validate",
         "workflow show",
         "workflow run",
+        "workflow pack",
+        "workflow install",
+        "workflow plan",
+        "workflow diff",
+        "workflow manifest",
+        "workflow export",
         "init",
         "config path",
         "config show",

@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// `create_dir_all` with mode `0700` on every directory it creates.
 pub fn create_private_dir(path: &Path) -> io::Result<()> {
@@ -40,32 +40,99 @@ pub fn write_private(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Resu
     file.write_all(data.as_ref())
 }
 
-/// Writes `data` next to `path`, syncs it, and renames it over `path`, so a reader (or a crash)
-/// sees the old file or the new one and never half of either. Mode `0600`.
-pub fn write_atomic(path: &Path, data: impl AsRef<[u8]>) -> io::Result<()> {
+/// Why `read_regular` read nothing.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error("not a regular file")]
+    NotRegular,
+    #[error("{0} bytes, the most is {1}")]
+    TooBig(u64, u64),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+/// Reads `path` if it is a regular file of at most `cap` bytes. The file is opened with
+/// `O_NONBLOCK`, so a fifo answers at once instead of hanging the caller, and the type and size
+/// are taken from the open file (`fstat`), so a swap between a check and the open changes
+/// nothing. A symlink is followed to what it names, which then has to pass the same checks.
+pub fn read_regular(path: &Path, cap: u64) -> Result<Vec<u8>, ReadError> {
+    use std::io::Read;
+    let mut opts = fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    let file = opts.open(path)?;
+    let md = file.metadata()?;
+    if !md.is_file() {
+        return Err(ReadError::NotRegular);
+    }
+    if md.len() > cap {
+        return Err(ReadError::TooBig(md.len(), cap));
+    }
+    let mut bytes = Vec::new();
+    file.take(cap + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > cap {
+        return Err(ReadError::TooBig(bytes.len() as u64, cap));
+    }
+    Ok(bytes)
+}
+
+/// Writes `data` to a new temp file next to `path` and syncs it; `commit_staged` renames it into
+/// place. The temp name is random and the file is created with `O_CREAT|O_EXCL` (which never
+/// follows a symlink) and mode `0600`, so nothing planted in the directory can redirect the write.
+/// On an error nothing is left behind: a temp file this call did not create is never removed.
+pub fn stage_private(path: &Path, data: impl AsRef<[u8]>) -> io::Result<PathBuf> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::other("no file name"))?
         .to_string_lossy();
-    let tmp = path.with_file_name(format!(".{name}.tmp"));
-    let written = (|| {
-        // A planted link at the temp name is removed, never followed.
-        let _ = fs::remove_file(&tmp);
-        let mut file = open_new_private(&tmp)?;
-        file.write_all(data.as_ref())?;
-        file.sync_all()
-    })();
-    if let Err(e) = written.and_then(|()| fs::rename(&tmp, path)) {
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", ulid::Ulid::new()));
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&tmp)?;
+    if let Err(e) = file.write_all(data.as_ref()).and_then(|()| file.sync_all()) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
-    // The rename itself is only durable once the directory is synced; best effort.
+    Ok(tmp)
+}
+
+/// Renames a file `stage_private` made over `path` (a rename never follows a symlink at `path`, it
+/// replaces it), then checks that `path` is a plain file and syncs the directory (best effort).
+pub fn commit_staged(tmp: &Path, path: &Path) -> io::Result<()> {
+    if let Err(e) = fs::rename(tmp, path) {
+        let _ = fs::remove_file(tmp);
+        return Err(e);
+    }
+    let md = fs::symlink_metadata(path)?;
+    if md.file_type().is_symlink() || !md.is_file() {
+        return Err(io::Error::other(format!(
+            "{} is not a plain file after the write",
+            path.display()
+        )));
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         if let Ok(d) = fs::File::open(dir) {
             let _ = d.sync_all();
         }
     }
     Ok(())
+}
+
+/// Writes `data` next to `path`, syncs it, and renames it over `path`, so a reader (or a crash)
+/// sees the old file or the new one and never half of either. Mode `0600`, through
+/// `stage_private`, so a symlink planted where a temp file might go is never written through.
+pub fn write_atomic(path: &Path, data: impl AsRef<[u8]>) -> io::Result<()> {
+    let tmp = stage_private(path, data)?;
+    commit_staged(&tmp, path)
 }
 
 /// Replaces `path` while holding an exclusive `fs4` lock on it, for the files two aibus
@@ -141,17 +208,6 @@ pub fn content_hash(bytes: &[u8]) -> String {
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{h:016x}")
-}
-
-fn open_new_private(path: &Path) -> io::Result<fs::File> {
-    let mut opts = fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    opts.open(path)
 }
 
 fn open_private(path: &Path, truncate: bool) -> io::Result<fs::File> {

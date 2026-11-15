@@ -48,15 +48,23 @@ pub fn apply<G: Graph>(op: &WorkflowFile, app: &App<G>, files: &WorkflowFiles, a
     match op {
         WorkflowFile::List => vec![loaded(None, None), open(Screen::Workflows)],
         WorkflowFile::Show(name) => {
-            let Some((_, path, _)) = workflow::list(&files.dirs).into_iter().find(|(n, ..)| n == name) else {
+            let Some(found) = workflow::list(&files.dirs).into_iter().find(|f| f.name == *name) else {
                 return vec![refused(format!("no workflow named {name} (/workflow list)"))];
             };
-            let raw = match std::fs::read_to_string(&path) {
-                Ok(t) => t,
-                Err(e) => return vec![refused(format!("{}: {e}", path.display()))],
+            let Some(raw) = found.text.clone() else {
+                let why = found.parsed.err().map(|e| e.to_string()).unwrap_or_default();
+                return vec![refused(format!("{}: {why}", found.path.display()))];
             };
-            let (_, line) = workflow::summarise(&raw, name, &roster);
-            let mut text = files.redactor.redact(&raw).into_owned();
+            let (_, mut line) = workflow::summarise(&raw, name, &roster);
+            if found.bundle.is_some() {
+                line = format!("{line}, from {}", found.source());
+                if let Err(why) = found.runnable() {
+                    line = format!("{line}; not runnable: {why}");
+                }
+            }
+            // A file can hold escape sequences; the modal draws none of them.
+            let mut text = aibus_core::text::strip_ansi(&files.redactor.redact(&raw)).into_owned();
+            let line = aibus_core::text::strip_ansi(&line).into_owned();
             if text.len() > files.cap {
                 let mut cut = files.cap;
                 while !text.is_char_boundary(cut) {

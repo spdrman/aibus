@@ -652,6 +652,22 @@ Snapshots: regenerated with `AIBUS_UPDATE_SNAPSHOTS=1` on arm64 (MERCURY) after 
 
 **Why.** A right click always means "this card", whether or not another menu is up, and that is what the issue expected. I could not tell what the one "opened, then gone 0.8 s later" in the second session was; the same toggle explains it if the click reached the loop late (the old menu was still on screen until it was handled), but I did not prove that.
 
+## D-283: the workflow compiler keeps the v1 format and adds to it (#283)
+
+**Context.** The spec's A1.3 asks for "workflow schema v1" with routes, runtimes, limits and approvals, and aibus already ships a v1 (#97): an ordered chain of `{agent, prompt, gate?, on_fail?}` that `workflow validate`, the MCP tools, `/workflow save` and the bundles of #271 all read. #283 recorded four open questions about that.
+
+**Decision.**
+1. *The v1 name.* The existing chain stays valid v1 for good. Everything new is an optional field of the same format (`schema_version = "1"` is accepted and means the same as leaving it out), the JSON Schema gains those fields, and every older example and fixture reads, validates and dry-runs exactly as before (`fixtures/workflows/compat/before-283.json`, `fixtures/mcp-server/compat-before-283.json`). The spec's example maps on as `[[step]]`/`[[route]]`, `description` for `objective` and the first step as `entry`. Step `id` is the one #275 asked for, so the studio only has `model` left to add.
+2. *TOML or JSON.* TOML is authoritative and is what people and tools write; JSON is what the compiler produces (the plan) and what the JSON Schema checks the TOML read as. The plan is the content-addressed record: every prompt and agent definition by sha256, line ends normalised, keys sorted, with a `plan_hash` over it, so the same input gives the same bytes on any host.
+3. *`plan --dry-run` and `workflow_dry_run`.* They sit side by side. `workflow_dry_run` keeps its job and shape (render the prompts for an input); `plan --dry-run` and the new `workflow_plan` tool are the compiler's output, which a lock or a diff can hold. A run manifest pins the input separately, by hash.
+4. *`workflow diff` and the config diff.* Two things. `aibus workflow diff <a> <b>` compares two revisions (workflows or saved plans) by step key; `plan --locked` turns that into drift detection with exit 13. The config diff is `aibus workflow export`, the previewed and consented change to `.claude/agents/`; it is optional, because the planned invocation passes native subagents inline with `--agents`, which the #281 spike showed writes nothing.
+
+Plan-only features (routes, limits, approvals, another runtime, native or parented steps, worktrees) compile and plan today and are refused by the chain runner before any step starts, until #288's scheduler runs them. The Claude Code runtime id is `cli.claude` for now, since the spike found the vendor's product name can't be in an extension's name; #286 names it.
+
+**Alternatives.** A v2 format or a second file kind next to the chains: it would split `validate`, the MCP tools and the bundles in two for no gain, since nothing in the old format had to change. JSON as the authoritative source: no comments, worse for people to write, and the existing files are TOML. Folding the plan into `workflow_dry_run`: its output schema is closed (`additionalProperties: false`), so an older client validating against it would see new keys as an error.
+
+**Why.** Nothing that works today breaks, the new fields are all a reader has to learn, and the compiled plan is what later issues (#284's graph, #288's scheduler, #293's comparisons) can pin to.
+
 ## D-282: The CLI supervisor and the evidence trace (#282)
 
 **Context.** EPIC A needs an official vendor CLI run as an external runtime and a trace aibus can trust and replay offline (spec A1.2). The spike (#281) gave the stream shapes and a list of traps. #282 left four questions open, and building it raised a few more.

@@ -436,6 +436,20 @@ async fn an_unknown_workflow_or_agent_is_an_error_the_lead_reads() {
     assert!(rig.agents().is_empty());
 }
 
+/// #283: a workflow with routes plans but does not run; the lead is told why and no step starts.
+#[tokio::test]
+async fn a_workflow_only_the_scheduler_can_run_starts_no_step() {
+    let routed = "[[step]]\nid = \"a\"\nagent = \"explore\"\nprompt = \"look at {{input}}\"\n\n\
+                  [[step]]\nid = \"b\"\nagent = \"general\"\nprompt = \"fix {{prev.summary}}\"\n\n\
+                  [[route]]\nfrom = \"a\"\nto = \"b\"\n";
+    let mut rig = Rig::new(&[("explore", &["found"]), ("general", &["fixed"])], &["ok"], &[("routed", routed)], None);
+    rig.start_lead("go", Some(("workflow", json!({"name": "routed", "input": "t"}))));
+    assert_eq!(rig.finish().await, RunStatus::Completed);
+    let said = results(&rig.lead_requests()[0]).remove(0);
+    assert!(said.contains("the scheduler (#288)") && said.contains("nothing was started"), "{said}");
+    assert!(rig.agents().is_empty(), "{:?}", rig.agents());
+}
+
 const TRIGGERS: &str = r#"
 [[trigger]]
 agents = ["explore", "plan"]

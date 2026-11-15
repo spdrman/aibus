@@ -1,0 +1,19 @@
+# expect: no route reaches step c
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+
+[[step]]
+id = "c"
+agent = "explore"
+prompt = "r"
+
+[[route]]
+from = "a"
+to = "b"

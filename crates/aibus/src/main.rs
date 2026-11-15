@@ -32,6 +32,7 @@ mod startup;
 mod term;
 mod trace;
 mod tui;
+mod workflow_plan;
 
 use std::io::IsTerminal;
 
@@ -47,7 +48,7 @@ fn main() -> std::process::ExitCode {
     match outcome {
         Ok(Ok(code)) => std::process::ExitCode::from(code),
         Ok(Err(e)) => {
-            eprintln!("aibus: {}", redactor.redact(&e.to_string()));
+            eprintln!("aibus: {}", aibus_core::text::strip_ansi(&redactor.redact(&e.to_string())));
             std::process::ExitCode::from(e.exit_code())
         }
         Err(_) => std::process::ExitCode::from(1),
@@ -100,6 +101,27 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
             commands::workflow_validate(&cli.global, target.as_deref())
         }
         Some(Command::Workflow(WorkflowCmd::Show { name })) => commands::workflow_show(&cli.global, &name),
+        Some(Command::Workflow(WorkflowCmd::Pack { names, output, description, with_agents, force })) => {
+            commands::workflow_pack(&cli.global, &names, &output, &description, with_agents, force, redactor)
+        }
+        Some(Command::Workflow(WorkflowCmd::Install { file, user, force, allow })) => commands::workflow_install(
+            &cli.global,
+            &file,
+            user,
+            force,
+            allow.iter().any(|a| a == "gates"),
+            redactor,
+        ),
+        Some(Command::Workflow(WorkflowCmd::Plan { target, dry_run, locked })) => {
+            workflow_plan::plan(&cli.global, &target, dry_run, locked.as_deref(), redactor)
+        }
+        Some(Command::Workflow(WorkflowCmd::Diff { a, b })) => workflow_plan::diff_cmd(&cli.global, &a, &b, redactor),
+        Some(Command::Workflow(WorkflowCmd::Manifest { target, input })) => {
+            workflow_plan::manifest(&cli.global, &target, input.as_deref(), redactor)
+        }
+        Some(Command::Workflow(WorkflowCmd::Export { target, dir, apply })) => {
+            workflow_plan::export(&cli.global, &target, dir.as_deref(), apply.as_deref(), redactor)
+        }
         Some(Command::Workflow(WorkflowCmd::Run { name, input, script })) => {
             // The same session as `aibus run --workflow <name> <input>`.
             let args = RunArgs {

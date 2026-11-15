@@ -1,0 +1,7 @@
+# expect: limits.max_parallel = 0: want 1 to 64
+[[step]]
+agent = "plan"
+prompt = "p"
+
+[limits]
+max_parallel = 0

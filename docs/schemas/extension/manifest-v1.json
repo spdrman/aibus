@@ -92,7 +92,7 @@
       "properties": {
         "protocol": {
           "type": "string",
-          "description": "A range such as >=1.0.0, <2.0.0. This host speaks 1.0.0."
+          "description": "A range such as >=1.0.0, <2.0.0. This host speaks 1.1.0 and still reads schema 1 manifests that ask for 1.0.0. Schema 2 (manifest-v2.json) adds typed flags."
         },
         "os": {
           "type": "array",

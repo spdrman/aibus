@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use aibus_extension::manifest::{escalations, Manifest, ManifestError, ValueKind};
 use aibus_extension::negotiate::{check_host, PROTOCOL};
@@ -26,14 +26,24 @@ fn refused(text: &str) -> (String, String) {
     }
 }
 
+/// The reference manifest without its own typed blocks, as it was in schema 1.
+fn reference_v1() -> String {
+    let m = fs::read_to_string(reference_dir().join("aibus-extension.toml")).unwrap();
+    let from = m
+        .find("# Flags whose value the host fills")
+        .expect("the typed blocks");
+    let to = m.find("kind = \"agent_list\"\n").expect("the agents block")
+        + "kind = \"agent_list\"\n".len();
+    let m = format!("{}{}", &m[..from], &m[to..]);
+    m.replace("schema_version = \"2\"", "schema_version = \"1\"")
+        .replace(">=1.1.0, <2.0.0", ">=1.0.0, <2.0.0")
+}
+
 /// The reference manifest as schema 2 with `extra` appended (typed blocks).
 fn reference_v2(extra: &str) -> String {
-    let m = fs::read_to_string(reference_dir().join("aibus-extension.toml")).unwrap();
-    let m = m.replace("schema_version = \"1\"", "schema_version = \"2\"");
-    let m = m.replace(
-        "protocol = \">=1.0.0, <2.0.0\"",
-        "protocol = \">=1.1.0, <2.0.0\"",
-    );
+    let m = reference_v1()
+        .replace("schema_version = \"1\"", "schema_version = \"2\"")
+        .replace(">=1.0.0, <2.0.0", ">=1.1.0, <2.0.0");
     format!("{m}\n{extra}\n")
 }
 
@@ -103,12 +113,12 @@ fn issue_334_a_schema_2_manifest_with_typed_flags_parses() {
     );
     // Every official CLI has a model flag; a path kind exists for Codex's output file.
     for cli in ["claude", "codex", "gemini", "kimi"] {
-        let argv = if cli == "codex" {
-            r#"["exec"]"#
-        } else {
-            r#"["--print"]"#
+        let argv = match cli {
+            "codex" => r#"["exec"]"#,
+            "claude" => r#"["-p"]"#,
+            "gemini" => r#"["--debug"]"#,
+            _ => r#"["--print"]"#,
         };
-        let argv = if cli == "claude" { r#"["-p"]"# } else { argv };
         Manifest::parse(&as_cli(cli, argv, &typed("--model", "model_id")))
             .unwrap_or_else(|e| panic!("{cli}: {e:?}"));
     }
@@ -122,11 +132,7 @@ fn issue_334_a_schema_2_manifest_with_typed_flags_parses() {
 
 #[test]
 fn issue_334_a_schema_1_manifest_cannot_carry_typed_flags() {
-    let m = format!(
-        "{}\n{}\n",
-        fs::read_to_string(reference_dir().join("aibus-extension.toml")).unwrap(),
-        typed("--model", "model_id")
-    );
+    let m = format!("{}\n{}\n", reference_v1(), typed("--model", "model_id"));
     let (field, why) = refused(&m);
     assert_eq!(field, "execution.typed");
     assert!(why.contains("schema 2"), "{why}");
@@ -643,9 +649,6 @@ async fn issue_334_the_launch_check_refuses_a_typed_flag_with_a_value_the_host_w
     }
     assert!(check_launch(&m, &with(&["--model", "gpt-5"]), &[]).is_ok());
     // A manifest that declares no typed flag takes none.
-    let plain =
-        Manifest::parse(&fs::read_to_string(reference_dir().join("aibus-extension.toml")).unwrap())
-            .unwrap();
+    let plain = Manifest::parse(&reference_v1()).unwrap();
     assert!(check_launch(&plain, &with(&["--model", "gpt-5"]), &[]).is_err());
-    let _ = Path::new("/");
 }

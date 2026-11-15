@@ -18,7 +18,7 @@ use aibus_supervisor::cli::{self, Probe as CliProbe, ProbeError, HOST_ENV_ALLOW}
 use aibus_supervisor::{Engine, Launch, Limits};
 use aibus_trace::AttemptRef;
 
-use crate::manifest::{Capability, Manifest};
+use crate::manifest::{Capability, Manifest, ValueKind};
 use crate::negotiate::{check_host, negotiate, Incompatible, Negotiated};
 
 /// What the host grants one launch. The extension cannot widen it.
@@ -116,31 +116,48 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
     if !OFFICIAL_CLIS.contains(&name) && !extra.iter().any(|e| e == name) {
         return Err(SandboxError::NotOfficial(name.to_owned()));
     }
-    // The same list the manifest was read against, over what is really about to run.
-    let args: Vec<String> = launch
-        .args
-        .iter()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
-    crate::flags::check(name, &args).map_err(refused)?;
     let fixed: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
     if launch.args.len() < fixed.len() || launch.args[..fixed.len()] != fixed[..] {
         return Err(refused(
             "the arguments do not start with the manifest's argv",
         ));
     }
-    for extra in &launch.args[fixed.len()..] {
-        if !m
+    // After the manifest's argv: its optional flags, and its typed flags each once with a value of
+    // the kind it declared. Nothing else.
+    let mut statics: Vec<String> = fixed
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let mut tail = launch.args[fixed.len()..].iter();
+    let mut seen: Vec<&str> = Vec::new();
+    while let Some(arg) = tail.next() {
+        let text = arg.to_string_lossy();
+        if let Some(t) = m.execution.typed.iter().find(|t| t.flag == text) {
+            let value = tail
+                .next()
+                .and_then(|v| v.to_str())
+                .ok_or_else(|| refused(format!("{text} has no value")))?;
+            if seen.contains(&t.flag.as_str()) {
+                return Err(refused(format!("{text} is given twice")));
+            }
+            seen.push(&t.flag);
+            check_typed(t.kind, value, &launch.cwd)
+                .map_err(|why| refused(format!("{text}: {why}")))?;
+        } else if m
             .execution
             .optional
             .iter()
-            .any(|o| OsString::from(&o.flag) == *extra)
+            .any(|o| OsString::from(&o.flag) == *arg)
         {
+            statics.push(text.into_owned());
+        } else {
             return Err(refused(format!(
-                "{extra:?} is not an optional flag the manifest declared"
+                "{arg:?} is not an optional or typed flag the manifest declared"
             )));
         }
     }
+    // The same list of flags the manifest was read against, over what is really about to run.
+    crate::flags::check(name, &statics).map_err(refused)?;
     for (k, v) in &launch.env {
         let Some(k) = k.to_str() else {
             return Err(refused("an environment name is not UTF-8"));
@@ -164,13 +181,133 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
     Ok(())
 }
 
-/// The argument pairs for the typed flags the manifest declared and the plan has a value for (#334).
+/// The argument pairs for the typed flags the manifest declared and the plan has a value for (#334),
+/// in the manifest's order. The value of a flag is one argument, built here from what the plan
+/// holds and checked by [`check_typed`], the same check `check_launch` runs on a finished launch.
+/// A value for a flag the manifest did not declare, or of another kind, is refused; a declared flag
+/// with no value is left out.
 pub fn typed_args(
-    _m: &Manifest,
-    _values: &std::collections::BTreeMap<String, TypedValue>,
-    _workdir: &Path,
+    m: &Manifest,
+    values: &std::collections::BTreeMap<String, TypedValue>,
+    workdir: &Path,
 ) -> Result<Vec<OsString>, SandboxError> {
-    Ok(Vec::new())
+    if let Some(flag) = values
+        .keys()
+        .find(|k| !m.execution.typed.iter().any(|t| &t.flag == *k))
+    {
+        return Err(refused(format!(
+            "{flag} is not a typed flag the manifest declared"
+        )));
+    }
+    let root = std::fs::canonicalize(workdir)
+        .map_err(|e| SandboxError::Workdir(format!("{}: {e}", workdir.display())))?;
+    let mut out = Vec::new();
+    for t in &m.execution.typed {
+        let Some(v) = values.get(&t.flag) else {
+            continue;
+        };
+        let text = match (t.kind, v) {
+            (ValueKind::ModelId, TypedValue::Model(id)) => id.clone(),
+            (ValueKind::AgentList, TypedValue::Agents(list)) => {
+                let mut object = serde_json::Map::new();
+                for a in list {
+                    let one =
+                        serde_json::json!({ "description": a.description, "prompt": a.prompt });
+                    if object.insert(a.name.clone(), one).is_some() {
+                        return Err(refused(format!(
+                            "{}: the agent {:?} is listed twice",
+                            t.flag, a.name
+                        )));
+                    }
+                }
+                serde_json::Value::Object(object).to_string()
+            }
+            (ValueKind::WorkdirPath, TypedValue::Path(rel)) => {
+                let plain = !rel.is_empty()
+                    && Path::new(rel).is_relative()
+                    && Path::new(rel)
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_)));
+                if !plain {
+                    return Err(refused(format!(
+                        "{}: {rel:?} is not a plain relative path",
+                        t.flag
+                    )));
+                }
+                root.join(rel).to_string_lossy().into_owned()
+            }
+            _ => {
+                return Err(refused(format!(
+                    "{}: the plan's value is not a {:?}",
+                    t.flag, t.kind
+                )))
+            }
+        };
+        check_typed(t.kind, &text, &root).map_err(|why| refused(format!("{}: {why}", t.flag)))?;
+        out.push(OsString::from(&t.flag));
+        out.push(OsString::from(text));
+    }
+    Ok(out)
+}
+
+/// Whether `value` is a well-formed value of `kind` for a CLI running in `workdir`. This is the
+/// invariant of the typed flags: nothing the manifest or the plan holds reaches the argv except
+/// through it.
+fn check_typed(kind: ValueKind, value: &str, workdir: &Path) -> Result<(), String> {
+    let re = |pattern: &str, v: &str| regex::Regex::new(pattern).expect("valid regex").is_match(v);
+    match kind {
+        ValueKind::ModelId => {
+            if !re(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$", value) {
+                return Err(format!("{value:?} is not a model id"));
+            }
+        }
+        ValueKind::AgentList => {
+            let v: serde_json::Value =
+                serde_json::from_str(value).map_err(|_| "the agents are not JSON".to_owned())?;
+            let list = v.as_object().filter(|o| (1..=16).contains(&o.len()));
+            let list = list.ok_or("the agents are not an object of one to 16 agents")?;
+            for (name, def) in list {
+                let fields = def.as_object().filter(|d| d.len() == 2);
+                let text = |k: &str, max: usize| {
+                    fields
+                        .and_then(|d| d.get(k))
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|t| (1..=max).contains(&t.chars().count()) && !t.contains('\0'))
+                };
+                if !re(r"^[a-z][a-z0-9-]{0,47}$", name)
+                    || text("description", 200).is_none()
+                    || text("prompt", 8000).is_none()
+                {
+                    return Err(format!("the agent {name:?} is not a name, a description and a prompt within the limits"));
+                }
+            }
+        }
+        ValueKind::WorkdirPath => {
+            let root = std::fs::canonicalize(workdir).map_err(|e| e.to_string())?;
+            let path = Path::new(value);
+            let name = path.file_name().and_then(|n| n.to_str());
+            if value.len() > 512
+                || value.chars().any(char::is_control)
+                || !path.is_absolute()
+                || name.is_none()
+            {
+                return Err(format!("{value:?} is not a plain absolute path"));
+            }
+            // The directory it is in has to resolve inside the working directory, and so does the
+            // path itself when it exists, so a link cannot lead out.
+            let inside = |p: &Path| {
+                std::fs::canonicalize(p)
+                    .ok()
+                    .is_some_and(|c| c.starts_with(&root))
+            };
+            let parent_ok = path.parent().is_some_and(inside);
+            let self_ok = path.symlink_metadata().is_err() || inside(path);
+            if !parent_ok || !self_ok {
+                return Err(format!("{value:?} is not inside the working directory"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Finds and probes the CLI, negotiates, and builds the launch. `want` are the optional
@@ -255,7 +392,19 @@ pub async fn prepare(
     };
     let negotiated = negotiate(m, &grant.os, &probe)?;
 
+    let cwd = std::fs::canonicalize(&grant.workdir)
+        .ok()
+        .filter(|p| grant.workdir.is_absolute() && p.is_dir())
+        .ok_or_else(|| {
+            SandboxError::Workdir(format!(
+                "{} is not an existing absolute directory",
+                grant.workdir.display()
+            ))
+        })?;
+
     let mut args: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
+    // The host's own values for the typed flags, from the plan, right after the manifest's argv.
+    args.extend(typed_args(m, &grant.typed, &cwd)?);
     for c in want {
         let Some(opt) = m.execution.optional.iter().find(|o| o.capability == *c) else {
             return Err(SandboxError::CapabilityMissing(format!(
@@ -270,16 +419,6 @@ pub async fn prepare(
         }
         args.push(OsString::from(&opt.flag));
     }
-
-    let cwd = std::fs::canonicalize(&grant.workdir)
-        .ok()
-        .filter(|p| grant.workdir.is_absolute() && p.is_dir())
-        .ok_or_else(|| {
-            SandboxError::Workdir(format!(
-                "{} is not an existing absolute directory",
-                grant.workdir.display()
-            ))
-        })?;
 
     // The smaller of what the manifest asked and the host's ceiling, field by field.
     let ask = m.limits.clone().unwrap_or_default();

@@ -47,7 +47,7 @@ fn the_reference_extension_parses_with_the_ratified_id_and_the_builtin_engine() 
 #[test]
 fn a_schema_version_other_than_1_is_refused() {
     assert_eq!(
-        refused_field("schema_version = \"1\"", "schema_version = \"2\""),
+        refused_field("schema_version = \"1\"", "schema_version = \"3\""),
         "schema_version"
     );
 }

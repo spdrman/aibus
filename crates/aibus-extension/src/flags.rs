@@ -8,6 +8,8 @@
 //! until someone reads what it does and adds it here. A program the user added in their policy file (`extra_official_clis`) has no list,
 //! so only the denylist applies to it.
 
+use crate::manifest::ValueKind;
+
 /// A flag, and the values it may have. An empty list means the flag is a switch or takes any value
 /// that passes the denylist; otherwise the value (inline, or the next token) has to equal an entry,
 /// or start with an entry that ends in `=` (a `--config key=value` setting by key).
@@ -83,6 +85,17 @@ fn list(cli: &str) -> Option<Allowed> {
         "codex" => Some(CODEX),
         "gemini" => Some(GEMINI),
         "kimi" => Some(KIMI),
+        _ => None,
+    }
+}
+
+/// The kind of value the host fills for a typed flag of `cli` (schema 2, #334). Only flags listed
+/// here can be typed, each with one kind, and a manifest's static argv never carries them.
+pub fn typed(cli: &str, flag: &str) -> Option<ValueKind> {
+    match (cli, flag) {
+        ("claude" | "codex" | "gemini" | "kimi", "--model") => Some(ValueKind::ModelId),
+        ("claude", "--agents") => Some(ValueKind::AgentList),
+        ("codex", "--output-last-message") => Some(ValueKind::WorkdirPath),
         _ => None,
     }
 }

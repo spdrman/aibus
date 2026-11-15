@@ -36,6 +36,7 @@ const EXAMPLES: [&str; 2] = [
 fn every_schema_is_2020_12_and_lints_clean() {
     for n in [
         "manifest-v1",
+        "manifest-v2",
         "registry-v1",
         "event-v1",
         "fixture-expected-v1",
@@ -51,10 +52,10 @@ fn every_schema_is_2020_12_and_lints_clean() {
 
 #[test]
 fn the_template_and_the_reference_manifest_validate() {
-    let s = schema("manifest-v1");
-    for dir in EXAMPLES {
+    // The template is schema 1, the reference extension schema 2 (typed flags, #334).
+    for (dir, file) in [(EXAMPLES[0], "manifest-v1"), (EXAMPLES[1], "manifest-v2")] {
         assert_eq!(
-            check_against(&s, &manifest_json(dir)),
+            check_against(&schema(file), &manifest_json(dir)),
             Vec::<String>::new(),
             "{dir}"
         );

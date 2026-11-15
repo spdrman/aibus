@@ -10,7 +10,7 @@ pub const MANIFEST_FILE: &str = "aibus-extension.toml";
 /// A manifest larger than this is not read.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 /// The schema versions this host reads. Schema 2 adds `[[execution.typed]]` (#334).
-pub const SCHEMA_VERSION: &str = "1";
+pub const SCHEMAS: [&str; 2] = ["1", "2"];
 
 /// The capability vector of spec 3, plus `hook_channel` (A1.5 amendment E5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -577,6 +577,21 @@ impl Manifest {
         if text_in.len() > MAX_MANIFEST_BYTES {
             return Err(ManifestError::TooLarge(text_in.len()));
         }
+        // The schema first, on its own: a manifest of a schema this host does not read is refused
+        // by name, not by whichever of its keys this host happens to have never heard of.
+        let table: toml::Table =
+            toml::from_str(text_in).map_err(|e| ManifestError::Syntax(e.message().to_owned()))?;
+        if let Some(v) = table.get("schema_version").and_then(toml::Value::as_str) {
+            if !SCHEMAS.contains(&v) {
+                return Err(bad(
+                    "schema_version",
+                    format!(
+                        "this host reads schemas {:?} and {:?}, not {v:?}; a newer aibus may read it",
+                        SCHEMAS[0], SCHEMAS[1]
+                    ),
+                ));
+            }
+        }
         let m: Self =
             toml::from_str(text_in).map_err(|e| ManifestError::Syntax(e.message().to_owned()))?;
         m.validate()?;
@@ -584,15 +599,6 @@ impl Manifest {
     }
 
     fn validate(&self) -> Result<(), ManifestError> {
-        if self.schema_version != SCHEMA_VERSION {
-            return Err(bad(
-                "schema_version",
-                format!(
-                    "this host reads schema {SCHEMA_VERSION:?}, not {:?}",
-                    self.schema_version
-                ),
-            ));
-        }
         if !valid_id(&self.id) {
             return Err(bad(
                 "id",
@@ -629,6 +635,18 @@ impl Manifest {
 
         range("compat.protocol", &self.compat.protocol)?;
         range("compat.cli_versions", &self.compat.cli_versions)?;
+        // A host that speaks protocol 1.0.0 does not read schema 2, and says so by not finding
+        // itself in this range, before it looks at a key it does not know.
+        let schema_2 = self.schema_version == "2";
+        if schema_2
+            && range("compat.protocol", &self.compat.protocol)?
+                .contains(&crate::version::Version(1, 0, 0))
+        {
+            return Err(bad(
+                "compat.protocol",
+                "a schema 2 manifest has to ask for protocol 1.1.0 or later, so a host that speaks 1.0.0 refuses it",
+            ));
+        }
         if self.compat.os.is_empty()
             || self.compat.os.len() > 3
             || self
@@ -770,6 +788,62 @@ impl Manifest {
                         o.flag, o.capability
                     ),
                 ));
+            }
+        }
+
+        if !schema_2 && !ex.typed.is_empty() {
+            return Err(bad(
+                "execution.typed",
+                "typed flags need schema 2 (schema_version = \"2\")",
+            ));
+        }
+        if ex.typed.len() > 8 {
+            return Err(bad("execution.typed", "more than 8 typed flags"));
+        }
+        for (i, t) in ex.typed.iter().enumerate() {
+            matches_re(
+                "execution.typed",
+                r"^--[a-z][a-z0-9-]{0,63}$",
+                &t.flag,
+                "a long flag with no value",
+            )?;
+            if ex.typed[..i].iter().any(|o| o.flag == t.flag) {
+                return Err(bad("execution.typed", format!("{} is typed twice", t.flag)));
+            }
+            // The host decides which flags can be typed, per CLI, and with which kind.
+            for cli in exes {
+                if crate::flags::typed(cli, &t.flag) != Some(t.kind) {
+                    return Err(bad(
+                        "execution.typed",
+                        format!(
+                            "{} as {:?} is not a typed flag the host has for {cli}",
+                            t.flag, t.kind
+                        ),
+                    ));
+                }
+            }
+        }
+        // What the host fills is never also written by the manifest.
+        if schema_2 {
+            let static_tokens = ex
+                .argv
+                .iter()
+                .chain(&self.auth.login_argv)
+                .chain(&self.auth.status_argv);
+            let optional = ex.optional.iter().map(|o| &o.flag);
+            for t in static_tokens.chain(optional) {
+                let name = t.split('=').next().unwrap_or_default();
+                if exes
+                    .iter()
+                    .any(|cli| crate::flags::typed(cli, name).is_some())
+                {
+                    return Err(bad(
+                        "execution.argv",
+                        format!(
+                            "{t:?} is a flag the host fills (schema 2 typed), never a static token"
+                        ),
+                    ));
+                }
             }
         }
 
@@ -958,6 +1032,14 @@ pub fn escalations(old: &Manifest, new: &Manifest) -> Vec<String> {
             .collect::<Vec<_>>()
     };
     added("flag", &flags(new), &flags(old));
+    let typed = |m: &Manifest| {
+        m.execution
+            .typed
+            .iter()
+            .map(|t| t.flag.clone())
+            .collect::<Vec<_>>()
+    };
+    added("typed", &typed(new), &typed(old));
     added("argv", &new.execution.argv, &old.execution.argv);
     let auth = |m: &Manifest| [m.auth.login_argv.clone(), m.auth.status_argv.clone()].concat();
     added("auth_argv", &auth(new), &auth(old));

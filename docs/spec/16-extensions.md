@@ -15,13 +15,13 @@ That is enough for the two things an extension has to say. How to launch the CLI
 
 Both are `aibus_supervisor::Engine`: `start`, `stream_line`, `hook_line`, `stderr_line`, `gap`, `finish`, per attempt. This is amendment E1 of the Phase 1 gate: a declarative-only manifest cannot express Claude's normaliser, so the normaliser is a per-attempt stateful object and `supervise` runs whichever one the manifest names. A CLI whose events need state across lines and is not Claude's needs a WASI component with the same shape. **This release does not host one** (see "Not here"), and a manifest that names `wasi-component` is refused like any other unknown value.
 
-## The manifest (schema version 1)
+## The manifest (schema versions 1 and 2)
 
-Strict: an unknown key, a wrong type or a value outside these rules is a refusal that names the field (`aibus_extension::manifest::Manifest::parse`, at most 64 KiB). `docs/schemas/extension/manifest-v1.json` says the shape in JSON Schema; the rules a schema cannot say are marked below. `examples/extensions/template/aibus-extension.toml` is the annotated starting point.
+Strict: an unknown key, a wrong type or a value outside these rules is a refusal that names the field (`aibus_extension::manifest::Manifest::parse`, at most 64 KiB). `docs/schemas/extension/manifest-v1.json` (schema 1) and `manifest-v2.json` (schema 2) say the shape in JSON Schema; the rules a schema cannot say are marked below. `examples/extensions/template/aibus-extension.toml` is the annotated starting point.
 
 | Block | What it says | Rules |
 |---|---|---|
-| `schema_version`, `id`, `version`, `name`, `kind`, `provider`, `license`, `source_url`, `[publisher]` | Identity | `schema_version = "1"`. `id` is lower-case reverse-DNS with three to eight labels. `version` is exactly `x.y.z`. `kind = "official_cli"`. URLs are `https`, with no credentials. **The id and the name never contain "Claude Code"** (E6) |
+| `schema_version`, `id`, `version`, `name`, `kind`, `provider`, `license`, `source_url`, `[publisher]` | Identity | `schema_version = "1"` or `"2"` (the next section). `id` is lower-case reverse-DNS with three to eight labels. `version` is exactly `x.y.z`. `kind = "official_cli"`. URLs are `https`, with no credentials. **The id and the name never contain "Claude Code"** (E6) |
 | `[compat]` | `protocol`, `os`, `cli_versions` | Ranges are comparators (`>=1.0.0, <2.0.0`). `os` is any of `macos`, `linux`, `windows` |
 | `[cli]` | `executable_candidates`, `vendor_urls` | Executables are file names, never paths. Vendor URLs are the provenance |
 | `[auth]` | `owner = "vendor_cli"`, `credential_access = "forbidden"`, `login_argv`, `status_argv` | The CLI owns its sign-in; aibus never reads, copies or stores the token |
@@ -34,6 +34,20 @@ Strict: an unknown key, a wrong type or a value outside these rules is a refusal
 | `[runtime]` | `usage_quality` | `reported`, `estimated` or `unknown` (E5) |
 | `[permissions]` | One acceptable value each | `spawn_only_declared_cli = true`, `read_provider_credentials = false`, `external_network_from_parser = false`. Anything else is refused, so a reviewer reads one block |
 | `[policy]`, `[fixtures]`, `[notes]` | Owner and review date, the recorded streams, upgrade and rollback notes | Spec 6.2 requires each of them. Fixtures are `fixtures/<name>.jsonl` and have to be in the package |
+
+## Schema 2: typed flags (#334)
+
+Schema 1 has static tokens and value-less optional flags, so a flag that takes a value, `--model` or `--agents`, had no contract. Schema 2 adds one block, `[[execution.typed]]`: a `flag` and a `kind`, nothing else (at most eight; a `value`, a `default`, a `template`, an `argv` or any other key is refused, and so is a kind that is not one of these). The host fills the value from the plan, and it is never an argument string a manifest wrote.
+
+| Kind | What the host puts in the launch | What it checks |
+|---|---|---|
+| `model_id` | one argument, the model id the plan names | `[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}`: it cannot start with a dash, hold a space, a quote, a shell character or a second argument |
+| `agent_list` | one argument, a JSON object the host builds with `serde_json` from the plan's agents: `{"name": {"description": "...", "prompt": "..."}}` | one to 16 agents, a unique lower-case name of up to 48 characters, a description of up to 200 and a prompt of up to 8000 characters, no other field |
+| `workdir_path` | one argument, an absolute path | the plan's path is relative and plain (no `..`, no root), its directory resolves inside the working directory and so does the path itself when it exists, so a link cannot lead out |
+
+Which flags can be typed is the host's list per CLI (`flags::typed`): `--model` as `model_id` for claude, codex, gemini and kimi, `--agents` as `agent_list` for claude, `--output-last-message` as `workdir_path` for codex. A manifest that types any other flag, or a listed flag as another kind, is refused, and so is one for a program the host has no list for. A typed flag is never also a static token (argv, auth argv or optional flag), so a manifest cannot write the value either. The plan reaches the host as `Grant.typed` (flag to `TypedValue`); `sandbox::typed_args` builds the pairs, in the manifest's order, right after the manifest's argv, and a flag the plan has no value for is left out. `check_launch` runs the same check on a finished launch: each typed flag at most once, followed by one value of its kind, and nothing else after the manifest's argv except its optional flags. A schema 1 manifest with a `[[execution.typed]]` block is refused.
+
+**How an older host says no.** A schema 2 manifest has to ask for `compat.protocol` 1.1.0 or later (a range that contains 1.0.0 is refused), and this host speaks protocol 1.1.0 (`negotiate::PROTOCOL`). A host from before schema 2 speaks 1.0.0, finds itself outside the range and refuses the extension as a protocol mismatch, the way it refuses any other range it is not in. A host that reads schema 2 reads `schema_version` before any other key, so a manifest of a schema it does not read (a future 3) is refused by name, with the schemas it does read, and not by whichever new key it meets first. Install lists every typed flag with its kind, and a typed flag a new version adds is an escalation the user accepts by name (`typed:--agents`).
 
 ## The event contract
 
@@ -49,7 +63,7 @@ An engine hands the host events in the trace envelope (`aibus-trace`, schema 2; 
 
 ## Negotiation and probes
 
-`negotiate::negotiate` takes the manifest and what `--version` and `--help` said. In order: the protocol range has to contain this host's (`1.0.0`), the operating system has to be listed, the CLI's version has to be in `cli_versions`; then each capability gets a verdict. `supported` and `unsupported` stay as declared (an extension cannot gain a capability the CLI happens to have), `probe_required` follows the probe flags and minimum version, and each unsupported verdict carries its reason. For `hook_channel`, when the manifest says `needs_delivery`, the verdict is `unsupported` with the reason that the host has no live way to receive hook payloads yet (E4; the inline `--settings` route is untried). The stream is then the only evidence, and a trace says so.
+`negotiate::negotiate` takes the manifest and what `--version` and `--help` said. In order: the protocol range has to contain this host's (`1.1.0`), the operating system has to be listed, the CLI's version has to be in `cli_versions`; then each capability gets a verdict. `supported` and `unsupported` stay as declared (an extension cannot gain a capability the CLI happens to have), `probe_required` follows the probe flags and minimum version, and each unsupported verdict carries its reason. For `hook_channel`, when the manifest says `needs_delivery`, the verdict is `unsupported` with the reason that the host has no live way to receive hook payloads yet (E4; the inline `--settings` route is untried). The stream is then the only evidence, and a trace says so.
 
 For the Claude engine the host also runs the supervisor's own probe (`cli::probe`): the required flags, the 2.1.0 floor and the refusal of a CLI whose `--help` says bare mode is the default for `-p`.
 
@@ -119,7 +133,7 @@ Nothing in the core source changes for any of it; `crates/aibus/tests/extensions
 
 ## The reference extension
 
-`examples/extensions/reference-cli/` is the official Claude Code CLI as an extension, built on the supervisor: id `org.devshell.aibus.reference-cli` (the owner's reverse-DNS, replacing the spec's `org.aibus.claude-code`), engine `builtin:claude-stream-json`, argv equal to what `cli::argv` builds for a default request, and two recorded streams from the spike (`basic`, `native-subagent`). Local, opt-in use of the user's own installed CLI only: the user signs in with the CLI itself (an API key, a Console sign-in or, for local use, a subscription sign-in) and aibus never reads or stores the token. Bundled, preinstalled, hosted and commercial use stay blocked (#280, #281). The suite runs the real manifest through the sandbox and the supervisor against a stand-in `claude` that answers `--version` and `--help` with the real 2.1.311 text and replays a recorded delegation (`aibus-extension/tests/reference.rs`).
+`examples/extensions/reference-cli/` is the official Claude Code CLI as an extension, built on the supervisor: id `org.devshell.aibus.reference-cli` (the owner's reverse-DNS, replacing the spec's `org.aibus.claude-code`), engine `builtin:claude-stream-json`, schema 2 with `--model` and `--agents` typed (the host fills them from the plan), argv equal to what `cli::argv` builds for a default request, and two recorded streams from the spike (`basic`, `native-subagent`). Local, opt-in use of the user's own installed CLI only: the user signs in with the CLI itself (an API key, a Console sign-in or, for local use, a subscription sign-in) and aibus never reads or stores the token. Bundled, preinstalled, hosted and commercial use stay blocked (#280, #281). The suite runs the real manifest through the sandbox and the supervisor against a stand-in `claude` that answers `--version` and `--help` with the real 2.1.311 text and replays a recorded delegation (`aibus-extension/tests/reference.rs`).
 
 ## Where this release differs from the issue text
 
@@ -140,7 +154,7 @@ The Phase 1 amendments win where they disagree with the issue, and each is appli
 
 - **An operating system sandbox, and a way to keep files under `HOME` away from the CLI.** The CLI needs `HOME` for its own sign-in, so the answer is a sandbox profile per CLI (macOS `sandbox-exec`, Linux landlock or a container), and it is a design of its own.
 - **A WASI host.** The scope says "only when needed". The declarative engine lets a third party write, test and install an extension for a one-line-one-event CLI with no core change, which is the acceptance criterion; a stateful parser for another CLI is the case that needs WASI, and which runtime to host (the issue leaves it open) is a decision with a security review of its own. Until then such a manifest is refused. Follow-up to open.
-- **Optional flags with values** (`--model`, `--max-budget-usd`, `--agents`). Schema 1 has static tokens and value-less optional flags. The workflow compiler (#283) and the scheduler (#288) need them, and they need a typed, host-supplied value; the schema bumps to 2 for that.
+- **Typed flags beyond the first set.** Schema 2 types `--model`, `--agents` and Codex's `--output-last-message` (#334); `--max-budget-usd` and the flags of other CLIs are added to `flags::typed` one at a time, each with a kind and a test. Nothing builds the values yet: the workflow compiler (#283) and the scheduler (#288) put them in `Grant.typed`.
 - **A package archive.** A package is a directory. A single-file form can reuse the hardened tar reader of `.aibus` bundles (#271) later.
 - **Signing from the command line, and a hosted catalog.** The signature is verified and enforced by policy; making one is the publisher's tool. Who signs a curated catalog and where it lives is still the open question of the issue.
 - **Live hook delivery** (E4), **an operating system sandbox around the CLI**, and **a live run of the reference extension from the command line** (the scheduler, #288, launches runs).

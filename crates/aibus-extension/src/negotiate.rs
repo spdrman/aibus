@@ -9,8 +9,10 @@ use aibus_supervisor::cli::Probe as CliProbe;
 use crate::manifest::{Capability, Manifest, Support};
 use crate::version::{Range, Version};
 
-/// The SDK protocol this host speaks. A manifest's `compat.protocol` has to contain it.
-pub const PROTOCOL: Version = Version(1, 0, 0);
+/// The SDK protocol this host speaks. A manifest's `compat.protocol` has to contain it. 1.1.0 is the
+/// one that reads schema 2 (typed flags, #334); a host at 1.0.0 reads schema 1 only, and a schema 2
+/// manifest asks for 1.1.0 or later, which that host refuses as a protocol mismatch.
+pub const PROTOCOL: Version = Version(1, 1, 0);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Incompatible {

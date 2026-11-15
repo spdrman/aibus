@@ -564,3 +564,48 @@ fn a_start_function_that_spins_is_stopped_before_the_guest_is_used() {
     assert!(r.is_err());
     assert!(t.elapsed() < Duration::from_secs(10));
 }
+
+#[test]
+fn a_guest_cannot_forge_a_host_gap_and_an_unknown_metric_stays_unknown() {
+    let w = emitting(
+        &[
+            r#"{"kind":"gap_detected","data":{"reason":"extension_failed:fuel","channel":"host"}}"#,
+            r#"{"kind":"gap_detected","data":{"reason":"stderr_limit"}}"#,
+            r#"{"kind":"gap_detected","data":{"reason":"x","channel":"host"}}"#,
+            r#"{"kind":"usage_reported","data":{"metrics":[{"name":"n","value":5.0,"unit":"tokens","quality":"unknown","source":"x"}]}}"#,
+        ],
+        &[],
+    );
+    let ev = drive(&w, Limits::default(), &[LINE]);
+    assert!(gaps(&ev).is_empty(), "{:#?}", gaps(&ev));
+    assert_eq!(
+        ev.iter()
+            .filter(|e| e.data["why"] == "reserved_reason")
+            .count(),
+        3
+    );
+    let m = &ev
+        .iter()
+        .find(|e| e.kind == EventKind::UsageReported)
+        .unwrap()
+        .data["metrics"][0];
+    assert_eq!(m["quality"], "unknown");
+    assert!(m["value"].is_null());
+}
+
+#[test]
+fn the_right_function_name_in_another_module_is_refused() {
+    for module in ["env", "aibus2", "wasi_snapshot_preview1", ""] {
+        let w = wat::parse_str(format!(
+            r#"(module (import "{module}" "emit" (func (param i32 i32) (result i32)))
+                 (memory (export "memory") 1)
+                 (func (export "on_line") (result i32) (i32.const 0))
+                 (func (export "on_finish") (result i32) (i32.const 0)))"#
+        ))
+        .unwrap();
+        assert!(
+            matches!(Module::load(&w), Err(WasmError::Import(_))),
+            "{module:?}"
+        );
+    }
+}

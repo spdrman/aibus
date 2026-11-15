@@ -446,11 +446,10 @@ fn clamp_metrics(data: &mut Value, quality: UsageQuality) -> Result<(), &'static
             m.value = m
                 .value
                 .filter(|v| v.fract() == 0.0 && (0.0..=(1u64 << 53) as f64).contains(v))
-                .filter(|_| quality != UsageQuality::Unknown);
+                .filter(|_| quality != UsageQuality::Unknown && m.quality != DataQuality::Unknown);
             m.quality = match (m.value, quality, m.quality) {
                 (None, _, _) => DataQuality::Unknown,
                 (_, UsageQuality::Estimated, DataQuality::Reported) => DataQuality::Estimated,
-                (Some(_), _, DataQuality::Unknown) => DataQuality::Estimated,
                 (_, _, q) => q,
             };
             m
@@ -634,6 +633,18 @@ impl Wasm {
                     continue;
                 }
             };
+            // The host's own gap and warning names are the host's: a guest cannot say them.
+            let reason = p.data["reason"].as_str().unwrap_or("");
+            if reason.starts_with("extension_failed")
+                || matches!(
+                    reason,
+                    "unread_after_exit" | "stderr_limit" | "output_limit"
+                )
+                || p.data["channel"] == "host"
+            {
+                out.push(self.refusal("reserved_reason", at));
+                continue;
+            }
             // The clamp: from a line, `cli_stream` observed is the most a guest gets; asking for
             // `derived`, or having no line to cite, gives `derived` and at best `inferred`.
             let origin = if line.is_some() {

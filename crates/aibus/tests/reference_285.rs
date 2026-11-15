@@ -736,9 +736,8 @@ async fn case_06_overlapping_output() -> Value {
 /// the host kills the group and stops reading, and what is left is dropped with no gap event and no
 /// warning: the attempt reads as complete. Here 8,000 distinct stderr lines (about 46 KB, so they all fit in the pipe) sit in the pipe when the
 /// stand-in exits, then the recording is printed. Either every line must be in the trace or a gap
-/// must say some were not read. Red until the defect in #324 is fixed.
+/// must say some were not read (#324, fixed in #326). The drain limits are short so the test stays quick.
 #[tokio::test]
-#[ignore = "red: lines still queued two seconds after the CLI exits are dropped without a gap (#324)"]
 async fn defect_a_backlog_after_exit_is_not_dropped_silently() {
     let rig = Rig::new();
     let (out, events) = rig
@@ -746,7 +745,11 @@ async fn defect_a_backlog_after_exit_is_not_dropped_silently() {
             "flood.sh",
             &spike_stream("07-deleg"),
             &[],
-            Limits::default(),
+            Limits {
+                drain_stall: Duration::from_secs(1),
+                drain_max: Duration::from_secs(3),
+                ..Limits::default()
+            },
         )
         .await;
     assert_eq!(out.ending, Ending::Exited(0));

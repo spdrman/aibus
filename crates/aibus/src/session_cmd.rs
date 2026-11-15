@@ -223,7 +223,13 @@ fn markdown(run: &str, agent: &str, lines: &[Json]) -> String {
         let when = l["t"].as_str().unwrap_or("");
         match l["type"].as_str().unwrap_or("") {
             "message" => {
-                md.push_str(&format!("\n## {} ({when})\n", l["role"].as_str().unwrap_or("?")));
+                // A line a client of `aibus mcp` sent into a live session says so (#274).
+                let via = match (l["via"].as_str(), l["client"].as_str()) {
+                    (Some(via), Some(client)) => format!(", via {via} ({client})"),
+                    (Some(via), None) => format!(", via {via}"),
+                    _ => String::new(),
+                };
+                md.push_str(&format!("\n## {}{via} ({when})\n", l["role"].as_str().unwrap_or("?")));
                 for b in l["blocks"].as_array().into_iter().flatten() {
                     match b["type"].as_str().unwrap_or("") {
                         "tool_use" => md.push_str(&format!(
@@ -253,4 +259,20 @@ fn markdown(run: &str, agent: &str, lines: &[Json]) -> String {
         }
     }
     md
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn an_export_says_which_lines_a_client_sent() {
+        let lines = [
+            json!({"t": "t1", "type": "message", "role": "user", "via": "mcp", "client": "editor", "blocks": [{"type": "text", "text": "from the client"}]}),
+            json!({"t": "t2", "type": "message", "role": "user", "blocks": [{"type": "text", "text": "typed"}]}),
+        ];
+        let md = super::markdown("R1", "lead", &lines);
+        assert!(md.contains("## user, via mcp (editor) (t1)\n\nfrom the client"), "{md}");
+        assert!(md.contains("## user (t2)\n\ntyped"), "{md}");
+    }
 }

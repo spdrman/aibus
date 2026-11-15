@@ -45,7 +45,7 @@ impl AuditLog {
 
     /// Writes one line. A failure to write is logged and otherwise ignored: a full disk must not
     /// turn a read-only call into an error.
-    // Nine arguments, and every one is a different column of the line. Six callers each pass their
+    // Ten arguments, and every one is a different column of the line. Six callers each pass their
     // own values, so a struct to carry them would only be a second spelling of the same call.
     #[allow(clippy::too_many_arguments)]
     pub fn record(
@@ -55,6 +55,7 @@ impl AuditLog {
         method: &str,
         tool: Option<&str>,
         run: Option<&str>,
+        session: Option<&str>,
         args: &Value,
         ok: bool,
         took: Duration,
@@ -80,6 +81,12 @@ impl AuditLog {
             "ok": ok,
             "ms": took.as_millis() as u64,
         });
+        // A call that reached a live session (#274) says which, and that it came through MCP.
+        let mut line = line;
+        if let Some(id) = session {
+            line["via"] = "mcp".into();
+            line["session"] = id.into();
+        }
         let line = self.redactor.redact(&line.to_string()).into_owned();
         let written = {
             let mut f = self.file.lock().unwrap_or_else(|e| e.into_inner());

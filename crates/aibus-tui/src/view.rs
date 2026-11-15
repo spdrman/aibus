@@ -2,7 +2,7 @@
 //! place that reads `model:` and `ctrl:` nodes on the way to the screen.
 
 use aibus_core::state::store::Store;
-use aibus_core::state::value::{as_i64, as_list, as_str, get, list, map, n, s};
+use aibus_core::state::value::{as_i64, as_list, as_str, get, list, map, n, s, with};
 use aibus_core::state::{
     router_last, run_key, ADVISOR_ADVICE, ADVISOR_STATE, AGENTS_DEFS, CHECKPOINT_PENDING,
     CLOCK_MS, LEDGER, LOG, LOG_FILTER, MEM, MENU, PERMISSIONS_BYPASS, PERMISSIONS_OPEN,
@@ -485,7 +485,7 @@ fn session_log(store: &Store, t: &mut Tracker) -> Value {
                 return None;
             }
             let at = get(&r, "at").and_then(as_i64).unwrap_or(0);
-            Some(map([
+            let row = map([
                 ("time", s(&clock(at))),
                 ("actor", s(&actor)),
                 ("actor_colour", s(colour)),
@@ -493,7 +493,12 @@ fn session_log(store: &Store, t: &mut Tracker) -> Value {
                 ("p", get(&r, "p").cloned().unwrap_or(Value::Null)),
                 ("verdict", get(&r, "verdict").cloned().unwrap_or(Value::Null)),
                 ("run", get(&r, "run").cloned().unwrap_or(Value::Null)),
-            ]))
+            ]);
+            // A row a client of `aibus mcp` caused (#274) carries its badge; the rest keep their shape.
+            Some(match get(&r, "via") {
+                Some(via) => with(&row, "via", via.clone()),
+                None => row,
+            })
         })
         .collect::<Vec<_>>();
     let skip = rows.len().saturating_sub(LOG_LINES_KEPT);

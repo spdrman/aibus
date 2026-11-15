@@ -1,0 +1,32 @@
+00 00..01 fg=#4b5273 bg=#ffffff
+00 01..14 fg=#4b5273 bg=#ffffff BOLD
+00 14..120 fg=#4b5273 bg=#ffffff
+01 00..01 fg=#4b5273 bg=#ffffff
+01 01..02 fg=#1a1b26 bg=#ffffff
+01 02..10 fg=#4b5273 bg=#ffffff
+01 10..12 fg=#1a1b26 bg=#ffffff
+01 12..16 fg=#9a4208 bg=#ffffff
+01 16..119 fg=#1a1b26 bg=#ffffff
+01 119..120 fg=#4b5273 bg=#ffffff
+02 00..01 fg=#4b5273 bg=#ffffff
+02 01..02 fg=#1a1b26 bg=#ffffff
+02 02..10 fg=#4b5273 bg=#ffffff
+02 10..12 fg=#1a1b26 bg=#ffffff
+02 12..15 fg=#845200 bg=#ffffff BOLD
+02 15..119 fg=#1a1b26 bg=#ffffff
+02 119..120 fg=#4b5273 bg=#ffffff
+03 00..01 fg=#4b5273 bg=#ffffff
+03 01..02 fg=#1a1b26 bg=#ffffff
+03 02..10 fg=#4b5273 bg=#ffffff
+03 10..12 fg=#1a1b26 bg=#ffffff
+03 12..15 fg=#845200 bg=#ffffff BOLD
+03 15..119 fg=#1a1b26 bg=#ffffff
+03 119..120 fg=#4b5273 bg=#ffffff
+04 00..01 fg=#4b5273 bg=#ffffff
+04 01..02 fg=#1a1b26 bg=#ffffff
+04 02..10 fg=#4b5273 bg=#ffffff
+04 10..12 fg=#1a1b26 bg=#ffffff
+04 12..15 fg=#845200 bg=#ffffff BOLD
+04 15..119 fg=#1a1b26 bg=#ffffff
+04 119..120 fg=#4b5273 bg=#ffffff
+05 00..120 fg=#4b5273 bg=#ffffff

@@ -3,6 +3,7 @@
 //! and it writes nothing but JSON-RPC there; logging is the binary's business and goes to stderr.
 #![forbid(unsafe_code)]
 
+mod attach;
 mod audit;
 mod confirm;
 mod limits;
@@ -87,6 +88,12 @@ pub struct Caps {
     /// `--allow permission`: `session_permission`, which the session itself also has to allow
     /// (`aibus --control-permission`).
     pub permission: bool,
+    /// `--allow attach`: `aibus_attach`, `next_step` and `step_result` (#322), which the session
+    /// also has to allow (`aibus --control-attach`).
+    pub attach: bool,
+    /// `--allow present`: `session_present`, which the session also has to allow
+    /// (`aibus --control-present`).
+    pub present: bool,
 }
 
 impl Caps {
@@ -112,6 +119,8 @@ impl Caps {
             "session-cancel" => &mut self.session_cancel,
             "session-transcript" => &mut self.session_transcript,
             "permission" => &mut self.permission,
+            "attach" => &mut self.attach,
+            "present" => &mut self.present,
             other => return Err(format!("--allow {other:?} is not something the server can allow")),
         };
         *flag = true;
@@ -131,13 +140,15 @@ impl Caps {
             "session-cancel" => self.session_cancel,
             "session-transcript" => self.session_transcript,
             "permission" => self.permission,
+            "attach" => self.attach,
+            "present" => self.present,
             _ => false,
         }
     }
 
     /// Some live-session tool is on, so the server needs a way into a session.
     pub fn session(&self) -> bool {
-        session::TOOLS.iter().any(|(_, flag, ..)| self.on(flag))
+        session::TOOLS.iter().any(|(_, flag, ..)| self.on(flag)) || self.attach || self.present
     }
 }
 
@@ -157,6 +168,8 @@ pub struct Server {
     /// The way into a live session, for the session tools (#274).
     session: Option<Arc<dyn SessionLink>>,
     session_limiter: Mutex<RateLimiter>,
+    /// The token of the step this server handed its client and has no result for yet (#322).
+    in_flight: Mutex<Option<(String, Instant)>>,
     redactor: Redactor,
     confirm: Confirm,
 }
@@ -192,6 +205,8 @@ impl Server {
                 "session_cancel": caps.session_cancel,
                 "session_transcript": caps.session_transcript,
                 "permission": caps.permission,
+                "attach": caps.attach,
+                "present": caps.present,
             }),
             true,
             std::time::Duration::ZERO,
@@ -209,6 +224,7 @@ impl Server {
             runs: None,
             session: None,
             session_limiter: Mutex::new(RateLimiter::new(SESSION_CHANGES_PER_MINUTE, Instant::now())),
+            in_flight: Mutex::new(None),
             redactor,
             confirm: Confirm::new(ConfirmConfig::default()),
         })
@@ -299,6 +315,7 @@ impl Server {
         }
         if self.session.is_some() {
             tools.extend(session::tools(|cap| self.caps.on(cap)));
+            tools.extend(attach::tools(|cap| self.caps.on(cap)));
         }
         tools
     }
@@ -367,6 +384,9 @@ impl Server {
     ) -> Result<CallToolResult, ErrorData> {
         let id = args.as_ref().and_then(|a| a.get("run")).and_then(Value::as_str).map(str::to_owned);
         let wait_ms = args.as_ref().and_then(|a| a.get("wait_ms")).and_then(Value::as_u64);
+        if name == "next_step" && self.caps.attach {
+            return self.next_step_waiting(client, addr, args, wait_ms.unwrap_or(0), now).await;
+        }
         let (Some(runs), true, Some(id)) = (&self.runs, self.caps.run, id) else {
             return self.call_from(client, addr, name, args, now);
         };
@@ -414,7 +434,18 @@ impl Server {
                 "rate limit: at most {CALLS_PER_MINUTE} tool calls a minute, try again in {secs} s"
             ))]));
         }
+        // A step from aibus is in flight on this server's client: anything that would start more
+        // work through aibus is a loop (#322).
+        if matches!(name, "workflow_run" | "session_send" | "session_command" | "next_step") {
+            let held = self.in_flight.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if let Some((token, _)) = held.filter(|(_, until)| now < *until) {
+                return Ok(self.fail(format!("would loop (step {token} is in flight on this attachment)")));
+            }
+        }
         match name {
+            "aibus_attach" | "next_step" | "step_result" | "session_present" => {
+                self.attach_tool(name, args, client, session)
+            }
             "workflow_list" => {
                 if args.as_object().is_some_and(|a| !a.is_empty()) {
                     return Err(ErrorData::invalid_params("workflow_list takes no arguments", None));

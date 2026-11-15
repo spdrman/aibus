@@ -807,6 +807,8 @@ pub enum ClientEvent {
     Disconnected,
     /// A line the session would not take, and why (already free of anything secret).
     Refused(String),
+    /// What an attached session or a step of it did (#322), as one line (already free of anything secret).
+    Note(String),
 }
 
 impl Msg {
@@ -1007,6 +1009,7 @@ impl Msg {
                     ClientEvent::Connected => "connected",
                     ClientEvent::Disconnected => "disconnected",
                     ClientEvent::Refused(_) => "refused",
+                    ClientEvent::Note(_) => "note",
                 };
                 map([("msg", name), ("event", s(what)), ("via", s("mcp")), ("client", s(client))])
             }

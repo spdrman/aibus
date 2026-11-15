@@ -120,6 +120,19 @@ pub struct Global {
     /// and logged like everything else it sends.
     #[arg(long, global = true)]
     pub control_permission: bool,
+    /// Let an agent session attach to this one through `aibus mcp --allow attach` (#322)
+    ///
+    /// Off by default. The agent asks, the screen shows a code, and only a typed
+    /// `/attach accept <code>` attaches it. While attached it can pull a step you queue with
+    /// `/attach step <text>` and answer it; everything it does is tagged `mcp` and audited.
+    #[arg(long, global = true)]
+    pub control_attach: bool,
+    /// Let a client of `aibus mcp --allow present` put a read-only panel on this screen (#322)
+    ///
+    /// Off by default. The first panel of a client waits for `/attach accept <code>`; a panel
+    /// is plain text, takes no key and no focus, and Esc closes it.
+    #[arg(long, global = true)]
+    pub control_present: bool,
 }
 
 impl Global {
@@ -204,7 +217,7 @@ pub enum Command {
 pub struct McpArgs {
     /// Add to what the server may do (repeatable): write, gates (needs write), run, or a live
     /// session tool: session-list, session-status, session-send, session-command,
-    /// session-cancel, session-transcript, permission
+    /// session-cancel, session-transcript, permission, or attach and present (#322)
     ///
     /// Same name as the global `--allow`, which this shadows for `mcp`; the values are text in
     /// both so clap can share the argument. Each session value lists one tool that acts on a
@@ -215,6 +228,7 @@ pub struct McpArgs {
         value_parser = [
             "write", "gates", "run", "session-list", "session-status", "session-send",
             "session-command", "session-cancel", "session-transcript", "permission",
+            "attach", "present",
         ],
         action = ArgAction::Append
     )]
@@ -762,6 +776,8 @@ mod tests {
         "trace",
         "no-control",
         "control-permission",
+        "control-attach",
+        "control-present",
     ];
 
     fn leaves(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {

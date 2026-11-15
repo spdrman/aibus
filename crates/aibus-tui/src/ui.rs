@@ -198,6 +198,8 @@ pub struct Scene<'a> {
     pub note: &'a str,
     /// The client of `aibus mcp` connected to this session, if any (#274).
     pub remote: Option<&'a str>,
+    /// A panel an attached agent put up, drawn over the log (#322).
+    pub presented: Option<&'a aibus_core::attach::Presented>,
 }
 
 /// Dotted cells in `dim`, with a brighter `●` at step `at` of the path when there is one. Only
@@ -426,6 +428,9 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
     let lead_label = get(v.lead, "model_label").and_then(as_str).unwrap_or("");
     let filter = (c.filter.as_str(), sc.filter_edit, c.follow);
     let log = widgets::session_log(buf, a.log, v.log, th, c.scroll_log, filter, lead_label);
+    if let Some(p) = sc.presented {
+        widgets::presented(buf, a.log, p, th);
+    }
     let prompt_rows = widgets::prompt(buf, a.prompt, th, sc.prompt, c.focus == Pane::Input, c.tick);
     if hint {
         widgets::hint_row(buf, hint_area, th, sc.prompt.notice.as_deref());
@@ -668,6 +673,10 @@ pub struct Ui {
     pub note: String,
     /// The client of `aibus mcp` connected to this session, for the status bar (#274).
     pub remote: Option<String>,
+    /// The agent session attached to this one, and what it may do (#322).
+    pub attach: aibus_core::attach::Attachments,
+    /// The panel an attached agent put up, until Esc.
+    pub presented: Option<aibus_core::attach::Presented>,
     /// Ticks reach the screen (a run is running, advice is typing). Off, the tick counter only
     /// matters through the prompt's cursor, so a frame is drawn when that blinks and no oftener.
     pub animating: bool,
@@ -692,6 +701,7 @@ struct State {
     copied: bool,
     note: String,
     remote: Option<String>,
+    presented: Option<aibus_core::attach::Presented>,
 }
 
 impl Ui {
@@ -708,6 +718,8 @@ impl Ui {
             copied: false,
             note: String::new(),
             remote: None,
+            attach: aibus_core::attach::Attachments::new(false, false),
+            presented: None,
             animating: true,
             seen: 0,
             pending: false,
@@ -744,6 +756,7 @@ impl Ui {
             copied: self.copied,
             note: self.note.clone(),
             remote: self.remote.clone(),
+            presented: self.presented.clone(),
         };
         if !self.animating {
             state.chrome.tick = chrome.tick / crate::prompt::BLINK_TICKS;
@@ -765,6 +778,7 @@ impl Ui {
             copied: self.copied,
             note: &self.note,
             remote: self.remote.as_deref(),
+            presented: self.presented.as_ref(),
         };
         let mut drawn = None;
         term.draw(|f| drawn = Some(render(f.buffer_mut(), &scene)))?;

@@ -84,6 +84,9 @@ pub struct Options {
     pub remote: Option<mpsc::Receiver<Remote>>,
     /// `--control-permission`: a client may answer a permission prompt. Off, only the keyboard can.
     pub remote_permission: bool,
+    /// `--control-attach` and `--control-present` (#322): an agent session may attach, and may
+    /// put a panel on the screen. Off, only the keyboard decides what is on it.
+    pub remote_attach: (bool, bool),
 }
 
 /// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
@@ -239,6 +242,19 @@ pub fn terminal_events<G: Graph>(
         let out = match ev {
             Event::Key(k) => {
                 let Some(key) = key_from_crossterm(k) else { continue };
+                // The attachment's own lines and its panel are the keyboard's (#322): they
+                // never become a prompt, a command or a run.
+                if key.code == KeyCode::Esc && ui.presented.take().is_some() {
+                    continue;
+                }
+                if key.code == KeyCode::Enter && !key.alt && ui.prompt.text.trim_start().starts_with("/attach") {
+                    let line = ui.prompt.text.clone();
+                    if let Some(out) = crate::remote::keyboard(&line, app, ui, now, step) {
+                        let _ = ui.prompt.take();
+                        ui.prompt.notice = Some(out.unwrap_or_else(|why| why));
+                        continue;
+                    }
+                }
                 // The second Ctrl+C quits, unless the first was a copy.
                 if key.ctrl
                     && key.code == KeyCode::Char('c')
@@ -412,6 +428,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     });
 
     let mut ui = Ui::new(opts.theme);
+    ui.attach = aibus_core::attach::Attachments::new(opts.remote_attach.0, opts.remote_attach.1);
     ui.keys = opts.keys;
     ui.prompt = opts.prompt;
     let mut user = opts.user.take().unwrap_or_else(|| Box::new(|_| {}));

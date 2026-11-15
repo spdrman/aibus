@@ -1134,6 +1134,7 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 ClientEvent::Connected => ("info", format!("{name} connected")),
                 ClientEvent::Disconnected => ("info", format!("{name} disconnected")),
                 ClientEvent::Refused(why) => ("warn", format!("{name}: refused {why}")),
+                ClientEvent::Note(what) => ("info", format!("{name}: {what}")),
             };
             r.log_row(level, "mcp", None, &text, Vec::new());
         }

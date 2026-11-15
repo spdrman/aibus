@@ -292,7 +292,14 @@ pub async fn supervise(
                 // while lines arrive; end the group when they stop or the bound is reached.
                 let now = tokio::time::Instant::now();
                 stall_at = Some(now + limits.drain_stall);
-                cap_at = Some(now + limits.drain_max);
+                // A run that was already being stopped (cancel, wall time, output limit) has had its
+                // chance: its drain is capped at the grace period, not the full bound.
+                let cap = if stopped.is_some() {
+                    limits.drain_max.min(limits.grace)
+                } else {
+                    limits.drain_max
+                };
+                cap_at = Some(now + cap);
             }
             _ = cancel.cancelled(), if stopped.is_none() && exit.is_none() => {
                 stopped = Some(Ending::Cancelled);

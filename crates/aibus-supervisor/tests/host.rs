@@ -755,11 +755,32 @@ async fn issue_324_cancel_during_the_drain_ends_it_as_cancelled() {
 #[tokio::test]
 async fn issue_324_cancel_during_the_drain_records_what_was_left_unread() {
     let rig = Rig::new();
-    let exe = rig.cli(&flood_body(3_000));
+    let pidfile = rig.root.join("cli.pid");
+    let exe = rig.cli(&format!(
+        "echo $$ > {}\n{}",
+        pidfile.display(),
+        flood_body(3_000)
+    ));
     let cancel = CancellationToken::new();
     let c = cancel.clone();
+    // Cancel only once the CLI process is gone, so the cancel lands in the drain.
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(700)).await;
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let Ok(pid) = fs::read_to_string(&pidfile) else {
+                continue;
+            };
+            let gone = !std::process::Command::new("kill")
+                .args(["-0", pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            if gone {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
         c.cancel();
     });
     let started = Instant::now();
@@ -772,7 +793,7 @@ async fn issue_324_cancel_during_the_drain_records_what_was_left_unread() {
         )
         .await;
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < Duration::from_secs(6),
         "{:?}",
         started.elapsed()
     );
@@ -797,4 +818,73 @@ async fn issue_324_the_wall_deadline_during_the_drain_ends_it_as_wall_time() {
         started.elapsed()
     );
     assert_eq!(out.ending, Ending::WallTime);
+}
+
+/// A CLI that stops on SIGTERM while a descendant that ignores it keeps writing: the drain after
+/// the exit has to end at the grace period, not at `drain_max`.
+const STOPPABLE_WITH_DRIP: &str =
+    "( trap '' TERM; while :; do echo drip >&2; sleep 0.2; done ) &\n\
+     echo xxxxxxxxxxxxxxxxxxxxxxxx\ntrap 'exit 0' TERM\nwhile :; do sleep 0.1; done";
+
+fn stopped_limits() -> Limits {
+    Limits {
+        grace: Duration::from_millis(700),
+        max_stdout_bytes: 10_000,
+        ..drain_limits(2_000, 10_000, 20_000)
+    }
+}
+
+async fn stopped_before_exit(limits: Limits, cancel_at: Option<u64>) -> (Ending, Duration, usize) {
+    let rig = Rig::new();
+    let exe = rig.cli(STOPPABLE_WITH_DRIP);
+    let cancel = CancellationToken::new();
+    if let Some(ms) = cancel_at {
+        let c = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            c.cancel();
+        });
+    }
+    let started = Instant::now();
+    let (out, events) = rig
+        .run(
+            rig.launch(exe, limits),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    (out.ending, started.elapsed(), unread_gaps(&events).len())
+}
+
+#[tokio::test]
+async fn issue_324_cancel_before_exit_drains_only_for_the_grace_period() {
+    let (ending, took, gaps) = stopped_before_exit(stopped_limits(), Some(400)).await;
+    assert_eq!(ending, Ending::Cancelled);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(gaps, 1, "the drip was still arriving when the drain ended");
+}
+
+#[tokio::test]
+async fn issue_324_wall_time_before_exit_drains_only_for_the_grace_period() {
+    let limits = Limits {
+        wall_time: Duration::from_millis(400),
+        ..stopped_limits()
+    };
+    let (ending, took, gaps) = stopped_before_exit(limits, None).await;
+    assert_eq!(ending, Ending::WallTime);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(gaps, 1);
+}
+
+#[tokio::test]
+async fn issue_324_output_limit_before_exit_drains_only_for_the_grace_period() {
+    let limits = Limits {
+        max_stdout_bytes: 10,
+        ..stopped_limits()
+    };
+    let (ending, took, gaps) = stopped_before_exit(limits, None).await;
+    assert_eq!(ending, Ending::OutputLimit);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(gaps, 1);
 }

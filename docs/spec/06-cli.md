@@ -15,6 +15,7 @@ aibus handoff create [--topic T] [--outcome O] | list | show [PATH]
 aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
 aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
+aibus runs list | inspect <run> [--node ID | --event N] | replay <run> [--offline] [--events] | rerun <run>   recorded runs (15-recorded-runs.md)
 aibus config path | show | init | validate | edit
 aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
 aibus doctor
@@ -104,6 +105,7 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | `account list` | `[{name, provider, label, auth:"keyring|env|file|none", default_model, status}]` |
 | `account test` | `{name, ok, label, org, models:[..], latency_ms}` or `{name, ok:false, error:{kind, message}}` |
 | `session list` | `[{id, started_at, ended_at, topic, runs, outcome, cost_usd}]` |
+| `runs list` | `[{id, workflow_run_id, provider, state, requires_reconciliation, first_seen, last_seen, events, attempts, agents, tools, edges:[observed, correlated, inferred, unavailable], gaps, cost:{name, value, unit, quality, source}, corrupt_lines, torn_bytes, unsupported_schema, error}]` |
 | `session show` | `{session, runs:[{id, agent, status, turns, usage}], handoff, ledger}` |
 | `session log` | NDJSON of the commit log: `{time, intent, changed, at}` |
 | `handoff list/show` | the YAML parsed to JSON |

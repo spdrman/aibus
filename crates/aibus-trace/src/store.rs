@@ -1,12 +1,13 @@
 //! The append-only local trace store.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use aibus_core::persist::fs::{create_private_dir, write_atomic, write_private};
+use aibus_core::persist::fs::{create_private_dir, write_atomic};
 use aibus_core::Redactor;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -123,6 +124,33 @@ pub struct TraceStore {
     run: Option<Uuid>,
 }
 
+/// A private (0700) directory that is really a directory, owned by this user. One that already
+/// exists with a wider mode is narrowed, and a link or a foreign owner is refused.
+fn private_dir(path: &Path) -> io::Result<()> {
+    create_private_dir(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let meta = fs::symlink_metadata(path)?;
+        if !meta.is_dir() {
+            return Err(io::Error::other(format!(
+                "{} is not a plain directory",
+                path.display()
+            )));
+        }
+        if meta.uid() != rustix::process::geteuid().as_raw() {
+            return Err(io::Error::other(format!(
+                "{} belongs to another user",
+                path.display()
+            )));
+        }
+        if meta.permissions().mode() & 0o077 != 0 {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    Ok(())
+}
+
 impl TraceStore {
     /// Opens (or creates) the run directory, takes the writer lock, and repairs a torn tail.
     pub fn open(
@@ -132,14 +160,16 @@ impl TraceStore {
         limits: StoreLimits,
     ) -> Result<(Self, Recovery), StoreError> {
         use fs4::fs_std::FileExt;
-        create_private_dir(dir)?;
+        private_dir(dir)?;
         let path = dir.join(EVENTS);
         let mut opts = fs::OpenOptions::new();
         opts.read(true).append(true).create(true);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
+            // A planted link at events.jsonl must not make the store rewrite what it points at.
+            opts.mode(0o600)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
         }
         let mut file = opts.open(&path)?;
         if let Err(e) = file.try_lock_exclusive() {
@@ -153,6 +183,7 @@ impl TraceStore {
         let mut recovery = Recovery::default();
         let mut ids = HashSet::new();
         let mut last_seq = 0;
+        let mut warned_corrupt = 0;
         let mut run = None;
         let mut good_len = 0u64;
         let mut raw = Vec::new();
@@ -164,8 +195,12 @@ impl TraceStore {
             }
             good_len += line.len() as u64;
             match serde_json::from_slice::<TraceEvent>(line) {
-                Ok(e) if e.schema_version == SCHEMA_VERSION => {
+                // A sequence of u64::MAX could only be planted, and `+ 1` would overflow: corrupt.
+                Ok(e) if e.schema_version == SCHEMA_VERSION && e.sequence < u64::MAX => {
                     last_seq = last_seq.max(e.sequence);
+                    if e.kind == EventKind::TraceWarning && e.data["reason"] == "corrupt_lines" {
+                        warned_corrupt = warned_corrupt.max(e.data["lines"].as_u64().unwrap_or(0));
+                    }
                     run.get_or_insert(e.workflow_run_id);
                     ids.insert(e.event_id);
                 }
@@ -175,10 +210,17 @@ impl TraceStore {
         let total = raw.len() as u64;
         if good_len < total {
             recovery.torn_bytes = total - good_len;
-            write_private(
-                dir.join(format!("{EVENTS}.torn-{good_len}")),
-                &raw[good_len as usize..],
-            )?;
+            // Never through a link: drop whatever sits at the name, then create it fresh.
+            let torn = dir.join(format!("{EVENTS}.torn-{good_len}"));
+            let _ = fs::remove_file(&torn);
+            let mut aside = fs::OpenOptions::new();
+            aside.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                aside.mode(0o600);
+            }
+            aside.open(&torn)?.write_all(&raw[good_len as usize..])?;
             file.set_len(good_len)?;
             file.sync_all()?;
         }
@@ -207,7 +249,8 @@ impl TraceStore {
                 payload: None,
             })?;
         }
-        if recovery.corrupt_lines > 0 {
+        // The lines stay in the file, so a reopen counts them again: warn only about new ones.
+        if recovery.corrupt_lines > warned_corrupt {
             let e = store.own_event(
                 EventKind::TraceWarning,
                 Visibility::Observed,
@@ -299,7 +342,7 @@ impl TraceStore {
                 } else {
                     let hash = sha256_hex(&body);
                     let objects = self.dir.join("objects");
-                    create_private_dir(&objects)?;
+                    private_dir(&objects)?;
                     let path = objects.join(format!("{hash}.json"));
                     if !path.exists() {
                         write_atomic(&path, &body)?;
@@ -319,6 +362,22 @@ impl TraceStore {
                 e.payload_ref.clone_from(&payload_ref);
             }
             self.redactor.redact_json(&mut e.data);
+            // The ids come from the CLI's stream too: same redaction as the data.
+            for id in [
+                &mut e.agent_id,
+                &mut e.parent_agent_id,
+                &mut e.parent_tool_use_id,
+                &mut e.native.session_id,
+                &mut e.native.tool_use_id,
+                &mut e.native.native_type,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if let Cow::Owned(clean) = self.redactor.redact(id) {
+                    *id = clean;
+                }
+            }
             let mut line = serde_json::to_vec(&e).map_err(io::Error::other)?;
             if line.len() >= self.limits.max_event_bytes {
                 e.data = json!({ "truncated": true, "bytes": line.len() });

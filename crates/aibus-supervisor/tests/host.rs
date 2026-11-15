@@ -64,9 +64,14 @@ impl Rig {
         let (mut store, _) =
             TraceStore::open(&dir, redactor, policy, StoreLimits::default()).unwrap();
         let mut norm = Normalizer::new(common::attempt());
-        let outcome = supervise(launch, &mut norm, &mut store, cancel)
-            .await
-            .unwrap();
+        // A regression that makes the host hang fails in seconds instead of at the job timeout.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(30),
+            supervise(launch, &mut norm, &mut store, cancel),
+        )
+        .await
+        .expect("supervise did not return within 30 s")
+        .unwrap();
         drop(store);
         (outcome, TraceStore::read(&dir).unwrap().0)
     }
@@ -521,4 +526,70 @@ async fn retained_payloads_from_a_live_run_are_redacted_on_disk() {
     .await;
     assert!(grep_tree(&rig.trace_dir(), canary).is_empty());
     assert!(grep_tree(&rig.trace_dir(), registered).is_empty());
+}
+
+fn alive(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid.trim()])
+        .status()
+        .unwrap()
+        .success()
+}
+
+#[tokio::test]
+async fn a_descendant_that_closed_its_pipes_is_killed_when_the_cli_exits_normally() {
+    let rig = Rig::new();
+    let pidfile = rig.root.join("sleeper.pid");
+    let body = format!(
+        "sleep 300 </dev/null >/dev/null 2>&1 &\necho $! > {}\nexit 0",
+        pidfile.display()
+    );
+    let (out, _) = rig.plain(&body, Limits::default()).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let pid = fs::read_to_string(&pidfile).unwrap();
+    // The kill is a signal, so give the reaping a moment.
+    let until = Instant::now() + Duration::from_secs(5);
+    while alive(&pid) && Instant::now() < until {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!alive(&pid), "the sleeper {pid} outlived the attempt");
+}
+
+#[tokio::test]
+async fn a_store_error_mid_run_still_ends_the_cli_and_its_children() {
+    let rig = Rig::new();
+    let pidfile = rig.root.join("child.pid");
+    let body = format!(
+        "sleep 300 &\necho $! > {}\necho '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"hi\"}}]}},\"session_id\":\"s\",\"parent_tool_use_id\":null}}'\nwait",
+        pidfile.display()
+    );
+    let exe = rig.cli(&body);
+    let (mut store, _) = TraceStore::open(
+        &rig.trace_dir(),
+        Redactor::new(),
+        PayloadPolicy::Retain { max_bytes: 1 << 20 },
+        StoreLimits::default(),
+    )
+    .unwrap();
+    // A file where the payload directory must go: the first retained payload fails the append.
+    fs::write(rig.trace_dir().join("objects"), b"x").unwrap();
+    let mut norm = Normalizer::new(common::attempt());
+    let r = tokio::time::timeout(
+        Duration::from_secs(30),
+        supervise(
+            rig.launch(exe, Limits::default()),
+            &mut norm,
+            &mut store,
+            CancellationToken::new(),
+        ),
+    )
+    .await
+    .expect("supervise did not return within 30 s");
+    assert!(r.is_err(), "the store error should surface");
+    let pid = fs::read_to_string(&pidfile).unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    while alive(&pid) && Instant::now() < until {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!alive(&pid), "the child {pid} was orphaned");
 }

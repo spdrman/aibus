@@ -467,3 +467,195 @@ fn a_line_of_another_schema_version_is_not_read_as_an_event() {
     assert_eq!(events.len(), 1);
     assert_eq!(report.unsupported_schema, 1);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_events_file_is_refused_and_its_target_left_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let victim = tmp.path().join("victim.txt");
+    fs::write(&victim, "line one\nno newline tail").unwrap();
+    let dir = tmp.path().join("run");
+    fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink(&victim, dir.join("events.jsonl")).unwrap();
+    let r = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::MetadataOnly,
+        StoreLimits::default(),
+    );
+    assert!(r.is_err());
+    assert_eq!(fs::read(&victim).unwrap(), b"line one\nno newline tail");
+    assert!(!dir.join("events.jsonl.torn-9").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_planted_at_the_torn_file_name_is_replaced_not_followed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let victim = tmp.path().join("victim.txt");
+    fs::write(&victim, "keep me").unwrap();
+    let dir = tmp.path().join("run");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("events.jsonl"), "line one\ntail").unwrap();
+    std::os::unix::fs::symlink(&victim, dir.join("events.jsonl.torn-9")).unwrap();
+    drop(open(&dir));
+    assert_eq!(fs::read(&victim).unwrap(), b"keep me");
+    let torn = dir.join("events.jsonl.torn-9");
+    assert!(!fs::symlink_metadata(&torn)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read(&torn).unwrap(), b"tail");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_planted_at_a_payload_temp_name_is_not_followed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let victim = tmp.path().join("victim.txt");
+    fs::write(&victim, "keep me").unwrap();
+    let dir = tmp.path().join("run");
+    let mut s = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::Retain { max_bytes: 1 << 20 },
+        StoreLimits::default(),
+    )
+    .unwrap()
+    .0;
+    let body = serde_json::to_vec(&json!({ "t": 1 })).unwrap();
+    let hash = aibus_trace::sha256_hex(&body);
+    fs::create_dir_all(dir.join("objects")).unwrap();
+    std::os::unix::fs::symlink(&victim, dir.join(format!("objects/.{hash}.json.tmp"))).unwrap();
+    s.append(Batch {
+        events: vec![ev(1, EventKind::MessageChunk)],
+        payload: Some(json!({ "t": 1 })),
+    })
+    .unwrap();
+    assert_eq!(fs::read(&victim).unwrap(), b"keep me");
+    assert!(dir.join(format!("objects/{hash}.json")).is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_run_dir_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let real = tmp.path().join("real");
+    fs::create_dir_all(&real).unwrap();
+    let dir = tmp.path().join("run");
+    std::os::unix::fs::symlink(&real, &dir).unwrap();
+    assert!(TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::MetadataOnly,
+        StoreLimits::default()
+    )
+    .is_err());
+    assert!(!real.join("events.jsonl").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_existing_wide_run_dir_and_objects_dir_are_narrowed_to_0700() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    fs::create_dir_all(dir.join("objects")).unwrap();
+    for d in [&dir, &dir.join("objects")] {
+        fs::set_permissions(d, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut s = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::Retain { max_bytes: 1 << 20 },
+        StoreLimits::default(),
+    )
+    .unwrap()
+    .0;
+    s.append(Batch {
+        events: vec![ev(1, EventKind::MessageChunk)],
+        payload: Some(json!({ "t": 1 })),
+    })
+    .unwrap();
+    for d in [&dir, &dir.join("objects")] {
+        let mode = fs::metadata(d).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "{}", d.display());
+    }
+}
+
+#[test]
+fn a_planted_max_sequence_is_a_corrupt_line_not_an_overflow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    drop(open(&dir));
+    let mut e = ev(1, EventKind::MessageChunk);
+    e.sequence = u64::MAX;
+    let mut line = serde_json::to_vec(&e).unwrap();
+    line.push(b'\n');
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("events.jsonl"))
+        .unwrap()
+        .write_all(&line)
+        .unwrap();
+    let (mut s, recovery) = TraceStore::open(
+        &dir,
+        Redactor::new(),
+        PayloadPolicy::MetadataOnly,
+        StoreLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(recovery.corrupt_lines, 1);
+    let written = s.append(one(ev(2, EventKind::MessageChunk))).unwrap();
+    assert!(written[0].sequence < 100, "{}", written[0].sequence);
+}
+
+#[test]
+fn reopening_does_not_repeat_the_corrupt_lines_warning() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    {
+        let mut s = open(&dir);
+        s.append(one(ev(1, EventKind::MessageChunk))).unwrap();
+    }
+    fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("events.jsonl"))
+        .unwrap()
+        .write_all(b"not json\n")
+        .unwrap();
+    for _ in 0..3 {
+        let (_, recovery) = TraceStore::open(
+            &dir,
+            Redactor::new(),
+            PayloadPolicy::MetadataOnly,
+            StoreLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(recovery.corrupt_lines, 1);
+    }
+    let warnings = TraceStore::read(&dir)
+        .unwrap()
+        .0
+        .iter()
+        .filter(|e| e.kind == EventKind::TraceWarning && e.data["reason"] == "corrupt_lines")
+        .count();
+    assert_eq!(warnings, 1);
+}
+
+#[test]
+fn ids_and_native_fields_are_redacted_like_the_data() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let shaped = format!("sk-ant-api03-{}", "B".repeat(40));
+    let mut s = open(&dir);
+    let mut e = ev(1, EventKind::ToolCompleted);
+    e.agent_id = Some(shaped.clone());
+    e.parent_agent_id = Some(shaped.clone());
+    e.parent_tool_use_id = Some(shaped.clone());
+    e.native.session_id = Some(shaped.clone());
+    e.native.tool_use_id = Some(shaped.clone());
+    e.native.native_type = Some(shaped.clone());
+    s.append(one(e)).unwrap();
+    assert!(grep_tree(&dir, "sk-ant-api03").is_empty());
+}

@@ -1,0 +1,33 @@
+{
+  "ending": "exit:0",
+  "kinds": [
+    "attempt_started",
+    "agent_started",
+    "task_delegated",
+    "agent_started",
+    "message_chunk",
+    "task_delegated",
+    "agent_started",
+    "message_chunk",
+    "tool_started",
+    "tool_completed",
+    "tool_started",
+    "tool_completed",
+    "message_chunk",
+    "agent_stopped",
+    "agent_stopped",
+    "usage_reported",
+    "agent_stopped",
+    "gap_detected",
+    "message_chunk",
+    "agent_stopped",
+    "agent_stopped",
+    "usage_reported",
+    "agent_stopped",
+    "message_chunk",
+    "usage_reported",
+    "agent_stopped",
+    "attempt_completed"
+  ],
+  "status": "completed"
+}

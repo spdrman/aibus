@@ -60,6 +60,8 @@ impl std::fmt::Display for ProbeError {
     }
 }
 
+impl std::error::Error for ProbeError {}
+
 /// `2.1.311 (Claude Code)` to `Version(2, 1, 311)`.
 pub fn parse_version(out: &str) -> Option<Version> {
     let re = Regex::new(r"^\s*(\d{1,6})\.(\d{1,6})\.(\d{1,6})\b").expect("valid regex");
@@ -98,19 +100,11 @@ pub fn probe(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
         out
     }
 
-    let version = parse_version(version_out)
-        .ok_or_else(|| ProbeError::Version(version_out.chars().take(80).collect()))?;
-    if version < MIN_VERSION {
-        return Err(ProbeError::TooOld(version));
+    let found = parse_help(version_out, help_out)?;
+    if found.version < MIN_VERSION {
+        return Err(ProbeError::TooOld(found.version));
     }
-    let re = Regex::new(r"(?m)^ {2}(?:-\w, )?(--[A-Za-z][\w-]*)(?:, (--[A-Za-z][\w-]*))?")
-        .expect("valid regex");
-    let flags: BTreeSet<String> = re
-        .captures_iter(help_out)
-        .flat_map(|c| [c.get(1), c.get(2)])
-        .flatten()
-        .map(|m| m.as_str().to_owned())
-        .collect();
+    let flags = &found.flags;
     if let Some(missing) = REQUIRED.iter().find(|f| !flags.contains(**f)) {
         return Err(ProbeError::MissingFlag((*missing).into()));
     }
@@ -121,6 +115,23 @@ pub fn probe(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
     if says_default("--bare", "") || says_default("--print", "bare") {
         return Err(ProbeError::BareDefault);
     }
+    Ok(found)
+}
+
+/// What `--version` and `--help` say, for any CLI: the version and every long flag, with no
+/// opinion about which ones matter (an extension's manifest says that). `probe` adds the Claude
+/// Code rules on top.
+pub fn parse_help(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
+    let version = parse_version(version_out)
+        .ok_or_else(|| ProbeError::Version(version_out.chars().take(80).collect()))?;
+    let re = Regex::new(r"(?m)^ {2}(?:-\w, )?(--[A-Za-z][\w-]*)(?:, (--[A-Za-z][\w-]*))?")
+        .expect("valid regex");
+    let flags: BTreeSet<String> = re
+        .captures_iter(help_out)
+        .flat_map(|c| [c.get(1), c.get(2)])
+        .flatten()
+        .map(|m| m.as_str().to_owned())
+        .collect();
     Ok(Probe {
         version,
         tested: version == TESTED_VERSION,
@@ -151,6 +162,17 @@ pub struct Discovery {
 /// other than this user or root), runs `--version` on the rest and chooses the first at or above
 /// `MIN_VERSION`. Every candidate stays in the result with its reason, so the user sees why.
 pub async fn discover(dirs: &[PathBuf], name: &str, env: &[(OsString, OsString)]) -> Discovery {
+    discover_from(dirs, name, env, MIN_VERSION).await
+}
+
+/// `discover` with the oldest acceptable version given: an extension for another CLI says its own
+/// (its manifest's range is checked after the probe), where `discover` insists on Claude's.
+pub async fn discover_from(
+    dirs: &[PathBuf],
+    name: &str,
+    env: &[(OsString, OsString)],
+    min: Version,
+) -> Discovery {
     /// Why a resolved executable must not be run, if it must not.
     fn unsafe_reason(real: &Path) -> Option<String> {
         let meta = match std::fs::metadata(real) {
@@ -215,8 +237,8 @@ pub async fn discover(dirs: &[PathBuf], name: &str, env: &[(OsString, OsString)]
                                     "--version printed {:?}",
                                     text.trim().chars().take(80).collect::<String>()
                                 )),
-                                Some(v) if v < MIN_VERSION => {
-                                    Err(format!("version {v} is older than {MIN_VERSION}"))
+                                Some(v) if v < min => {
+                                    Err(format!("version {v} is older than {min}"))
                                 }
                                 Some(v) => Ok(v),
                             }
@@ -382,6 +404,18 @@ impl std::fmt::Display for EnvError {
     }
 }
 
+/// The names `bounded_env` takes from the parent on its own, besides `PATH`.
+pub const HOST_ENV_ALLOW: [&str; 8] = [
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "CLAUDE_CONFIG_DIR",
+];
+
 /// The child's whole environment: `PATH=/usr/bin:/bin`, the allowlist (`HOME`, `USER`, `LOGNAME`,
 /// `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `CLAUDE_CONFIG_DIR`) from `parent` when set, then `pass`
 /// (more names from `parent`) and `set` (explicit values). The parent session's `CLAUDECODE` and
@@ -392,16 +426,6 @@ pub fn bounded_env(
     pass: &[&str],
     set: &[(&str, &str)],
 ) -> Result<Vec<(OsString, OsString)>, EnvError> {
-    const ALLOW: [&str; 8] = [
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "TMPDIR",
-        "CLAUDE_CONFIG_DIR",
-    ];
     let credential =
         Regex::new(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION_ID)")
             .expect("valid regex");
@@ -419,7 +443,9 @@ pub fn bounded_env(
     let mut env: Vec<(OsString, OsString)> = vec![("PATH".into(), "/usr/bin:/bin".into())];
     for (k, v) in parent {
         let Some(name) = k.to_str() else { continue };
-        if (ALLOW.contains(&name) || pass.contains(&name)) && !env.iter().any(|(e, _)| e == &k) {
+        if (HOST_ENV_ALLOW.contains(&name) || pass.contains(&name))
+            && !env.iter().any(|(e, _)| e == &k)
+        {
             env.push((k, v));
         }
     }

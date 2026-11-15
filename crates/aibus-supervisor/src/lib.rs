@@ -11,10 +11,27 @@ pub mod claude;
 pub mod cli;
 pub mod host;
 
-pub use claude::Normalizer;
+pub use claude::{Channel, Normalizer};
 pub use host::{supervise, Launch, Outcome, SupervisorError};
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
+
+use aibus_trace::Batch;
+
+/// One attempt's stateful normaliser, the shape the Phase 1 gate ratified (A1.5 amendment E1): the
+/// host feeds it every line from every channel in arrival order and writes what it returns. The
+/// built-in Claude normaliser and the declarative one of an extension (#286) both implement it, and
+/// `supervise` runs either, so the supervisor never knows which provider it is supervising.
+pub trait Engine: Send {
+    /// Makes the next event id sort after `id` (`supervise` seeds it from the run it writes to).
+    fn observe(&mut self, id: uuid::Uuid);
+    fn start(&mut self, at: SystemTime, info: serde_json::Value) -> Batch;
+    fn stream_line(&mut self, line: &[u8], at: SystemTime) -> Batch;
+    fn hook_line(&mut self, line: &[u8], at: SystemTime) -> Batch;
+    fn stderr_line(&mut self, line: &[u8], at: SystemTime) -> Batch;
+    fn gap(&mut self, channel: Channel, reason: &str, bytes: u64, at: SystemTime) -> Batch;
+    fn finish(&mut self, ending: Ending, wall: Duration, at: SystemTime) -> Batch;
+}
 
 /// How the process ended, as the host saw it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

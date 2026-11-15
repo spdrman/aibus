@@ -1,0 +1,6 @@
+{"type":"text","text":"trying"}
+{"type":"tool_start","id":"t9"}
+{"type":"tool_error","id":"t9"}
+{"type":"usage","usage":{"in":3}}
+{"type":"mystery","x":1}
+this is not json

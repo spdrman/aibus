@@ -80,7 +80,7 @@ fn the_config_dir_is_only_ever_passed_through_by_name() {
         .unwrap()
         .1;
     let allow = cli
-        .split("const ALLOW")
+        .split("const HOST_ENV_ALLOW")
         .nth(1)
         .and_then(|r| r.split("];").next())
         .expect("the allowlist");

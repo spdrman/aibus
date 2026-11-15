@@ -28,6 +28,7 @@ version = "0.2.1"
 dependencies = [
  "aibus-control",
  "aibus-core",
+ "aibus-extension",
  "aibus-graph",
  "aibus-mcp",
  "aibus-provider",
@@ -125,6 +126,27 @@ dependencies = [
  "ulid",
  "yaml-rust2",
  "zstd",
+]
+
+[[package]]
+name = "aibus-extension"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-supervisor",
+ "aibus-trace",
+ "regex",
+ "ring",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "uuid",
 ]
 
 [[package]]

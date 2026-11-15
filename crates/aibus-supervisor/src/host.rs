@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::claude::Channel;
-use crate::{Ending, Limits, Normalizer};
+use crate::{Ending, Engine, Limits};
 
 /// Everything needed to start the CLI. `exe` must be absolute (from `cli::discover`), `cwd` an
 /// existing directory, and `env` is the whole environment (from `cli::bounded_env`).
@@ -156,7 +156,7 @@ fn signal_group(pid: Option<u32>, sig: rustix::process::Signal) {
 fn put(
     store: &mut TraceStore,
     batch: Batch,
-    norm: &mut Normalizer,
+    norm: &mut dyn Engine,
 ) -> Result<Vec<TraceEvent>, StoreError> {
     let out = store.append(batch)?;
     if let Some(id) = store.last_id() {
@@ -171,7 +171,7 @@ fn put(
 /// once the process has exited and `attempt_completed` or `attempt_failed` is in the store.
 pub async fn supervise(
     launch: Launch,
-    norm: &mut Normalizer,
+    norm: &mut dyn Engine,
     store: &mut TraceStore,
     cancel: CancellationToken,
 ) -> Result<Outcome, SupervisorError> {
@@ -454,6 +454,7 @@ pub async fn supervise(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Normalizer;
     use aibus_trace::{AttemptRef, PayloadPolicy, StoreLimits};
     use std::time::Duration;
 

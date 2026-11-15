@@ -5,12 +5,13 @@
 //!
 //! What stays the keyboard's is decided by what a line would do (`effect`), never by the
 //! command's name, so an alias or a later command is covered: ending the session, any
-//! confirmation (`/logout`, `/clear`, `/cancel` on the lead), writing files, and opening,
-//! replacing or closing a screen while the user has one open or is typing (`busy`). A permission
+//! confirmation (`/logout`, `/clear`, `/cancel` on the lead), writing files, opening any screen with
+//! live letter keys (`/accounts`, `/model`, `/agents`, `/workflow list`), and opening or closing an
+//! inert one (help, cost, status) while the user has a screen open or is typing (`busy`). A permission
 //! prompt is answered by a client only when the session was started with `--control-permission`,
 //! and `/login` opens a masked key entry, which is the keyboard's too.
 
-use aibus_core::remote::{Ask, Remote};
+use aibus_core::remote::{client_name, Ask, Remote};
 use aibus_core::state::value::{as_list, as_str, get};
 use aibus_core::state::{run_key, PERMISSIONS_OPEN};
 use aibus_core::{
@@ -26,29 +27,10 @@ use crate::input::Context;
 use crate::prompt::Sent;
 use crate::ui::Ui;
 
-/// The most characters of a client's name the screen and the log show.
-const NAME_MAX: usize = 32;
 /// The most of a transcript one read returns: its last 32 KiB.
 const TRANSCRIPT_MAX: usize = 32 * 1024;
 /// Session log rows one read returns, newest last.
 const LOG_ROWS: usize = 200;
-
-/// The name a client gave, safe to draw and to put in a Markdown heading: ASCII letters, digits,
-/// space, `.`, `_` and `-` only (no control, zero-width or bidi characters, no Markdown), at most
-/// 32 characters, and `client` when nothing is left.
-pub fn client_name(raw: &str) -> String {
-    let name: String = raw
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
-        .take(NAME_MAX)
-        .collect();
-    let name = name.trim();
-    if name.is_empty() {
-        "client".into()
-    } else {
-        name.to_owned()
-    }
-}
 
 /// What a message would do that a client may not do on its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,8 +42,12 @@ enum Effect {
     Confirms,
     /// Writes files: a workflow, a handoff, the ledger.
     Writes,
-    /// Opens, replaces or closes a screen, or moves the keyboard's focus.
+    /// Opens a screen that takes no key but the one that closes it (help, cost, a status card),
+    /// or closes one: refused only while the user is in the middle of something.
     Screen,
+    /// Opens a screen or menu with live letter keys, or moves the focus to a pane that has them.
+    /// The user's next keystroke would answer it, so it is refused from a client at all.
+    Keys,
 }
 
 /// What `m` would do. The matches name every variant on purpose: a new command or intent does
@@ -74,16 +60,16 @@ fn effect(m: &Msg) -> Effect {
                 Screen::ConfirmLogout(_) | Screen::ConfirmClear | Screen::ConfirmCancel(_) => {
                     Effect::Confirms
                 }
+                Screen::RunStatus(_)
+                | Screen::AdvisorStatus
+                | Screen::RouterStatus
+                | Screen::Cost => Effect::Screen,
                 Screen::Agents
                 | Screen::Accounts
                 | Screen::Models(_)
                 | Screen::Providers
-                | Screen::RunStatus(_)
-                | Screen::AdvisorStatus
-                | Screen::RouterStatus
-                | Screen::Cost
                 | Screen::Workflows
-                | Screen::WorkflowShow => Effect::Screen,
+                | Screen::WorkflowShow => Effect::Keys,
             },
             Command::Clear => Effect::Confirms,
             Command::WorkflowFile(WorkflowFile::Save { .. })
@@ -97,13 +83,12 @@ fn effect(m: &Msg) -> Effect {
                 }
             }
             // The loop answers these with a screen.
-            Command::WorkflowFile(WorkflowFile::List | WorkflowFile::Show(_)) => Effect::Screen,
+            Command::WorkflowFile(WorkflowFile::List | WorkflowFile::Show(_)) => Effect::Keys,
+            Command::CloseModal | Command::OpenHelp => Effect::Screen,
             Command::OpenTranscript(_)
-            | Command::CloseModal
             | Command::OpenPalette
-            | Command::OpenHelp
             | Command::Permission { .. }
-            | Command::Focus(_) => Effect::Screen,
+            | Command::Focus(_) => Effect::Keys,
             Command::Delegate { .. }
             | Command::Background { .. }
             | Command::Fork { .. }
@@ -120,14 +105,14 @@ fn effect(m: &Msg) -> Effect {
             | Command::SetModel { .. } => Effect::None,
         },
         Msg::Ui(intent) => match intent {
+            UiIntent::CloseMenu => Effect::Screen,
             UiIntent::Open(_)
             | UiIntent::ShowPermission
             | UiIntent::OpenMenu { .. }
-            | UiIntent::CloseMenu
             | UiIntent::Transcript(_)
             | UiIntent::Focus(_)
             | UiIntent::FocusNext
-            | UiIntent::FocusPrev => Effect::Screen,
+            | UiIntent::FocusPrev => Effect::Keys,
             UiIntent::Select(..)
             | UiIntent::Scroll { .. }
             | UiIntent::ToggleRail
@@ -179,6 +164,11 @@ fn checked(line: &str, msgs: Vec<Msg>, busy: Option<&str>) -> Result<Vec<Msg>, S
     if effects.contains(&Effect::Writes) {
         return Err(format!(
             "{word} writes files, which only the keyboard can do from a session"
+        ));
+    }
+    if effects.contains(&Effect::Keys) {
+        return Err(format!(
+            "{word} would open a screen or menu the user's next key answers, so only the keyboard can do that"
         ));
     }
     if let (true, Some(busy)) = (effects.contains(&Effect::Screen), busy) {

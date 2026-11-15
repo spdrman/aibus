@@ -712,3 +712,33 @@ fn dropping_an_endpoint_never_removes_a_socket_it_did_not_make() {
     assert!(path.exists(), "the other socket was removed");
     drop(theirs);
 }
+
+/// A socket file that is mine (chowned) but served by another uid: the link refuses before it
+/// reads or sends the token. The owner check passes here, so only the peer-credential check can
+/// refuse. Needs root (chown), skipped otherwise like the other owner cases.
+#[test]
+fn the_link_refuses_a_socket_of_mine_served_by_another_uid() {
+    if uid() != 0 {
+        eprintln!("skipping the peer case: needs root");
+        return;
+    }
+    let (l, ep) = live("01JCREVLINKPEER00000000000");
+    std::os::unix::fs::chown(ep.socket(), Some(4243), Some(4243)).unwrap();
+    let mut link = Link::new(l.dir.clone(), None);
+    link.uid = 4243;
+    let why = link.call("editor", json!({"op": "status"})).unwrap_err();
+    assert!(
+        why.contains("not this user"),
+        "the peer check did not fire: {why}"
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(
+        !l.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|x| x.starts_with("connected")),
+        "the token went out"
+    );
+    drop(ep);
+}

@@ -42,3 +42,19 @@ pub enum Remote {
         reply: Reply,
     },
 }
+
+/// The name a client gave, safe to draw, log and put in a Markdown heading: ASCII letters,
+/// digits, space, `.`, `_` and `-` only (no control, zero-width or bidi characters, no Markdown),
+/// at most 32 characters, and `client` when nothing is left. The control socket and the screen
+/// both apply it, so it lives where both can reach it.
+pub fn client_name(raw: &str) -> String {
+    let name: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
+        .take(32)
+        .collect();
+    match name.trim() {
+        "" => "client".into(),
+        n => n.into(),
+    }
+}

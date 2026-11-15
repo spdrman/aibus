@@ -457,6 +457,32 @@ fn a_client_cannot_open_a_screen_while_the_user_is_typing() {
     assert_eq!(r.ui.prompt.text, "wh");
 }
 
+/// Review of #276, round 2: with nothing open and nothing typed, a screen with live letter keys
+/// is still refused, because the user's next word would drive it (`d` disables an account, `t`
+/// tests it). Inert screens (help, cost, status) stay open to a client when the user is idle.
+#[test]
+fn a_client_cannot_open_a_screen_with_live_keys_under_an_idle_user() {
+    for line in ["/accounts", "/model", "/agents", "/workflow list"] {
+        let mut r = rig();
+        with_account(&mut r, "work");
+        let why = call(&mut r, command(line), false).unwrap_err();
+        assert!(why.contains("keyboard"), "{line}: {why}");
+        assert_eq!(modal(&r), None, "{line}");
+        r.type_text("do it");
+        assert!(
+            r.jobs.is_empty(),
+            "{line}: the user's letters ran {:?}",
+            r.jobs
+        );
+        assert_eq!(r.ui.prompt.text, "do it", "{line}");
+    }
+    for line in ["/help", "/cost"] {
+        let mut r = rig();
+        call(&mut r, command(line), false).unwrap();
+        assert!(modal(&r).is_some(), "{line}");
+    }
+}
+
 /// Review of #276, item 5: writing files is the keyboard's (and `aibus mcp --allow write`'s for
 /// its own tools), so a client line that would write one is refused.
 #[test]

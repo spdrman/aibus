@@ -154,21 +154,8 @@ pub(crate) fn file(dir: &Path, id: &str, ext: &str) -> PathBuf {
     dir.join(format!("{id}.{ext}"))
 }
 
-/// The name a client gave, safe to put on a screen, in a log and in a Markdown heading: ASCII
-/// letters, digits, space, `.`, `_` and `-` only, at most 32 characters, `client` when nothing
-/// is left.
 #[cfg(unix)]
-pub(crate) fn client_name(raw: &str) -> String {
-    let name: String = raw
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
-        .take(32)
-        .collect();
-    match name.trim() {
-        "" => "client".into(),
-        n => n.into(),
-    }
-}
+pub(crate) use aibus_core::remote::client_name;
 
 #[cfg(all(test, unix))]
 mod tests;

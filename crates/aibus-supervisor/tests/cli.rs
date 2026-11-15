@@ -350,6 +350,54 @@ mod discovery {
     }
 
     #[tokio::test]
+    async fn a_safe_binary_in_a_directory_others_can_write_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let open = root.join("shared-dir");
+        fake(&open, "2.1.311", 0o755);
+        fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
+        let d = cli::discover(std::slice::from_ref(&open), "claude", &env()).await;
+        assert!(d.chosen.is_none());
+        assert!(
+            d.candidates[0]
+                .verdict
+                .as_ref()
+                .is_err_and(|e| e.contains("directory writable")),
+            "{:#?}",
+            d.candidates
+        );
+    }
+
+    #[tokio::test]
+    async fn a_binary_owned_by_a_third_user_is_refused() {
+        // Needs root to chown; as an ordinary user there is no third uid to use.
+        if rustix::process::geteuid().as_raw() != 0 {
+            eprintln!("skipped: not root");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let dir = root.join("theirs");
+        let p = fake(&dir, "2.1.311", 0o755);
+        rustix::fs::chown(
+            &p,
+            Some(rustix::fs::Uid::from_raw(54321)),
+            Some(rustix::fs::Gid::from_raw(54321)),
+        )
+        .unwrap();
+        let d = cli::discover(std::slice::from_ref(&dir), "claude", &env()).await;
+        assert!(d.chosen.is_none());
+        assert!(
+            d.candidates[0]
+                .verdict
+                .as_ref()
+                .is_err_and(|e| e.contains("owned by uid 54321")),
+            "{:#?}",
+            d.candidates
+        );
+    }
+
+    #[tokio::test]
     async fn nothing_usable_means_nothing_chosen() {
         let tmp = tempfile::tempdir().unwrap();
         let stale = tmp.path().canonicalize().unwrap().join("old");

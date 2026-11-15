@@ -49,7 +49,9 @@ pub fn write_atomic(path: &Path, data: impl AsRef<[u8]>) -> io::Result<()> {
         .to_string_lossy();
     let tmp = path.with_file_name(format!(".{name}.tmp"));
     let written = (|| {
-        let mut file = open_private(&tmp, true)?;
+        // A planted link at the temp name is removed, never followed.
+        let _ = fs::remove_file(&tmp);
+        let mut file = open_new_private(&tmp)?;
         file.write_all(data.as_ref())?;
         file.sync_all()
     })();
@@ -139,6 +141,17 @@ pub fn content_hash(bytes: &[u8]) -> String {
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{h:016x}")
+}
+
+fn open_new_private(path: &Path) -> io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
 }
 
 fn open_private(path: &Path, truncate: bool) -> io::Result<fs::File> {

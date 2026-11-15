@@ -186,6 +186,16 @@ pub async fn supervise(
     let started = Instant::now();
     let mut child = cmd.spawn().map_err(SupervisorError::Spawn)?;
     let pid = child.id();
+    /// Ends the CLI's whole group when `supervise` returns early (a store error), so the CLI's
+    /// tool processes are not orphaned. `kill_on_drop` only reaches the leader.
+    struct GroupGuard(Option<u32>);
+    impl Drop for GroupGuard {
+        fn drop(&mut self) {
+            #[cfg(unix)]
+            signal_group(self.0, rustix::process::Signal::KILL);
+        }
+    }
+    let mut guard = GroupGuard(pid);
     store.append(norm.start(
         SystemTime::now(),
         json!({ "executable": exe.display().to_string(), "pid": pid }),
@@ -298,6 +308,7 @@ pub async fn supervise(
     // Whatever the CLI left in its group goes with it.
     #[cfg(unix)]
     signal_group(pid, rustix::process::Signal::KILL);
+    guard.0 = None;
 
     let ending = stopped.unwrap_or_else(|| match exit.and_then(|s| s.code()) {
         Some(code) => Ending::Exited(code),

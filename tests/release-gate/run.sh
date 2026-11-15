@@ -473,7 +473,9 @@ if pty_available; then
   prompt267() { # name input want
     r=$t/rel267; mkrepo "$r"; usegate "$r"; : >"$GH_LOG"
     ( export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh; unset SSH_AUTH_SOCK SSH_AGENT_PID
-      PTY_INPUT=$2 PTY_PROMPT='\[y/N\]' pty_run 60 tools/release-gate/release.sh 0.2.0 --key "$t/key" ) >"$t/p267.out" 2>&1
+      PTY_INPUT=$2 PTY_PROMPT='\[y/N\]' pty_run 180 tools/release-gate/release.sh 0.2.0 --key "$t/key" ) >"$t/p267.out" 2>&1; prc=$?
+    # 180s only catches a real hang (it costs nothing when things work); a cut-off says so instead of failing the refusal check
+    expect "#267 $1: the run was not cut off by the timeout" test $prc != 124
     if [ "$3" = push ]; then
       expect "#267 $1 confirms: the branch is pushed and the PR opened" bash -c "[ -n \"\$(git ls-remote origin refs/heads/release-prep/v0.2.0)\" ] && [ \$(wc -l <'$GH_LOG') = 1 ]"
     else

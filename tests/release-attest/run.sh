@@ -393,10 +393,27 @@ if [ $pty_ok = 1 ]; then
   done
   # TERM to the caller stops the child, script and feeder and leaves no temp file
   ( PTY_INPUT=y PTY_PROMPT='never shown' pty_run 60 bash -c 'echo up; exec sleep 4177' >/dev/null 2>&1 ) & tp=$!
-  sleep 1.5; kill -TERM $tp; wait $tp 2>/dev/null; trc=$?; sleep 2
+  sleep 1.5; s0=$SECONDS; kill -TERM $tp; wait $tp 2>/dev/null; trc=$?; sdt=$((SECONDS - s0)); sleep 2
   expect "#278 TERM to the shell running pty_run ends it with 143" test $trc = 143
+  expect "#278 ...within 10s (the child is killed, not waited out for the 60s budget)" test $sdt -lt 10
   expect "#278 ...and leaves no child, script or sleep process running" test -z "$(pgrep -f 'sleep 4177')"
   expect "#278 ...and no temp file in TMPDIR" test -z "$(/bin/ls -A "$t/tmp" | grep '^pty-')"
+  # a feeder whose child is already gone (no output file) stops at once, it does not poll the whole budget
+  s0=$SECONDS; PTY_INPUT=zzz PTY_PROMPT='never shown' _pty_feed 30 "$t/no-such-out" >/dev/null 2>&1
+  expect "#278 the feeder stops soon when the child ended before printing its prompt (under 5s)" test $((SECONDS - s0)) -lt 5
+  # pty_run is safe for a caller under set -e: valid pattern, no pattern, and a failing child (its status comes back)
+  cat >"$t/sete.sh" <<'EOS'
+set -e
+. "$1"
+PTY_INPUT=$'y\n' PTY_PROMPT='go> ' pty_run 20 bash -c 'printf "go> "; read a; echo got:$a'
+echo after:$?
+pty_run 20 true
+pty_run 20 false || echo rc:$?
+echo done
+EOS
+  she=$(bash "$t/sete.sh" "$here/../lib/pty.sh" 2>&1 | tr -d '\r')
+  expect "#278 pty_run under set -e: valid PTY_PROMPT runs the child, a failing child returns its status, the caller reaches the end" bash -c "printf '%s' '$she' | grep -q got:y && printf '%s' '$she' | grep -q after:0 && printf '%s' '$she' | grep -q rc:1 && printf '%s' '$she' | grep -q done"
+  expect "#278 ...and leaves no temp file" test -z "$(/bin/ls -A "$t/tmp" | grep '^pty-')"
   r=$t/repo30; mkrepo "$r" 1.2.3; cp "$t/pkey.pub" "$r/$PUBKEY_PATH"; git -C "$r" commit -qam pub
   pty_attest "$t/pkey" >"$t/pty1.out" 2>&1; rc=$?
   expect "from a terminal, a passphrase key that is not loaded is refused at once (exit 2, no hang)" test $rc = 2

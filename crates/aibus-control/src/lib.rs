@@ -71,6 +71,17 @@ pub fn runtime_dir(xdg_runtime: Option<&OsStr>, tmp: &Path, short: &Path) -> Pat
     }
 }
 
+/// The directory this process uses: `runtime_dir` of `$XDG_RUNTIME_DIR`, the temporary directory
+/// and `/tmp`. The session and `aibus mcp` both call it, so they always agree on where to look.
+#[cfg(unix)]
+pub fn default_runtime_dir() -> PathBuf {
+    runtime_dir(
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        &std::env::temp_dir(),
+        Path::new("/tmp"),
+    )
+}
+
 /// Makes the session directory, or checks the one that is there. `dir` is `<base>/<aibus>/sessions`
 /// (`runtime_dir`): `sessions` and the directory above it have to be directories of this user,
 /// not links, mode 0700; `<base>` (`$XDG_RUNTIME_DIR` or the temporary directory, resolved) has

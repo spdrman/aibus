@@ -314,3 +314,36 @@ fn a_client_that_can_be_asked_confirms_a_change_by_retyping_the_tail_of_the_id()
     assert!(wait_for(&seen, "fix it"), "{:?}", seen.lock().unwrap());
     c.finish();
 }
+
+/// #320: no `XDG_RUNTIME_DIR` and a macOS-length `TMPDIR`: the session and `aibus mcp` both end
+/// up in the short fallback directory, so `session_list` sees the session.
+#[test]
+fn issue_320_aibus_mcp_finds_a_session_with_a_macos_length_tmpdir_and_no_xdg() {
+    let home = xdg_temp();
+    let tmpdir = "/var/folders/zz/0123456789abcdefghijklmnopqrstuvwxyz0/T";
+    assert!(tmpdir.len() >= 49);
+    let rt = runtime();
+    let id = "01JCT320000000000000000000";
+    let dir = runtime_dir(None, Path::new(tmpdir), Path::new("/tmp"));
+    private_dir(&dir).unwrap();
+    let info = json!({"id": id, "cwd": "~/app", "lead": "lead", "model": "sonnet", "started": "2026-11-14T10:00:00Z"});
+    let ep = Endpoint::open(&dir, id, &info).unwrap();
+    let (tx, _rx) = mpsc::channel::<Remote>(16);
+    {
+        let _in = rt.handle.enter();
+        let mut ep = ep;
+        ep.serve(tx, Redactor::new()).unwrap();
+        let mut cmd = mcp_command(home.path(), &["--allow", "session-list"]);
+        cmd.env_remove("XDG_RUNTIME_DIR").env("TMPDIR", tmpdir);
+        let mut c = McpClient::spawn(cmd, Protocol::V2026_07_28, home.path());
+        let listed = c.call("session_list", json!({})).expect("session_list");
+        let ids: Vec<&str> = listed["structuredContent"]["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .filter_map(|s| s["id"].as_str())
+            .collect();
+        assert!(ids.contains(&id), "{ids:?} in {}", dir.display());
+        c.finish();
+    }
+}

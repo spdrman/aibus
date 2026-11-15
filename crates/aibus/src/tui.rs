@@ -291,8 +291,13 @@ fn control(
             tracing::warn!("no control socket for this session: {e}");
             // The log line is for the file; the session's own screen says it too, so a missing
             // socket is never silent. The reducer logs `io error in <context>`.
+            // A path under the home directory is shown with `~`, like the prompt's directory.
+            let why = match std::env::var("HOME") {
+                Ok(home) if !home.is_empty() => e.to_string().replace(&home, "~"),
+                _ => e.to_string(),
+            };
             let _ = app.step(Msg::IoError {
-                context: format!("control socket, so `aibus mcp` will not find this session: {e}"),
+                context: format!("control socket, so `aibus mcp` will not find this session: {why}"),
                 error: String::new(),
             });
             None
@@ -449,7 +454,7 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     let id = ctx.session.as_ref().map(|s| s.id.to_string());
     let _control = match id {
         Some(id) if !ctx.global.no_control => {
-            let dir = aibus_control::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), &std::env::temp_dir(), Path::new("/tmp"));
+            let dir = aibus_control::default_runtime_dir();
             control(ctx, &id, &dir, rt, &mut opts, &mut app)
         }
         _ => None,

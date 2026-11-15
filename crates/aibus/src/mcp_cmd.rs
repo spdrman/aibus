@@ -94,7 +94,7 @@ pub fn mcp(g: &Global, args: &McpArgs, redactor: &Redactor) -> Result<u8, AibusE
     }
     #[cfg(unix)]
     if caps_session {
-        let dir = aibus_control::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), &std::env::temp_dir(), std::path::Path::new("/tmp"));
+        let dir = aibus_control::default_runtime_dir();
         server = server.with_session(std::sync::Arc::new(aibus_control::Link::new(dir, args.session.clone())));
     }
     match http {

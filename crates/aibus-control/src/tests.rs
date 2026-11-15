@@ -866,3 +866,17 @@ fn issue_320_the_fallback_dir_gets_the_same_checks_as_the_default() {
     assert_eq!(mode(&dir), 0o700);
     assert_eq!(mode(dir.parent().unwrap()), 0o700);
 }
+
+#[test]
+fn issue_320_the_threshold_is_exactly_where_the_socket_stops_fitting() {
+    // `<tmp>/aibus-<uid>/sessions` is kept up to 38 bytes (38 + 1 + 40 + 21 = 100) and falls back
+    // at 39, whatever the host's own paths are like.
+    let fixed = format!("/aibus-{}/sessions", uid()).len();
+    let short = Path::new("/tmp");
+    for (len, kept) in [(38, true), (39, false)] {
+        let tmp = PathBuf::from(format!("/{}", "t".repeat(len - fixed - 1)));
+        let dir = runtime_dir(None, &tmp, short);
+        assert_eq!(dir.as_os_str().len() == len, kept, "{}", dir.display());
+        assert_eq!(dir.starts_with(&tmp), kept, "{}", dir.display());
+    }
+}

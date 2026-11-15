@@ -370,3 +370,23 @@ fn the_docs_say_what_the_sandbox_is_and_is_not() {
     );
     assert!(!sec.contains("no ambient credential"));
 }
+
+#[test]
+fn the_docs_hedge_the_resolved_name_check_and_name_the_open_issue() {
+    let spec = fs::read_to_string(repo().join("docs/spec/16-extensions.md")).unwrap();
+    let dec = fs::read_to_string(repo().join("docs/DECISIONS.md")).unwrap();
+    let sec = fs::read_to_string(repo().join("docs/SECURITY.md")).unwrap();
+    for (name, doc) in [("spec 16", &spec), ("D-286", &dec)] {
+        assert!(
+            doc.contains("#338") && doc.contains("#288"),
+            "{name}: the process-group escape and #288"
+        );
+        assert!(
+            !doc.contains("coordinator"),
+            "{name}: say it is the owner's default, to be confirmed"
+        );
+    }
+    assert!(spec.contains("best effort") && spec.contains("own search directories"));
+    assert!(!spec.contains("`claude` that is really `python3` is refused"));
+    assert!(!sec.contains("coordinator"));
+}

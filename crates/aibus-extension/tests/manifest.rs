@@ -704,3 +704,114 @@ fn a_safe_value_for_the_same_flag_names_is_not_refused() {
         assert!(Manifest::parse(&m).is_ok(), "{ok}");
     }
 }
+
+// ---- #332 review round 2 ----
+
+fn as_codex(argv: &str) -> String {
+    let m = edit(
+        &template_manifest(),
+        "executable_candidates = [\"examplecli\"]",
+        "executable_candidates = [\"codex\"]",
+    );
+    edit(
+        &m,
+        "argv = [\"run\", \"--json\"]",
+        &format!("argv = {argv}"),
+    )
+}
+
+/// An allowlisted CLI's own subcommands are its own: `codex exec --json` is Codex's headless mode.
+#[test]
+fn an_official_clis_own_subcommands_are_not_refused_for_their_name() {
+    for argv in [
+        r#"["exec", "--json"]"#,
+        r#"["exec", "--json", "--skip-git-repo-check"]"#,
+        r#"["run", "--json"]"#,
+    ] {
+        assert!(Manifest::parse(&as_codex(argv)).is_ok(), "{argv}");
+    }
+    // The same word after a program that is not on the host's list is still refused.
+    assert_eq!(
+        refused_field(
+            "argv = [\"run\", \"--json\"]",
+            "argv = [\"exec\", \"--json\"]"
+        ),
+        "execution.argv"
+    );
+    // And the programs that make it dangerous stay refused, whatever the argv.
+    for (prog, argv) in [
+        ("npx", r#"["--yes", "x"]"#),
+        ("gem", r#"["install", "x"]"#),
+        ("sh", r#"["-c", "id"]"#),
+    ] {
+        let m = edit(
+            &template_manifest(),
+            "executable_candidates = [\"examplecli\"]",
+            &format!("executable_candidates = [\"{prog}\"]"),
+        );
+        let m = edit(
+            &m,
+            "argv = [\"run\", \"--json\"]",
+            &format!("argv = {argv}"),
+        );
+        assert!(Manifest::parse(&m).is_err(), "{prog}");
+    }
+}
+
+/// Every spelling the second review found, as an argv for an official CLI (each is one or two tokens).
+const MORE_UNATTENDED: [&[&str]; 31] = [
+    &["--permission-prompt-tool=mcp__x__approve"],
+    &["--permission-prompt-tool", "mcp__x"],
+    &["--settings=/tmp/s.json"],
+    &["--settings", "s.json"],
+    &["--mcp-config=cfg.json"],
+    &["--add-dir=.."],
+    &["--add-dir", "x"],
+    &["--permission-mode=auto"],
+    &["--permission-mode", "auto"],
+    &["--config=approval_policy=never"],
+    &["--config=sandbox_mode=danger-full-access"],
+    &["--config", "approval_policy=never"],
+    &["--config", "sandbox_mode=danger-full-access"],
+    &["-c", "approval_policy=never"],
+    &["-anever"],
+    &["-sdanger-full-access"],
+    &["-a", "on-failure"],
+    &["--ask-for-approval=on-failure"],
+    &["--ask-for-approval", "on-failure"],
+    &["--profile=full_auto"],
+    &["--profile", "full_auto"],
+    &["--approval-mode=autoEdit"],
+    &["--approval-mode", "autoEdit"],
+    &["--allow-tools=all"],
+    &["--allow-tools", "all"],
+    &["--yes-always"],
+    &["--auto-accept"],
+    &["--approve-all"],
+    &["-a=never"],
+    &["--sandbox=danger-full-access"],
+    &["--approval-policy=on-failure"],
+];
+
+#[test]
+fn the_spellings_the_second_review_found_are_refused_for_an_official_cli_too() {
+    for tokens in MORE_UNATTENDED {
+        let quoted: Vec<String> = tokens.iter().map(|t| format!("\"{t}\"")).collect();
+        let argv = format!("[\"exec\", {}]", quoted.join(", "));
+        let (field, _) = refused(&as_codex(&argv));
+        assert_eq!(field, "execution.argv", "{tokens:?}");
+    }
+}
+
+#[test]
+fn ordinary_flags_of_an_official_cli_are_not_swept_up() {
+    for argv in [
+        r#"["exec", "--json", "--model", "gpt-5"]"#,
+        r#"["exec", "--sandbox", "read-only"]"#,
+        r#"["exec", "--ask-for-approval", "untrusted"]"#,
+        r#"["exec", "--config", "model=gpt-5"]"#,
+        r#"["exec", "--output-format", "stream-json", "--verbose"]"#,
+    ] {
+        assert!(Manifest::parse(&as_codex(argv)).is_ok(), "{argv}");
+    }
+}

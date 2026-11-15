@@ -107,6 +107,19 @@ impl Package {
                 .into());
             }
         }
+        // A guest module is code the host will run: it has to be in the package and it has to pass
+        // the load checks (compiles, imports only the host API) before the package is accepted.
+        #[cfg(feature = "wasm")]
+        if let Some(path) = &manifest.normalizer.module {
+            let invalid = |why: String| ManifestError::Invalid {
+                field: "normalizer.module".into(),
+                why,
+            };
+            let bytes = files
+                .get(path)
+                .ok_or_else(|| invalid(format!("{path} is not in the package")))?;
+            crate::wasm::Module::load(bytes).map_err(|e| invalid(e.to_string()))?;
+        }
         // The hash of a package: sha256 over the sorted lines `<path> NUL <sha256 of the file> LF`.
         let mut listing = Vec::new();
         for (path, bytes) in &files {

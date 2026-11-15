@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Hosts WASM extension modules (#333). Off by default until the owner decides.
+wasm = ["aibus-extension/wasm"]
+
 [dependencies]
 aibus-core.workspace = true
 aibus-extension = { path = "../aibus-extension" }

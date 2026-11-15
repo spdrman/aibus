@@ -13,11 +13,21 @@ publish.workspace = true
 # extension is data (a manifest, fixtures and, for the declarative engine, a few mapping rules):
 # no code from a package ever runs inside aibus, and only the host starts a process, and only a program on the host's
 # allowlist of official CLIs, with a bounded environment and the host's limits.
+[features]
+# The WASM guest host (#333). Off by default: wasmtime and its compiler are most of this crate's
+# build time and binary size, and the owner has not yet decided whether a release build carries
+# them. With the feature off, a manifest that names a module is refused at parse time.
+wasm = ["dep:wasmtime"]
+
 [dependencies]
 aibus-core.workspace = true
 aibus-supervisor = { path = "../aibus-supervisor" }
 aibus-trace = { path = "../aibus-trace" }
 regex = "1"
+# Pinned to the 36.0.x long-term-support line: it still gets security fixes and its MSRV (1.86) fits
+# the workspace's 1.89, while 40.0.4 (the newest 1.89 release) has open advisories. No default features:
+# no WASI, no component model, no async, no cache, no profiling. The guest gets no ambient authority.
+wasmtime = { version = "=36.0.20", optional = true, default-features = false, features = ["runtime", "cranelift", "std"] }
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -31,5 +41,7 @@ rustix = { version = "1", default-features = false, features = ["std", "fs", "pr
 
 [dev-dependencies]
 tempfile = "3"
+# Hostile guests in the tests are written as WAT.
+wat = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
 tokio-util = "0.7"

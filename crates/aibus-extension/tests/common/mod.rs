@@ -72,3 +72,34 @@ pub fn registry_of(reg: &Path, pkgs: &[PathBuf]) -> Registry {
     }
     Registry::open(reg).unwrap()
 }
+
+/// The checked-in guest the conformance tests run (source and build script beside it).
+pub fn guest_wasm() -> Vec<u8> {
+    fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/wasm-guest/parser.wasm"))
+        .expect("tests/wasm-guest/parser.wasm is the built fixture: run tests/wasm-guest/build.sh")
+}
+
+/// The template's manifest with its declarative rules replaced by a WASM module at `wasm/parser.wasm`.
+pub fn wasm_manifest() -> String {
+    let m = template_manifest();
+    let from = m
+        .find("[normalizer]")
+        .expect("the template has a [normalizer]");
+    let to = m
+        .find("# Every capability")
+        .expect("the template lists capabilities");
+    format!(
+        "{}[normalizer]\nengine = \"wasm-module\"\nmodule = \"wasm/parser.wasm\"\n\n{}",
+        &m[..from],
+        &m[to..]
+    )
+}
+
+/// A package directory under `root/name`: the template's fixtures and licence, `manifest`, and
+/// `module` at `wasm/parser.wasm`.
+pub fn wasm_package(root: &Path, name: &str, manifest: &str, module: &[u8]) -> PathBuf {
+    let dir = package_with(root, name, manifest);
+    fs::create_dir_all(dir.join("wasm")).unwrap();
+    fs::write(dir.join("wasm/parser.wasm"), module).unwrap();
+    dir
+}

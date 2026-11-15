@@ -389,7 +389,9 @@ pub async fn prepare(
     let probe = match m.normalizer.engine {
         // The host's own Claude gate: required flags and the bare-mode refusal.
         crate::manifest::Engine::ClaudeStreamJson => cli::probe(&version_out, &help_out)?,
-        crate::manifest::Engine::DeclarativeJsonl => cli::parse_help(&version_out, &help_out)?,
+        crate::manifest::Engine::DeclarativeJsonl | crate::manifest::Engine::WasmModule => {
+            cli::parse_help(&version_out, &help_out)?
+        }
     };
     let negotiated = negotiate(m, &grant.os, &probe)?;
 
@@ -460,7 +462,9 @@ pub async fn prepare(
     })
 }
 
-/// The engine that reads this extension's events.
+/// The engine that reads this extension's events, for a manifest alone. A manifest that names a
+/// WASM module needs the module's bytes: use [`engine_for`]. Here such an engine is one whose guest
+/// is not there, which says so and hosts nothing.
 pub fn engine(m: &Manifest, attempt: AttemptRef) -> Box<dyn Engine> {
     match m.normalizer.engine {
         crate::manifest::Engine::ClaudeStreamJson => {
@@ -473,5 +477,50 @@ pub fn engine(m: &Manifest, attempt: AttemptRef) -> Box<dyn Engine> {
                 m.runtime.usage_quality,
             ))
         }
+        #[cfg(feature = "wasm")]
+        crate::manifest::Engine::WasmModule => Box::new(crate::wasm::Wasm::unavailable(
+            attempt,
+            m.runtime.usage_quality,
+            "no_module",
+        )),
+        // A manifest naming a module is refused at parse time in a build without the feature.
+        #[cfg(not(feature = "wasm"))]
+        crate::manifest::Engine::WasmModule => Box::new(crate::declarative::Declarative::new(
+            attempt,
+            Vec::new(),
+            m.runtime.usage_quality,
+        )),
     }
+}
+
+/// The engine for a package: [`engine`], with the guest loaded from the package's own bytes when
+/// the manifest names a module. A module that will not load (it passed at read time, so this is a
+/// changed host) gives an engine that reports `extension_failed` and carries the attempt on.
+pub fn engine_for(pkg: &crate::package::Package, attempt: AttemptRef) -> Box<dyn Engine> {
+    #[cfg(feature = "wasm")]
+    if let Some(path) = &pkg.manifest.normalizer.module {
+        let loaded = pkg
+            .files
+            .get(path)
+            .ok_or_else(|| "no_module".to_owned())
+            .and_then(|b| crate::wasm::Module::load(b).map_err(|e| format!("load: {e}")))
+            .and_then(|m| {
+                crate::wasm::Wasm::new(
+                    attempt.clone(),
+                    &m,
+                    crate::wasm::Limits::default(),
+                    pkg.manifest.runtime.usage_quality,
+                )
+                .map_err(|e| format!("start: {e}"))
+            });
+        return match loaded {
+            Ok(w) => Box::new(w),
+            Err(why) => Box::new(crate::wasm::Wasm::unavailable(
+                attempt,
+                pkg.manifest.runtime.usage_quality,
+                &why.chars().take(48).collect::<String>(),
+            )),
+        };
+    }
+    engine(&pkg.manifest, attempt)
 }

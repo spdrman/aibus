@@ -75,7 +75,7 @@ pub fn observe(pkg: &Package, fixture: &str, ending: &str) -> Result<Observed, S
         provider_extension: pkg.manifest.id.clone(),
     };
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut eng = crate::sandbox::engine(&pkg.manifest, attempt);
+    let mut eng = crate::sandbox::engine_for(pkg, attempt);
     let mut events = eng
         .start(base, serde_json::json!({ "fixture": fixture }))
         .events;

@@ -426,12 +426,15 @@ pub fn export(
             json!({ "dir": preview.dir, "files": files, "diff": preview.diff, "hash": preview.hash })
         );
     } else if preview.files.is_empty() {
-        println!("{} already matches; nothing to write", dir.display());
+        println!(
+            "{} already matches; nothing to write",
+            preview.dir.display()
+        );
     } else {
         print!("{}", preview.diff);
         println!(
             "\nnothing was written. To write these files into {}:",
-            dir.display()
+            preview.dir.display()
         );
         println!("  aibus workflow export {target} --apply {}", preview.hash);
     }

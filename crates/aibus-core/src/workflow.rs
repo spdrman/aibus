@@ -358,7 +358,7 @@ impl Workflow {
         for (i, r) in file.routes.into_iter().enumerate() {
             let when = r.when.as_deref().unwrap_or("");
             let when = if when.trim().is_empty() {
-                graph::Cond::completed(&r.from)
+                graph::Cond::Is { step: r.from.clone(), what: graph::Pred::Completed }
             } else {
                 graph::Cond::parse(when).map_err(|why| WorkflowError::Invalid(format!("route {}: when: {why}", i + 1)))?
             };
@@ -526,8 +526,16 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
         if let Some(gate) = raw.gate.as_ref().filter(|g| !g.trim().is_empty()) {
             note(Some("gate"), format!("runs a shell command after this step: {gate}"));
         }
-        if let Some(why) = jev::status_note(raw.runtime) {
-            note(Some("runtime"), why);
+        let info = jev::runtime_info(raw.runtime);
+        if info.status != "available" {
+            note(
+                Some("runtime"),
+                format!(
+                    "runtime {} is {}: the #281 spike proved it and #285 decides on it, so this step plans \
+                     (aibus workflow plan --dry-run) and does not run yet",
+                    info.id, info.status
+                ),
+            );
         }
         // The last step's summary is the workflow's result, so nobody else has to read it.
         let read = |j: usize| {

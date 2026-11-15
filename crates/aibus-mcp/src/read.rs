@@ -27,6 +27,64 @@ fn schema(v: Value) -> Arc<JsonObject> {
 
 /// The five read tools, in the epic's table order (after `workflow_list`).
 pub(crate) fn tools() -> Vec<Tool> {
+    /// The shape of a compiled plan (`docs/schemas/workflow/plan-v1.json`).
+    fn plan_schema() -> Value {
+        let object = json!({ "type": "object" });
+        let list = json!({ "type": "array" });
+        let text = json!({ "type": "string" });
+        let maybe_text = json!({ "type": ["string", "null"] });
+        json!({
+            "$schema": DRAFT_2020_12,
+            "type": "object",
+            "properties": {
+                "kind": { "const": "aibus.workflow.plan" },
+                "manifest_version": { "const": 1 },
+                "compiler": text,
+                "workflow": object,
+                "entry": text,
+                "runnable_now": { "type": "boolean" },
+                "plan_only_because": maybe_text,
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": text,
+                            "agent": text,
+                            "runtime": text,
+                            "mode": text,
+                            "prompt": object,
+                            "invocation": object,
+                        },
+                        "required": ["key", "agent", "runtime", "mode", "prompt", "invocation"],
+                    },
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": { "kind": text, "from": text, "to": text },
+                        "required": ["kind", "from", "to"],
+                    },
+                },
+                "fan_out": list,
+                "envelope": object,
+                "approvals": object,
+                "agents": object,
+                "prompts": object,
+                "runtimes": object,
+                "jev": object,
+                "notes": list,
+                "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            },
+            "required": [
+                "kind", "manifest_version", "compiler", "workflow", "entry", "runnable_now", "plan_only_because",
+                "steps", "edges", "fan_out", "envelope", "approvals", "agents", "prompts", "runtimes", "jev",
+                "notes", "plan_hash",
+            ],
+            "additionalProperties": false,
+        })
+    }
     let scope = json!({ "type": "string", "enum": ["project", "user"] });
     let by_name = json!({
         "$schema": DRAFT_2020_12,
@@ -266,65 +324,6 @@ pub(crate) fn tools() -> Vec<Tool> {
         .with_raw_output_schema(schema(plan_schema()))
         .with_annotations(read_only()),
     ]
-}
-
-/// The shape of a compiled plan (`docs/schemas/workflow/plan-v1.json`).
-fn plan_schema() -> Value {
-    let object = json!({ "type": "object" });
-    let list = json!({ "type": "array" });
-    let text = json!({ "type": "string" });
-    let maybe_text = json!({ "type": ["string", "null"] });
-    json!({
-        "$schema": DRAFT_2020_12,
-        "type": "object",
-        "properties": {
-            "kind": { "const": "aibus.workflow.plan" },
-            "manifest_version": { "const": 1 },
-            "compiler": text,
-            "workflow": object,
-            "entry": text,
-            "runnable_now": { "type": "boolean" },
-            "plan_only_because": maybe_text,
-            "steps": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "key": text,
-                        "agent": text,
-                        "runtime": text,
-                        "mode": text,
-                        "prompt": object,
-                        "invocation": object,
-                    },
-                    "required": ["key", "agent", "runtime", "mode", "prompt", "invocation"],
-                },
-            },
-            "edges": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": { "kind": text, "from": text, "to": text },
-                    "required": ["kind", "from", "to"],
-                },
-            },
-            "fan_out": list,
-            "envelope": object,
-            "approvals": object,
-            "agents": object,
-            "prompts": object,
-            "runtimes": object,
-            "jev": object,
-            "notes": list,
-            "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-        },
-        "required": [
-            "kind", "manifest_version", "compiler", "workflow", "entry", "runnable_now", "plan_only_because",
-            "steps", "edges", "fan_out", "envelope", "approvals", "agents", "prompts", "runtimes", "jev",
-            "notes", "plan_hash",
-        ],
-        "additionalProperties": false,
-    })
 }
 
 /// A tool failure the caller can act on: an `isError` result with one sentence.

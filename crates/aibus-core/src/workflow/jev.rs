@@ -88,18 +88,6 @@ pub fn runtime_info(rt: Runtime) -> RuntimeInfo {
     }
 }
 
-/// A warning for a step on a runtime that is not plainly available.
-pub fn status_note(rt: Runtime) -> Option<String> {
-    let info = runtime_info(rt);
-    (info.status != "available").then(|| {
-        format!(
-            "runtime {} is {}: the #281 spike proved it and #285 decides on it, so this step plans \
-             (aibus workflow plan --dry-run) and does not run yet",
-            info.id, info.status
-        )
-    })
-}
-
 /// `native_or_managed` becomes `native` when the runtime can show native child lineage and the
 /// parent runs on the same runtime (a native subagent lives in its parent's process); otherwise
 /// `aibus_managed`. The other two modes are what they say.

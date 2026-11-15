@@ -70,44 +70,6 @@ fn agent_file(name: &str, agent: &serde_json::Value) -> String {
     out
 }
 
-/// A line diff of `old` and `new`: ` ` for a line both have, `-` and `+` for the rest. A pair too
-/// big to compare line by line is shown as all of one and all of the other.
-fn line_diff(old: &str, new: &str) -> String {
-    let (a, b): (Vec<&str>, Vec<&str>) = (old.lines().collect(), new.lines().collect());
-    let mut out = String::new();
-    if a.len().saturating_mul(b.len()) > 4_000_000 {
-        a.iter().for_each(|l| out.push_str(&format!("-{l}\n")));
-        b.iter().for_each(|l| out.push_str(&format!("+{l}\n")));
-        return out;
-    }
-    // lcs[i][j]: the longest common run of a[i..] and b[j..].
-    let mut lcs = vec![vec![0u32; b.len() + 1]; a.len() + 1];
-    for i in (0..a.len()).rev() {
-        for j in (0..b.len()).rev() {
-            lcs[i][j] = if a[i] == b[j] {
-                lcs[i + 1][j + 1] + 1
-            } else {
-                lcs[i + 1][j].max(lcs[i][j + 1])
-            };
-        }
-    }
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() || j < b.len() {
-        if i < a.len() && j < b.len() && a[i] == b[j] {
-            out.push_str(&format!(" {}\n", a[i]));
-            i += 1;
-            j += 1;
-        } else if j < b.len() && (i == a.len() || lcs[i][j + 1] >= lcs[i + 1][j]) {
-            out.push_str(&format!("+{}\n", b[j]));
-            j += 1;
-        } else {
-            out.push_str(&format!("-{}\n", a[i]));
-            i += 1;
-        }
-    }
-    out
-}
-
 /// What exporting `wf`'s native subagents into `dir` would change. Files that would not change
 /// are left out; nothing is written.
 pub fn preview(
@@ -115,12 +77,89 @@ pub fn preview(
     agents: &IndexMap<AgentName, AgentDef>,
     dir: &Path,
 ) -> Result<Export, String> {
-    if std::fs::symlink_metadata(dir).is_ok_and(|md| md.file_type().is_symlink()) {
-        return Err(format!(
-            "{} is a symlink, refusing to write through it",
-            dir.display()
-        ));
+    /// `dir` made absolute with every symlink in it resolved. A symlink may lead deeper (`/tmp`
+    /// to `/private/tmp`) but not sideways or up, so a repository that ships `.claude -> ~/.claude`
+    /// cannot send the files out of the project; a symlink as the directory itself is refused too.
+    fn resolve(dir: &Path) -> Result<PathBuf, String> {
+        let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        if std::fs::symlink_metadata(&dir).is_ok_and(|md| md.file_type().is_symlink()) {
+            return Err(format!(
+                "{} is a symlink, refusing to write through it",
+                dir.display()
+            ));
+        }
+        let mut below = PathBuf::new();
+        let mut here = dir.as_path();
+        // The nearest ancestor that exists, and the names under it that do not yet.
+        while std::fs::symlink_metadata(here).is_err() {
+            let (Some(up), Some(name)) = (here.parent(), here.file_name()) else {
+                break;
+            };
+            below = Path::new(name).join(&below);
+            here = up;
+        }
+        for p in here.ancestors() {
+            if std::fs::symlink_metadata(p).is_ok_and(|md| md.file_type().is_symlink()) {
+                let says = |e: std::io::Error| format!("{}: {e}", p.display());
+                let to = p.canonicalize().map_err(says)?;
+                let from = p.parent().unwrap_or(p).canonicalize().map_err(says)?;
+                if !to.starts_with(&from) {
+                    return Err(format!(
+                        "{} is a symlink to {}, outside its own directory; refusing to write through it",
+                        p.display(),
+                        to.display()
+                    ));
+                }
+            }
+        }
+        let here = here
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", here.display()))?;
+        Ok(here.join(below))
     }
+
+    /// A line diff of `old` and `new`: ` ` for a line both have, `-` and `+` for the rest. A pair too
+    /// big to compare line by line is shown as all of one and all of the other. Lines split on `\n`
+    /// only, so a file that differs in its line ends (`\r`) shows a changed line.
+    fn line_diff(old: &str, new: &str) -> String {
+        let (a, b): (Vec<&str>, Vec<&str>) = (
+            old.strip_suffix('\n').unwrap_or(old).split('\n').collect(),
+            new.strip_suffix('\n').unwrap_or(new).split('\n').collect(),
+        );
+        let mut out = String::new();
+        if a.len().saturating_mul(b.len()) > 4_000_000 {
+            a.iter().for_each(|l| out.push_str(&format!("-{l}\n")));
+            b.iter().for_each(|l| out.push_str(&format!("+{l}\n")));
+            return out;
+        }
+        // lcs[i][j]: the longest common run of a[i..] and b[j..].
+        let mut lcs = vec![vec![0u32; b.len() + 1]; a.len() + 1];
+        for i in (0..a.len()).rev() {
+            for j in (0..b.len()).rev() {
+                lcs[i][j] = if a[i] == b[j] {
+                    lcs[i + 1][j + 1] + 1
+                } else {
+                    lcs[i + 1][j].max(lcs[i][j + 1])
+                };
+            }
+        }
+        let (mut i, mut j) = (0, 0);
+        while i < a.len() || j < b.len() {
+            if i < a.len() && j < b.len() && a[i] == b[j] {
+                out.push_str(&format!(" {}\n", a[i]));
+                i += 1;
+                j += 1;
+            } else if j < b.len() && (i == a.len() || lcs[i][j + 1] >= lcs[i + 1][j]) {
+                out.push_str(&format!("+{}\n", b[j]));
+                j += 1;
+            } else {
+                out.push_str(&format!("-{}\n", a[i]));
+                i += 1;
+            }
+        }
+        out
+    }
+    let dir = &resolve(dir)?;
     let mut files = Vec::new();
     let mut diff = String::new();
     for parent in 0..wf.steps.len() {

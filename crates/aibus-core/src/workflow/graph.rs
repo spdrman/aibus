@@ -11,17 +11,8 @@ use std::fmt;
 
 use super::{jev, reads, var, Mode, Output, StepIsolation, Var, Workflow, WorkflowError};
 
-/// The longest `when` a route may have.
-pub const MAX_WHEN_BYTES: usize = 256;
-
 /// The most steps a workflow that uses any field added in #283 may have.
 pub const MAX_STEPS: usize = 256;
-
-/// The most routes a workflow may have.
-pub const MAX_ROUTES: usize = 1024;
-
-/// The most times one route back may be taken in a run.
-pub const MAX_ITERATIONS: u32 = 10;
 
 /// What a route condition can say about a step.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,15 +42,9 @@ enum Tok<'a> {
 }
 
 impl Cond {
-    /// The default condition of a route with no `when`: its `from` step completed.
-    pub fn completed(step: &str) -> Self {
-        Cond::Is {
-            step: step.to_owned(),
-            what: Pred::Completed,
-        }
-    }
-
     pub fn parse(text: &str) -> Result<Self, String> {
+        // The longest `when` a route may have.
+        const MAX_WHEN_BYTES: usize = 256;
         if text.len() > MAX_WHEN_BYTES {
             return Err(format!(
                 "{} bytes, the most is {MAX_WHEN_BYTES}",
@@ -112,9 +97,6 @@ impl Cond {
     }
 }
 
-const WANT: &str =
-    "want <step>.completed, <step>.failed or <step>.artifact_valid, joined with !, && and ||";
-
 fn any(toks: &[Tok<'_>]) -> Result<Cond, String> {
     let parts = toks
         .split(|t| *t == Tok::Or)
@@ -140,6 +122,8 @@ fn one_or(mut parts: Vec<Cond>, many: fn(Vec<Cond>) -> Cond) -> Cond {
 }
 
 fn unary(toks: &[Tok<'_>]) -> Result<Cond, String> {
+    const WANT: &str =
+        "want <step>.completed, <step>.failed or <step>.artifact_valid, joined with !, && and ||";
     match toks {
         [Tok::Not, rest @ ..] => Ok(Cond::Not(Box::new(unary(rest)?))),
         [Tok::Word(w)] => {
@@ -427,6 +411,10 @@ pub(super) fn check(wf: &Workflow) -> Result<(), WorkflowError> {
     /// The checks a workflow with routes needs: route ends, cycles, loops, conditions,
     /// reachability and what each step reads.
     fn routes(wf: &Workflow, native: &[bool]) -> Result<(), WorkflowError> {
+        /// The most routes a workflow may have.
+        const MAX_ROUTES: usize = 1024;
+        /// The most times one route back may be taken in a run.
+        const MAX_ITERATIONS: u32 = 10;
         let n = wf.steps.len();
         let at = |r: usize, why: String| WorkflowError::Invalid(format!("route {}: {why}", r + 1));
         let short = |s: &str| s.chars().take(80).collect::<String>();

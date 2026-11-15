@@ -229,6 +229,26 @@ pub fn compile(
                 .into(),
         ));
     }
+    // A native subagent's definition is copied into the plan as it is, so it is held to the same rule.
+    for (i, s) in wf.steps.iter().enumerate() {
+        if let Some(def) = agents.get(&s.agent).filter(|_| wf.native(i)) {
+            for (what, text) in [
+                ("prompt", &def.system_prompt),
+                ("description", &def.description),
+            ] {
+                if redactor.redact(text) != *text {
+                    problems.push(Problem {
+                        step: Some(i + 1),
+                        field: Some("agent".into()),
+                        message: format!(
+                            "the {what} of agent `{}` looks like a credential, so it gets no plan",
+                            s.agent
+                        ),
+                    });
+                }
+            }
+        }
+    }
     for (i, s) in wf.steps.iter().enumerate() {
         if !agents.contains_key(&s.agent) {
             problems.push(Problem {

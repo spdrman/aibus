@@ -717,6 +717,51 @@ fn the_native_export_shows_a_diff_and_never_overwrites_without_the_consent_for_i
         assert!(native::preview(&wf, &agents(), &dir).is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
     }
+
+    // A symlink as the directory, or anywhere above it that leads out of its own directory (a
+    // cloned `.claude -> elsewhere`), is refused and nothing lands outside.
+    #[cfg(unix)]
+    {
+        let project = home.path().join("project");
+        let elsewhere = home.path().join("elsewhere");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(elsewhere.join("agents")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, project.join(".claude")).unwrap();
+        let err = native::preview(&wf, &agents(), &project.join(".claude/agents")).unwrap_err();
+        assert!(err.contains("refusing to write through it"), "{err}");
+        std::fs::remove_file(project.join(".claude")).unwrap();
+        std::fs::create_dir_all(project.join(".claude")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("agents"), project.join(".claude/agents"))
+            .unwrap();
+        assert!(native::preview(&wf, &agents(), &project.join(".claude/agents")).is_err());
+        assert!(!elsewhere.join("agents/search.md").exists());
+        // A link that only leads deeper is fine, and the preview shows where the files really go.
+        let real = project.join("real");
+        std::fs::create_dir_all(real.join("agents")).unwrap();
+        std::os::unix::fs::symlink("real", project.join("deeper")).unwrap();
+        let ok = native::preview(&wf, &agents(), &project.join("deeper/agents")).unwrap();
+        assert!(ok.dir.ends_with("real/agents"), "{}", ok.dir.display());
+    }
+
+    // A copy that differs only in its line ends is shown as a change, not an empty diff.
+    let dir = home.path().join("crlf");
+    let crlf = native::preview(&wf, &agents(), &dir).unwrap();
+    native::apply(&crlf, &crlf.hash).unwrap();
+    let path = dir.join("search.md");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace('\n', "\r\n");
+    std::fs::write(&path, text).unwrap();
+    let again = native::preview(&wf, &agents(), &dir).unwrap();
+    assert_eq!(again.files.len(), 1);
+    assert!(
+        again
+            .diff
+            .lines()
+            .any(|l| l.starts_with('+') && !l.starts_with("+++")),
+        "{}",
+        again.diff
+    );
 }
 
 #[test]

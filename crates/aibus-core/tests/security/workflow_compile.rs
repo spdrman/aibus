@@ -40,6 +40,33 @@ fn compile_refuses_a_credential_anywhere_in_the_workflow() {
         // And the refusal does not repeat it.
         assert!(!said.iter().any(|m| m.contains(&key)), "{said:?}");
     }
+
+    // A native subagent's definition is copied into the plan, so a credential in its prompt or
+    // description is refused too, and the refusal names the agent and not the value.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/workflows/graph/repo-review.toml"
+    ))
+    .unwrap();
+    let wf = Workflow::parse("repo-review", &text).unwrap();
+    let explore: AgentName = "explore".parse().unwrap();
+    for field in ["prompt", "description"] {
+        let mut roster = agents.clone();
+        let def = roster.get_mut(&explore).unwrap();
+        match field {
+            "prompt" => def.system_prompt.push_str(&format!("\nuse {key}\n")),
+            _ => def.description = format!("search with {key}"),
+        }
+        let refused = compile(&wf, &text, &roster, &Redactor::new()).unwrap_err();
+        let said: Vec<&str> = refused.iter().map(|p| p.message.as_str()).collect();
+        assert!(
+            said.iter().any(|m| m.contains("agent `explore`")
+                && m.contains(field)
+                && m.contains("looks like a credential")),
+            "{field}: {said:?}"
+        );
+        assert!(!said.iter().any(|m| m.contains(&key)), "{said:?}");
+    }
 }
 
 #[test]

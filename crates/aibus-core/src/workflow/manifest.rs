@@ -172,52 +172,6 @@ pub fn run_manifest(plan: &Value, facts: &RunFacts) -> Value {
     })
 }
 
-/// `plan` with its lists that have an identity turned into maps keyed by it: steps by key, edges
-/// by kind and ends, decisions by step.
-fn keyed(plan: &Value) -> Value {
-    let mut v = plan.clone();
-    let by = |list: &Value, key: &dyn Fn(&Value) -> String| -> Value {
-        match list.as_array() {
-            Some(items) => Value::Object(
-                items
-                    .iter()
-                    .map(|x| (key(x), x.clone()))
-                    .collect::<Map<_, _>>(),
-            ),
-            None => list.clone(),
-        }
-    };
-    let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
-    if let Some(m) = v.as_object_mut() {
-        if let Some(steps) = m.get("steps") {
-            let steps = by(steps, &|s| text(&s["key"]));
-            m.insert("steps".into(), steps);
-        }
-        if let Some(edges) = m.get("edges") {
-            let edges = by(edges, &|e| {
-                let via = e
-                    .get("via")
-                    .map(|v| format!(" via {}", text(v)))
-                    .unwrap_or_default();
-                format!(
-                    "{} {} -> {}{via}",
-                    text(&e["kind"]),
-                    text(&e["from"]),
-                    text(&e["to"])
-                )
-            });
-            m.insert("edges".into(), edges);
-        }
-        if let Some(jev) = m.get_mut("jev").and_then(Value::as_object_mut) {
-            if let Some(d) = jev.get("decisions") {
-                let d = by(d, &|x| text(&x["step"]));
-                jev.insert("decisions".into(), d);
-            }
-        }
-    }
-    v
-}
-
 fn walk(path: &str, a: &Value, b: &Value, out: &mut Vec<Change>) {
     if a == b {
         return;
@@ -250,6 +204,51 @@ fn walk(path: &str, a: &Value, b: &Value, out: &mut Vec<Change>) {
 /// Every difference between two plans. Steps are matched by key and edges by their ends and
 /// kind, so a step moved in the file is not a change and a renamed one is.
 pub fn diff(a: &Value, b: &Value) -> Vec<Change> {
+    /// `plan` with its lists that have an identity turned into maps keyed by it: steps by key, edges
+    /// by kind and ends, decisions by step.
+    fn keyed(plan: &Value) -> Value {
+        let mut v = plan.clone();
+        let by = |list: &Value, key: &dyn Fn(&Value) -> String| -> Value {
+            match list.as_array() {
+                Some(items) => Value::Object(
+                    items
+                        .iter()
+                        .map(|x| (key(x), x.clone()))
+                        .collect::<Map<_, _>>(),
+                ),
+                None => list.clone(),
+            }
+        };
+        let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+        if let Some(m) = v.as_object_mut() {
+            if let Some(steps) = m.get("steps") {
+                let steps = by(steps, &|s| text(&s["key"]));
+                m.insert("steps".into(), steps);
+            }
+            if let Some(edges) = m.get("edges") {
+                let edges = by(edges, &|e| {
+                    let via = e
+                        .get("via")
+                        .map(|v| format!(" via {}", text(v)))
+                        .unwrap_or_default();
+                    format!(
+                        "{} {} -> {}{via}",
+                        text(&e["kind"]),
+                        text(&e["from"]),
+                        text(&e["to"])
+                    )
+                });
+                m.insert("edges".into(), edges);
+            }
+            if let Some(jev) = m.get_mut("jev").and_then(Value::as_object_mut) {
+                if let Some(d) = jev.get("decisions") {
+                    let d = by(d, &|x| text(&x["step"]));
+                    jev.insert("decisions".into(), d);
+                }
+            }
+        }
+        v
+    }
     let mut out = Vec::new();
     walk("", &keyed(a), &keyed(b), &mut out);
     out

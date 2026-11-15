@@ -102,3 +102,18 @@ fn the_readme_and_the_help_text_say_http_and_confirmation() {
     let first = own.lines().next().unwrap();
     assert!(first.contains("HTTP"), "{first}");
 }
+
+/// #339: spec 16 and D-286 say the flags a manifest may pass are a host-owned list per CLI, kept
+/// per CLI version, with the denylist as a second check.
+#[test]
+fn issue_339_the_docs_describe_the_per_cli_flag_allowlist() {
+    let spec = fs::read_to_string(root().join("docs/spec/16-extensions.md")).unwrap();
+    let decisions = fs::read_to_string(root().join("docs/DECISIONS.md")).unwrap();
+    let d286 = decisions.split("## D-286").nth(1).unwrap().split("\n## D-").next().unwrap();
+    for (name, text) in [("spec 16", spec.as_str()), ("D-286", d286)] {
+        assert!(text.contains("allowlist of flags"), "{name} does not describe the flag allowlist");
+        assert!(text.contains("per CLI version"), "{name} does not say the lists are kept per CLI version");
+        assert!(!text.contains("I did not move to a per-CLI allowlist"), "{name} still says it did not");
+    }
+    assert!(spec.contains("second check"), "spec 16 does not keep the denylist as a second check");
+}

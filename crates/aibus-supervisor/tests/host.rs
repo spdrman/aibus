@@ -651,11 +651,10 @@ async fn issue_324_a_flood_after_exit_hits_the_bound_and_says_so() {
         .filter(|e| e.kind == EventKind::GapDetected && e.data["reason"] == "unread_after_exit")
         .collect();
     assert_eq!(gaps.len(), 1, "one gap says output was left unread");
-    assert!(
-        gaps[0].data["bytes"].as_u64().is_some() && gaps[0].data["lines"].as_u64().is_some(),
-        "the gap carries a count: {}",
-        gaps[0].data
-    );
+    let d = &gaps[0].data;
+    assert_eq!(d["bound"], "drain_max", "{d}");
+    assert!(d["lines"].as_u64().unwrap() > 0, "lines were counted: {d}");
+    assert!(d["bytes"].as_u64().unwrap() > 0, "bytes were counted: {d}");
 }
 
 #[tokio::test]
@@ -697,4 +696,105 @@ async fn issue_324_a_descendant_holding_the_pipes_is_still_cut_off_quickly() {
             .any(|e| e.data["reason"] == "unread_after_exit"),
         "nothing was queued, so there is nothing to report"
     );
+}
+
+const DRIP: &str = "( while :; do echo drip >&2; sleep 0.2; done ) &";
+
+fn unread_gaps(events: &[TraceEvent]) -> Vec<&TraceEvent> {
+    events
+        .iter()
+        .filter(|e| e.kind == EventKind::GapDetected && e.data["reason"] == "unread_after_exit")
+        .collect()
+}
+
+#[tokio::test]
+async fn issue_324_a_slow_drip_after_exit_ends_at_drain_max_with_a_gap() {
+    let rig = Rig::new();
+    let started = Instant::now();
+    let (out, events) = rig.plain(DRIP, drain_limits(2_000, 500, 2_000)).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(1_900),
+        "ended early: {took:?}"
+    );
+    assert!(took < Duration::from_secs(6), "ended late: {took:?}");
+    let gaps = unread_gaps(&events);
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].data["bound"], "drain_max");
+}
+
+#[tokio::test]
+async fn issue_324_cancel_during_the_drain_ends_it_as_cancelled() {
+    let rig = Rig::new();
+    let exe = rig.cli(DRIP);
+    let cancel = CancellationToken::new();
+    let c = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        c.cancel();
+    });
+    let started = Instant::now();
+    let (out, _) = rig
+        .run(
+            rig.launch(exe, drain_limits(2_000, 5_000, 20_000)),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.ending, Ending::Cancelled);
+    assert_eq!(out.status, AttemptStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn issue_324_cancel_during_the_drain_records_what_was_left_unread() {
+    let rig = Rig::new();
+    let exe = rig.cli(&flood_body(3_000));
+    let cancel = CancellationToken::new();
+    let c = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        c.cancel();
+    });
+    let started = Instant::now();
+    let (out, events) = rig
+        .run(
+            rig.launch(exe, drain_limits(20, 5_000, 20_000)),
+            PayloadPolicy::MetadataOnly,
+            Redactor::new(),
+            cancel,
+        )
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.ending, Ending::Cancelled);
+    let gaps = unread_gaps(&events);
+    assert_eq!(gaps.len(), 1, "pending lines are a gap");
+    assert!(gaps[0].data["lines"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn issue_324_the_wall_deadline_during_the_drain_ends_it_as_wall_time() {
+    let rig = Rig::new();
+    let limits = Limits {
+        wall_time: Duration::from_secs(1),
+        ..drain_limits(2_000, 5_000, 20_000)
+    };
+    let started = Instant::now();
+    let (out, _) = rig.plain(DRIP, limits).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.ending, Ending::WallTime);
 }

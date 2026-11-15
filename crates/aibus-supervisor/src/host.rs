@@ -314,6 +314,18 @@ pub async fn supervise(
                 #[cfg(not(unix))]
                 let _ = child.start_kill();
             }
+            // Cancel and the wall deadline end the drain too: the run reports how it was stopped,
+            // and anything already read but not recorded is a gap.
+            _ = cancel.cancelled(), if stopped.is_none() && exit.is_some() => {
+                stopped = Some(Ending::Cancelled);
+                drained = Some(false);
+                break;
+            }
+            _ = tokio::time::sleep_until(deadline), if stopped.is_none() && exit.is_some() => {
+                stopped = Some(Ending::WallTime);
+                drained = Some(false);
+                break;
+            }
             _ = tokio::time::sleep_until(stall_at.unwrap_or(deadline)), if stall_at.is_some() => {
                 // Slow storing, not silence: lines are waiting, so the stall has not happened.
                 if !rx.is_empty() {

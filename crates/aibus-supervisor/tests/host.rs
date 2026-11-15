@@ -834,7 +834,10 @@ fn stopped_limits() -> Limits {
     }
 }
 
-async fn stopped_before_exit(limits: Limits, cancel_at: Option<u64>) -> (Ending, Duration, usize) {
+async fn stopped_before_exit(
+    limits: Limits,
+    cancel_at: Option<u64>,
+) -> (Ending, Duration, Vec<String>) {
     let rig = Rig::new();
     let exe = rig.cli(STOPPABLE_WITH_DRIP);
     let cancel = CancellationToken::new();
@@ -854,7 +857,11 @@ async fn stopped_before_exit(limits: Limits, cancel_at: Option<u64>) -> (Ending,
             cancel,
         )
         .await;
-    (out.ending, started.elapsed(), unread_gaps(&events).len())
+    let bounds = unread_gaps(&events)
+        .iter()
+        .map(|g| g.data["bound"].as_str().unwrap_or_default().to_string())
+        .collect();
+    (out.ending, started.elapsed(), bounds)
 }
 
 #[tokio::test]
@@ -862,7 +869,7 @@ async fn issue_324_cancel_before_exit_drains_only_for_the_grace_period() {
     let (ending, took, gaps) = stopped_before_exit(stopped_limits(), Some(400)).await;
     assert_eq!(ending, Ending::Cancelled);
     assert!(took < Duration::from_secs(4), "{took:?}");
-    assert_eq!(gaps, 1, "the drip was still arriving when the drain ended");
+    assert_eq!(gaps, ["grace"], "the grace cap ended the drain (#329)");
 }
 
 #[tokio::test]
@@ -874,7 +881,7 @@ async fn issue_324_wall_time_before_exit_drains_only_for_the_grace_period() {
     let (ending, took, gaps) = stopped_before_exit(limits, None).await;
     assert_eq!(ending, Ending::WallTime);
     assert!(took < Duration::from_secs(4), "{took:?}");
-    assert_eq!(gaps, 1);
+    assert_eq!(gaps, ["grace"], "the grace cap ended the drain (#329)");
 }
 
 #[tokio::test]
@@ -886,5 +893,44 @@ async fn issue_324_output_limit_before_exit_drains_only_for_the_grace_period() {
     let (ending, took, gaps) = stopped_before_exit(limits, None).await;
     assert_eq!(ending, Ending::OutputLimit);
     assert!(took < Duration::from_secs(4), "{took:?}");
-    assert_eq!(gaps, 1);
+    assert_eq!(gaps, ["grace"], "the grace cap ended the drain (#329)");
+}
+
+// ---- #327: stderr past its byte cap is a gap, not a silent drop ----
+
+#[tokio::test]
+async fn issue_327_a_stderr_flood_past_the_cap_records_a_gap_with_the_dropped_bytes() {
+    let rig = Rig::new();
+    let limits = Limits {
+        max_stderr_bytes: 2_000,
+        ..drain_limits(2_000, 1_000, 10_000)
+    };
+    let (out, events) = rig.plain(&flood_body(600), limits).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let gaps: Vec<_> = on_channel(&events, EventKind::GapDetected, "stderr")
+        .into_iter()
+        .filter(|e| e.data["reason"] == "stderr_limit")
+        .collect();
+    assert_eq!(gaps.len(), 1, "one stderr gap says output was dropped");
+    let dropped = gaps[0].data["bytes"].as_u64().unwrap();
+    // 600 lines of at least 13 bytes each, 2000 kept: well over 5000 dropped.
+    assert!(
+        dropped > 5_000,
+        "the dropped byte count is recorded: {dropped}"
+    );
+    assert!(
+        on_channel(&events, EventKind::TraceWarning, "stderr").len() < 600,
+        "lines past the cap are not kept"
+    );
+}
+
+#[tokio::test]
+async fn issue_327_stderr_under_the_cap_records_no_gap() {
+    let rig = Rig::new();
+    let limits = Limits {
+        max_stderr_bytes: 1_000_000,
+        ..drain_limits(2_000, 1_000, 10_000)
+    };
+    let (_, events) = rig.plain(&flood_body(50), limits).await;
+    assert!(on_channel(&events, EventKind::GapDetected, "stderr").is_empty());
 }

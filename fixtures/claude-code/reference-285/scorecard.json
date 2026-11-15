@@ -1,0 +1,1211 @@
+{
+  "cases": [
+    {
+      "attempt_status": "completed",
+      "checks": [
+        "supervised run exits 0 and is completed",
+        "one lead and two native children",
+        "two delegation edges",
+        "a lead was observed",
+        "both edges point from the lead, via a native tool_use id",
+        "both edges are observed and carry source events",
+        "each child ran a tool that completed",
+        "the attempt completed",
+        "hooks cross-check both edges (a second channel, same ids)",
+        "hook events corroborate and are not double counted",
+        "the stream alone and stream plus hooks give the same graph"
+      ],
+      "ending": "exited(0)",
+      "events": 27,
+      "evidence_levels": {
+        "observed": 26,
+        "unavailable": 1
+      },
+      "id": "01-native-delegation",
+      "kind": "native_delegation",
+      "result": "pass",
+      "stream": "recorded_real"
+    },
+    {
+      "attempt_status": "completed",
+      "checks": [
+        "the attempt still completes (the CLI exited 0)",
+        "exactly one tool failed and one completed",
+        "the failure is an observed native event on the child, not inferred",
+        "a failed tool does not disturb the delegation graph"
+      ],
+      "ending": "exited(0)",
+      "events": 27,
+      "evidence_levels": {
+        "observed": 26,
+        "unavailable": 1
+      },
+      "id": "02-failed-tool",
+      "kind": "failed_tool",
+      "result": "pass",
+      "stream": "recorded_real_with_one_change(is_error on one child tool result)"
+    },
+    {
+      "attempt_status": "interrupted",
+      "checks": [
+        "stopped by the wall-time limit, within seconds",
+        "the attempt is interrupted, never completed",
+        "what happened before the limit is still in the graph"
+      ],
+      "ending": "wall_time",
+      "events": null,
+      "evidence_levels": null,
+      "id": "03-timeout",
+      "kind": "timeout",
+      "result": "pass",
+      "stream": "recorded_real_prefix_plus_stand_in(never finishes)"
+    },
+    {
+      "attempt_status": "cancelled",
+      "checks": [
+        "the host reports a user cancel",
+        "the CLI was asked to stop (SIGTERM) before any kill",
+        "the trace ends attempt_failed with status cancelled",
+        "a cancelled attempt is not marked completed or interrupted"
+      ],
+      "ending": "cancelled",
+      "events": null,
+      "evidence_levels": null,
+      "id": "04-cancelled-run",
+      "kind": "cancelled_run",
+      "result": "pass",
+      "stream": "recorded_real_prefix_plus_stand_in(waits for cancel)"
+    },
+    {
+      "attempt_status": "interrupted then completed",
+      "checks": [
+        "a fresh store has nothing to repair",
+        "attempt 1 is interrupted by the signal",
+        "the torn tail is cut off and kept aside",
+        "the retry is a second attempt that completes",
+        "the repaired store reads clean",
+        "sequence numbers are unique and increase across the restart",
+        "the repair is itself in the trace as a warning",
+        "two attempts, two ids, both still inspectable",
+        "attempt 1 stays interrupted and is flagged requires_reconciliation (a tool never reported back)",
+        "attempt 2 is untouched by attempt 1",
+        "no event claims a vendor session was resumed or restored"
+      ],
+      "ending": "signalled(9) then exited(0)",
+      "events": 22,
+      "evidence_levels": {
+        "inferred": 2,
+        "observed": 18,
+        "unavailable": 2
+      },
+      "id": "05-restart",
+      "kind": "restart",
+      "result": "pass",
+      "stream": "recorded_real_prefix_plus_stand_in(killed)"
+    },
+    {
+      "attempt_status": "completed",
+      "checks": [
+        "completed despite concurrent stderr",
+        "the recording really interleaves two agents",
+        "the graph is the same as the offline replay of the same stream",
+        "nothing was dropped to keep up (no gap on stdout)",
+        "stderr text never reaches the trace",
+        "several result lines still end the attempt only at exit"
+      ],
+      "ending": "exited(0)",
+      "events": null,
+      "evidence_levels": null,
+      "id": "06-overlapping-output",
+      "kind": "overlapping_output",
+      "result": "pass",
+      "stream": "recorded_real_plus_stand_in(20 stderr lines in parallel)"
+    },
+    {
+      "attempt_status": "completed",
+      "checks": [
+        "the attempt is not ended by bad lines",
+        "each damaged line is a labelled gap, unavailable not guessed",
+        "an event type aibus has never seen is kept as a warning naming it",
+        "the damage did not change the graph",
+        "the broken text is not copied into the trace"
+      ],
+      "ending": "exited(0)",
+      "events": 10,
+      "evidence_levels": {
+        "observed": 7,
+        "unavailable": 3
+      },
+      "id": "07-malformed-event",
+      "kind": "malformed_event",
+      "result": "pass",
+      "stream": "recorded_real_plus_stand_in(damaged lines)"
+    },
+    {
+      "attempt_status": "completed",
+      "checks": [
+        "the run completes without usage",
+        "a usage event is still written",
+        "every metric is unknown with no value, none invented",
+        "the projection carries no known number",
+        "the fleet row says unknown, not zero",
+        "the inspector says usage was not reported"
+      ],
+      "ending": "exited(0)",
+      "events": 25,
+      "evidence_levels": {
+        "observed": 24,
+        "unavailable": 1
+      },
+      "id": "08-missing-usage",
+      "kind": "missing_usage",
+      "result": "pass",
+      "stream": "recorded_real_with_one_change(usage, cost and durations removed)"
+    },
+    {
+      "attempt_status": "completed",
+      "checks": [
+        "a denied tool is an observed tool_failed with reason permission_denied",
+        "no approval event is invented for the denial (no approval_requested or approval_resolved)",
+        "the attempt is not marked as approved or failed because of the denial",
+        "argv always carries --permission-prompts none",
+        "argv never carries a bypass or auto-accept flag or mode",
+        "the plan holds the lead step for network_write, git_merge and destructive_tool approval",
+        "the plan says it cannot run yet (plan-only until the scheduler), and starts nothing",
+        "the claude runtime is listed experimental, not available"
+      ],
+      "ending": "exited(0)",
+      "events": 11,
+      "evidence_levels": {
+        "correlated": 2,
+        "observed": 9
+      },
+      "id": "09-approval",
+      "kind": "approval",
+      "result": "pass",
+      "stream": "recorded_real(09-denied)+compiled_plan; interactive approval is unsupported in Phase 1"
+    },
+    {
+      "attempt_status": "n/a",
+      "checks": [
+        "replay exits 0 with no CLI on PATH",
+        "replay is byte for byte repeatable",
+        "replay equals the committed golden",
+        "replay says it is the recording, not a new run",
+        "--events prints the stored lines byte for byte",
+        "the replayed graph has the lead, two children and their tools",
+        "a rerun is refused, says its outcome may differ, and does not start anything",
+        "the replay makes no claim of re-execution, determinism or a restored vendor session"
+      ],
+      "ending": "n/a",
+      "events": 40,
+      "evidence_levels": {
+        "correlated": 13,
+        "observed": 26,
+        "unavailable": 1
+      },
+      "id": "10-trace-replay",
+      "kind": "trace_replay",
+      "result": "pass",
+      "stream": "recorded_real(11-foreground.hooks, stored by the real TraceStore)"
+    }
+  ],
+  "claims_not_made": [
+    "no deterministic re-execution: a rerun starts a new attempt and may differ",
+    "no resume of a vendor session: native children die with their process",
+    "no model-level cost: the CLI reports aggregate usage only",
+    "no interactive approval through aibus: --permission-prompts host is untested"
+  ],
+  "cli": {
+    "minimum_supported": "2.1.0",
+    "name": "Claude Code",
+    "recorded_on": "2026-11-14",
+    "recorded_version": "2.1.311"
+  },
+  "corpus": {
+    "cases": 10,
+    "manifest": "fixtures/claude-code/reference-285/corpus.json",
+    "pilot_workflow": "fixtures/workflows/graph/repo-review.toml",
+    "version": 1
+  },
+  "event_fidelity": {
+    "delegation_edges": {
+      "cross_checked_by_hooks": 12,
+      "observed": 12,
+      "total": 12
+    },
+    "events_by_kind_and_level": {
+      "agent_started": {
+        "correlated": 21,
+        "observed": 22
+      },
+      "agent_stopped": {
+        "correlated": 20,
+        "inferred": 2,
+        "observed": 40
+      },
+      "attempt_completed": {
+        "observed": 8
+      },
+      "attempt_failed": {
+        "observed": 2
+      },
+      "attempt_started": {
+        "observed": 10
+      },
+      "gap_detected": {
+        "unavailable": 8
+      },
+      "message_chunk": {
+        "observed": 28
+      },
+      "task_delegated": {
+        "correlated": 12,
+        "observed": 12
+      },
+      "tool_completed": {
+        "correlated": 11,
+        "observed": 11
+      },
+      "tool_failed": {
+        "observed": 2
+      },
+      "tool_started": {
+        "correlated": 12,
+        "observed": 12
+      },
+      "usage_reported": {
+        "observed": 24
+      }
+    },
+    "events_by_origin": {
+      "aibus_scheduler": 30,
+      "cli_stream": 149,
+      "derived": 2,
+      "hook": 76
+    },
+    "kinds_not_produced": [
+      "workflow_started",
+      "step_scheduled",
+      "route_decided",
+      "approval_requested",
+      "approval_resolved",
+      "checkpoint_written",
+      "artifact_created",
+      "auth_required",
+      "trace_warning"
+    ],
+    "kinds_produced": 12,
+    "not_produced_because": "workflow_started, step_scheduled, route_decided, approval_requested, approval_resolved and checkpoint_written belong to the scheduler (#288, #289); artifact_created to the worktree work (#290); no recorded run needed a login (auth_required) or produced a trace_warning; the cases that damage a stream or write stderr produce the warnings",
+    "spec_kinds": 21,
+    "stream_event_types_without_a_trace_event": "hook_started, hook_response, task_progress, task_updated and rate_limit_event are counted by the normaliser and carry no trace event of their own"
+  },
+  "latency": {
+    "benchmark": false,
+    "cli_version": "2.1.311",
+    "host": "owner MacBook (macOS, arm64), the machine #281 ran on",
+    "median_and_p95": "withheld: one sample per run does not support them",
+    "recorded": "2026-11-14, #281",
+    "runs": [
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 679.0
+        },
+        "ending": "completed",
+        "run": "06-basic",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 2244
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 702.0
+        },
+        "ending": "completed",
+        "run": "07-deleg",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 5459
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 540.0
+        },
+        "ending": "completed",
+        "run": "08-control",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 3685
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 1649.0
+        },
+        "ending": "completed",
+        "run": "09-denied",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 2445
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 11.0
+        },
+        "ending": "interrupted",
+        "run": "10-killed",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 3015
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 2908.0
+        },
+        "ending": "completed",
+        "run": "11-foreground",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 3876
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 596.0
+        },
+        "ending": "completed",
+        "run": "12-teams-probe",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 1435
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 624.0
+        },
+        "ending": "completed",
+        "run": "13-teams-control",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 1428
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "reported",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": 5515.0
+        },
+        "ending": "completed",
+        "run": "14-teams-attempt",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 6326
+        }
+      },
+      {
+        "cli_reported_duration_ms": {
+          "quality": "unknown",
+          "source": "result.duration_ms of the last result",
+          "unit": "ms",
+          "value": null
+        },
+        "ending": "interrupted",
+        "run": "15-killed-midrun",
+        "samples": 1,
+        "wall_ms": {
+          "quality": "derived",
+          "source": "spike harness wall clock, spawn to exit or kill",
+          "unit": "ms",
+          "value": 2206
+        }
+      }
+    ],
+    "samples_per_run": 1,
+    "supervisor_overhead": {
+      "quality": "unknown",
+      "source": "not measured in this issue; a timing needs the bench queue on Mercury and is not a required gate"
+    }
+  },
+  "mode": "offline (recorded streams and stand-in CLIs; no provider, no network)",
+  "resource_use": {
+    "cost_note": "cost_usd is the CLI's list-price estimate (costBasis list), quality estimated, never a bill; billed cost is unknown",
+    "measured_by_aibus": {
+      "cli_processes_per_attempt": {
+        "quality": "derived",
+        "source": "spike runs 08 and 15: ps samples showed one claude process for the lead and both children",
+        "unit": "processes",
+        "value": 1
+      },
+      "cpu_and_memory_of_the_cli": {
+        "quality": "unknown",
+        "source": "the host does not sample the child's CPU or memory; nothing is claimed",
+        "unit": null,
+        "value": null
+      },
+      "events_per_run": "see cases[].events and the fleet view"
+    },
+    "reported_by_the_cli": [
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 2.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 4.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 3027.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 649.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 1.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 679.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.0006140900000000001
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "06-basic"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 2.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 18.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 709.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 8963.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 1.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 702.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.003142075
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "07-deleg"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 2.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 18.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 1193.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 8298.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 1.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 540.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.00111874
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "08-control"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 4.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 185.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 3584.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 6951.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 2.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 1649.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.00087921
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "09-denied"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 0.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 0.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 0.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 0.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 0.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 11.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.00083856
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "10-killed"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 4.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 316.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 2223.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 13036.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 3.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 2908.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.0010430450000000005
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "11-foreground"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 2.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 4.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 6665.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 11607.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 1.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 596.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.00145127
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "12-teams-probe"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 2.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 4.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 6665.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 11382.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 1.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 624.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.00144902
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "13-teams-control"
+      },
+      {
+        "attempt_usage": [
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 4.0
+            },
+            "name": "input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 903.0
+            },
+            "name": "output_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 5638.0
+            },
+            "name": "cache_creation_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.usage",
+              "unit": "tokens",
+              "value": 32600.0
+            },
+            "name": "cache_read_input_tokens"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.num_turns",
+              "unit": "turns",
+              "value": 3.0
+            },
+            "name": "num_turns"
+          },
+          {
+            "m": {
+              "quality": "reported",
+              "source": "result.duration_ms",
+              "unit": "ms",
+              "value": 5515.0
+            },
+            "name": "duration_ms"
+          },
+          {
+            "m": {
+              "quality": "estimated",
+              "source": "result.total_cost_usd (client-side list-price estimate)",
+              "unit": "usd",
+              "value": 0.0044801749999999994
+            },
+            "name": "cost_usd"
+          },
+          {
+            "m": {
+              "quality": "unknown",
+              "source": "not reported by the CLI",
+              "unit": "usd",
+              "value": null
+            },
+            "name": "billed_cost_usd"
+          }
+        ],
+        "run": "14-teams-attempt"
+      },
+      {
+        "attempt_usage": [],
+        "run": "15-killed-midrun"
+      }
+    ]
+  },
+  "scorecard_version": "1.0.0",
+  "suite": "aibus-reference-285",
+  "summary": {
+    "of": 10,
+    "passed": 10
+  }
+}

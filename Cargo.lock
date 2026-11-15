@@ -35,6 +35,7 @@ dependencies = [
  "aibus-provider-gemini",
  "aibus-provider-http",
  "aibus-provider-openai",
+ "aibus-supervisor",
  "aibus-testkit",
  "aibus-trace",
  "aibus-tui",
@@ -55,6 +56,7 @@ dependencies = [
  "rmcp",
  "rpassword",
  "rustix 1.1.6",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "signal-hook",
@@ -67,6 +69,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "uuid",
  "zeroize",
  "zstd",
 ]

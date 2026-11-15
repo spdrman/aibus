@@ -9,6 +9,8 @@
 
 pub mod claude;
 pub mod cli;
+#[cfg(unix)]
+mod descendants;
 pub mod host;
 
 pub use claude::{Channel, Normalizer};

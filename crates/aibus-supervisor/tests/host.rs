@@ -1038,23 +1038,31 @@ async fn issue_329_grace_equal_to_drain_max_is_labelled_drain_max() {
 }
 
 /// The CLI floods stderr and exits at once; the rate limit holds the host back, and a cancel
-/// arrives while it waits. Returns how the run ended, the `bound` of each unread gap and how long
-/// the whole run took.
+/// arrives `cancel_ms` after the CLI has finished writing (it leaves a marker as its last act, and
+/// the cancel waits for it, so a loaded host cannot cancel a CLI that is still running). Returns
+/// how the run ended, the `bound` of each unread gap and how long the run lasted after the cancel.
 async fn cancel_after_exit(
     lines_per_second: u32,
     cancel_ms: u64,
 ) -> (Ending, Vec<String>, Duration) {
     let rig = Rig::new();
+    let marker = rig.root.join("flooded");
     let cancel = CancellationToken::new();
-    let c = cancel.clone();
+    let cancelled_at = std::sync::Arc::new(std::sync::OnceLock::new());
+    let (c, at, m) = (cancel.clone(), cancelled_at.clone(), marker.clone());
     tokio::spawn(async move {
+        while !m.exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         tokio::time::sleep(Duration::from_millis(cancel_ms)).await;
+        let _ = at.set(Instant::now());
         c.cancel();
     });
-    // `yes | head` writes the 36 KB in a blink, so the CLI has exited long before the cancel even
-    // on a loaded host (a shell loop could still be running, and then there is no drain to label).
-    let exe = rig.cli("yes 'queued line' | head -n 3000 >&2");
-    let started = Instant::now();
+    // `yes | head` writes the 36 KB in a blink, then the marker, then the shell exits.
+    let exe = rig.cli(&format!(
+        "yes 'queued line' | head -n 3000 >&2; : > {}",
+        marker.display()
+    ));
     let (out, events) = rig
         .run(
             rig.launch(exe, drain_limits(lines_per_second, 5_000, 20_000)),
@@ -1063,11 +1071,12 @@ async fn cancel_after_exit(
             cancel,
         )
         .await;
+    let after_cancel = cancelled_at.get().map_or(Duration::ZERO, Instant::elapsed);
     let bounds = unread_gaps(&events)
         .iter()
         .map(|g| g.data["bound"].as_str().unwrap_or("?").to_owned())
         .collect();
-    (out.ending, bounds, started.elapsed())
+    (out.ending, bounds, after_cancel)
 }
 
 #[tokio::test]
@@ -1103,6 +1112,7 @@ async fn issue_336_the_cancel_after_exit_label_is_the_same_in_fifty_runs() {
 /// #336: an exit that has already happened is acted on before the cancel, and a rate-limit wait
 /// does not hold either back. The wait is a second long here; the cancel comes at 100 ms and the
 /// run must end near it, not after the wait (a fast-failing bound, far below the 20 s drain max).
+/// The time is counted from the cancel, so a slow start cannot fail it.
 #[tokio::test]
 async fn issue_336_a_rate_limit_wait_does_not_hold_back_the_cancel_after_exit() {
     let (ending, bounds, took) = cancel_after_exit(1, 100).await;
@@ -1110,8 +1120,52 @@ async fn issue_336_a_rate_limit_wait_does_not_hold_back_the_cancel_after_exit() 
     assert_eq!(bounds, ["drain_stall"]);
     assert!(
         took < Duration::from_millis(800),
-        "the rate-limit wait held the run for {took:?}"
+        "the rate-limit wait held the run for {took:?} after the cancel"
     );
+}
+
+/// #336: the rate limit still holds after a quiet stretch. Five lines, a pause longer than the
+/// window, then thirty-five more at ten lines a second: the window that expired unused is
+/// reset by the next line over the limit, and the rest take three more seconds. (A lower bound
+/// only, so a slow machine cannot flake it.)
+#[tokio::test]
+async fn issue_336_the_rate_limit_still_holds_after_a_quiet_window() {
+    let rig = Rig::new();
+    let body = "for i in 1 2 3 4 5; do echo a$i >&2; done; sleep 1.3; i=0; \
+                while [ $i -lt 35 ]; do echo b$i >&2; i=$((i+1)); done";
+    let limits = Limits {
+        wall_time: Duration::from_secs(20),
+        ..drain_limits(10, 5_000, 20_000)
+    };
+    let started = Instant::now();
+    let (out, _) = rig.plain(body, limits).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    assert!(
+        started.elapsed() >= Duration::from_millis(3_900),
+        "the limit was off after the quiet window: {:?}",
+        started.elapsed()
+    );
+}
+
+/// #336: reading resumes about a second after a throttle, not at the deadline. Twenty-five lines at
+/// ten a second take two waits; the wall time is 10 s so a wait that ran to the deadline ends the
+/// run as `WallTime` and fails here instead of hanging.
+#[tokio::test]
+async fn issue_336_reading_resumes_a_second_after_a_throttle() {
+    let rig = Rig::new();
+    let limits = Limits {
+        wall_time: Duration::from_secs(10),
+        ..drain_limits(10, 5_000, 20_000)
+    };
+    let started = Instant::now();
+    let (out, _) = rig.plain(&flood_body(25), limits).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(1_900),
+        "no throttle at all: {took:?}"
+    );
+    assert!(took < Duration::from_secs(6), "resumed late: {took:?}");
 }
 
 #[tokio::test]

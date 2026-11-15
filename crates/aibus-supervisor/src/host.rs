@@ -454,6 +454,7 @@ pub async fn supervise(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Normalizer;
     use aibus_trace::{AttemptRef, PayloadPolicy, StoreLimits};
     use std::time::Duration;
 

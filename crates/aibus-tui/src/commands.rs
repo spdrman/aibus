@@ -736,7 +736,8 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
         if !c.env.runs.is_empty() {
             return Err(format!("/{} is not available: no lead is running", c.name));
         }
-        if c.env.account_names.is_empty() {
+        // A fresh install only has the built-in fake, which stands in until a real account is added.
+        if c.env.account_names.iter().all(|a| a == "fake") {
             return Err(format!("/{} needs a lead, and no account is set up to run it; add one with: aibus account add <name> --provider <id>", c.name));
         }
         out.msgs.push(Msg::SubmitPrompt { text: format!("/workflow {name} {input}").trim_end().to_owned() });

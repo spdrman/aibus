@@ -888,3 +888,48 @@ async fn issue_324_output_limit_before_exit_drains_only_for_the_grace_period() {
     assert!(took < Duration::from_secs(4), "{took:?}");
     assert_eq!(gaps, 1);
 }
+
+/// #328: `supervise` seeds the normaliser from the run, so a writer whose clock is behind the
+/// run's last id (here a year ahead) still sorts after it, whichever constructor it came from.
+#[tokio::test]
+async fn supervise_seeds_a_new_normaliser_from_the_runs_last_id_328() {
+    use aibus_trace::{Batch, Origin, Visibility};
+    let rig = Rig::new();
+    let dir = rig.trace_dir();
+    let planted = uuid::Builder::from_unix_timestamp_millis(
+        (std::time::SystemTime::now() + Duration::from_secs(365 * 86_400))
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+        &[0; 10],
+    )
+    .into_uuid();
+    {
+        let (mut store, _) = TraceStore::open(
+            &dir,
+            Redactor::new(),
+            PayloadPolicy::MetadataOnly,
+            StoreLimits::default(),
+        )
+        .unwrap();
+        let e = TraceEvent::new(
+            &common::attempt(),
+            planted,
+            EventKind::TraceWarning,
+            Origin::Derived,
+            Visibility::Observed,
+            std::time::SystemTime::now(),
+            "test/1",
+        );
+        store
+            .append(Batch {
+                events: vec![e],
+                payload: None,
+            })
+            .unwrap();
+    }
+    let (_, events) = rig.plain("echo hi", Limits::default()).await;
+    assert_eq!(events[0].event_id, planted);
+    assert!(events.len() > 2);
+    assert!(events.windows(2).all(|w| w[0].event_id < w[1].event_id));
+}

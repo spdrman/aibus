@@ -179,8 +179,12 @@ impl Normalizer {
         }
     }
 
-    /// A normaliser for a run with no store yet. Against a store use `with_ids(attempt, store.ids())`:
-    /// an unseeded one that falls behind the run is refused by `TraceStore::append` (`OutOfOrder`).
+    /// Makes the next id sort after `id`. `supervise` calls it with the store's last id before and
+    /// after every append, so a normaliser from `new` is seeded whatever run it is given.
+    pub fn observe(&mut self, id: Uuid) {
+        self.ids.observe(id);
+    }
+
     pub fn new(attempt: AttemptRef) -> Self {
         Self {
             attempt,

@@ -318,6 +318,11 @@ impl TraceStore {
         self.ids
     }
 
+    /// The largest id the store holds: every new event must sort after it.
+    pub fn last_id(&self) -> Option<Uuid> {
+        self.last
+    }
+
     /// An event about the trace itself (a repair, a budget), run-wide: the nil attempt.
     fn own_event(&mut self, kind: EventKind, visibility: Visibility, data: Value) -> TraceEvent {
         const PARSER: &str = "aibus-trace-store/1";
@@ -348,6 +353,27 @@ impl TraceStore {
     /// that is not a uuid v7 is refused (nothing from the batch is written), and an event whose id
     /// is already in the trace is skipped. Returns the events as written.
     pub fn append(&mut self, batch: Batch) -> Result<Vec<TraceEvent>, StoreError> {
+        // A refused batch changes nothing: the id generator, the gap flags and the payload count
+        // go back, so the next event still gets its gap instead of being dropped without one.
+        let saved = (
+            self.ids,
+            self.over_soft_limit,
+            self.payload_budget_gap,
+            self.payload_bytes,
+        );
+        let out = self.append_checked(batch);
+        if matches!(out, Err(StoreError::OutOfOrder { .. })) {
+            (
+                self.ids,
+                self.over_soft_limit,
+                self.payload_budget_gap,
+                self.payload_bytes,
+            ) = saved;
+        }
+        out
+    }
+
+    fn append_checked(&mut self, batch: Batch) -> Result<Vec<TraceEvent>, StoreError> {
         let Batch { events, payload } = batch;
         let mut keep: Vec<TraceEvent> = Vec::with_capacity(events.len());
         let mut storage_gap = false;

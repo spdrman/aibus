@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime};
 
-use aibus_trace::{AttemptStatus, StoreError, TraceStore};
+use aibus_trace::{AttemptStatus, Batch, StoreError, TraceEvent, TraceStore};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -142,6 +142,21 @@ fn signal_group(pid: Option<u32>, sig: rustix::process::Signal) {
     }
 }
 
+/// Appends `batch` and tells `norm` the last id the store holds, so the store's own events (its
+/// gaps) never tie with the normaliser's next id. A refusal ends the run with the store error;
+/// the store restores its state first, so nothing is dropped without a gap.
+fn put(
+    store: &mut TraceStore,
+    batch: Batch,
+    norm: &mut Normalizer,
+) -> Result<Vec<TraceEvent>, StoreError> {
+    let out = store.append(batch)?;
+    if let Some(id) = store.last_id() {
+        norm.observe(id);
+    }
+    Ok(out)
+}
+
 /// Runs one attempt: spawns the CLI in its own process group, writes the prompt, feeds every
 /// stdout and stderr line through `norm` into `store` as it arrives, and stops it on `cancel`, the
 /// wall-time limit or the output limit (SIGTERM to the group, then SIGKILL after `grace`). Returns
@@ -196,10 +211,18 @@ pub async fn supervise(
         }
     }
     let mut guard = GroupGuard(pid);
-    store.append(norm.start(
-        SystemTime::now(),
-        json!({ "executable": exe.display().to_string(), "pid": pid }),
-    ))?;
+    if let Some(id) = store.last_id() {
+        // Seed from the run, so this writer sorts after whatever is already in it.
+        norm.observe(id);
+    }
+    put(
+        store,
+        norm.start(
+            SystemTime::now(),
+            json!({ "executable": exe.display().to_string(), "pid": pid }),
+        ),
+        norm,
+    )?;
 
     if let Some(mut pipe) = child.stdin.take() {
         tokio::spawn(async move {
@@ -257,12 +280,12 @@ pub async fn supervise(
                 match piece {
                     None => open_pipes = 0,
                     Some(Piece::Eof) => open_pipes -= 1,
-                    Some(Piece::Line(Channel::Stdout, l)) => { store.append(norm.stream_line(&l, now))?; }
-                    Some(Piece::Line(_, l)) => { store.append(norm.stderr_line(&l, now))?; }
-                    Some(Piece::TooLong(ch, bytes)) => { store.append(norm.gap(ch, "line_too_long", bytes, now))?; }
+                    Some(Piece::Line(Channel::Stdout, l)) => { put(store, norm.stream_line(&l, now), norm)?; }
+                    Some(Piece::Line(_, l)) => { put(store, norm.stderr_line(&l, now), norm)?; }
+                    Some(Piece::TooLong(ch, bytes)) => { put(store, norm.gap(ch, "line_too_long", bytes, now), norm)?; }
                     Some(Piece::OutputLimit(bytes)) => {
                         open_pipes -= 1;
-                        store.append(norm.gap(Channel::Host, "output_limit", bytes, now))?;
+                        put(store, norm.gap(Channel::Host, "output_limit", bytes, now), norm)?;
                         if stopped.is_none() {
                             stopped = Some(Ending::OutputLimit);
                             kill_at = Some(tokio::time::Instant::now() + limits.grace);
@@ -379,7 +402,7 @@ pub async fn supervise(
             } else {
                 "drain_stall"
             });
-            store.append(gap)?;
+            put(store, gap, norm)?;
         }
     }
     guard.0 = None;
@@ -396,7 +419,11 @@ pub async fn supervise(
             Ending::Signalled(0)
         }
     });
-    let written = store.append(norm.finish(ending, started.elapsed(), SystemTime::now()))?;
+    let written = put(
+        store,
+        norm.finish(ending, started.elapsed(), SystemTime::now()),
+        norm,
+    )?;
     let status = written
         .last()
         .and_then(|e| serde_json::from_value(e.data["status"].clone()).ok())

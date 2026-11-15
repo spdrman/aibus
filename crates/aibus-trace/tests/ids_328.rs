@@ -297,3 +297,69 @@ fn a_recorded_view_orders_out_of_order_lines_by_id_328() {
     );
     assert!(rec.raw[0].starts_with(b"{") && rec.raw[0] != rec.raw[2]);
 }
+
+#[test]
+fn ids_inside_one_batch_must_ascend_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut s = open(&tmp.path().join("run"), StoreLimits::default());
+    let err = s
+        .append(batch(vec![
+            ev(v7(MS, 2), EventKind::AttemptStarted),
+            ev(v7(MS, 1), EventKind::MessageChunk),
+        ]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    assert!(TraceStore::read(&tmp.path().join("run"))
+        .unwrap()
+        .0
+        .is_empty());
+}
+
+#[test]
+fn a_refused_batch_does_not_swallow_the_next_gap_328() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let limits = StoreLimits {
+        soft_max_bytes: 0,
+        ..StoreLimits::default()
+    };
+    let mut s = open(&dir, limits);
+    s.append(batch(vec![ev(v7(MS + 100, 0), EventKind::AttemptStarted)]))
+        .unwrap();
+    // The chunk is dropped (soft limit) and the lifecycle event behind it is refused.
+    let err = s
+        .append(batch(vec![
+            ev(v7(MS + 200, 1), EventKind::MessageChunk),
+            ev(v7(MS, 1), EventKind::AttemptCompleted),
+        ]))
+        .unwrap_err();
+    assert!(matches!(err, StoreError::OutOfOrder { .. }), "{err}");
+    let out = s
+        .append(batch(vec![ev(v7(MS + 300, 0), EventKind::MessageChunk)]))
+        .unwrap();
+    assert!(
+        out.iter().any(|e| e.kind == EventKind::GapDetected),
+        "the chunk was dropped with no gap: {out:?}"
+    );
+}
+
+#[test]
+fn an_event_in_the_same_millisecond_as_the_stores_own_gap_is_accepted_328() {
+    let limits = StoreLimits {
+        soft_max_bytes: 0,
+        ..StoreLimits::default()
+    };
+    for i in 0..60u8 {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = open(&tmp.path().join("run"), limits.clone());
+        let mut ids = EventIds::default();
+        let started = ev(ids.next(at(MS), &[b"s", &[i]]), EventKind::AttemptStarted);
+        let chunk = ev(ids.next(at(MS), &[b"c", &[i]]), EventKind::MessageChunk);
+        s.append(batch(vec![started, chunk])).unwrap();
+        // What `supervise` does after every append: the writer learns the store's last id.
+        ids.observe(s.last_id().unwrap());
+        let next = ev(ids.next(at(MS), &[b"n", &[i]]), EventKind::AttemptCompleted);
+        s.append(batch(vec![next]))
+            .unwrap_or_else(|e| panic!("{i}: {e}"));
+    }
+}

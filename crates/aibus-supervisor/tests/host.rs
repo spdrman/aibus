@@ -1037,28 +1037,79 @@ async fn issue_329_grace_equal_to_drain_max_is_labelled_drain_max() {
     assert_eq!(bounds, ["drain_max"]);
 }
 
-#[tokio::test]
-async fn issue_329_a_drain_ended_by_a_cancel_after_exit_is_labelled_drain_stall() {
+/// The CLI floods stderr and exits at once; the rate limit holds the host back, and a cancel
+/// arrives while it waits. Returns how the run ended, the `bound` of each unread gap and how long
+/// the whole run took.
+async fn cancel_after_exit(
+    lines_per_second: u32,
+    cancel_ms: u64,
+) -> (Ending, Vec<String>, Duration) {
     let rig = Rig::new();
     let cancel = CancellationToken::new();
     let c = cancel.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(cancel_ms)).await;
         c.cancel();
     });
     let exe = rig.cli(&flood_body(3_000));
+    let started = Instant::now();
     let (out, events) = rig
         .run(
-            rig.launch(exe, drain_limits(20, 5_000, 20_000)),
+            rig.launch(exe, drain_limits(lines_per_second, 5_000, 20_000)),
             PayloadPolicy::MetadataOnly,
             Redactor::new(),
             cancel,
         )
         .await;
-    assert_eq!(out.ending, Ending::Cancelled);
-    let gaps = unread_gaps(&events);
-    assert_eq!(gaps.len(), 1);
-    assert_eq!(gaps[0].data["bound"], "drain_stall", "{}", gaps[0].data);
+    let bounds = unread_gaps(&events)
+        .iter()
+        .map(|g| g.data["bound"].as_str().unwrap_or("?").to_owned())
+        .collect();
+    (out.ending, bounds, started.elapsed())
+}
+
+#[tokio::test]
+async fn issue_329_a_drain_ended_by_a_cancel_after_exit_is_labelled_drain_stall() {
+    let (ending, bounds, _) = cancel_after_exit(20, 500).await;
+    assert_eq!(ending, Ending::Cancelled);
+    assert_eq!(bounds, ["drain_stall"]);
+}
+
+/// #336: the label must not depend on which ready branch `select!` picks, so the same scenario
+/// run 50 times (ten at a time) gives the same label every time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue_336_the_cancel_after_exit_label_is_the_same_in_fifty_runs() {
+    let mut labels = std::collections::BTreeMap::<String, u32>::new();
+    for _ in 0..5 {
+        let mut batch = tokio::task::JoinSet::new();
+        for _ in 0..10 {
+            batch.spawn(cancel_after_exit(20, 500));
+        }
+        while let Some(done) = batch.join_next().await {
+            let (ending, bounds, _) = done.unwrap();
+            assert_eq!(ending, Ending::Cancelled);
+            *labels.entry(bounds.join(",")).or_default() += 1;
+        }
+    }
+    assert_eq!(
+        labels,
+        std::collections::BTreeMap::from([("drain_stall".to_owned(), 50)]),
+        "labels over 50 runs"
+    );
+}
+
+/// #336: an exit that has already happened is acted on before the cancel, and a rate-limit wait
+/// does not hold either back. The wait is a second long here; the cancel comes at 100 ms and the
+/// run must end near it, not after the wait (a fast-failing bound, far below the 20 s drain max).
+#[tokio::test]
+async fn issue_336_a_rate_limit_wait_does_not_hold_back_the_cancel_after_exit() {
+    let (ending, bounds, took) = cancel_after_exit(1, 100).await;
+    assert_eq!(ending, Ending::Cancelled);
+    assert_eq!(bounds, ["drain_stall"]);
+    assert!(
+        took < Duration::from_millis(800),
+        "the rate-limit wait held the run for {took:?}"
+    );
 }
 
 #[tokio::test]

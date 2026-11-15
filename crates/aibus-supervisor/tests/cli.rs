@@ -349,6 +349,45 @@ mod discovery {
         assert_eq!(chosen.verdict, Ok(Version(2, 1, 311)));
     }
 
+    /// #337: the discovery tests pass whatever umask the developer's shell has. They run again
+    /// in a child under umask 002 (a login user's default on Debian), where a directory made
+    /// without an explicit mode comes out group-writable and discovery rightly refuses it.
+    #[test]
+    fn issue_337_the_discovery_tests_pass_under_umask_002() {
+        let status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("umask 002; exec \"$0\" discovery:: --skip issue_337_the_discovery_tests --test-threads=1")
+            .arg(std::env::current_exe().unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stdout)
+        );
+    }
+
+    /// #337: a directory the group can write to is refused, which is why the tests above set
+    /// their modes instead of inheriting the umask.
+    #[tokio::test]
+    async fn issue_337_a_group_writable_directory_is_still_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let shared = root.join("group-dir");
+        fake(&shared, "2.1.311", 0o755);
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o775)).unwrap();
+        let d = cli::discover(std::slice::from_ref(&shared), "claude", &env()).await;
+        assert!(d.chosen.is_none());
+        assert!(
+            d.candidates[0]
+                .verdict
+                .as_ref()
+                .is_err_and(|e| e.contains("directory writable")),
+            "{:#?}",
+            d.candidates
+        );
+    }
+
     #[tokio::test]
     async fn a_safe_binary_in_a_directory_others_can_write_is_refused() {
         let tmp = tempfile::tempdir().unwrap();

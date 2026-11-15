@@ -270,8 +270,15 @@ mod discovery {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
-    fn fake(dir: &Path, version: &str, mode: u32) -> PathBuf {
+    /// A directory with its mode set, not inherited from the umask (#337): discovery refuses a
+    /// directory others can write, and `create_dir_all` under umask 002 makes one.
+    fn open_dir(dir: &Path) {
         fs::create_dir_all(dir).unwrap();
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn fake(dir: &Path, version: &str, mode: u32) -> PathBuf {
+        open_dir(dir);
         let p = dir.join("claude");
         fs::write(&p, format!("#!/bin/sh\necho '{version} (Claude Code)'\n")).unwrap();
         fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
@@ -295,10 +302,10 @@ mod discovery {
         let cask = root.join("cask/2.1.311");
         let real = fake(&cask, "2.1.311", 0o755);
         let brew = root.join("brew-bin");
-        fs::create_dir_all(&brew).unwrap();
+        open_dir(&brew);
         std::os::unix::fs::symlink(&real, brew.join("claude")).unwrap();
         let empty = root.join("empty");
-        fs::create_dir_all(&empty).unwrap();
+        open_dir(&empty);
         let dirs = vec![
             PathBuf::from("relative/bin"),
             stale.clone(),

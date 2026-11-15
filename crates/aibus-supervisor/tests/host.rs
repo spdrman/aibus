@@ -1051,7 +1051,9 @@ async fn cancel_after_exit(
         tokio::time::sleep(Duration::from_millis(cancel_ms)).await;
         c.cancel();
     });
-    let exe = rig.cli(&flood_body(3_000));
+    // `yes | head` writes the 36 KB in a blink, so the CLI has exited long before the cancel even
+    // on a loaded host (a shell loop could still be running, and then there is no drain to label).
+    let exe = rig.cli("yes 'queued line' | head -n 3000 >&2");
     let started = Instant::now();
     let (out, events) = rig
         .run(

@@ -66,11 +66,14 @@ enum Piece {
     TooLong(Channel, u64),
     /// stdout passed `max_stdout_bytes`; the reader has stopped.
     OutputLimit(u64),
+    /// stderr went past `max_stderr_bytes`; this many bytes were read and dropped.
+    StderrDropped(u64),
     Eof,
 }
 
 /// Splits a pipe into lines of at most `max_line` bytes. A longer line is skipped to its newline
-/// and reported by size; stdout stops at `max_total`, stderr past it is drained and only counted.
+/// and reported by size; stdout stops at `max_total`, stderr past it is drained and dropped, then
+/// reported once as a gap with the dropped byte count.
 async fn read_lines(
     mut pipe: impl AsyncRead + Unpin,
     ch: Channel,
@@ -82,6 +85,7 @@ async fn read_lines(
     let mut line: Vec<u8> = Vec::new();
     let mut skipping: Option<u64> = None;
     let mut total = 0u64;
+    let mut dropped = 0u64;
     loop {
         let n = match pipe.read(&mut buf).await {
             Ok(0) | Err(_) => break,
@@ -93,6 +97,7 @@ async fn read_lines(
                 let _ = tx.send(Piece::OutputLimit(total)).await;
                 return;
             }
+            dropped += n as u64;
             continue;
         }
         for chunk in buf[..n].split_inclusive(|b| *b == b'\n') {
@@ -127,6 +132,9 @@ async fn read_lines(
     };
     if let Some(p) = last {
         let _ = tx.send(p).await;
+    }
+    if dropped > 0 {
+        let _ = tx.send(Piece::StderrDropped(dropped)).await;
     }
     let _ = tx.send(Piece::Eof).await;
 }
@@ -238,6 +246,8 @@ pub async fn supervise(
     // the exit whatever keeps arriving. Both are deadlines, so the drain always ends.
     // Set when the drain was cut off: true if it hit `drain_max` (lines were still arriving).
     let mut drained: Option<bool> = None;
+    // Which bound `cap_at` is: `grace` when a stopped run's drain is cut to the grace period.
+    let mut cap_name = "drain_max";
     let mut stall_at: Option<tokio::time::Instant> = None;
     let mut cap_at: Option<tokio::time::Instant> = None;
     let (mut window, mut in_window) = (tokio::time::Instant::now(), 0u32);
@@ -260,6 +270,7 @@ pub async fn supervise(
                     Some(Piece::Line(Channel::Stdout, l)) => { store.append(norm.stream_line(&l, now))?; }
                     Some(Piece::Line(_, l)) => { store.append(norm.stderr_line(&l, now))?; }
                     Some(Piece::TooLong(ch, bytes)) => { store.append(norm.gap(ch, "line_too_long", bytes, now))?; }
+                    Some(Piece::StderrDropped(bytes)) => { store.append(norm.gap(Channel::Stderr, "stderr_limit", bytes, now))?; }
                     Some(Piece::OutputLimit(bytes)) => {
                         open_pipes -= 1;
                         store.append(norm.gap(Channel::Host, "output_limit", bytes, now))?;
@@ -294,8 +305,9 @@ pub async fn supervise(
                 stall_at = Some(now + limits.drain_stall);
                 // A run that was already being stopped (cancel, wall time, output limit) has had its
                 // chance: its drain is capped at the grace period, not the full bound.
-                let cap = if stopped.is_some() {
-                    limits.drain_max.min(limits.grace)
+                let cap = if stopped.is_some() && limits.grace < limits.drain_max {
+                    cap_name = "grace";
+                    limits.grace
                 } else {
                     limits.drain_max
                 };
@@ -374,11 +386,7 @@ pub async fn supervise(
         if hit_bound || lines > 0 {
             let mut gap = norm.gap(Channel::Host, "unread_after_exit", bytes, SystemTime::now());
             gap.events[0].data["lines"] = json!(lines);
-            gap.events[0].data["bound"] = json!(if hit_bound {
-                "drain_max"
-            } else {
-                "drain_stall"
-            });
+            gap.events[0].data["bound"] = json!(if hit_bound { cap_name } else { "drain_stall" });
             store.append(gap)?;
         }
     }

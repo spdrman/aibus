@@ -6,9 +6,7 @@ mod common;
 
 use aibus_extension::conformance;
 use aibus_extension::package::{self, Package};
-use common::{
-    guest_wasm, package_with, template_dir, template_manifest, wasm_manifest, wasm_package,
-};
+use common::{guest_wasm, package_with, template_manifest, wasm_manifest, wasm_package};
 
 fn comparable(mut v: serde_json::Value) -> serde_json::Value {
     // The only field that names the engine: the parser that produced the event.
@@ -83,7 +81,8 @@ fn a_guest_that_traps_fails_conformance_by_name_and_does_not_hang_it() {
 #[test]
 fn the_checked_in_guest_is_the_one_its_recorded_hash_names() {
     let sum = std::fs::read_to_string(
-        template_dir().join("../../../crates/aibus-extension/tests/wasm-guest/parser.wasm.sha256"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/wasm-guest/parser.wasm.sha256"),
     )
     .expect("tests/wasm-guest/parser.wasm.sha256 is written by build.sh");
     assert_eq!(sum.trim(), aibus_trace::sha256_hex(&guest_wasm()));

@@ -761,7 +761,40 @@ impl Manifest {
                     "the declarative engine needs one to 64 rules",
                 ));
             }
+            Engine::WasmModule => {
+                #[cfg(not(feature = "wasm"))]
+                return Err(bad(
+                    "normalizer.engine",
+                    "this build of aibus is without WASM support (the `wasm` cargo feature is off)",
+                ));
+                #[cfg(feature = "wasm")]
+                {
+                    if !n.rule.is_empty() {
+                        return Err(bad("normalizer.rule", "a WASM module takes no rules"));
+                    }
+                    match &n.module {
+                        Some(m) => matches_re(
+                            "normalizer.module",
+                            r"^wasm/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.wasm$",
+                            m,
+                            "a .wasm file directly under wasm/",
+                        )?,
+                        None => {
+                            return Err(bad(
+                                "normalizer.module",
+                                "the engine wasm-module names its module",
+                            ))
+                        }
+                    }
+                }
+            }
             _ => {}
+        }
+        if n.module.is_some() && n.engine != Engine::WasmModule {
+            return Err(bad(
+                "normalizer.module",
+                "only the engine wasm-module has a module",
+            ));
         }
         for r in &n.rule {
             for p in [
@@ -961,6 +994,15 @@ pub fn escalations(old: &Manifest, new: &Manifest) -> Vec<String> {
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_default()
+        ));
+    }
+    // New code under the same engine: a different module path.
+    if new.normalizer.engine == old.normalizer.engine
+        && new.normalizer.module != old.normalizer.module
+    {
+        out.push(format!(
+            "module:{}",
+            new.normalizer.module.clone().unwrap_or_default()
         ));
     }
     let needs = |m: &Manifest| m.hooks.as_ref().is_some_and(|h| h.needs_delivery);

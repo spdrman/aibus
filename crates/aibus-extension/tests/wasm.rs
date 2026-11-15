@@ -5,6 +5,7 @@
 
 use std::time::{Duration, Instant, SystemTime};
 
+use aibus_extension::manifest::UsageQuality;
 use aibus_extension::wasm::{Limits, Module, Wasm, WasmError, MAX_EVENTS_PER_CALL};
 use aibus_supervisor::{Ending, Engine};
 use aibus_trace::{AttemptRef, EventKind, Origin, TraceEvent, Visibility};
@@ -61,8 +62,12 @@ fn emitting(line: &[&str], finish: &[&str]) -> Vec<u8> {
 }
 
 fn drive(wasm: &[u8], limits: Limits, lines: &[&str]) -> Vec<TraceEvent> {
+    drive_as(wasm, limits, UsageQuality::Reported, lines)
+}
+
+fn drive_as(wasm: &[u8], limits: Limits, q: UsageQuality, lines: &[&str]) -> Vec<TraceEvent> {
     let module = Module::load(wasm).expect("the module loads");
-    let mut e = Wasm::new(attempt(), &module, limits).expect("the guest starts");
+    let mut e = Wasm::new(attempt(), &module, limits, q).expect("the guest starts");
     let mut at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut out = e.start(at, serde_json::json!({})).events;
     for l in lines {
@@ -117,10 +122,10 @@ fn a_guest_that_emits_one_event_per_line_produces_host_stamped_events() {
 
 #[test]
 fn the_guest_reads_exactly_the_line_and_a_too_small_buffer_is_minus_one() {
-    // 26 bytes, first byte `{`; a 4 byte buffer cannot hold it and gets -1 without a partial copy.
+    // 27 bytes, first byte `{`; a 4 byte buffer cannot hold it and gets -1 without a partial copy.
     let ok = guest(
         "",
-        "(if (i32.ne (call $read (i32.const 0) (i32.const 1024)) (i32.const 26)) (then unreachable))
+        "(if (i32.ne (call $read (i32.const 0) (i32.const 1024)) (i32.const 27)) (then unreachable))
          (if (i32.ne (i32.load8_u (i32.const 0)) (i32.const 123)) (then unreachable))
          (if (i32.ne (call $read (i32.const 0) (i32.const 4)) (i32.const -1)) (then unreachable))
          (i32.const 0)",
@@ -151,7 +156,13 @@ fn stderr_and_hooks_never_reach_the_guest() {
     // A guest that traps if it is ever called: stderr and hook lines are the host's.
     let w = guest("", "unreachable", "(i32.const 0)");
     let module = Module::load(&w).unwrap();
-    let mut e = Wasm::new(attempt(), &module, Limits::default()).unwrap();
+    let mut e = Wasm::new(
+        attempt(),
+        &module,
+        Limits::default(),
+        UsageQuality::Reported,
+    )
+    .unwrap();
     let at = SystemTime::UNIX_EPOCH;
     let s = e.stderr_line(b"please log in", at);
     assert_eq!(s.events.len(), 1);
@@ -241,7 +252,7 @@ fn a_nonzero_return_is_a_failure_and_so_is_a_guest_that_runs_out_of_stack() {
 fn a_pointer_outside_the_guests_memory_is_refused_not_followed() {
     let w = guest(
         "",
-        "(drop (call $read (i32.const 65500) (i32.const 1000))) (i32.const 0)",
+        "(drop (call $read (i32.const 65530) (i32.const 1000))) (i32.const 0)",
         "(i32.const 0)",
     );
     assert_eq!(
@@ -291,7 +302,7 @@ fn a_guest_that_returns_garbage_gets_warnings_and_no_events() {
 }
 
 #[test]
-fn a_usage_event_with_a_made_up_quality_is_not_stored_as_reported() {
+fn a_guests_usage_numbers_are_held_to_the_quality_the_manifest_declares() {
     // The manifest says the CLI's usage is estimated, so a guest cannot upgrade it to reported.
     let w = emitting(
         &[
@@ -299,9 +310,16 @@ fn a_usage_event_with_a_made_up_quality_is_not_stored_as_reported() {
         ],
         &[],
     );
-    let ev = drive(&w, Limits::default(), &[LINE]);
+    let ev = drive_as(&w, Limits::default(), UsageQuality::Estimated, &[LINE]);
     let m = &ev[1].data["metrics"][0];
-    assert_ne!(m["quality"], "reported", "{m}");
+    assert_eq!(m["quality"], "estimated");
+    let ev = drive_as(&w, Limits::default(), UsageQuality::Unknown, &[LINE]);
+    let m = &ev[1].data["metrics"][0];
+    assert_eq!(m["quality"], "unknown");
+    assert!(m["value"].is_null());
+    let ev = drive_as(&w, Limits::default(), UsageQuality::Reported, &[LINE]);
+    let m = &ev[1].data["metrics"][0];
+    assert_eq!(m["quality"], "reported", "{m}");
 }
 
 // ---- the host owns ids and evidence ----------------------------------------------------------
@@ -537,7 +555,12 @@ fn a_start_function_that_spins_is_stopped_before_the_guest_is_used() {
     );
     let module = Module::load(&w).unwrap();
     let t = Instant::now();
-    let r = Wasm::new(attempt(), &module, Limits::default());
+    let r = Wasm::new(
+        attempt(),
+        &module,
+        Limits::default(),
+        UsageQuality::Reported,
+    );
     assert!(r.is_err());
     assert!(t.elapsed() < Duration::from_secs(10));
 }

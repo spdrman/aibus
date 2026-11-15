@@ -123,7 +123,7 @@ mod with_the_host {
         let e = r0.entries[0].clone();
         let pair = Ed25519KeyPair::from_seed_unchecked(&[7u8; 32]).unwrap();
         let sig = pair.sign(&signed_message(&e.id, &e.version, &e.hash));
-        let index_path = reg.join("index.json");
+        let index_path = reg.join(aibus_extension::registry::INDEX_FILE);
         let mut v: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
         v["entries"][0]["signature"] = serde_json::to_value(Signature {

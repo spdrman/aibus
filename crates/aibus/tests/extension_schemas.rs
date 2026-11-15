@@ -204,3 +204,73 @@ fn every_expected_file_validates() {
         }
     }
 }
+
+/// The template with its rules swapped for a WASM module (#333), as TOML text.
+fn wasm_manifest_text() -> String {
+    let m = std::fs::read_to_string(repo().join(EXAMPLES[0]).join("aibus-extension.toml")).unwrap();
+    let (from, to) = (
+        m.find("[normalizer]").unwrap(),
+        m.find("# Every capability").unwrap(),
+    );
+    format!(
+        "{}[normalizer]\nengine = \"wasm-module\"\nmodule = \"wasm/parser.wasm\"\n\n{}",
+        &m[..from],
+        &m[to..]
+    )
+}
+
+#[test]
+fn a_manifest_naming_a_wasm_module_validates_and_a_module_that_climbs_does_not() {
+    let s = schema("manifest-v1");
+    let v: Value = toml::from_str(&wasm_manifest_text()).unwrap();
+    assert_eq!(check_against(&s, &v), Vec::<String>::new());
+    for bad in [
+        "wasm/../x.wasm",
+        "/etc/x.wasm",
+        "other/x.wasm",
+        "wasm/x.bin",
+    ] {
+        let mut v = v.clone();
+        v["normalizer"]["module"] = json!(bad);
+        assert!(
+            !check_against(&s, &v).is_empty(),
+            "the schema accepted {bad}"
+        );
+    }
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn the_events_a_wasm_guest_makes_match_the_event_contract() {
+    use std::collections::BTreeMap;
+    let template = repo().join(EXAMPLES[0]);
+    let mut files = BTreeMap::new();
+    for f in ["LICENSE", "README.md"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            std::fs::read_dir(template.join("fixtures"))
+                .unwrap()
+                .map(|e| format!("fixtures/{}", e.unwrap().file_name().to_string_lossy())),
+        )
+    {
+        files.insert(f.clone(), std::fs::read(template.join(&f)).unwrap());
+    }
+    files.insert(
+        "aibus-extension.toml".into(),
+        wasm_manifest_text().into_bytes(),
+    );
+    files.insert(
+        "wasm/parser.wasm".into(),
+        std::fs::read(repo().join("crates/aibus-extension/tests/wasm-guest/parser.wasm")).unwrap(),
+    );
+    let pkg = package::Package::from_files(files).unwrap();
+    let s = schema("event-v1");
+    for f in &pkg.manifest.fixtures.files {
+        let o = aibus_extension::conformance::observe(&pkg, f, "exit:0").unwrap();
+        for e in &o.events {
+            let v = serde_json::to_value(e).unwrap();
+            assert_eq!(check_against(&s, &v), Vec::<String>::new(), "{f}: {v}");
+        }
+    }
+}

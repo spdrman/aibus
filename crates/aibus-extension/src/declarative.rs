@@ -24,15 +24,21 @@ pub struct Declarative {
     attempt: AttemptRef,
     rules: Vec<Rule>,
     ids: EventIds,
-    lines: u64,
-    stdout_lines: u64,
+    // The counters, the parser name and the ending are `pub(crate)` because the WASM host
+    // (`crate::wasm`) stamps and ends an attempt through this same object, so the two engines'
+    // host-owned events cannot drift apart.
+    pub(crate) lines: u64,
+    pub(crate) stdout_lines: u64,
     stderr_lines: u64,
     usage_quality: UsageQuality,
     host: u64,
-    malformed: u64,
-    unknown: u64,
+    pub(crate) malformed: u64,
+    pub(crate) unknown: u64,
     open_tools: BTreeSet<String>,
-    ended: bool,
+    /// A guest said a tool outcome is unknown: the terminal event asks for reconciliation.
+    pub(crate) reconcile: bool,
+    pub(crate) parser: &'static str,
+    pub(crate) ended: bool,
 }
 
 impl Declarative {
@@ -49,12 +55,14 @@ impl Declarative {
             malformed: 0,
             unknown: 0,
             open_tools: BTreeSet::new(),
+            reconcile: false,
+            parser: PARSER,
             ended: false,
         }
     }
 
     /// An event for the raw `key` (the channel and line number, or a host counter), made at `at`.
-    fn event(
+    pub(crate) fn event(
         &mut self,
         key: &str,
         raw: &[u8],
@@ -73,7 +81,7 @@ impl Declarative {
                 &0u32.to_le_bytes(),
             ],
         );
-        let mut e = TraceEvent::new(&self.attempt, id, kind, origin, visibility, at, PARSER);
+        let mut e = TraceEvent::new(&self.attempt, id, kind, origin, visibility, at, self.parser);
         if !key.starts_with("host") {
             e.evidence_refs.push(format!("raw:{key}"));
             e.source.raw_sha256 = Some(sha);
@@ -81,7 +89,7 @@ impl Declarative {
         e
     }
 
-    fn host_event(
+    pub(crate) fn host_event(
         &mut self,
         kind: EventKind,
         origin: Origin,
@@ -296,14 +304,33 @@ impl Engine for Declarative {
             return Batch::default();
         }
         self.ended = true;
-        let (status, reason) = match ending {
-            Ending::Exited(0) => (AttemptStatus::Completed, "completed"),
-            Ending::Exited(_) => (AttemptStatus::Failed, "exit_code"),
-            Ending::Signalled(_) => (AttemptStatus::Interrupted, "signal"),
-            Ending::WallTime => (AttemptStatus::Interrupted, "wall_time"),
-            Ending::OutputLimit => (AttemptStatus::Interrupted, "output_limit"),
-            Ending::Cancelled => (AttemptStatus::Cancelled, "cancelled"),
-        };
+        let mut out = self.close(ending, at);
+        out.push(self.terminal(ending, wall, at));
+        Batch {
+            events: out,
+            payload: None,
+        }
+    }
+}
+
+/// How an ending maps to the attempt's terminal state.
+fn status_of(ending: Ending) -> (AttemptStatus, &'static str) {
+    match ending {
+        Ending::Exited(0) => (AttemptStatus::Completed, "completed"),
+        Ending::Exited(_) => (AttemptStatus::Failed, "exit_code"),
+        Ending::Signalled(_) => (AttemptStatus::Interrupted, "signal"),
+        Ending::WallTime => (AttemptStatus::Interrupted, "wall_time"),
+        Ending::OutputLimit => (AttemptStatus::Interrupted, "output_limit"),
+        Ending::Cancelled => (AttemptStatus::Cancelled, "cancelled"),
+    }
+}
+
+impl Declarative {
+    /// What the end of the stream leaves behind, before the terminal event: the truncation gap of
+    /// an interrupted attempt and one gap per tool use still open. The WASM host puts its guest's
+    /// own end-of-stream events between this and [`Self::terminal`].
+    pub(crate) fn close(&mut self, ending: Ending, at: SystemTime) -> Vec<TraceEvent> {
+        let (status, _) = status_of(ending);
         let mut out = Vec::new();
         if matches!(
             status,
@@ -319,7 +346,7 @@ impl Engine for Declarative {
             out.push(e);
         }
         let open = std::mem::take(&mut self.open_tools);
-        let reconcile = !open.is_empty();
+        self.reconcile |= !open.is_empty();
         for id in open {
             let mut e = self.host_event(
                 EventKind::GapDetected,
@@ -331,6 +358,18 @@ impl Engine for Declarative {
             e.data = json!({ "reason": "tool_outcome_unknown", "requires_reconciliation": true });
             out.push(e);
         }
+        out
+    }
+
+    /// The attempt's one terminal event, with the counters of the run.
+    pub(crate) fn terminal(
+        &mut self,
+        ending: Ending,
+        wall: Duration,
+        at: SystemTime,
+    ) -> TraceEvent {
+        let (status, reason) = status_of(ending);
+        let reconcile = self.reconcile;
         let kind = if status == AttemptStatus::Completed {
             EventKind::AttemptCompleted
         } else {
@@ -354,10 +393,6 @@ impl Engine for Declarative {
                 source: "aibus monotonic clock, spawn to exit".into(),
             }],
         });
-        out.push(e);
-        Batch {
-            events: out,
-            payload: None,
-        }
+        e
     }
 }

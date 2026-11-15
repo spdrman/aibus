@@ -25,3 +25,12 @@ aibus-provider-http = { path = "crates/aibus-provider-http" }
 aibus-provider-openai = { path = "crates/aibus-provider-openai" }
 aibus-tui = { path = "crates/aibus-tui" }
 aibus-testkit = { path = "crates/aibus-testkit" }
+
+# wasmtime's compiler is unusably slow in an unoptimised build (seconds per small module), and the
+# WASM host's tests compile real modules. Optimise just the compiler crates in dev and test builds.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3

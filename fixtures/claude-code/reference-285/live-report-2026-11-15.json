@@ -1,0 +1,93 @@
+{
+  "live": [
+    {
+      "attempt_status": "completed",
+      "checks_passed": [
+        "one lead and two native children",
+        "two delegation edges",
+        "a lead was observed",
+        "both edges point from the lead, via a native tool_use id",
+        "both edges are observed and carry source events",
+        "each child ran a tool that completed",
+        "the attempt completed"
+      ],
+      "cli": "claude",
+      "edges": [
+        {
+          "cross_checked": false,
+          "level": "observed"
+        },
+        {
+          "cross_checked": false,
+          "level": "observed"
+        }
+      ],
+      "ending": "Exited(0)",
+      "events": 29,
+      "evidence_levels": {
+        "observed": 26,
+        "unavailable": 3
+      },
+      "note": "One live run, 2026-11-15, same two-reader delegation as 11-foreground. Not a benchmark: n=1. Host name removed. Edges were not hook cross-checked (stream only).",
+      "status": "pass",
+      "tested_version": true,
+      "usage": [
+        {
+          "quality": "reported",
+          "source": "result.usage",
+          "unit": "tokens",
+          "value": 4.0
+        },
+        {
+          "quality": "reported",
+          "source": "result.usage",
+          "unit": "tokens",
+          "value": 637.0
+        },
+        {
+          "quality": "reported",
+          "source": "result.usage",
+          "unit": "tokens",
+          "value": 2997.0
+        },
+        {
+          "quality": "reported",
+          "source": "result.usage",
+          "unit": "tokens",
+          "value": 36376.0
+        },
+        {
+          "quality": "reported",
+          "source": "result.num_turns",
+          "unit": "turns",
+          "value": 3.0
+        },
+        {
+          "quality": "reported",
+          "source": "result.duration_ms",
+          "unit": "ms",
+          "value": 10055.0
+        },
+        {
+          "quality": "estimated",
+          "source": "result.total_cost_usd (client-side list-price estimate)",
+          "unit": "usd",
+          "value": 0.001943715
+        },
+        {
+          "quality": "unknown",
+          "source": "not reported by the CLI",
+          "unit": "usd",
+          "value": null
+        }
+      ],
+      "version": "2.1.311",
+      "wall_ms": {
+        "quality": "derived",
+        "source": "tokio Instant around supervise, this run, n=1, on the host in this row (not a benchmark)",
+        "unit": "ms",
+        "value": 10716
+      }
+    }
+  ]
+}

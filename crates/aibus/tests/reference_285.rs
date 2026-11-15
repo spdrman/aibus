@@ -565,7 +565,7 @@ async fn case_05_restart() -> Value {
             .append(true)
             .open(rig.trace().join("events.jsonl"))
             .unwrap();
-        f.write_all(br#"{"schema_version":1,"event_id":"0000"#)
+        f.write_all(br#"{"schema_version":2,"event_id":"0000"#)
             .unwrap();
     }
 
@@ -602,9 +602,22 @@ async fn case_05_restart() -> Value {
         "the repaired store reads clean",
         report.torn_bytes == 0 && report.corrupt_lines == 0,
     );
+    let file_ids: Vec<Uuid> = fs::read_to_string(rig.trace().join("events.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|l| {
+            serde_json::from_str::<Value>(l).unwrap()["event_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap()
+        })
+        .collect();
     c.ok(
-        "sequence numbers are unique and increase across the restart",
-        events.windows(2).all(|w| w[0].sequence < w[1].sequence),
+        "event ids are unique uuid v7s and increase in file order across the restart",
+        file_ids.len() == events.len()
+            && file_ids.iter().all(|i| i.get_version_num() == 7)
+            && file_ids.windows(2).all(|w| w[0] < w[1]),
     );
     c.ok(
         "the repair is itself in the trace as a warning",
@@ -778,6 +791,10 @@ async fn case_07_malformed_event() -> Value {
     c.ok(
         "the damage did not change the graph",
         facts(&events) == facts(&sup::replay("06-basic", Feed::Stream)),
+    );
+    c.ok(
+        "a line the CLI printed twice is counted once (duplicate detection)",
+        last(&events).data["duplicates"].as_u64() >= Some(1),
     );
     c.ok(
         "the broken text is not copied into the trace",

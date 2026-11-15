@@ -84,7 +84,7 @@
         "the torn tail is cut off and kept aside",
         "the retry is a second attempt that completes",
         "the repaired store reads clean",
-        "sequence numbers are unique and increase across the restart",
+        "event ids are unique uuid v7s and increase in file order across the restart",
         "the repair is itself in the trace as a warning",
         "two attempts, two ids, both still inspectable",
         "attempt 1 stays interrupted and is flagged requires_reconciliation (a tool never reported back)",
@@ -128,6 +128,7 @@
         "each damaged line is a labelled gap, unavailable not guessed",
         "an event type aibus has never seen is kept as a warning naming it",
         "the damage did not change the graph",
+        "a line the CLI printed twice is counted once (duplicate detection)",
         "the broken text is not copied into the trace"
       ],
       "ending": "exited(0)",

@@ -37,7 +37,7 @@ Evidence date 2026-11-15. Every number carries its data quality (invariant 9): *
 
 ## Event-fidelity coverage
 
-From the ten spike recordings fed through the normaliser (with hooks where recorded), 12 of the spec's 21 event kinds are produced: `attempt_started`, `attempt_completed`, `attempt_failed`, `agent_started`, `agent_stopped`, `task_delegated`, `message_chunk`, `tool_started`, `tool_completed`, `tool_failed`, `usage_reported`, `gap_detected`. The cases add `trace_warning` (stderr, unknown event types, store repairs) for 13.
+From the ten spike recordings fed through the normaliser (with hooks where recorded), 12 of the spec's 21 event kinds are produced (counts here are derived: aibus counted them from the stored traces): `attempt_started`, `attempt_completed`, `attempt_failed`, `agent_started`, `agent_stopped`, `task_delegated`, `message_chunk`, `tool_started`, `tool_completed`, `tool_failed`, `usage_reported`, `gap_detected`. The cases add `trace_warning` (stderr, unknown event types, store repairs) for 13.
 
 Not produced, and why:
 
@@ -49,7 +49,7 @@ Not produced, and why:
 | `artifact_created` | Worktrees and artifacts (#290) |
 | `auth_required` | The recordings were all signed in. It is covered by `host.rs` tests (a login prompt on stderr, an auth-error result), not by the corpus |
 
-Events by origin across the recordings: `cli_stream` 149, `hook` 76, `aibus_scheduler` 30, `derived` 2. Child ends that the CLI does not report (children die with the process) are `inferred` and say so; a killed stream is a `gap_detected` at the `unavailable` level. Stream types counted but given no event of their own: `hook_started`, `hook_response`, `task_progress`, `task_updated`, `rate_limit_event`.
+Events by origin across the recordings (derived counts): `cli_stream` 149, `hook` 76, `aibus_scheduler` 30, `derived` 2. Child ends that the CLI does not report (children die with the process) are `inferred` and say so; a killed stream is a `gap_detected` at the `unavailable` level. Stream types counted but given no event of their own: `hook_started`, `hook_response`, `task_progress`, `task_updated`, `rate_limit_event`.
 
 ## CLI version constraints
 
@@ -83,7 +83,7 @@ Not a benchmark. Host: the owner's MacBook (macOS, arm64). One sample per run, s
 | 14-teams-attempt | 6326 | 5515 | completed |
 | 15-killed-midrun | 2206 | none (no `result` before the kill) | interrupted |
 
-Wall is the spike harness clock from spawn to exit or kill (2026-11-14, #281). The reported duration is `result.duration_ms` of the first result line the projection found, so with several results (07, 08) it understates the run. The live runs in this PR (2026-11-15, host `Mac.lan`, 2.1.311, the same two-reader delegation as 11-foreground, three runs while building the live mode) took 10,165, 9,739 and 10,716 ms wall (derived), 29 events in the run whose report I kept; the first run reported `duration_ms` 8,773. That is slower than the 3.9 s of the spike's 11-foreground. I did not look into why (the live run passes `--agents` with `haiku` and the spike's flags, but the model turns can differ run to run), and three samples do not support a claim either way.
+Wall is the spike harness clock from spawn to exit or kill (2026-11-14, #281). The reported duration is `result.duration_ms` of the last result line (the scorecard's `cli_reported_duration_ms`), which for runs with several results (07, 08) is the last turn only, so it understates the run. One live run in this PR (2026-11-15, Claude Code 2.1.311, the same two-reader delegation as 11-foreground) is committed as `fixtures/claude-code/reference-285/live-report-2026-11-15.json` (host name removed): 10,716 ms wall (derived), 29 events, CLI-reported `duration_ms` 10,055 (reported), cost 0.0019 USD (estimated, list price). It passed the native-delegation checks with two observed edges and no hook cross-check (stream only). I ran the live mode two more times while building it and saw other wall times (about 9.7 to 10.2 s); **those reports were not kept, so treat them as unverified**. The spike's 11-foreground took 3.9 s, and I did not look into the difference. n=1 committed sample, so no claim either way.
 
 Supervisor overhead, the cost of a replay and anything else that would be a timing benchmark: **unknown, not measured.** Per the benchmark rule that would go through `bench-queue.sh` on Mercury, and the issue asks for no required timing gate.
 
@@ -98,4 +98,4 @@ Supervisor overhead, the cost of a replay and anything else that would be a timi
 | CPU and memory of the CLI | not sampled by the host | unknown |
 | Trace size | events per case in the scorecard (for example 27 events for 11-foreground) | derived |
 
-Cost over the whole spike was about 0.015 USD of estimated list price (#281); the live run in this PR added roughly 0.004 per run on the same basis.
+Cost over the whole spike was about 0.015 USD of estimated list price (#281); the committed live run was 0.0019 on the same basis.

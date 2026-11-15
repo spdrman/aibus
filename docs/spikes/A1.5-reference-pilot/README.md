@@ -1,6 +1,10 @@
 # A1.5 Phase 1 gate: go/no-go for Phase 2 (#285)
 
-> **This is a recommendation for the owner to ratify. Nothing here is ratified.** Until the owner says so on #285 or #280, Phase 2 (#286 to #290) stays blocked, and the amendments below are proposals, not decisions.
+> Ratified by the owner on 2026-11-15 as GO-WITH-CONDITIONS. Decisions: the supervisor drop (#324) is fixed first (#326); Claude Code subscription sign-in is allowed for local, opt-in use of the official CLI only (aibus never reads or stores the token, and commercial, bundled and hosted use stay blocked); the reference extension id is a reverse-DNS under the owner's domain, `org.devshell.aibus.reference-cli`, replacing the provisional `org.aibus.reference-cli`.
+
+The text below is the recommendation as I wrote it before that ratification; where it says "owner decision" or "change needed", the decisions above settle it.
+
+> I wrote this as a recommendation, and the owner has now ratified it as above. The amendments to the extension and checkpoint contracts below stay proposals for #286 and #289 to apply.
 
 Written 2026-11-15 on `a1-5-reference-pilot-285`. Evidence: the reference suite (`crates/aibus/tests/reference_285.rs`), the committed scorecard (`fixtures/claude-code/reference-285/scorecard.json`, version 1.0.0), the spike record (#281, `docs/spikes/A1.1-claude-code/`), and the merged Phase 1 code (#282, #283, #284). Details live next door: [capability-note.md](capability-note.md) and [benchmark.md](benchmark.md).
 
@@ -12,7 +16,7 @@ The Claude spike did not fail, so the clause "failing the Claude spike blocks th
 
 | Gate item | Result | Evidence |
 |---|---|---|
-| Claude CLI native-subagent spike and compliance decision | Met, with an open owner decision | #281; the live run in this PR saw it again on 2.1.311 (two observed edges, 29 events) |
+| Claude CLI native-subagent spike and compliance decision | Met, with an open owner decision | #281; one live run in this PR saw it again on 2.1.311 (two observed edges, 29 events; report committed as `live-report-2026-11-15.json`) |
 | Valid manifest | Met | #283: `workflow plan --dry-run` is byte-stable; case 09 reads it |
 | Trustworthy event and graph replay | Met for stream evidence; hook delivery in a live run is not shown (see amendment E4) | cases 01 to 10, 12 of 12 edges observed and hook cross-checked on the recordings |
 | Baseline benchmark | Met as a capability comparison, **not** as a timing benchmark | [benchmark.md](benchmark.md); latency is n=1 per run, no median or p95 |
@@ -23,7 +27,7 @@ The Claude spike did not fail, so the clause "failing the Claude spike blocks th
 |---|---|
 | Open source, local, user's own unmodified `claude`, API key or Console sign-in | **Go.** This is the documented developer path |
 | Same, claude.ai subscription sign-in | **Owner decision first** (unchanged from #281): ask Anthropic, accept the ambiguity, or tell users to use an API key. Until then aibus shows the CLI's own `authMethod` and says so plainly |
-| Extension or package with "Claude Code" in its name | **Change needed.** `org.aibus.claude-code` and `aibus-claude-code` go, the owner picks the name |
+| Extension or package with "Claude Code" in its name | **Decided.** `org.aibus.claude-code` and `aibus-claude-code` go. The reference extension id is `org.devshell.aibus.reference-cli` |
 | Bundled, preinstalled, hosted, commercial | **Blocked**, as #280 decided. Nothing in this PR clears it |
 | Terms | Re-check before any release (#295). The 2026-11-14 gate in `terms-gate.md` is the last review; I did not re-fetch the terms for this issue |
 
@@ -59,7 +63,7 @@ No other defect turned up in the ten cases.
 
 ### Checkpoint contract (spec 5.3, 7.4, #289)
 
-**Ratified for aibus-owned state only, with five amendments.** What exists today: an append-only JSONL store, one fsync per append, torn-tail repair on reopen, unique increasing sequence numbers across a restart, a new attempt per retry with the old one left inspectable, and `requires_reconciliation` when a tool never reported back (case 05).
+**Ratified for aibus-owned state only, with five amendments.** What exists today: an append-only JSONL store, one fsync per append, torn-tail repair on reopen, unique uuid v7 event ids that ascend in file order across a restart (#319), a new attempt per retry with the old one left inspectable, and `requires_reconciliation` when a tool never reported back (case 05).
 
 | # | Amendment | Why |
 |---|---|---|

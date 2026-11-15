@@ -1,0 +1,14 @@
+{
+  "ending": "exit:0",
+  "kinds": [
+    "attempt_started",
+    "message_chunk",
+    "tool_started",
+    "tool_failed",
+    "usage_reported",
+    "trace_warning",
+    "gap_detected",
+    "attempt_completed"
+  ],
+  "status": "completed"
+}

@@ -200,9 +200,10 @@ fn an_oversized_index_too_many_entries_an_unknown_field_or_a_future_version_is_r
         .collect();
     v["entries"] = many.into();
     write_index(&w.reg(), &v);
+    // Either cap may fire first: 4097 entries are also over the size cap.
     assert!(matches!(
         Registry::open(&w.reg()),
-        Err(RegistryError::Invalid(_))
+        Err(RegistryError::Invalid(_) | RegistryError::TooLarge(_))
     ));
 }
 

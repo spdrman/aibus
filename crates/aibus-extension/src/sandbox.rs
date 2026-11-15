@@ -10,12 +10,14 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use aibus_supervisor::cli::{Probe as CliProbe, ProbeError};
+use std::time::Duration;
+
+use aibus_supervisor::cli::{self, Probe as CliProbe, ProbeError, HOST_ENV_ALLOW};
 use aibus_supervisor::{Engine, Launch, Limits};
 use aibus_trace::AttemptRef;
 
 use crate::manifest::{Capability, Manifest};
-use crate::negotiate::{Incompatible, Negotiated};
+use crate::negotiate::{check_host, negotiate, Incompatible, Negotiated};
 
 /// What the host grants one launch. The extension cannot widen it.
 #[derive(Clone, Debug)]
@@ -61,11 +63,65 @@ pub enum SandboxError {
     Refused(String),
 }
 
+fn refused(why: impl Into<String>) -> SandboxError {
+    SandboxError::Refused(why.into())
+}
+
 /// The checks every launch has to pass whoever built it: an absolute executable whose file name is
 /// one the manifest declared, argv that is the manifest's tokens plus its optional flags only, an
 /// environment of allowed names only, and an existing absolute working directory.
 pub fn check_launch(m: &Manifest, launch: &Launch) -> Result<(), SandboxError> {
-    todo!("{m:?} {launch:?}")
+    let name = launch
+        .exe
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if !launch.exe.is_absolute() || !m.cli.executable_candidates.iter().any(|c| c == name) {
+        return Err(refused(format!(
+            "{} is not an absolute path to one of the declared executables {:?}",
+            launch.exe.display(),
+            m.cli.executable_candidates
+        )));
+    }
+    let fixed: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
+    if launch.args.len() < fixed.len() || launch.args[..fixed.len()] != fixed[..] {
+        return Err(refused(
+            "the arguments do not start with the manifest's argv",
+        ));
+    }
+    for extra in &launch.args[fixed.len()..] {
+        if !m
+            .execution
+            .optional
+            .iter()
+            .any(|o| OsString::from(&o.flag) == *extra)
+        {
+            return Err(refused(format!(
+                "{extra:?} is not an optional flag the manifest declared"
+            )));
+        }
+    }
+    for (k, v) in &launch.env {
+        let Some(k) = k.to_str() else {
+            return Err(refused("an environment name is not UTF-8"));
+        };
+        if k == "PATH" {
+            if v != "/usr/bin:/bin" {
+                return Err(refused("PATH is the host's, /usr/bin:/bin"));
+            }
+        } else if !HOST_ENV_ALLOW.contains(&k) && !m.execution.env_allow.iter().any(|n| n == k) {
+            return Err(refused(format!(
+                "{k} is not an environment name the manifest declared"
+            )));
+        }
+    }
+    if !launch.cwd.is_absolute() || !launch.cwd.is_dir() {
+        return Err(refused(format!(
+            "{} is not an existing absolute directory",
+            launch.cwd.display()
+        )));
+    }
+    Ok(())
 }
 
 /// Finds and probes the CLI, negotiates, and builds the launch. `want` are the optional
@@ -76,10 +132,129 @@ pub async fn prepare(
     grant: &Grant,
     want: &[Capability],
 ) -> Result<Prepared, SandboxError> {
-    todo!("{m:?} {grant:?} {want:?}")
+    check_host(m, &grant.os)?;
+    let names: Vec<&str> = m.execution.env_allow.iter().map(String::as_str).collect();
+    let env = cli::bounded_env(grant.parent_env.iter().cloned(), &names, &[])
+        .map_err(|e| SandboxError::Env(e.to_string()))?;
+
+    let mut why = Vec::new();
+    let mut found = None;
+    for name in &m.cli.executable_candidates {
+        let d = cli::discover_from(
+            &grant.search_dirs,
+            name,
+            &env,
+            crate::version::Version(0, 0, 0),
+        )
+        .await;
+        why.extend(d.candidates.iter().filter_map(|c| {
+            c.verdict
+                .as_ref()
+                .err()
+                .map(|e| format!("{}: {e}", c.path.display()))
+        }));
+        if let Some(c) = d.chosen.and_then(|i| d.candidates.get(i)) {
+            found = Some(c.clone());
+            break;
+        }
+    }
+    let Some(found) = found else {
+        return Err(SandboxError::NoExecutable {
+            names: m.cli.executable_candidates.clone(),
+            why,
+        });
+    };
+    let real = found.resolved.clone().unwrap_or_else(|| found.path.clone());
+    let say = |args: &'static [&'static str]| async {
+        cli::capture(&real, args, &env, Duration::from_secs(10), 256 * 1024)
+            .await
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .map_err(|e| SandboxError::NoExecutable {
+                names: m.cli.executable_candidates.clone(),
+                why: vec![format!("{}: {e}", real.display())],
+            })
+    };
+    let (version_out, help_out) = (say(&["--version"]).await?, say(&["--help"]).await?);
+    let probe = match m.normalizer.engine {
+        // The host's own Claude gate: required flags and the bare-mode refusal.
+        crate::manifest::Engine::ClaudeStreamJson => cli::probe(&version_out, &help_out)?,
+        crate::manifest::Engine::DeclarativeJsonl => cli::parse_help(&version_out, &help_out)?,
+    };
+    let negotiated = negotiate(m, &grant.os, &probe)?;
+
+    let mut args: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
+    for c in want {
+        let Some(opt) = m.execution.optional.iter().find(|o| o.capability == *c) else {
+            return Err(SandboxError::CapabilityMissing(format!(
+                "{c:?} (the manifest has no optional flag for it)"
+            )));
+        };
+        if !negotiated.supports(*c) {
+            return Err(SandboxError::CapabilityMissing(format!(
+                "{c:?} ({} is not offered by this CLI)",
+                opt.flag
+            )));
+        }
+        args.push(OsString::from(&opt.flag));
+    }
+
+    let cwd = std::fs::canonicalize(&grant.workdir)
+        .ok()
+        .filter(|p| grant.workdir.is_absolute() && p.is_dir())
+        .ok_or_else(|| {
+            SandboxError::Workdir(format!(
+                "{} is not an existing absolute directory",
+                grant.workdir.display()
+            ))
+        })?;
+
+    // The smaller of what the manifest asked and the host's ceiling, field by field.
+    let ask = m.limits.clone().unwrap_or_default();
+    let mut limits = grant.ceiling;
+    if let Some(s) = ask.wall_time_secs {
+        limits.wall_time = limits.wall_time.min(Duration::from_secs(s));
+    }
+    if let Some(b) = ask.max_stdout_bytes {
+        limits.max_stdout_bytes = limits.max_stdout_bytes.min(b);
+    }
+    if let Some(b) = ask.max_line_bytes {
+        limits.max_line_bytes = limits
+            .max_line_bytes
+            .min(usize::try_from(b).unwrap_or(usize::MAX));
+    }
+    if let Some(b) = ask.max_stderr_bytes {
+        limits.max_stderr_bytes = limits.max_stderr_bytes.min(b);
+    }
+    if let Some(n) = ask.lines_per_second {
+        limits.lines_per_second = limits.lines_per_second.min(n);
+    }
+
+    let launch = Launch {
+        // The name the manifest declared, in the directory the host searched. Its target was
+        // checked by `discover`.
+        exe: found.path.clone(),
+        args,
+        cwd,
+        env,
+        stdin: Vec::new(),
+        limits,
+    };
+    check_launch(m, &launch)?;
+    Ok(Prepared {
+        launch,
+        negotiated,
+        probe,
+    })
 }
 
 /// The engine that reads this extension's events.
 pub fn engine(m: &Manifest, attempt: AttemptRef) -> Box<dyn Engine> {
-    todo!("{m:?} {attempt:?}")
+    match m.normalizer.engine {
+        crate::manifest::Engine::ClaudeStreamJson => {
+            Box::new(aibus_supervisor::Normalizer::new(attempt))
+        }
+        crate::manifest::Engine::DeclarativeJsonl => Box::new(
+            crate::declarative::Declarative::new(attempt, m.normalizer.rule.clone()),
+        ),
+    }
 }

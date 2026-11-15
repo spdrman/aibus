@@ -180,7 +180,10 @@ fn names_that_could_escape_or_confuse_are_refused() {
 fn a_non_utf8_name_on_disk_is_refused() {
     let (_t, p) = base();
     let name = std::ffi::OsStr::from_bytes(b"bad\xff.txt");
-    fs::write(p.join(name), b"x").unwrap();
+    // APFS refuses such a name outright; there is nothing to read then.
+    if fs::write(p.join(name), b"x").is_err() {
+        return;
+    }
     assert!(matches!(package::read(&p), Err(PackageError::BadName(_))));
 }
 

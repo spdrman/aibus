@@ -1,0 +1,12 @@
+{
+  "ending": "exit:0",
+  "kinds": [
+    "attempt_started",
+    "agent_started",
+    "message_chunk",
+    "usage_reported",
+    "agent_stopped",
+    "attempt_completed"
+  ],
+  "status": "completed"
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/extension/fixture-expected-v1.json",
+  "title": "aibus extension fixture expectation v1",
+  "description": "fixtures/<name>.expected.json next to fixtures/<name>.jsonl: the ending the host reports, and the attempt status and event kinds in order that the engine has to produce for that recorded stream.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ending",
+    "status",
+    "kinds"
+  ],
+  "properties": {
+    "ending": {
+      "type": "string",
+      "pattern": "^(exit:-?[0-9]+|signal:-?[0-9]+|cancelled|wall_time|output_limit)$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "workflow_started",
+          "step_scheduled",
+          "route_decided",
+          "approval_requested",
+          "approval_resolved",
+          "attempt_started",
+          "attempt_completed",
+          "attempt_failed",
+          "agent_started",
+          "agent_stopped",
+          "task_delegated",
+          "message_chunk",
+          "tool_started",
+          "tool_completed",
+          "tool_failed",
+          "checkpoint_written",
+          "artifact_created",
+          "usage_reported",
+          "auth_required",
+          "gap_detected",
+          "trace_warning"
+        ]
+      }
+    }
+  }
+}

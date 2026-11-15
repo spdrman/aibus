@@ -170,6 +170,8 @@ pub enum Command {
     /// Recorded runs of an external CLI: list, inspect, replay offline
     #[command(subcommand)]
     Runs(RunsCmd),
+    /// Extensions for official CLIs: search, install, verify, update, test
+    Extensions(ExtensionsArgs),
     /// The config file
     #[command(subcommand)]
     Config(ConfigCmd),
@@ -345,6 +347,64 @@ pub struct AccountAdd {
     pub project: Option<String>,
 }
 
+
+/// `aibus extensions` (#286): extensions are directories read as data and never run inside aibus.
+/// They come from a local registry directory (no network) and are kept in `<data>/extensions`.
+#[derive(Args, Debug)]
+pub struct ExtensionsArgs {
+    /// The registry directory (default: $AIBUS_EXTENSION_REGISTRY, else <config>/extension-registry)
+    #[arg(long, global = true, value_name = "DIR")]
+    pub registry: Option<PathBuf>,
+    #[command(subcommand)]
+    pub cmd: ExtensionsCmd,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ExtensionsCmd {
+    /// Extensions in the registry whose id contains the text, newest first
+    Search { query: String },
+    /// Install <id> or <id>@<version> from the registry; a refused package is quarantined
+    Install {
+        spec: String,
+        /// An escalation to accept by name, as `update` lists them (repeatable)
+        #[arg(long = "accept", value_name = "ITEM")]
+        accept: Vec<String>,
+    },
+    /// Re-hash an installed extension and check it against revocations and the policy
+    Verify { id: String },
+    /// Installed extensions, one line each
+    List {
+        /// Ids only, one per line
+        #[arg(long, hide = true)]
+        names: bool,
+    },
+    /// Move to the newest version in the registry (never down; a pin refuses)
+    Update {
+        id: String,
+        #[arg(long = "accept", value_name = "ITEM")]
+        accept: Vec<String>,
+    },
+    /// Keep an installed extension from being used
+    Disable { id: String },
+    /// Undo `disable`
+    Enable { id: String },
+    /// Refuse updates of an extension until it is unpinned
+    Pin { id: String },
+    Unpin { id: String },
+    /// Make the previous installed version active again
+    Rollback { id: String },
+    /// Delete an installed extension and its files
+    Remove { id: String },
+    /// Run the recorded streams of a package directory or an installed id through its engine, offline
+    Test {
+        target: String,
+        /// The fixtures are always run; the flag is the spelling the spec uses
+        #[arg(long)]
+        fixtures: bool,
+    },
+    /// Add a package directory to the registry, with its content hash
+    Publish { dir: PathBuf },
+}
 
 /// `aibus runs` (#284): recorded runs read from `<state>/traces/<run>/`, or from `--root`. All of it
 /// reads files; none of it starts a provider or a process.
@@ -656,6 +716,19 @@ mod tests {
         "runs inspect",
         "runs replay",
         "runs rerun",
+        "extensions search",
+        "extensions install",
+        "extensions verify",
+        "extensions list",
+        "extensions update",
+        "extensions disable",
+        "extensions enable",
+        "extensions pin",
+        "extensions unpin",
+        "extensions rollback",
+        "extensions remove",
+        "extensions test",
+        "extensions publish",
         "init",
         "config path",
         "config show",

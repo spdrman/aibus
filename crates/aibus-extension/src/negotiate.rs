@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use aibus_supervisor::cli::Probe as CliProbe;
 
-use crate::manifest::{Capability, Manifest};
-use crate::version::Version;
+use crate::manifest::{Capability, Manifest, Support};
+use crate::version::{Range, Version};
 
 /// The SDK protocol this host speaks. A manifest's `compat.protocol` has to contain it.
 pub const PROTOCOL: Version = Version(1, 0, 0);
@@ -41,10 +41,69 @@ impl Negotiated {
 
 /// The checks that need no CLI: the protocol range and the operating system.
 pub fn check_host(m: &Manifest, os: &str) -> Result<(), Incompatible> {
-    todo!("{m:?} {os}")
+    let wants = Range::parse(&m.compat.protocol).expect("validated by Manifest::parse");
+    if !wants.contains(&PROTOCOL) {
+        return Err(Incompatible::Protocol {
+            wants: m.compat.protocol.clone(),
+            have: PROTOCOL,
+        });
+    }
+    if !m.compat.os.iter().any(|o| o == os) {
+        return Err(Incompatible::Os {
+            os: os.to_owned(),
+            lists: m.compat.os.join(", "),
+        });
+    }
+    Ok(())
 }
 
 /// Everything `check_host` says, then the CLI's version range, then each capability.
 pub fn negotiate(m: &Manifest, os: &str, cli: &CliProbe) -> Result<Negotiated, Incompatible> {
-    todo!("{m:?} {os} {cli:?}")
+    check_host(m, os)?;
+    let wants = Range::parse(&m.compat.cli_versions).expect("validated by Manifest::parse");
+    if !wants.contains(&cli.version) {
+        return Err(Incompatible::CliVersion {
+            version: cli.version,
+            wants: m.compat.cli_versions.clone(),
+        });
+    }
+    let mut capabilities = BTreeMap::new();
+    for (c, declared) in &m.capabilities {
+        let verdict = match declared {
+            Support::Unsupported => {
+                Verdict::Unsupported("the extension declares it unsupported".into())
+            }
+            Support::Supported => Verdict::Supported,
+            Support::ProbeRequired => 'probe: {
+                for p in m.probe.iter().filter(|p| p.capability == *c) {
+                    if let Some(missing) = p.flags.iter().find(|f| !cli.flags.contains(*f)) {
+                        break 'probe Verdict::Unsupported(format!(
+                            "the CLI's --help does not list {missing}"
+                        ));
+                    }
+                    if let Some(min) = p.min_version.as_deref().and_then(crate::version::exact) {
+                        if cli.version < min {
+                            break 'probe Verdict::Unsupported(format!(
+                                "needs CLI {min}, this is {}",
+                                cli.version
+                            ));
+                        }
+                    }
+                }
+                Verdict::Supported
+            }
+        };
+        capabilities.insert(*c, verdict);
+    }
+    // Amendment E4: the extension's evidence is better with hook payloads, and the host has no live
+    // way to receive them yet, so the capability is not offered whatever the CLI lists.
+    if m.hooks.as_ref().is_some_and(|h| h.needs_delivery) {
+        capabilities.insert(
+            Capability::HookChannel,
+            Verdict::Unsupported(
+                "the host has no live way to receive hook payloads yet (#281, inline --settings is untried); the stream is the only evidence".into(),
+            ),
+        );
+    }
+    Ok(Negotiated { capabilities })
 }

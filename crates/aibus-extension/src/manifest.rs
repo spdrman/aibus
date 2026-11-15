@@ -281,9 +281,407 @@ pub enum ManifestError {
     Invalid { field: String, why: String },
 }
 
+/// Whether `id` is a well-formed extension id (reverse-DNS, lower case, three to eight labels).
+pub fn valid_id(id: &str) -> bool {
+    regex::Regex::new(r"^[a-z][a-z0-9-]{0,30}(\.[a-z][a-z0-9-]{0,30}){2,7}$")
+        .expect("valid regex")
+        .is_match(id)
+}
+
+fn bad(field: &str, why: impl Into<String>) -> ManifestError {
+    ManifestError::Invalid {
+        field: field.to_owned(),
+        why: why.into(),
+    }
+}
+
+fn text(field: &str, s: &str, max: usize) -> Result<(), ManifestError> {
+    // Characters that confuse a terminal or a reader: controls, bidi overrides, zero-width marks.
+    let invisible = |c: char| {
+        c.is_control()
+            || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+    };
+    if s.trim().is_empty() || s.chars().count() > max || s.chars().any(invisible) {
+        return Err(bad(
+            field,
+            format!("must be 1 to {max} printable characters"),
+        ));
+    }
+    Ok(())
+}
+
+fn matches_re(field: &str, re: &str, s: &str, what: &str) -> Result<(), ManifestError> {
+    let re = regex::Regex::new(re).expect("valid regex");
+    if re.is_match(s) {
+        Ok(())
+    } else {
+        Err(bad(field, format!("{s:?} is not {what}")))
+    }
+}
+
+fn https(field: &str, s: &str) -> Result<(), ManifestError> {
+    matches_re(
+        field,
+        r"(?i)^https://[a-z0-9]([a-z0-9.-]{0,98}[a-z0-9])?(:\d{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]{0,200})?$",
+        s,
+        "an https URL with no credentials",
+    )
+}
+
+/// Words that mean "run without asking": never in an argv or an optional flag.
+fn bypass(token: &str) -> bool {
+    let t = token.to_ascii_lowercase();
+    [
+        "dangerously",
+        "skip-permissions",
+        "yolo",
+        "bypass",
+        "no-sandbox",
+        "auto-approve",
+        "allow-all",
+    ]
+    .iter()
+    .any(|w| t.contains(w))
+}
+
+fn argv_tokens(field: &str, tokens: &[String], max: usize) -> Result<(), ManifestError> {
+    if tokens.len() > max {
+        return Err(bad(field, format!("more than {max} tokens")));
+    }
+    for t in tokens {
+        matches_re(
+            field,
+            r"^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
+            t,
+            "a plain token (no space, slash, quote, $, `, ~ or braces)",
+        )?;
+        if bypass(t) {
+            return Err(bad(field, format!("{t:?} would run without asking")));
+        }
+    }
+    Ok(())
+}
+
+fn range(field: &str, s: &str) -> Result<crate::version::Range, ManifestError> {
+    crate::version::Range::parse(s).map_err(|why| bad(field, why))
+}
+
 impl Manifest {
-    pub fn parse(text: &str) -> Result<Self, ManifestError> {
-        todo!("{text}")
+    pub fn parse(text_in: &str) -> Result<Self, ManifestError> {
+        if text_in.len() > MAX_MANIFEST_BYTES {
+            return Err(ManifestError::TooLarge(text_in.len()));
+        }
+        let m: Self =
+            toml::from_str(text_in).map_err(|e| ManifestError::Syntax(e.message().to_owned()))?;
+        m.validate()?;
+        Ok(m)
+    }
+
+    fn validate(&self) -> Result<(), ManifestError> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(bad(
+                "schema_version",
+                format!(
+                    "this host reads schema {SCHEMA_VERSION:?}, not {:?}",
+                    self.schema_version
+                ),
+            ));
+        }
+        if !valid_id(&self.id) {
+            return Err(bad(
+                "id",
+                "must be a lower-case reverse-DNS id with at least three labels",
+            ));
+        }
+        // Amendment E6: no vendor product name in an id or a name.
+        let squashed = |s: &str| {
+            s.chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect::<String>()
+                .to_ascii_lowercase()
+        };
+        for (field, value) in [("id", &self.id), ("name", &self.name)] {
+            if squashed(value).contains("claudecode") {
+                return Err(bad(
+                    field,
+                    "must not contain the vendor's product name \"Claude Code\"",
+                ));
+            }
+        }
+        if crate::version::exact(&self.version).is_none() {
+            return Err(bad("version", "must be exactly major.minor.patch"));
+        }
+        text("name", &self.name, 64)?;
+        if self.kind != "official_cli" {
+            return Err(bad("kind", "the only kind is official_cli"));
+        }
+        text("provider", &self.provider, 64)?;
+        text("license", &self.license, 100)?;
+        https("source_url", &self.source_url)?;
+        text("publisher.name", &self.publisher.name, 64)?;
+        https("publisher.url", &self.publisher.url)?;
+
+        range("compat.protocol", &self.compat.protocol)?;
+        range("compat.cli_versions", &self.compat.cli_versions)?;
+        if self.compat.os.is_empty()
+            || self.compat.os.len() > 3
+            || self
+                .compat
+                .os
+                .iter()
+                .any(|o| !matches!(o.as_str(), "macos" | "linux" | "windows"))
+        {
+            return Err(bad("compat.os", "one to three of macos, linux, windows"));
+        }
+
+        let exes = &self.cli.executable_candidates;
+        if exes.is_empty() || exes.len() > 4 {
+            return Err(bad("cli.executable_candidates", "one to four file names"));
+        }
+        for e in exes {
+            matches_re(
+                "cli.executable_candidates",
+                r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                e,
+                "a plain file name (no path, no leading dot)",
+            )?;
+        }
+        if self.cli.vendor_urls.is_empty() || self.cli.vendor_urls.len() > 8 {
+            return Err(bad("cli.vendor_urls", "one to eight vendor URLs"));
+        }
+        for u in &self.cli.vendor_urls {
+            https("cli.vendor_urls", u)?;
+        }
+
+        if self.auth.owner != "vendor_cli" {
+            return Err(bad("auth.owner", "the vendor CLI owns its sign-in"));
+        }
+        if self.auth.credential_access != "forbidden" {
+            return Err(bad("auth.credential_access", "must be \"forbidden\""));
+        }
+        argv_tokens("auth.login_argv", &self.auth.login_argv, 16)?;
+        argv_tokens("auth.status_argv", &self.auth.status_argv, 16)?;
+
+        let ex = &self.execution;
+        argv_tokens("execution.argv", &ex.argv, 32)?;
+        if ex.prompt != "stdin" {
+            return Err(bad(
+                "execution.prompt",
+                "the prompt goes on stdin, never in argv",
+            ));
+        }
+        if ex.stdout != "jsonl" {
+            return Err(bad("execution.stdout", "the only stdout format is jsonl"));
+        }
+        if ex.env_allow.len() > 16 {
+            return Err(bad("execution.env_allow", "more than 16 names"));
+        }
+        for n in &ex.env_allow {
+            matches_re(
+                "execution.env_allow",
+                r"^[A-Z][A-Z0-9_]{0,63}$",
+                n,
+                "an upper-case name",
+            )?;
+            // Names the host never passes on an extension's say-so, on top of `bounded_env`'s
+            // credential, session and PATH rules: aibus's own, and the variables that make a
+            // process load someone's code.
+            let private = n.starts_with("AIBUS_")
+                || n.starts_with("LD_")
+                || n.starts_with("DYLD_")
+                || matches!(
+                    n.as_str(),
+                    "NODE_OPTIONS"
+                        | "PYTHONPATH"
+                        | "PYTHONSTARTUP"
+                        | "PERL5OPT"
+                        | "RUBYOPT"
+                        | "BASH_ENV"
+                        | "ENV"
+                        | "IFS"
+                        | "SHELL"
+                );
+            if private
+                || aibus_supervisor::cli::bounded_env(std::iter::empty(), &[n.as_str()], &[])
+                    .is_err()
+            {
+                return Err(bad(
+                    "execution.env_allow",
+                    format!("{n} is never passed to a CLI"),
+                ));
+            }
+        }
+        for o in &ex.optional {
+            matches_re(
+                "execution.optional",
+                r"^--[a-z][a-z0-9-]{0,63}$",
+                &o.flag,
+                "a long flag",
+            )?;
+            if bypass(&o.flag) {
+                return Err(bad(
+                    "execution.optional",
+                    format!("{} would run without asking", o.flag),
+                ));
+            }
+            let listed = self
+                .probe
+                .iter()
+                .any(|p| p.capability == o.capability && p.flags.contains(&o.flag));
+            if !listed {
+                return Err(bad(
+                    "execution.optional",
+                    format!(
+                        "{} needs a [[probe]] for {:?} that lists it",
+                        o.flag, o.capability
+                    ),
+                ));
+            }
+        }
+
+        if let Some(l) = &self.limits {
+            for (name, v) in [
+                ("wall_time_secs", l.wall_time_secs),
+                ("max_stdout_bytes", l.max_stdout_bytes),
+                ("max_line_bytes", l.max_line_bytes),
+                ("max_stderr_bytes", l.max_stderr_bytes),
+                ("lines_per_second", l.lines_per_second.map(u64::from)),
+            ] {
+                if v == Some(0) {
+                    return Err(bad(&format!("limits.{name}"), "must be above zero"));
+                }
+            }
+        }
+
+        let n = &self.normalizer;
+        match n.engine {
+            Engine::ClaudeStreamJson if !n.rule.is_empty() => {
+                return Err(bad("normalizer.rule", "the built-in engine takes no rules"));
+            }
+            Engine::DeclarativeJsonl if n.rule.is_empty() || n.rule.len() > 64 => {
+                return Err(bad(
+                    "normalizer.rule",
+                    "the declarative engine needs one to 64 rules",
+                ));
+            }
+            _ => {}
+        }
+        for r in &n.rule {
+            for p in [
+                Some(&r.pointer),
+                r.id_pointer.as_ref(),
+                r.tokens_in_pointer.as_ref(),
+                r.tokens_out_pointer.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                matches_re(
+                    "normalizer.rule",
+                    r"^(/[A-Za-z0-9_-]{1,32}){1,6}$",
+                    p,
+                    "a short JSON pointer",
+                )?;
+            }
+            text("normalizer.rule", &r.equals, 128)?;
+            let tool = matches!(
+                r.kind,
+                RuleKind::ToolStarted | RuleKind::ToolCompleted | RuleKind::ToolFailed
+            );
+            if r.id_pointer.is_some() && !tool {
+                return Err(bad("normalizer.rule", "id_pointer is for the tool kinds"));
+            }
+            let usage = r.kind == RuleKind::UsageReported;
+            if (r.tokens_in_pointer.is_some() || r.tokens_out_pointer.is_some()) && !usage {
+                return Err(bad(
+                    "normalizer.rule",
+                    "token pointers are for usage_reported",
+                ));
+            }
+        }
+
+        for c in Capability::ALL {
+            if !self.capabilities.contains_key(&c) {
+                return Err(bad(
+                    "capabilities",
+                    format!("{c:?} is not declared; declare every capability"),
+                ));
+            }
+        }
+        for p in &self.probe {
+            if self.capabilities.get(&p.capability) != Some(&Support::ProbeRequired) {
+                return Err(bad(
+                    "probe",
+                    format!("{:?} has a probe but is not probe_required", p.capability),
+                ));
+            }
+            if p.flags.is_empty() || p.flags.len() > 8 {
+                return Err(bad("probe", "one to eight flags"));
+            }
+            for f in &p.flags {
+                matches_re("probe", r"^--[a-z][a-z0-9-]{0,63}$", f, "a long flag")?;
+            }
+            if let Some(v) = &p.min_version {
+                if crate::version::exact(v).is_none() {
+                    return Err(bad("probe", "min_version must be major.minor.patch"));
+                }
+            }
+        }
+        for (c, s) in &self.capabilities {
+            if *s == Support::ProbeRequired && !self.probe.iter().any(|p| p.capability == *c) {
+                return Err(bad(
+                    "probe",
+                    format!("{c:?} is probe_required and has no [[probe]]"),
+                ));
+            }
+        }
+        // Amendment E5 and C1: native children live inside the lead process, so they cannot resume.
+        let lineage = self.capabilities[&Capability::NativeChildLineage] != Support::Unsupported;
+        if lineage && self.capabilities[&Capability::SessionResume] != Support::Unsupported {
+            return Err(bad(
+                "capabilities.session_resume",
+                "native children die with the lead process, so session_resume must be unsupported",
+            ));
+        }
+
+        let p = &self.permissions;
+        for (name, ok) in [
+            ("spawn_only_declared_cli", p.spawn_only_declared_cli),
+            ("read_provider_credentials", !p.read_provider_credentials),
+            (
+                "external_network_from_parser",
+                !p.external_network_from_parser,
+            ),
+        ] {
+            if !ok {
+                return Err(bad(
+                    &format!("permissions.{name}"),
+                    "this value is never granted",
+                ));
+            }
+        }
+
+        text("policy.owner", &self.policy.owner, 100)?;
+        matches_re(
+            "policy.review_date",
+            r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$",
+            &self.policy.review_date,
+            "a date as YYYY-MM-DD",
+        )?;
+        if self.fixtures.files.is_empty() || self.fixtures.files.len() > 32 {
+            return Err(bad("fixtures.files", "one to 32 fixtures"));
+        }
+        for f in &self.fixtures.files {
+            matches_re(
+                "fixtures.files",
+                r"^fixtures/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.jsonl$",
+                f,
+                "a .jsonl file directly under fixtures/",
+            )?;
+        }
+        text("notes.upgrade", &self.notes.upgrade, 500)?;
+        text("notes.rollback", &self.notes.rollback, 500)?;
+        Ok(())
     }
 }
 
@@ -292,5 +690,71 @@ impl Manifest {
 /// list is a capability escalation: the user has to accept it by name, and nothing changes
 /// until then.
 pub fn escalations(old: &Manifest, new: &Manifest) -> Vec<String> {
-    todo!("{old:?} {new:?}")
+    let mut out = Vec::new();
+    let mut added = |prefix: &str, new: &[String], old: &[String]| {
+        for n in new.iter().filter(|n| !old.contains(n)) {
+            out.push(format!("{prefix}:{n}"));
+        }
+    };
+    added(
+        "executable",
+        &new.cli.executable_candidates,
+        &old.cli.executable_candidates,
+    );
+    added("env", &new.execution.env_allow, &old.execution.env_allow);
+    let flags = |m: &Manifest| {
+        m.execution
+            .optional
+            .iter()
+            .map(|o| o.flag.clone())
+            .collect::<Vec<_>>()
+    };
+    added("flag", &flags(new), &flags(old));
+    added("argv", &new.execution.argv, &old.execution.argv);
+    let auth = |m: &Manifest| [m.auth.login_argv.clone(), m.auth.status_argv.clone()].concat();
+    added("auth_argv", &auth(new), &auth(old));
+    let rank = |s: Support| match s {
+        Support::Unsupported => 0,
+        Support::ProbeRequired => 1,
+        Support::Supported => 2,
+    };
+    for (c, s) in &new.capabilities {
+        let before = old.capabilities.get(c).copied().map_or(0, rank);
+        if rank(*s) > before {
+            let name = serde_json::to_value(c)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned));
+            out.push(format!("capability:{}", name.unwrap_or_default()));
+        }
+    }
+    // An absent limit is the host's own, which can be larger than any number the old one named.
+    let limit = |m: &Manifest| {
+        let l = m.limits.clone().unwrap_or_default();
+        [
+            ("wall_time_secs", l.wall_time_secs),
+            ("max_stdout_bytes", l.max_stdout_bytes),
+            ("max_line_bytes", l.max_line_bytes),
+            ("max_stderr_bytes", l.max_stderr_bytes),
+            ("lines_per_second", l.lines_per_second.map(u64::from)),
+        ]
+    };
+    for ((name, was), (_, now)) in limit(old).into_iter().zip(limit(new)) {
+        if now.unwrap_or(u64::MAX) > was.unwrap_or(u64::MAX) {
+            out.push(format!("limit:{name}"));
+        }
+    }
+    if old.normalizer.engine != new.normalizer.engine {
+        out.push(format!(
+            "engine:{}",
+            serde_json::to_value(new.normalizer.engine)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ));
+    }
+    let needs = |m: &Manifest| m.hooks.as_ref().is_some_and(|h| h.needs_delivery);
+    if needs(new) && !needs(old) {
+        out.push("hooks:needs_delivery".to_owned());
+    }
+    out
 }

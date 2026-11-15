@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/extension/registry-v1.json",
+  "title": "aibus extension registry index v1",
+  "description": "aibus-registry.json at the root of a registry directory. A list of claims: every fetch re-reads the package and checks it against its entry, the revocations and the user's policy. Package directories are one to three plain names below the registry (conventionally <id>/<version>). At most 4096 entries; the file is at most 1 MiB.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "index_version",
+    "entries"
+  ],
+  "properties": {
+    "index_version": {
+      "const": 1
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "hash",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^sha256-tree-v1:[0-9a-f]{64}$",
+            "description": "sha256 over the sorted lines <path> NUL <sha256 of the file> LF of every file in the package."
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,2}$"
+          },
+          "signature": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key_id",
+              "signature"
+            ],
+            "properties": {
+              "key_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._-]{1,64}$"
+              },
+              "signature": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{128}$",
+                "description": "ed25519 over 'aibus-extension-v1' LF id LF version LF hash."
+              }
+            }
+          }
+        }
+      },
+      "maxItems": 4096
+    },
+    "revoked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^sha256-tree-v1:[0-9a-f]{64}$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "maxItems": 4096
+    }
+  }
+}

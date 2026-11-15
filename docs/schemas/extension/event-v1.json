@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/extension/event-v1.json",
+  "title": "aibus extension event contract v1",
+  "description": "What an extension's engine hands the host for each raw line: events in the trace envelope of aibus-trace (schema_version 2). The ids are uuid v7 and ascend in the order the events were made (D-319). Every event carries an evidence level in visibility; a number is always a metric with a data quality; a line the engine cannot map is a trace_warning or a gap_detected and is never dropped.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "event_id",
+    "workflow_run_id",
+    "attempt_id",
+    "origin",
+    "visibility",
+    "kind",
+    "observed_at",
+    "provider_extension",
+    "source",
+    "data"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "workflow_run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "aibus_scheduler",
+        "jev",
+        "cli_stream",
+        "hook",
+        "vendor_transcript",
+        "openrouter_adapter",
+        "derived"
+      ]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "correlated",
+        "inferred",
+        "unavailable"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "workflow_started",
+        "step_scheduled",
+        "route_decided",
+        "approval_requested",
+        "approval_resolved",
+        "attempt_started",
+        "attempt_completed",
+        "attempt_failed",
+        "agent_started",
+        "agent_stopped",
+        "task_delegated",
+        "message_chunk",
+        "tool_started",
+        "tool_completed",
+        "tool_failed",
+        "checkpoint_written",
+        "artifact_created",
+        "usage_reported",
+        "auth_required",
+        "gap_detected",
+        "trace_warning"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "provider_extension": {
+      "type": "string",
+      "description": "The extension id."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parser",
+        "redaction_version"
+      ],
+      "properties": {
+        "parser": {
+          "type": "string"
+        },
+        "redaction_version": {
+          "type": "integer"
+        },
+        "raw_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "data": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metric"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value",
+        "unit",
+        "quality",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": "string"
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "reported",
+            "derived",
+            "estimated",
+            "unknown"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "description": "A value of null has quality unknown; a number never has quality unknown."
+    }
+  }
+}

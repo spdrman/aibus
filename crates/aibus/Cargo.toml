@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 aibus-core.workspace = true
+aibus-extension = { path = "../aibus-extension" }
 aibus-graph.workspace = true
 aibus-mcp.workspace = true
 aibus-provider.workspace = true

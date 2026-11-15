@@ -162,6 +162,17 @@ pub struct Discovery {
 /// other than this user or root), runs `--version` on the rest and chooses the first at or above
 /// `MIN_VERSION`. Every candidate stays in the result with its reason, so the user sees why.
 pub async fn discover(dirs: &[PathBuf], name: &str, env: &[(OsString, OsString)]) -> Discovery {
+    discover_from(dirs, name, env, MIN_VERSION).await
+}
+
+/// `discover` with the oldest acceptable version given: an extension for another CLI says its own
+/// (its manifest's range is checked after the probe), where `discover` insists on Claude's.
+pub async fn discover_from(
+    dirs: &[PathBuf],
+    name: &str,
+    env: &[(OsString, OsString)],
+    min: Version,
+) -> Discovery {
     /// Why a resolved executable must not be run, if it must not.
     fn unsafe_reason(real: &Path) -> Option<String> {
         let meta = match std::fs::metadata(real) {
@@ -226,8 +237,8 @@ pub async fn discover(dirs: &[PathBuf], name: &str, env: &[(OsString, OsString)]
                                     "--version printed {:?}",
                                     text.trim().chars().take(80).collect::<String>()
                                 )),
-                                Some(v) if v < MIN_VERSION => {
-                                    Err(format!("version {v} is older than {MIN_VERSION}"))
+                                Some(v) if v < min => {
+                                    Err(format!("version {v} is older than {min}"))
                                 }
                                 Some(v) => Ok(v),
                             }
@@ -393,6 +404,18 @@ impl std::fmt::Display for EnvError {
     }
 }
 
+/// The names `bounded_env` takes from the parent on its own, besides `PATH`.
+pub const HOST_ENV_ALLOW: [&str; 8] = [
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "CLAUDE_CONFIG_DIR",
+];
+
 /// The child's whole environment: `PATH=/usr/bin:/bin`, the allowlist (`HOME`, `USER`, `LOGNAME`,
 /// `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `CLAUDE_CONFIG_DIR`) from `parent` when set, then `pass`
 /// (more names from `parent`) and `set` (explicit values). The parent session's `CLAUDECODE` and
@@ -403,16 +426,6 @@ pub fn bounded_env(
     pass: &[&str],
     set: &[(&str, &str)],
 ) -> Result<Vec<(OsString, OsString)>, EnvError> {
-    const ALLOW: [&str; 8] = [
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "TMPDIR",
-        "CLAUDE_CONFIG_DIR",
-    ];
     let credential =
         Regex::new(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION_ID)")
             .expect("valid regex");
@@ -430,7 +443,9 @@ pub fn bounded_env(
     let mut env: Vec<(OsString, OsString)> = vec![("PATH".into(), "/usr/bin:/bin".into())];
     for (k, v) in parent {
         let Some(name) = k.to_str() else { continue };
-        if (ALLOW.contains(&name) || pass.contains(&name)) && !env.iter().any(|(e, _)| e == &k) {
+        if (HOST_ENV_ALLOW.contains(&name) || pass.contains(&name))
+            && !env.iter().any(|(e, _)| e == &k)
+        {
             env.push((k, v));
         }
     }

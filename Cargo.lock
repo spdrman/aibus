@@ -28,6 +28,7 @@ version = "0.2.1"
 dependencies = [
  "aibus-control",
  "aibus-core",
+ "aibus-extension",
  "aibus-graph",
  "aibus-mcp",
  "aibus-provider",

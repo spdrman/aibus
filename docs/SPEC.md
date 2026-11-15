@@ -20,6 +20,7 @@ This is the index. The spec is split into sections under `docs/spec/`; read them
 | 13 | [Issue map](spec/13-issue-map.md) | How the spec became GitHub issues: the EPIC, phase and task scheme, the panel's decisions, the task table with issue numbers, milestone mapping, coverage |
 | 14 | [CLI supervisor and evidence trace](spec/14-evidence-trace.md) | EPIC A #282: the supervisor that runs an official vendor CLI, the versioned evidence envelope, the append-only trace store and offline replay |
 | 15 | [Recorded runs](spec/15-recorded-runs.md) | EPIC A #284: the planned and execution graph, timeline, inspector, offline replay and fleet of recorded runs, as `aibus runs` and `/runs` |
+| 16 | [Extensions](spec/16-extensions.md) | EPIC A #286: the versioned extension SDK (manifest, event contract, capabilities, negotiation), the sandbox host, the local registry and the `aibus extensions` commands |
 
 Contested decisions and why they went the way they did: [DECISIONS.md](DECISIONS.md).
 

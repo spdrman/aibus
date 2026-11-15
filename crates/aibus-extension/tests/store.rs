@@ -60,7 +60,10 @@ fn install_activates_the_newest_and_resolve_returns_it() {
         .install(&w.open(), &Policy::default(), ID, None, &[])
         .unwrap();
     assert_eq!(rec.active.as_deref(), Some("0.2.0"));
-    assert_eq!(s.resolve(ID).unwrap().manifest.version, "0.2.0");
+    assert_eq!(
+        s.resolve(ID, &Policy::default()).unwrap().manifest.version,
+        "0.2.0"
+    );
     assert!(s
         .root
         .join("packages")
@@ -108,7 +111,10 @@ fn an_id_the_registry_does_not_have_is_an_error_and_a_path_shaped_id_is_refused(
                 .is_err(),
             "{bad:?}"
         );
-        assert!(w.store().resolve(bad).is_err(), "{bad:?}");
+        assert!(
+            w.store().resolve(bad, &Policy::default()).is_err(),
+            "{bad:?}"
+        );
         assert!(w.store().remove(bad).is_err(), "{bad:?}");
     }
 }
@@ -152,7 +158,7 @@ fn a_revoked_package_is_quarantined_and_never_installed() {
     assert!(rec.active.is_none() && rec.versions.is_empty());
     assert_eq!(rec.quarantined.len(), 1);
     assert!(!s.root.join("packages").join(ID).exists());
-    assert!(s.resolve(ID).is_err());
+    assert!(s.resolve(ID, &Policy::default()).is_err());
 }
 
 #[test]
@@ -233,7 +239,7 @@ fn verify_passes_for_an_untouched_install_and_quarantines_a_tampered_one() {
     let err = s.verify(ID, &[], &Policy::default()).unwrap_err();
     assert_eq!(quarantined(&err), "tampered");
     assert!(
-        s.resolve(ID).is_err(),
+        s.resolve(ID, &Policy::default()).is_err(),
         "a quarantined active version does not resolve"
     );
 }
@@ -245,13 +251,13 @@ fn resolve_rehashes_on_every_call_so_a_swap_after_install_never_runs() {
     let s = w.store();
     s.install(&w.open(), &Policy::default(), ID, None, &[])
         .unwrap();
-    s.resolve(ID).unwrap();
+    s.resolve(ID, &Policy::default()).unwrap();
     fs::write(
         s.root.join("packages").join(ID).join("0.1.0/LICENSE"),
         b"changed",
     )
     .unwrap();
-    assert!(s.resolve(ID).is_err());
+    assert!(s.resolve(ID, &Policy::default()).is_err());
 }
 
 #[test]
@@ -284,9 +290,12 @@ fn update_moves_to_the_newest_and_keeps_the_old_for_rollback() {
         (rec.active.as_deref(), rec.previous.as_deref()),
         (Some("0.3.0"), Some("0.1.0"))
     );
-    let back = s.rollback(ID).unwrap();
+    let back = s.rollback(ID, &Policy::default()).unwrap();
     assert_eq!(back.active.as_deref(), Some("0.1.0"));
-    assert_eq!(s.resolve(ID).unwrap().manifest.version, "0.1.0");
+    assert_eq!(
+        s.resolve(ID, &Policy::default()).unwrap().manifest.version,
+        "0.1.0"
+    );
 }
 
 #[test]
@@ -333,7 +342,10 @@ fn a_registry_replaying_an_older_index_does_not_downgrade_an_update() {
         s.update(&old.open(), &Policy::default(), ID, &[]),
         Err(StoreError::UpToDate(_))
     ));
-    assert_eq!(s.resolve(ID).unwrap().manifest.version, "0.2.0");
+    assert_eq!(
+        s.resolve(ID, &Policy::default()).unwrap().manifest.version,
+        "0.2.0"
+    );
 }
 
 #[test]
@@ -419,9 +431,12 @@ fn disable_stops_resolve_and_enable_restores_it() {
     s.install(&w.open(), &Policy::default(), ID, None, &[])
         .unwrap();
     s.set_disabled(ID, true).unwrap();
-    assert!(matches!(s.resolve(ID), Err(StoreError::Disabled(_))));
+    assert!(matches!(
+        s.resolve(ID, &Policy::default()),
+        Err(StoreError::Disabled(_))
+    ));
     s.set_disabled(ID, false).unwrap();
-    assert!(s.resolve(ID).is_ok());
+    assert!(s.resolve(ID, &Policy::default()).is_ok());
 }
 
 #[test]
@@ -431,7 +446,10 @@ fn rollback_without_an_earlier_version_is_an_error() {
     let s = w.store();
     s.install(&w.open(), &Policy::default(), ID, None, &[])
         .unwrap();
-    assert!(matches!(s.rollback(ID), Err(StoreError::NoPrevious(_))));
+    assert!(matches!(
+        s.rollback(ID, &Policy::default()),
+        Err(StoreError::NoPrevious(_))
+    ));
 }
 
 #[test]
@@ -498,7 +516,7 @@ fn a_corrupt_or_hostile_state_file_is_an_error_not_a_panic() {
     ] {
         fs::write(s.root.join("state.json"), bad).unwrap();
         assert!(s.state().is_err(), "{bad:?}");
-        assert!(s.resolve(ID).is_err());
+        assert!(s.resolve(ID, &Policy::default()).is_err());
     }
 }
 
@@ -514,4 +532,195 @@ fn list_reports_every_installed_extension_with_its_flags() {
     let rec = &st.extensions[ID];
     assert!(rec.pinned && !rec.disabled);
     assert_eq!(rec.versions.len(), 1);
+}
+
+// ---- #332 review, items 2 to 4 ----
+
+fn with_env(version: &str, env: &str) -> String {
+    edit(
+        &template_as(ID, version),
+        "env_allow = []",
+        &format!("env_allow = [\"{env}\"]"),
+    )
+}
+
+fn revoke(version: &str) -> Policy {
+    Policy::parse(&format!(
+        "[[revoke]]\nid = \"{ID}\"\nversion = \"{version}\"\nreason = \"withdrawn\"\n"
+    ))
+    .unwrap()
+}
+
+/// A registry that re-points an installed version at different content is not an update.
+#[test]
+fn the_same_version_with_new_content_is_refused_not_installed_over_the_active_one() {
+    let w = World::new();
+    w.at("0.1.0");
+    let s = w.store();
+    s.install(&w.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    let swapped = World::new();
+    swapped.publish(
+        "evil",
+        &edit(
+            &with_env("0.1.0", "EXAMPLE_HOME"),
+            "workspace_control = \"unsupported\"",
+            "workspace_control = \"supported\"",
+        ),
+    );
+    let err = s
+        .install(&swapped.open(), &Policy::default(), ID, None, &[])
+        .unwrap_err();
+    assert_eq!(quarantined(&err), "provenance_invalid", "{err:?}");
+    let rec = &s.state().unwrap().extensions[ID];
+    assert_eq!(rec.active.as_deref(), Some("0.1.0"));
+    assert!(!s
+        .resolve(ID, &Policy::default())
+        .unwrap()
+        .manifest
+        .execution
+        .env_allow
+        .contains(&"EXAMPLE_HOME".to_owned()));
+}
+
+#[test]
+fn an_unreadable_installed_copy_fails_the_install_it_does_not_skip_the_check() {
+    let w = World::new();
+    w.at("0.1.0");
+    let s = w.store();
+    s.install(&w.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    fs::remove_file(
+        s.root
+            .join("packages")
+            .join(ID)
+            .join("0.1.0/aibus-extension.toml"),
+    )
+    .unwrap();
+    w.publish("more", &with_env("0.2.0", "EXAMPLE_HOME"));
+    let err = s
+        .update(&w.open(), &Policy::default(), ID, &[])
+        .unwrap_err();
+    assert_eq!(quarantined(&err), "tampered", "{err:?}");
+    assert!(s.state().unwrap().extensions[ID].active.is_none());
+}
+
+/// After the active version is quarantined there is still a last accepted grant to compare with.
+#[test]
+fn a_quarantined_active_version_leaves_the_last_accepted_grant_as_the_baseline() {
+    let w = World::new();
+    w.at("0.1.0");
+    let s = w.store();
+    s.install(&w.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    let revoked = [aibus_extension::registry::Revocation {
+        id: ID.into(),
+        version: Some("0.1.0".into()),
+        hash: None,
+        reason: "cve".into(),
+    }];
+    s.verify(ID, &revoked, &Policy::default()).unwrap_err();
+    assert!(s.state().unwrap().extensions[ID].active.is_none());
+    w.publish("more", &with_env("0.2.0", "EXAMPLE_HOME"));
+    let err = s
+        .install(
+            &w.open(),
+            &Policy::default(),
+            ID,
+            Some(&Version(0, 2, 0)),
+            &[],
+        )
+        .unwrap_err();
+    match err {
+        StoreError::Escalation(items) => {
+            assert!(items.contains(&"env:EXAMPLE_HOME".to_owned()), "{items:?}")
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn install_honours_a_pin_by_id_and_by_version() {
+    let w = World::new();
+    w.at("0.1.0");
+    let s = w.store();
+    s.install(&w.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    s.set_pinned(ID, true).unwrap();
+    w.at("0.2.0");
+    assert!(matches!(
+        s.install(&w.open(), &Policy::default(), ID, None, &[]),
+        Err(StoreError::Pinned(_))
+    ));
+    assert!(matches!(
+        s.install(
+            &w.open(),
+            &Policy::default(),
+            ID,
+            Some(&Version(0, 2, 0)),
+            &[]
+        ),
+        Err(StoreError::Pinned(_))
+    ));
+    assert_eq!(
+        s.state().unwrap().extensions[ID].active.as_deref(),
+        Some("0.1.0")
+    );
+    // The version already active is not a move.
+    assert!(s
+        .install(
+            &w.open(),
+            &Policy::default(),
+            ID,
+            Some(&Version(0, 1, 0)),
+            &[]
+        )
+        .is_ok());
+}
+
+#[test]
+fn rollback_refuses_a_version_the_policy_revokes() {
+    let w = World::new();
+    w.at("0.1.0");
+    let s = w.store();
+    s.install(&w.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    w.at("0.2.0");
+    s.update(&w.open(), &Policy::default(), ID, &[]).unwrap();
+    let err = s.rollback(ID, &revoke("0.1.0")).unwrap_err();
+    assert_eq!(quarantined(&err), "revoked", "{err:?}");
+    assert_eq!(
+        s.state().unwrap().extensions[ID].active.as_deref(),
+        Some("0.2.0")
+    );
+}
+
+#[test]
+fn resolve_does_not_serve_a_revoked_version_and_remembers_what_the_registry_revoked() {
+    let w = World::new();
+    w.at("0.1.0");
+    let s = w.store();
+    s.install(&w.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    // The user's own policy.
+    let err = s.resolve(ID, &revoke("0.1.0")).unwrap_err();
+    assert_eq!(quarantined(&err), "revoked", "{err:?}");
+
+    // The registry's list is kept from the last time the store saw it, so `resolve` needs no registry.
+    let w2 = World::new();
+    w2.at("0.1.0");
+    let s2 = w2.store();
+    s2.install(&w2.open(), &Policy::default(), ID, None, &[])
+        .unwrap();
+    let mut v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(w2.reg().join(INDEX_FILE)).unwrap()).unwrap();
+    v["revoked"] = serde_json::json!([{"id": ID, "version": "0.1.0", "reason": "late news"}]);
+    fs::write(w2.reg().join(INDEX_FILE), serde_json::to_vec(&v).unwrap()).unwrap();
+    // Any command that reads the registry notes it, even one that goes on to say "up to date".
+    assert!(matches!(
+        s2.update(&w2.open(), &Policy::default(), ID, &[]),
+        Err(StoreError::UpToDate(_))
+    ));
+    let err = s2.resolve(ID, &Policy::default()).unwrap_err();
+    assert_eq!(quarantined(&err), "revoked", "{err:?}");
 }

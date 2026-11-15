@@ -311,3 +311,62 @@ fn the_spec_names_every_extensions_subcommand_and_flag() {
         assert!(spec.contains(flag), "{flag}");
     }
 }
+
+// ---- #332 review ----
+
+#[test]
+fn verify_fails_and_says_so_when_the_registry_cannot_be_read() {
+    let e = Env::new();
+    e.publish("1.0.0");
+    assert!(e.run(&["install", ID]).status.success());
+    fs::remove_file(e.reg.join("aibus-registry.json")).unwrap();
+    let out = e.run(&["verify", ID]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(!text(&out).starts_with("ok"), "{}", text(&out));
+    assert!(
+        common::stderr(&out).contains("revocations"),
+        "{}",
+        common::stderr(&out)
+    );
+}
+
+/// What gets installed is shown with the program it would run and whether the host would run it.
+#[test]
+fn install_shows_the_program_the_argv_and_whether_it_is_on_the_allowlist() {
+    let e = Env::new();
+    e.publish("1.0.0");
+    let out = text(&e.run(&["install", ID]));
+    assert!(
+        out.contains("program examplecli: not on the host's allowlist"),
+        "{out}"
+    );
+    assert!(out.contains("argv: run --json"), "{out}");
+    let dir = repo().join("examples/extensions/reference-cli");
+    e.run(&["publish", dir.to_str().unwrap()]);
+    let out = text(&e.run(&["install", "org.devshell.aibus.reference-cli"]));
+    assert!(
+        out.contains("program claude: on the host's allowlist"),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_docs_say_what_the_sandbox_is_and_is_not() {
+    let spec = fs::read_to_string(repo().join("docs/spec/16-extensions.md")).unwrap();
+    let sec = fs::read_to_string(repo().join("docs/SECURITY.md")).unwrap();
+    let dec = fs::read_to_string(repo().join("docs/DECISIONS.md")).unwrap();
+    for (name, doc) in [("spec 16", &spec), ("SECURITY", &sec)] {
+        assert!(doc.contains("not an operating system sandbox"), "{name}");
+        assert!(
+            doc.contains("`HOME`"),
+            "{name}: files under HOME are reachable"
+        );
+    }
+    assert!(spec.contains("claude, codex, gemini, kimi") && spec.contains("extra_official_clis"));
+    assert!(dec.contains("claude, codex, gemini, kimi") && dec.contains("default"));
+    assert!(
+        !spec.contains("least privilege"),
+        "the sandbox is not least privilege"
+    );
+    assert!(!sec.contains("no ambient credential"));
+}

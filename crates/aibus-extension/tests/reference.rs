@@ -134,6 +134,7 @@ fn stand_in(stream: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
     let work = t.path().join("work");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&work).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
     fs::write(bin.join("version.txt"), spike("01-version.txt")).unwrap();
     fs::write(bin.join("help.txt"), spike("02-help.txt")).unwrap();
     fs::write(bin.join("stream.jsonl"), stream).unwrap();
@@ -163,6 +164,7 @@ async fn the_reference_extension_runs_a_recorded_delegation_through_the_sandbox_
             ),
         ],
         ceiling: Limits::default(),
+        extra_programs: Vec::new(),
         os: "macos".into(),
     };
     let mut p = prepare(&m, &grant, &[]).await.unwrap();
@@ -216,7 +218,7 @@ fn bless() {
             let expected = dir.join(f.replace(".jsonl", ".expected.json"));
             if bless {
                 let obs = aibus_extension::conformance::observe(&pkg, f, "exit:0").unwrap();
-                fs::write(&expected, aibus_extension::conformance::expected_json(&obs)).unwrap();
+                fs::write(&expected, expected_json(&obs)).unwrap();
             }
             assert!(
                 expected.is_file(),
@@ -225,4 +227,21 @@ fn bless() {
             );
         }
     }
+}
+
+/// The text of an `.expected.json` for what was observed (`fixture-expected-v1.json`).
+fn expected_json(o: &aibus_extension::conformance::Observed) -> String {
+    let kinds: Vec<serde_json::Value> = o
+        .kinds
+        .iter()
+        .map(|k| serde_json::to_value(k).unwrap())
+        .collect();
+    let mut text = serde_json::to_string_pretty(&serde_json::json!({
+        "ending": o.ending,
+        "status": serde_json::to_value(o.status).unwrap(),
+        "kinds": kinds,
+    }))
+    .unwrap();
+    text.push('\n');
+    text
 }

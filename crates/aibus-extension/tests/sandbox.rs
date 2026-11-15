@@ -47,6 +47,8 @@ impl Bench {
         let work = t.path().join("work");
         fs::create_dir_all(&bin).unwrap();
         fs::create_dir_all(&work).unwrap();
+        // Whatever the umask, the search directory is not writable by others.
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         let exe = bin.join("examplecli");
         fs::write(&exe, script).unwrap();
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
@@ -80,6 +82,7 @@ impl Bench {
                 grace: Duration::from_millis(300),
                 ..Limits::default()
             },
+            extra_programs: vec!["examplecli".into()],
             os: if cfg!(target_os = "macos") {
                 "macos".into()
             } else {
@@ -87,6 +90,10 @@ impl Bench {
             },
         }
     }
+}
+
+fn extra() -> Vec<String> {
+    vec!["examplecli".to_owned()]
 }
 
 fn manifest() -> Manifest {
@@ -198,39 +205,39 @@ async fn check_launch_refuses_a_launch_of_something_the_manifest_did_not_declare
     let b = Bench::new(SCRIPT);
     let m = manifest();
     let good = prepare(&m, &b.grant(), &[]).await.unwrap().launch;
-    check_launch(&m, &good).unwrap();
+    check_launch(&m, &good, &extra()).unwrap();
 
     let mut other_exe = good.clone();
     other_exe.exe = PathBuf::from("/bin/sh");
     assert!(matches!(
-        check_launch(&m, &other_exe),
+        check_launch(&m, &other_exe, &extra()),
         Err(SandboxError::Refused(_))
     ));
 
     let mut relative = good.clone();
     relative.exe = PathBuf::from("examplecli");
-    assert!(check_launch(&m, &relative).is_err());
+    assert!(check_launch(&m, &relative, &extra()).is_err());
 
     let mut extra_arg = good.clone();
     extra_arg.args.push("--dangerously-skip-permissions".into());
-    assert!(check_launch(&m, &extra_arg).is_err());
+    assert!(check_launch(&m, &extra_arg, &extra()).is_err());
 
     let mut replaced = good.clone();
     replaced.args[0] = "exec".into();
-    assert!(check_launch(&m, &replaced).is_err());
+    assert!(check_launch(&m, &replaced, &extra()).is_err());
 
     let mut leaky = good.clone();
     leaky.env.push(("AWS_SECRET_ACCESS_KEY".into(), "x".into()));
-    assert!(check_launch(&m, &leaky).is_err());
+    assert!(check_launch(&m, &leaky, &extra()).is_err());
 
     let mut path = good.clone();
     path.env.retain(|(k, _)| k != "PATH");
     path.env.push(("PATH".into(), "/tmp/evil".into()));
-    assert!(check_launch(&m, &path).is_err());
+    assert!(check_launch(&m, &path, &extra()).is_err());
 
     let mut cwd = good;
     cwd.cwd = PathBuf::from("relative/dir");
-    assert!(check_launch(&m, &cwd).is_err());
+    assert!(check_launch(&m, &cwd, &extra()).is_err());
 }
 
 /// PATH shadowing: a relative search directory and an executable others can write are passed over.
@@ -392,4 +399,132 @@ async fn a_cli_that_prints_no_version_is_not_launched() {
     let err = prepare(&manifest(), &b.grant(), &[]).await.unwrap_err();
     assert!(matches!(err, SandboxError::NoExecutable { .. }), "{err:?}");
     let _ = Path::new("/");
+}
+
+// ---- #332 review, item 1: only the host's allowlist of official CLIs runs ----
+
+fn grant_without_extras(b: &Bench) -> Grant {
+    Grant {
+        extra_programs: Vec::new(),
+        ..b.grant()
+    }
+}
+
+#[tokio::test]
+async fn a_program_that_is_not_on_the_hosts_allowlist_is_never_built_into_a_launch() {
+    let b = Bench::new(SCRIPT);
+    // The manifest names examplecli and the host's own list has claude, codex, gemini and kimi.
+    let err = prepare(&manifest(), &grant_without_extras(&b), &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SandboxError::NotOfficial(ref n) if n == "examplecli"),
+        "{err:?}"
+    );
+    // The user adds it in their own config, and then it runs.
+    assert!(prepare(&manifest(), &b.grant(), &[]).await.is_ok());
+}
+
+/// The review's probe: a manifest that parses, with a real system program, in a real directory.
+#[tokio::test]
+async fn a_system_program_named_by_a_manifest_is_refused_even_in_a_trusted_directory() {
+    let b = Bench::new(SCRIPT);
+    for prog in ["ls", "cat", "plutil", "gem", "python3", "curl", "sh", "env"] {
+        let m = edit(
+            &template_manifest(),
+            "executable_candidates = [\"examplecli\"]",
+            &format!("executable_candidates = [\"{prog}\"]"),
+        );
+        let Ok(m) = Manifest::parse(&m) else { continue }; // the denylist already refused it
+        let mut g = b.grant();
+        g.search_dirs = vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")];
+        let err = prepare(&m, &g, &[]).await.unwrap_err();
+        assert!(
+            matches!(err, SandboxError::NotOfficial(_)),
+            "{prog}: {err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_hosts_own_list_names_the_four_official_clis_and_nothing_else() {
+    assert_eq!(
+        aibus_extension::sandbox::OFFICIAL_CLIS,
+        ["claude", "codex", "gemini", "kimi"]
+    );
+}
+
+/// A name on the list that resolves to a shell or an interpreter is not the official CLI.
+#[tokio::test]
+async fn an_allowlisted_name_that_resolves_to_an_interpreter_is_refused() {
+    let b = Bench::new(SCRIPT);
+    fs::rename(b.bin.join("examplecli"), b.bin.join("python3")).unwrap();
+    symlink(b.bin.join("python3"), b.bin.join("claude")).unwrap();
+    let text =
+        std::fs::read_to_string(common::reference_dir().join("aibus-extension.toml")).unwrap();
+    let m = Manifest::parse(&text).unwrap();
+    let mut g = b.grant();
+    g.os = "macos".into();
+    let err = prepare(&m, &g, &[]).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SandboxError::NotOfficial(_) | SandboxError::NoExecutable { .. }
+        ),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn check_launch_refuses_a_program_that_is_not_on_the_list_whoever_built_the_launch() {
+    let b = Bench::new(SCRIPT);
+    let m = manifest();
+    let good = prepare(&m, &b.grant(), &[]).await.unwrap().launch;
+    assert!(check_launch(&m, &good, &[]).is_err());
+    assert!(check_launch(&m, &good, &extra()).is_ok());
+}
+
+#[test]
+fn the_policy_file_has_to_be_the_users_and_not_writable_by_others() {
+    use aibus_extension::policy::Policy;
+    let t = tempfile::tempdir().unwrap();
+    let p = t.path().join("extension-policy.toml");
+    fs::write(&p, "require_signature = true\n").unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(Policy::load(&p).unwrap().require_signature);
+    for mode in [0o664, 0o666, 0o646] {
+        fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+        let err = Policy::load(&p).unwrap_err();
+        assert!(err.contains("writable"), "{mode:o}: {err}");
+    }
+    assert!(Policy::load(&t.path().join("absent.toml"))
+        .unwrap()
+        .extra_official_clis
+        .is_empty());
+}
+
+#[test]
+fn the_users_own_additions_to_the_allowlist_are_plain_names_never_a_shell() {
+    use aibus_extension::policy::Policy;
+    assert_eq!(
+        Policy::parse("extra_official_clis = [\"examplecli\"]")
+            .unwrap()
+            .extra_official_clis,
+        ["examplecli"]
+    );
+    for bad in [
+        "sh",
+        "python3",
+        "curl",
+        "/usr/bin/x",
+        "a b",
+        "..",
+        "env",
+        "npx",
+    ] {
+        assert!(
+            Policy::parse(&format!("extra_official_clis = [\"{bad}\"]")).is_err(),
+            "{bad}"
+        );
+    }
 }

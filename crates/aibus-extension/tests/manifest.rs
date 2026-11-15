@@ -22,9 +22,7 @@ fn the_template_parses_and_declares_every_capability() {
     let m = Manifest::parse(&template_manifest()).unwrap();
     assert_eq!(m.id, "org.example.aibus.examplecli");
     assert_eq!(m.normalizer.engine, Engine::DeclarativeJsonl);
-    for c in Capability::ALL {
-        assert!(m.capabilities.contains_key(&c), "{c:?} is not declared");
-    }
+    assert_eq!(m.capabilities.len(), 13);
 }
 
 #[test]
@@ -432,7 +430,7 @@ fn fixtures_are_relative_jsonl_files_under_fixtures() {
     ] {
         assert_eq!(
             refused_field(
-                "files = [\"fixtures/basic.jsonl\", \"fixtures/failed-tool.jsonl\"]",
+                "files = [\"fixtures/basic.jsonl\", \"fixtures/failed-tool.jsonl\", \"fixtures/unfinished-tool.jsonl\"]",
                 &format!("files = [\"{bad}\"]")
             ),
             "fixtures.files",
@@ -494,4 +492,196 @@ fn escalations_name_everything_a_new_version_asks_for_that_the_old_did_not() {
     }
     // Asking for less is not an escalation.
     assert!(aibus_extension::manifest::escalations(&new, &old).is_empty());
+}
+
+// ---- #332 review, item 1: which programs count as an official CLI ----
+
+#[test]
+fn a_manifest_naming_an_interpreter_package_manager_shell_or_fetcher_is_refused() {
+    for bad in [
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "dash",
+        "python",
+        "python3",
+        "python3.12",
+        "perl",
+        "ruby",
+        "node",
+        "deno",
+        "bun",
+        "npx",
+        "npm",
+        "pnpm",
+        "yarn",
+        "pip",
+        "pip3",
+        "pipx",
+        "uv",
+        "gem",
+        "cargo",
+        "go",
+        "php",
+        "curl",
+        "wget",
+        "env",
+        "sudo",
+        "doas",
+        "su",
+        "ssh",
+        "scp",
+        "nc",
+        "ncat",
+        "socat",
+        "busybox",
+        "xargs",
+        "osascript",
+        "pwsh",
+    ] {
+        assert_eq!(
+            refused_field(
+                "executable_candidates = [\"examplecli\"]",
+                &format!("executable_candidates = [\"{bad}\"]")
+            ),
+            "cli.executable_candidates",
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn argv_with_an_install_exec_or_eval_shape_is_refused() {
+    for bad in [
+        r#"["install", "attacker-gem"]"#,
+        r#"["-m", "http.server"]"#,
+        r#"["-c", "id"]"#,
+        r#"["-e", "id"]"#,
+        r#"["exec", "x"]"#,
+        r#"["--eval", "x"]"#,
+        r#"["--yes", "attacker-package"]"#,
+        r#"["add", "x"]"#,
+        r#"["uninstall", "x"]"#,
+        r#"["-d@.env", "x"]"#,
+    ] {
+        assert_eq!(
+            refused_field("argv = [\"run\", \"--json\"]", &format!("argv = {bad}")),
+            "execution.argv",
+            "{bad}"
+        );
+    }
+}
+
+/// A manifest cannot declare setup steps: nothing a package says is ever run to prepare it.
+#[test]
+fn a_manifest_with_prepare_steps_is_refused() {
+    for block in [
+        "[[prepare]]\ncommand = \"gem install attacker-gem\"\n",
+        "[prepare]\nargv = [\"x\"]\n",
+    ] {
+        let m = format!("{}\n{block}", template_manifest());
+        assert!(
+            matches!(Manifest::parse(&m), Err(ManifestError::Syntax(_))),
+            "{block}"
+        );
+    }
+}
+
+// ---- item 5: run without asking, every spelling ----
+
+/// (name, value) pairs that mean "run without asking". Each is tried as `--name=value`,
+/// `--name value`, `-name=value` and, for a value-less one, alone.
+const UNATTENDED: [(&str, &str); 14] = [
+    ("permission-mode", "acceptEdits"),
+    ("permission-mode", "bypassPermissions"),
+    ("permission-mode", "dontAsk"),
+    ("allowedTools", "Bash"),
+    ("allowed-tools", "Bash"),
+    ("allowed_tools", "Bash"),
+    ("sandbox", "danger-full-access"),
+    ("ask-for-approval", "never"),
+    ("approval-mode", "yolo"),
+    ("approval-policy", "never"),
+    ("full-auto", ""),
+    ("yes", ""),
+    ("trust-all-tools", ""),
+    ("auto-approve", ""),
+];
+
+#[test]
+fn every_spelling_of_a_run_without_asking_flag_is_refused_in_argv() {
+    for (name, value) in UNATTENDED {
+        let spellings: Vec<Vec<String>> = if value.is_empty() {
+            vec![vec![format!("--{name}")]]
+        } else {
+            vec![
+                vec![format!("--{name}={value}")],
+                vec![format!("--{name}"), value.to_owned()],
+                vec![format!("-{name}={value}")],
+                vec![format!("-{name}"), value.to_owned()],
+            ]
+        };
+        for tokens in spellings {
+            let quoted: Vec<String> = tokens.iter().map(|t| format!("\"{t}\"")).collect();
+            let field = refused_field(
+                "argv = [\"run\", \"--json\"]",
+                &format!("argv = [\"run\", {}]", quoted.join(", ")),
+            );
+            assert_eq!(field, "execution.argv", "{tokens:?}");
+        }
+    }
+    for tokens in [
+        r#"["-y"]"#,
+        r#"["-a", "never"]"#,
+        r#"["-a=never"]"#,
+        r#"["-s", "danger-full-access"]"#,
+        r#"["acceptEdits"]"#,
+        r#"["--x", "bypassPermissions"]"#,
+    ] {
+        assert_eq!(
+            refused_field("argv = [\"run\", \"--json\"]", &format!("argv = {tokens}")),
+            "execution.argv",
+            "{tokens}"
+        );
+    }
+}
+
+#[test]
+fn a_run_without_asking_flag_is_refused_as_an_optional_flag_and_in_the_auth_argv() {
+    for (name, _) in UNATTENDED {
+        let f = refused_field("flag = \"--usage\"", &format!("flag = \"--{name}\""));
+        assert_eq!(f, "execution.optional", "{name}");
+    }
+    assert_eq!(
+        refused_field(
+            "login_argv = [\"login\"]",
+            "login_argv = [\"login\", \"--full-auto\"]"
+        ),
+        "auth.login_argv"
+    );
+    assert_eq!(
+        refused_field(
+            "status_argv = [\"status\"]",
+            "status_argv = [\"status\", \"-y\"]"
+        ),
+        "auth.status_argv"
+    );
+}
+
+#[test]
+fn a_safe_value_for_the_same_flag_names_is_not_refused() {
+    for ok in [
+        r#"["run", "--permission-mode", "plan"]"#,
+        r#"["run", "--permission-prompts", "none"]"#,
+        r#"["run", "--sandbox", "read-only"]"#,
+        r#"["run", "--allowed-hosts", "none"]"#,
+    ] {
+        let m = edit(
+            &template_manifest(),
+            "argv = [\"run\", \"--json\"]",
+            &format!("argv = {ok}"),
+        );
+        assert!(Manifest::parse(&m).is_ok(), "{ok}");
+    }
 }

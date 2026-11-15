@@ -31,24 +31,6 @@ pub enum Capability {
     HookChannel,
 }
 
-impl Capability {
-    pub const ALL: [Capability; 13] = [
-        Self::LoginStatus,
-        Self::OneShot,
-        Self::StructuredEvents,
-        Self::NativeChildLineage,
-        Self::ToolEvents,
-        Self::UsageReport,
-        Self::SessionResume,
-        Self::InteractiveApproval,
-        Self::Cancel,
-        Self::WorkspaceControl,
-        Self::Headless,
-        Self::SupportedOs,
-        Self::HookChannel,
-    ];
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Support {
@@ -600,7 +582,21 @@ impl Manifest {
             }
         }
 
-        for c in Capability::ALL {
+        for c in [
+            Capability::LoginStatus,
+            Capability::OneShot,
+            Capability::StructuredEvents,
+            Capability::NativeChildLineage,
+            Capability::ToolEvents,
+            Capability::UsageReport,
+            Capability::SessionResume,
+            Capability::InteractiveApproval,
+            Capability::Cancel,
+            Capability::WorkspaceControl,
+            Capability::Headless,
+            Capability::SupportedOs,
+            Capability::HookChannel,
+        ] {
             if !self.capabilities.contains_key(&c) {
                 return Err(bad(
                     "capabilities",

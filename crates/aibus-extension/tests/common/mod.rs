@@ -40,12 +40,14 @@ pub fn package_with(root: &Path, name: &str, manifest: &str) -> PathBuf {
         "README.md",
         "fixtures/basic.jsonl",
         "fixtures/failed-tool.jsonl",
+        "fixtures/unfinished-tool.jsonl",
     ] {
         fs::copy(template_dir().join(f), dir.join(f)).unwrap();
     }
     for f in [
         "fixtures/basic.expected.json",
         "fixtures/failed-tool.expected.json",
+        "fixtures/unfinished-tool.expected.json",
     ] {
         fs::copy(template_dir().join(f), dir.join(f)).unwrap();
     }

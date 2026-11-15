@@ -227,7 +227,7 @@ impl Store {
         let pkg = match reg.fetch(entry, policy) {
             Ok(p) => p,
             Err(refusal) => {
-                let class = refusal.class().name();
+                let class = refusal.class();
                 quarantine(
                     rec,
                     &entry.version,
@@ -392,13 +392,14 @@ impl Store {
             };
             match registry::check(&pkg, &entry, revoked, &relaxed) {
                 Ok(()) => Ok(pkg),
-                Err(r) => Err(fail(rec, r.class().name(), r.to_string())),
+                Err(r) => Err(fail(rec, r.class(), r.to_string())),
             }
         })
     }
 
     /// The active package for use: not disabled, not quarantined, re-hashed on every call.
-    pub fn resolve(&self, id: &str) -> Result<Package, StoreError> {
+    pub fn resolve(&self, id: &str, policy: &Policy) -> Result<Package, StoreError> {
+        let _ = policy;
         bad_id(id)?;
         let st = self.state()?;
         let rec = st
@@ -448,7 +449,8 @@ impl Store {
     }
 
     /// Makes the previous version active again, after re-hashing it.
-    pub fn rollback(&self, id: &str) -> Result<Record, StoreError> {
+    pub fn rollback(&self, id: &str, policy: &Policy) -> Result<Record, StoreError> {
+        let _ = policy;
         bad_id(id)?;
         self.transact(|st| {
             let rec = st

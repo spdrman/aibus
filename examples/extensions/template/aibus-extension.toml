@@ -130,7 +130,7 @@ owner = "Example Corp security team"
 review_date = "2026-11-15"
 
 [fixtures]
-files = ["fixtures/basic.jsonl", "fixtures/failed-tool.jsonl"]
+files = ["fixtures/basic.jsonl", "fixtures/failed-tool.jsonl", "fixtures/unfinished-tool.jsonl"]
 
 [notes]
 upgrade = "Reinstall from the registry; a new version that asks for more has to be accepted by name."

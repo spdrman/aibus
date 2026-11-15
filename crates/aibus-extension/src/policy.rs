@@ -21,6 +21,9 @@ pub struct Policy {
     pub trusted_keys: BTreeMap<String, String>,
     /// When set, only these publisher names install.
     pub allow_publishers: Option<Vec<String>>,
+    /// Program names the user wants run as official CLIs besides the host's own four.
+    #[serde(default)]
+    pub extra_official_clis: Vec<String>,
     #[serde(default)]
     pub revoke: Vec<Revocation>,
 }

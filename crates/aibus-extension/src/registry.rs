@@ -83,37 +83,19 @@ pub enum Refusal {
     Package(#[from] PackageError),
 }
 
-/// How a refusal is filed in quarantine.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Class {
-    Revoked,
-    ProvenanceInvalid,
-    Incompatible,
-    Malformed,
-}
-
-impl Class {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Revoked => "revoked",
-            Self::ProvenanceInvalid => "provenance_invalid",
-            Self::Incompatible => "incompatible",
-            Self::Malformed => "malformed",
-        }
-    }
-}
-
 impl Refusal {
-    pub fn class(&self) -> Class {
+    /// How the refusal is filed in quarantine: `revoked`, `provenance_invalid`, `incompatible`
+    /// or `malformed`.
+    pub fn class(&self) -> &'static str {
         match self {
-            Self::Revoked(_) => Class::Revoked,
+            Self::Revoked(_) => "revoked",
             Self::HashMismatch { .. }
             | Self::IdentityMismatch { .. }
             | Self::BadSignature(_)
             | Self::SignatureRequired
-            | Self::PublisherNotAllowed(_) => Class::ProvenanceInvalid,
-            Self::Incompatible(_) => Class::Incompatible,
-            Self::Package(_) => Class::Malformed,
+            | Self::PublisherNotAllowed(_) => "provenance_invalid",
+            Self::Incompatible(_) => "incompatible",
+            Self::Package(_) => "malformed",
         }
     }
 }

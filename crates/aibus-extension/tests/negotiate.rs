@@ -109,7 +109,7 @@ fn a_capability_declared_unsupported_stays_unsupported_whatever_the_cli_has() {
 #[test]
 fn every_capability_gets_a_verdict() {
     let n = negotiate(&template(), "linux", &cli(Version(1, 2, 0), &[])).unwrap();
-    assert_eq!(n.capabilities.len(), Capability::ALL.len());
+    assert_eq!(n.capabilities.len(), 13);
 }
 
 /// Amendment E4: the extension wants hook payloads and the host has no live way to take them.
@@ -127,4 +127,18 @@ fn hook_delivery_the_host_cannot_provide_is_unsupported_with_the_reason() {
         Verdict::Unsupported(why) => assert!(why.contains("hook"), "{why}"),
         v => panic!("{v:?}"),
     }
+}
+
+/// E4: the host cannot deliver hook payloads, so a manifest that declares `hook_channel` as
+/// supported, with or without `needs_delivery`, is still told no.
+#[test]
+fn hook_channel_declared_supported_is_not_offered_while_the_host_cannot_deliver_hooks() {
+    let m = Manifest::parse(&edit(
+        &template_manifest(),
+        "hook_channel = \"unsupported\"",
+        "hook_channel = \"supported\"",
+    ))
+    .unwrap();
+    let n = negotiate(&m, "linux", &cli(Version(1, 2, 0), &["--usage"])).unwrap();
+    assert!(!n.supports(Capability::HookChannel));
 }

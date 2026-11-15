@@ -16,7 +16,7 @@ use aibus_trace::{
 };
 use serde_json::{json, Value};
 
-use crate::manifest::{Rule, RuleKind};
+use crate::manifest::{Rule, RuleKind, UsageQuality};
 
 pub const PARSER: &str = "declarative-jsonl/1";
 
@@ -36,7 +36,8 @@ pub struct Declarative {
 }
 
 impl Declarative {
-    pub fn new(attempt: AttemptRef, rules: Vec<Rule>) -> Self {
+    pub fn new(attempt: AttemptRef, rules: Vec<Rule>, usage_quality: UsageQuality) -> Self {
+        let _ = usage_quality;
         Self {
             attempt,
             rules,

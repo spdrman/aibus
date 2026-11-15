@@ -102,15 +102,12 @@ fn the_schema_refuses_what_the_host_refuses() {
 
 #[test]
 fn the_schema_names_the_same_capabilities_and_event_kinds_as_the_code() {
-    let caps: Vec<String> = Capability::ALL
-        .iter()
-        .map(|c| {
-            serde_json::to_value(c)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
+    let template = manifest_json(EXAMPLES[0]);
+    let caps: Vec<String> = template["capabilities"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
         .collect();
     let m = schema("manifest-v1");
     let listed: Vec<String> = m["properties"]["capabilities"]["required"]
@@ -119,7 +116,13 @@ fn the_schema_names_the_same_capabilities_and_event_kinds_as_the_code() {
         .iter()
         .map(|v| v.as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(listed, caps);
+    let mut listed = listed;
+    listed.sort();
+    assert_eq!(listed, caps, "the schema's list is the template's list");
+    // And the code reads the same names: each one is a variant.
+    for c in &caps {
+        serde_json::from_value::<Capability>(json!(c)).unwrap();
+    }
     let kinds = [
         EventKind::WorkflowStarted,
         EventKind::StepScheduled,

@@ -99,19 +99,6 @@ pub fn observe(pkg: &Package, fixture: &str, ending: &str) -> Result<Observed, S
     })
 }
 
-/// The text of an `.expected.json` for what was observed.
-pub fn expected_json(o: &Observed) -> String {
-    let kinds: Vec<String> = o.kinds.iter().map(wire).collect();
-    let mut text = serde_json::to_string_pretty(&serde_json::json!({
-        "ending": o.ending,
-        "status": wire(o.status),
-        "kinds": kinds,
-    }))
-    .expect("plain JSON");
-    text.push('\n');
-    text
-}
-
 fn check(name: String, passed: bool, detail: impl Into<String>) -> Check {
     Check {
         name,
@@ -128,79 +115,80 @@ struct Expected {
     kinds: Vec<String>,
 }
 
-pub fn run(pkg: &Package) -> Report {
-    /// The obligations every extension owes the trace, over the events of one fixture.
-    fn invariants(stem: &str, o: &Observed) -> Vec<Check> {
-        let ev = &o.events;
-        let ascending = ev.windows(2).all(|w| w[0].event_id < w[1].event_id)
-            && ev.iter().all(|e| e.event_id.get_version_num() == 7);
-        // Raw-line evidence is cited, and nothing inferred passes for observed.
-        let labelled = ev.iter().all(|e| {
-            (e.origin != Origin::Derived || e.visibility != Visibility::Observed)
-                && (e.origin != Origin::CliStream
-                    || e.kind == EventKind::GapDetected && e.source.raw_sha256.is_none()
-                    || !e.evidence_refs.is_empty())
+/// The obligations every extension owes the trace, over the events of one fixture: ascending uuid
+/// v7 ids, an evidence level on every event, a data quality on every metric, a missing number
+/// that stays unknown, and one ending, last. A third party can run it over their own events.
+pub fn invariants(stem: &str, ev: &[TraceEvent]) -> Vec<Check> {
+    let ascending = ev.windows(2).all(|w| w[0].event_id < w[1].event_id)
+        && ev.iter().all(|e| e.event_id.get_version_num() == 7);
+    // Raw-line evidence is cited, and nothing inferred passes for observed.
+    let labelled = ev.iter().all(|e| {
+        (e.origin != Origin::Derived || e.visibility != Visibility::Observed)
+            && (e.origin != Origin::CliStream
+                || e.kind == EventKind::GapDetected && e.source.raw_sha256.is_none()
+                || !e.evidence_refs.is_empty())
+    });
+    let metrics: Vec<Metric> = ev
+        .iter()
+        .filter_map(|e| e.data.get("metrics"))
+        .filter_map(|m| m.as_array())
+        .flatten()
+        .filter_map(|m| serde_json::from_value(m.clone()).ok())
+        .collect();
+    let every_metric_has_quality = ev
+        .iter()
+        .filter_map(|e| e.data.get("metrics").and_then(|m| m.as_array()))
+        .flatten()
+        .all(|m| serde_json::from_value::<Metric>(m.clone()).is_ok());
+    let unknown_stays_unknown = metrics
+        .iter()
+        .all(|m| (m.value.is_none()) == (m.quality == DataQuality::Unknown));
+    let one_terminal = ev
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                EventKind::AttemptCompleted | EventKind::AttemptFailed
+            )
+        })
+        .count()
+        == 1
+        && ev.last().is_some_and(|e| {
+            matches!(
+                e.kind,
+                EventKind::AttemptCompleted | EventKind::AttemptFailed
+            )
         });
-        let metrics: Vec<Metric> = ev
-            .iter()
-            .filter_map(|e| e.data.get("metrics"))
-            .filter_map(|m| m.as_array())
-            .flatten()
-            .filter_map(|m| serde_json::from_value(m.clone()).ok())
-            .collect();
-        let every_metric_has_quality = ev
-            .iter()
-            .filter_map(|e| e.data.get("metrics").and_then(|m| m.as_array()))
-            .flatten()
-            .all(|m| serde_json::from_value::<Metric>(m.clone()).is_ok());
-        let unknown_stays_unknown = metrics
-            .iter()
-            .all(|m| (m.value.is_none()) == (m.quality == DataQuality::Unknown));
-        let one_terminal = ev
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e.kind,
-                    EventKind::AttemptCompleted | EventKind::AttemptFailed
-                )
-            })
-            .count()
-            == 1
-            && ev.last().is_some_and(|e| {
-                matches!(
-                    e.kind,
-                    EventKind::AttemptCompleted | EventKind::AttemptFailed
-                )
-            });
-        vec![
-            check(
-                format!("{stem}: event ids ascend (uuid v7)"),
-                ascending,
-                "ids in stream order",
-            ),
-            check(
-                format!("{stem}: every event has an evidence level"),
-                labelled,
-                "cli events cite their raw line; derived events are never observed",
-            ),
-            check(
-                format!("{stem}: every metric has a data quality"),
-                every_metric_has_quality,
-                "reported, derived, estimated or unknown",
-            ),
-            check(
-                format!("{stem}: usage that is missing stays unknown"),
-                unknown_stays_unknown,
-                "no zero-filling",
-            ),
-            check(
-                format!("{stem}: the attempt ends once, last"),
-                one_terminal,
-                "attempt_completed or attempt_failed",
-            ),
-        ]
-    }
+    vec![
+        check(
+            format!("{stem}: event ids ascend (uuid v7)"),
+            ascending,
+            "ids in stream order",
+        ),
+        check(
+            format!("{stem}: every event has an evidence level"),
+            labelled,
+            "cli events cite their raw line; derived events are never observed",
+        ),
+        check(
+            format!("{stem}: every metric has a data quality"),
+            every_metric_has_quality,
+            "reported, derived, estimated or unknown",
+        ),
+        check(
+            format!("{stem}: usage that is missing stays unknown"),
+            unknown_stays_unknown,
+            "no zero-filling",
+        ),
+        check(
+            format!("{stem}: the attempt ends once, last"),
+            one_terminal,
+            "attempt_completed or attempt_failed",
+        ),
+    ]
+}
 
+pub fn run(pkg: &Package) -> Report {
     let mut checks = vec![check(
         format!("{}: the manifest is valid under schema 1", pkg.manifest.id),
         true,
@@ -253,7 +241,7 @@ pub fn run(pkg: &Package) -> Report {
             matches,
             detail,
         ));
-        checks.extend(invariants(&stem, &observed));
+        checks.extend(invariants(&stem, &observed.events));
     }
     Report { checks }
 }

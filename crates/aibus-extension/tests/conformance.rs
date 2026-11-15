@@ -119,7 +119,7 @@ fn a_third_party_can_write_package_test_and_install_an_extension() {
         )
         .unwrap();
     assert_eq!(rec.active.as_deref(), Some("1.0.0"));
-    assert!(conformance::run(&store.resolve(id).unwrap()).passed());
+    assert!(conformance::run(&store.resolve(id, &Policy::default()).unwrap()).passed());
 }
 
 #[test]
@@ -165,4 +165,206 @@ fn a_nonzero_exit_or_a_cancel_ends_the_attempt_failed_or_cancelled_never_complet
             .status,
         AttemptStatus::Completed
     );
+}
+
+// ---- #332 review, item 6: each rule check is shown to fail on a bad stream ----
+
+mod bad_streams {
+    use aibus_extension::conformance::invariants;
+    use aibus_extension::package;
+    use aibus_trace::{EventKind, Origin, TraceEvent, Visibility};
+
+    fn good() -> Vec<TraceEvent> {
+        let pkg = package::read(&super::template_dir()).unwrap();
+        aibus_extension::conformance::observe(&pkg, "fixtures/basic.jsonl", "exit:0")
+            .unwrap()
+            .events
+    }
+
+    fn failing(events: &[TraceEvent]) -> Vec<String> {
+        invariants("x", events)
+            .into_iter()
+            .filter(|c| !c.passed)
+            .map(|c| c.name)
+            .collect()
+    }
+
+    #[test]
+    fn a_good_stream_fails_nothing() {
+        assert!(failing(&good()).is_empty());
+    }
+
+    #[test]
+    fn ids_that_go_backwards_or_are_not_v7_fail_the_ascending_check() {
+        let mut e = good();
+        e.swap(1, 2);
+        assert!(failing(&e).iter().any(|n| n.contains("event ids ascend")));
+        let mut e = good();
+        e[1].event_id = uuid::Uuid::from_u128(5);
+        assert!(failing(&e).iter().any(|n| n.contains("event ids ascend")));
+    }
+
+    #[test]
+    fn a_derived_event_passed_off_as_observed_or_a_cli_event_with_no_raw_line_fails_the_evidence_check(
+    ) {
+        let mut e = good();
+        e[1].origin = Origin::Derived;
+        e[1].visibility = Visibility::Observed;
+        assert!(failing(&e).iter().any(|n| n.contains("evidence level")));
+        let mut e = good();
+        let i = e
+            .iter()
+            .position(|x| x.kind == EventKind::MessageChunk)
+            .unwrap();
+        e[i].evidence_refs.clear();
+        assert!(failing(&e).iter().any(|n| n.contains("evidence level")));
+    }
+
+    #[test]
+    fn a_metric_with_no_quality_fails_the_quality_check() {
+        let mut e = good();
+        let i = e
+            .iter()
+            .position(|x| x.kind == EventKind::UsageReported)
+            .unwrap();
+        e[i].data["metrics"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("quality");
+        assert!(failing(&e)
+            .iter()
+            .any(|n| n.contains("every metric has a data quality")));
+    }
+
+    #[test]
+    fn a_missing_number_called_reported_or_a_number_called_unknown_fails_the_unknown_check() {
+        let mut e = good();
+        let i = e
+            .iter()
+            .position(|x| x.kind == EventKind::UsageReported)
+            .unwrap();
+        e[i].data["metrics"][0]["value"] = serde_json::Value::Null;
+        e[i].data["metrics"][0]["quality"] = "reported".into();
+        assert!(failing(&e)
+            .iter()
+            .any(|n| n.contains("usage that is missing stays unknown")));
+        let mut e = good();
+        e[i].data["metrics"][0]["quality"] = "unknown".into();
+        assert!(failing(&e)
+            .iter()
+            .any(|n| n.contains("usage that is missing stays unknown")));
+    }
+
+    #[test]
+    fn two_endings_none_or_one_that_is_not_last_fail_the_ending_check() {
+        let mut e = good();
+        let last = e.last().unwrap().clone();
+        e.push(last);
+        assert!(failing(&e).iter().any(|n| n.contains("ends once, last")));
+        let mut e = good();
+        e.pop();
+        assert!(failing(&e).iter().any(|n| n.contains("ends once, last")));
+        let mut e = good();
+        let n = e.len();
+        e.swap(n - 1, n - 2);
+        assert!(failing(&e).iter().any(|n| n.contains("ends once, last")));
+    }
+}
+
+/// A tool that starts and never reports back ends the attempt with a gap that asks for reconciliation.
+#[test]
+fn a_tool_that_never_reports_back_is_a_tool_outcome_unknown_gap() {
+    use aibus_trace::EventKind;
+    let pkg = package::read(&template_dir()).unwrap();
+    let o = conformance::observe(&pkg, "fixtures/unfinished-tool.jsonl", "exit:0").unwrap();
+    let gap = o
+        .events
+        .iter()
+        .find(|e| e.kind == EventKind::GapDetected && e.data["reason"] == "tool_outcome_unknown")
+        .expect("the gap");
+    assert_eq!(gap.native.tool_use_id.as_deref(), Some("t5"));
+    assert_eq!(gap.data["requires_reconciliation"], true);
+    let end = o.events.last().unwrap();
+    assert_eq!(end.data["requires_reconciliation"], true);
+}
+
+// ---- item 7: what the declarative engine labels ----
+
+mod labels {
+    use std::time::SystemTime;
+
+    use aibus_extension::declarative::Declarative;
+    use aibus_extension::manifest::{Manifest, UsageQuality};
+    use aibus_supervisor::Engine;
+    use aibus_trace::{AttemptRef, DataQuality, EventKind};
+    use uuid::Uuid;
+
+    fn engine(q: UsageQuality) -> Declarative {
+        let m = Manifest::parse(&super::common::template_manifest()).unwrap();
+        let a = AttemptRef {
+            workflow_run_id: Uuid::from_u128(1),
+            attempt_id: Uuid::from_u128(2),
+            parent_attempt_id: None,
+            provider_extension: m.id.clone(),
+        };
+        Declarative::new(a, m.normalizer.rule, q)
+    }
+
+    #[test]
+    fn evidence_refs_count_stdout_and_stderr_lines_separately() {
+        let mut e = engine(UsageQuality::Reported);
+        let at = SystemTime::UNIX_EPOCH;
+        e.stream_line(br#"{"type":"text"}"#, at);
+        e.stderr_line(b"a warning", at);
+        let b = e.stream_line(br#"{"type":"text"}"#, at);
+        assert_eq!(b.events[0].evidence_refs, ["raw:stdout:L2"]);
+    }
+
+    #[test]
+    fn the_manifests_usage_quality_labels_the_metrics() {
+        for (q, want) in [
+            (UsageQuality::Reported, DataQuality::Reported),
+            (UsageQuality::Estimated, DataQuality::Estimated),
+        ] {
+            let mut e = engine(q);
+            let b = e.stream_line(
+                br#"{"type":"usage","usage":{"in":5,"out":2}}"#,
+                SystemTime::UNIX_EPOCH,
+            );
+            assert_eq!(b.events[0].kind, EventKind::UsageReported);
+            let m: Vec<aibus_trace::Metric> =
+                serde_json::from_value(b.events[0].data["metrics"].clone()).unwrap();
+            assert!(m.iter().all(|m| m.quality == want), "{q:?} {m:?}");
+        }
+        // A manifest that says unknown never claims a number.
+        let mut e = engine(UsageQuality::Unknown);
+        let b = e.stream_line(
+            br#"{"type":"usage","usage":{"in":5,"out":2}}"#,
+            SystemTime::UNIX_EPOCH,
+        );
+        let m: Vec<aibus_trace::Metric> =
+            serde_json::from_value(b.events[0].data["metrics"].clone()).unwrap();
+        assert!(
+            m.iter()
+                .all(|m| m.value.is_none() && m.quality == DataQuality::Unknown),
+            "{m:?}"
+        );
+    }
+
+    #[test]
+    fn a_negative_fractional_or_huge_token_count_is_unknown_not_reported() {
+        for bad in ["-3", "1.5", "1e30", "\"7\"", "null"] {
+            let mut e = engine(UsageQuality::Reported);
+            let line = format!(r#"{{"type":"usage","usage":{{"in":{bad},"out":2}}}}"#);
+            let b = e.stream_line(line.as_bytes(), SystemTime::UNIX_EPOCH);
+            let m: Vec<aibus_trace::Metric> =
+                serde_json::from_value(b.events[0].data["metrics"].clone()).unwrap();
+            assert_eq!(
+                (m[0].value, m[0].quality),
+                (None, DataQuality::Unknown),
+                "{bad}"
+            );
+            assert_eq!(m[1].quality, DataQuality::Reported, "{bad}");
+        }
+    }
 }

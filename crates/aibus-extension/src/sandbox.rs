@@ -20,6 +20,10 @@ use crate::manifest::{Capability, Manifest};
 use crate::negotiate::{check_host, negotiate, Incompatible, Negotiated};
 
 /// What the host grants one launch. The extension cannot widen it.
+/// The program names the host runs as an official CLI. A user can add their own in the policy
+/// file (`extra_official_clis`); a manifest never can.
+pub const OFFICIAL_CLIS: [&str; 4] = ["claude", "codex", "gemini", "kimi"];
+
 #[derive(Clone, Debug)]
 pub struct Grant {
     /// The only directory the CLI runs in. Absolute, existing; resolved before use.
@@ -30,6 +34,8 @@ pub struct Grant {
     pub parent_env: Vec<(OsString, OsString)>,
     /// The most any extension may use; the manifest's request is clamped to it.
     pub ceiling: Limits,
+    /// Program names the user added to the allowlist in their own policy file.
+    pub extra_programs: Vec<String>,
     /// `macos`, `linux` or `windows`.
     pub os: String,
 }
@@ -49,6 +55,8 @@ pub enum SandboxError {
         names: Vec<String>,
         why: Vec<String>,
     },
+    #[error("{0} is not on the host's allowlist of official CLIs")]
+    NotOfficial(String),
     #[error("probe: {0}")]
     Probe(#[from] ProbeError),
     #[error("{0}")]
@@ -70,7 +78,8 @@ fn refused(why: impl Into<String>) -> SandboxError {
 /// The checks every launch has to pass whoever built it: an absolute executable whose file name is
 /// one the manifest declared, argv that is the manifest's tokens plus its optional flags only, an
 /// environment of allowed names only, and an existing absolute working directory.
-pub fn check_launch(m: &Manifest, launch: &Launch) -> Result<(), SandboxError> {
+pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(), SandboxError> {
+    let _ = extra;
     let name = launch
         .exe
         .file_name()
@@ -239,7 +248,7 @@ pub async fn prepare(
         stdin: Vec::new(),
         limits,
     };
-    check_launch(m, &launch)?;
+    check_launch(m, &launch, &grant.extra_programs)?;
     Ok(Prepared {
         launch,
         negotiated,
@@ -253,8 +262,12 @@ pub fn engine(m: &Manifest, attempt: AttemptRef) -> Box<dyn Engine> {
         crate::manifest::Engine::ClaudeStreamJson => {
             Box::new(aibus_supervisor::Normalizer::new(attempt))
         }
-        crate::manifest::Engine::DeclarativeJsonl => Box::new(
-            crate::declarative::Declarative::new(attempt, m.normalizer.rule.clone()),
-        ),
+        crate::manifest::Engine::DeclarativeJsonl => {
+            Box::new(crate::declarative::Declarative::new(
+                attempt,
+                m.normalizer.rule.clone(),
+                m.runtime.usage_quality,
+            ))
+        }
     }
 }

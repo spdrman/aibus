@@ -9,7 +9,7 @@ use std::os::unix::fs::symlink;
 
 use aibus_extension::policy::Policy;
 use aibus_extension::registry::{
-    self, signed_message, Class, Entry, Refusal, Registry, RegistryError, Revocation, Signature,
+    self, signed_message, Entry, Refusal, Registry, RegistryError, Revocation, Signature,
     INDEX_FILE,
 };
 use aibus_extension::version::Version;
@@ -243,7 +243,7 @@ fn a_package_changed_after_it_was_indexed_is_a_hash_mismatch() {
     fs::write(w.reg().join(&e.path).join("fixtures/basic.jsonl"), b"{}\n").unwrap();
     let err = r.fetch(e, &Policy::default()).unwrap_err();
     assert!(matches!(err, Refusal::HashMismatch { .. }), "{err:?}");
-    assert_eq!(err.class(), Class::ProvenanceInvalid);
+    assert_eq!(err.class(), "provenance_invalid");
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn an_entry_whose_manifest_names_another_id_or_version_is_refused() {
     let r2 = Registry::open(&w.reg()).unwrap();
     let err = r2.fetch(&r2.entries[0], &Policy::default()).unwrap_err();
     assert!(matches!(err, Refusal::IdentityMismatch { .. }), "{err:?}");
-    assert_eq!(err.class(), Class::ProvenanceInvalid);
+    assert_eq!(err.class(), "provenance_invalid");
     drop(r);
 }
 
@@ -273,7 +273,7 @@ fn a_revoked_version_hash_or_whole_id_is_refused_and_is_class_revoked() {
         write_index(&w.reg(), &v);
         let r = Registry::open(&w.reg()).unwrap();
         let err = r.fetch(&r.entries[0], &Policy::default()).unwrap_err();
-        assert_eq!(err.class(), Class::Revoked, "{err:?}");
+        assert_eq!(err.class(), "revoked", "{err:?}");
     }
     let w = World::new();
     let r = registry_of(&w.reg(), &[w.pkg("a", "0.1.0")]);
@@ -285,7 +285,7 @@ fn a_revoked_version_hash_or_whole_id_is_refused_and_is_class_revoked() {
     }];
     let pkg = r.fetch(&r.entries[0], &Policy::default()).unwrap();
     let err = registry::check(&pkg, &r.entries[0], &by_hash, &Policy::default()).unwrap_err();
-    assert_eq!(err.class(), Class::Revoked);
+    assert_eq!(err.class(), "revoked");
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn an_incompatible_package_is_class_incompatible() {
     let p = package_with(&w.t.path().join("src"), "a", &m);
     let r = registry_of(&w.reg(), &[p]);
     let err = r.fetch(&r.entries[0], &Policy::default()).unwrap_err();
-    assert_eq!(err.class(), Class::Incompatible, "{err:?}");
+    assert_eq!(err.class(), "incompatible", "{err:?}");
 }
 
 fn signed(w: &World, tamper_key: bool) -> (Registry, Policy, Entry) {
@@ -355,7 +355,7 @@ fn a_signature_from_another_key_or_no_signature_fails_when_one_is_required() {
     let (r, policy, e) = signed(&w, true);
     let err = r.fetch(&e, &policy).unwrap_err();
     assert!(matches!(err, Refusal::BadSignature(_)), "{err:?}");
-    assert_eq!(err.class(), Class::ProvenanceInvalid);
+    assert_eq!(err.class(), "provenance_invalid");
 
     let w2 = World::new();
     let r2 = registry_of(&w2.reg(), &[w2.pkg("a", "0.1.0")]);
@@ -378,7 +378,7 @@ fn a_signature_made_for_one_hash_does_not_cover_another_version() {
     let r = Registry::open(&w.reg()).unwrap();
     let err = r.fetch(&r.entries[0], &policy).unwrap_err();
     // The identity check or the signature check fires; either way it is provenance, not a pass.
-    assert_eq!(err.class(), Class::ProvenanceInvalid, "{err:?}");
+    assert_eq!(err.class(), "provenance_invalid", "{err:?}");
 }
 
 #[test]
@@ -405,4 +405,37 @@ fn a_policy_with_an_unknown_key_or_a_bad_public_key_is_refused() {
     assert!(Policy::parse("surprise = 1").is_err());
     assert!(Policy::parse("[trusted_keys]\nk = \"nothex\"").is_err());
     assert!(Policy::parse("[trusted_keys]\nk = \"abcd\"").is_err());
+}
+
+// ---- #332 review, item 6: the entry cap on its own ----
+
+/// 4097 compact entries are about 600 KB, under the 1 MiB size cap, so only the entry cap can refuse.
+#[test]
+fn the_entry_cap_refuses_an_index_that_is_well_under_the_size_cap() {
+    let w = World::new();
+    fs::create_dir_all(w.reg()).unwrap();
+    let entries: Vec<serde_json::Value> = (0..registry::MAX_ENTRIES + 1)
+        .map(|i| {
+            serde_json::json!({
+                "id": "org.a.b", "version": format!("1.0.{i}"),
+                "hash": format!("sha256-tree-v1:{}", "0".repeat(64)), "path": "p"
+            })
+        })
+        .collect();
+    let text =
+        serde_json::to_vec(&serde_json::json!({"index_version": 1, "entries": entries})).unwrap();
+    assert!(
+        text.len() < registry::MAX_INDEX_BYTES,
+        "{} bytes",
+        text.len()
+    );
+    fs::write(w.reg().join(INDEX_FILE), text).unwrap();
+    assert!(
+        matches!(Registry::open(&w.reg()), Err(RegistryError::Invalid(m)) if m.contains("4096"))
+    );
+    // One fewer is fine.
+    let mut v = index(&w.reg());
+    v["entries"].as_array_mut().unwrap().pop();
+    write_index(&w.reg(), &v);
+    assert!(Registry::open(&w.reg()).is_ok());
 }

@@ -253,3 +253,30 @@ fn write_then_read_gives_the_same_package_and_private_modes() {
         "an existing directory is never written into"
     );
 }
+
+// ---- #332 review, item 7: hard links, empty directories, fd-relative walking ----
+
+#[test]
+fn a_hard_linked_file_is_refused() {
+    let (t, p) = base();
+    fs::write(t.path().join("outside.txt"), b"x").unwrap();
+    fs::hard_link(t.path().join("outside.txt"), p.join("fixtures/hard.jsonl")).unwrap();
+    assert!(matches!(package::read(&p), Err(PackageError::Link(_))));
+}
+
+#[test]
+fn empty_directories_count_toward_the_file_cap() {
+    let (_t, p) = base();
+    for i in 0..package::MAX_FILES + 1 {
+        fs::create_dir(p.join(format!("empty{i}"))).unwrap();
+    }
+    assert!(matches!(package::read(&p), Err(PackageError::TooManyFiles)));
+}
+
+#[test]
+fn a_directory_that_is_a_link_is_refused_at_any_depth() {
+    let (t, p) = base();
+    fs::create_dir_all(p.join("a/b")).unwrap();
+    symlink(t.path(), p.join("a/b/c")).unwrap();
+    assert!(matches!(package::read(&p), Err(PackageError::Link(_))));
+}

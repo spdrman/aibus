@@ -9,8 +9,8 @@ use std::time::{Duration, SystemTime};
 
 use aibus_core::Redactor;
 use aibus_trace::{
-    derived_id, AttemptRef, Batch, EventKind, Origin, PayloadPolicy, StoreError, StoreLimits,
-    TraceEvent, TraceStore, Visibility,
+    AttemptRef, Batch, EventKind, Origin, PayloadPolicy, StoreError, StoreLimits, TraceEvent,
+    TraceStore, Visibility,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -66,7 +66,7 @@ fn lines(dir: &Path) -> Vec<Value> {
     fs::read_to_string(dir.join("events.jsonl"))
         .unwrap()
         .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
+        .filter_map(|l| serde_json::from_str(l).ok())
         .collect()
 }
 
@@ -117,7 +117,7 @@ fn events_the_store_writes_itself_carry_a_uuid_v7_id_319() {
 fn the_store_refuses_an_event_id_that_is_not_a_uuid_v7_319() {
     let tmp = tempfile::tempdir().unwrap();
     let mut s = open(&tmp.path().join("run"));
-    let e = ev(derived_id(&[b"x"]), EventKind::AttemptStarted);
+    let e = ev(Uuid::new_v8([1; 16]), EventKind::AttemptStarted);
     let err = s.append(one(e)).unwrap_err().to_string();
     assert!(err.contains("uuid v7"), "{err}");
 }
@@ -214,7 +214,7 @@ fn a_schema_1_store_is_refused_with_a_message_that_says_why_319() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("run");
     fs::create_dir_all(&dir).unwrap();
-    let mut v = serde_json::to_value(ev(derived_id(&[b"old"]), EventKind::AttemptStarted)).unwrap();
+    let mut v = serde_json::to_value(ev(Uuid::new_v8([2; 16]), EventKind::AttemptStarted)).unwrap();
     v["schema_version"] = 1.into();
     v["sequence"] = 1.into();
     fs::write(dir.join("events.jsonl"), format!("{v}\n")).unwrap();

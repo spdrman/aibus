@@ -30,8 +30,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-/// The envelope version written by this build. A reader refuses a line with any other.
-pub const SCHEMA_VERSION: u32 = 1;
+/// The envelope version written by this build. A reader refuses a line with any other. Version 2
+/// dropped the integer `sequence` of version 1: events order by their uuid v7 `event_id` (#319).
+pub const SCHEMA_VERSION: u32 = 2;
 /// Bumped whenever what reaches the store before redaction changes (fields dropped, rules added),
 /// so an old trace says which rules it was written under.
 pub const REDACTION_VERSION: u32 = 1;
@@ -155,8 +156,9 @@ pub struct AttemptRef {
     pub provider_extension: String,
 }
 
-/// The envelope (spec 7.1), schema version 1. `sequence` is assigned by the store; `observed_at`
-/// is aibus's own clock (Claude Code puts no timestamp on most events); `occurred_at` is the
+/// The envelope (spec 7.1), schema version 2. `event_id` is a uuid v7 and is the ordering key: a
+/// trace is its events sorted by it, and replay, torn-tail repair and idempotent append all key on
+/// it. `observed_at` is aibus's own clock (Claude Code puts no timestamp on most events); `occurred_at` is the
 /// vendor's timestamp when it gave one, and `None` when it did not, never a copy of `observed_at`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TraceEvent {
@@ -173,7 +175,10 @@ pub struct TraceEvent {
     pub kind: EventKind,
     pub occurred_at: Option<String>,
     pub observed_at: String,
-    pub sequence: u64,
+    /// The 1-based rank of this event in the run's `event_id` order, set when a trace is read, for
+    /// display ("event 12 of 400"). Never written and never used to order anything.
+    #[serde(skip)]
+    pub position: u64,
     pub provider_extension: String,
     pub payload_ref: Option<String>,
     pub evidence_refs: Vec<String>,
@@ -191,8 +196,8 @@ pub struct TraceEvent {
 }
 
 impl TraceEvent {
-    /// An event of `attempt` with no agent, native ids or data yet. `event_id` is the caller's: the
-    /// normaliser derives it from the raw line so that feeding the same line twice is idempotent.
+    /// An event of `attempt` with no agent, native ids or data yet. `event_id` is the caller's, a uuid v7
+    /// from an `EventIds` (the store refuses any other).
     pub fn new(
         attempt: &AttemptRef,
         event_id: Uuid,
@@ -216,7 +221,7 @@ impl TraceEvent {
             kind,
             occurred_at: None,
             observed_at: aibus_core::persist::time::rfc3339(observed_at),
-            sequence: 0,
+            position: 0,
             provider_extension: attempt.provider_extension.clone(),
             payload_ref: None,
             evidence_refs: Vec::new(),
@@ -240,16 +245,61 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// A version 8 UUID that is a pure function of `parts`, so the same raw line in the same attempt
-/// always gets the same event id and appending it twice is a no-op.
-pub fn derived_id(parts: &[&[u8]]) -> Uuid {
-    let mut h = Sha256::new();
-    for p in parts {
-        h.update((p.len() as u64).to_le_bytes());
-        h.update(p);
+/// Makes uuid v7 event ids that never go backwards: the same millisecond (or a clock that steps
+/// back) bumps a 12-bit counter in `rand_a`, so two events made in one millisecond still sort in
+/// the order they were made, and a full counter moves on to the next millisecond. The rest of the
+/// id is a hash of `parts`, so the same raw line in the same attempt at the same time gets the same
+/// id and appending it twice is a no-op. The counter only breaks ties inside one writer; the order
+/// of a trace is the id.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EventIds {
+    ms: u64,
+    counter: u16,
+}
+
+impl EventIds {
+    /// A generator whose next id sorts after `last`.
+    pub fn after(last: Uuid) -> Self {
+        let mut g = Self::default();
+        g.observe(last);
+        g
     }
-    let digest = h.finalize();
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    Uuid::new_v8(bytes)
+
+    /// Makes the next id sort after `id` when it would not already.
+    pub fn observe(&mut self, id: Uuid) {
+        let b = id.as_bytes();
+        let ms = b[..6].iter().fold(0u64, |a, x| a << 8 | u64::from(*x));
+        let counter = u16::from(b[6] & 0x0f) << 8 | u16::from(b[7]);
+        if (ms, counter) > (self.ms, self.counter) {
+            (self.ms, self.counter) = (ms, counter);
+        }
+    }
+
+    /// The next id, stamped with `at` unless an earlier id already sits at or past it.
+    pub fn next(&mut self, at: SystemTime, parts: &[&[u8]]) -> Uuid {
+        let at_ms = at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64)
+            & 0xffff_ffff_ffff;
+        if at_ms > self.ms {
+            (self.ms, self.counter) = (at_ms, 0);
+        } else if self.counter == 0x0fff {
+            (self.ms, self.counter) = (self.ms + 1, 0);
+        } else {
+            self.counter += 1;
+        }
+        let mut h = Sha256::new();
+        for p in parts {
+            h.update((p.len() as u64).to_le_bytes());
+            h.update(p);
+        }
+        let tail = h.finalize();
+        let mut b = [0u8; 16];
+        b[..6].copy_from_slice(&self.ms.to_be_bytes()[2..]);
+        b[6] = 0x70 | (self.counter >> 8) as u8;
+        b[7] = self.counter as u8;
+        b[8] = 0x80 | (tail[0] & 0x3f);
+        b[9..].copy_from_slice(&tail[1..8]);
+        Uuid::from_bytes(b)
+    }
 }

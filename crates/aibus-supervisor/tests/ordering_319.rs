@@ -44,6 +44,10 @@ fn events_normalised_with_a_clock_that_steps_back_still_ascend_319() {
         let at = t0 - Duration::from_millis(i as u64);
         events.extend(n.stream_line(l, at).events);
     }
+    events.extend(
+        n.finish(run.ending, run.wall, t0 - Duration::from_secs(1))
+            .events,
+    );
     assert!(events.len() > 5);
     for w in events.windows(2) {
         assert!(w[0].event_id < w[1].event_id);

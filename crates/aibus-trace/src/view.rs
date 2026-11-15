@@ -98,8 +98,7 @@ impl Recorded {
     /// The events of `bytes`, read the way `TraceStore::read` reads a file, keeping each line.
     pub fn from_bytes(dir: &Path, bytes: &[u8]) -> Self {
         let mut report = ReadReport::default();
-        let mut events = Vec::new();
-        let mut raw = Vec::new();
+        let mut rows: Vec<(TraceEvent, Vec<u8>)> = Vec::new();
         for line in bytes.split_inclusive(|b| *b == b'\n') {
             if !line.ends_with(b"\n") {
                 report.torn_bytes += line.len() as u64;
@@ -113,16 +112,19 @@ impl Recorded {
             {
                 Some(s) if s == u64::from(SCHEMA_VERSION) => {
                     match serde_json::from_value::<TraceEvent>(v.unwrap_or_default()) {
-                        Ok(e) => {
-                            events.push(e);
-                            raw.push(line.to_vec());
-                        }
+                        Ok(e) => rows.push((e, line.to_vec())),
                         Err(_) => report.corrupt_lines += 1,
                     }
                 }
                 Some(_) => report.unsupported_schema += 1,
                 None => report.corrupt_lines += 1,
             }
+        }
+        // The event id (a uuid v7) is the order; the position is only its rank, for display.
+        rows.sort_by_key(|(e, _)| e.event_id);
+        let (mut events, raw): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
+        for (i, e) in events.iter_mut().enumerate() {
+            e.position = i as u64 + 1;
         }
         Self {
             dir: dir.to_owned(),
@@ -255,7 +257,7 @@ fn levels<'a>(ev: impl Iterator<Item = &'a crate::Evidence>) -> String {
 fn edge_line(e: &Edge) -> String {
     fn sources(ev: &[crate::Evidence]) -> String {
         ev.iter()
-            .map(|e| format!("#{} {}/{}", e.sequence, wire(e.visibility), wire(e.origin)))
+            .map(|e| format!("#{} {}/{}", e.position, wire(e.visibility), wire(e.origin)))
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -290,7 +292,7 @@ struct Facts<'a> {
     denied: HashMap<(Uuid, String), String>,
     /// attempt -> its parent attempt, for aibus-managed lineage.
     parent_attempt: HashMap<Uuid, Uuid>,
-    /// event id -> sequence, to show what a corroboration confirms.
+    /// event id -> position, to show what a corroboration confirms.
     seq_of: HashMap<Uuid, u64>,
 }
 
@@ -302,7 +304,7 @@ impl<'a> Facts<'a> {
         let mut parent_attempt = HashMap::new();
         let mut seq_of = HashMap::new();
         for e in &rec.events {
-            seq_of.entry(e.event_id).or_insert(e.sequence);
+            seq_of.entry(e.event_id).or_insert(e.position);
             if let Some(pa) = e.parent_attempt_id {
                 parent_attempt.entry(e.attempt_id).or_insert(pa);
             }
@@ -675,7 +677,7 @@ pub fn graph(rec: &Recorded, name: &str) -> String {
             .events
             .iter()
             .filter(|e| e.kind == EventKind::StepScheduled && e.corroborates.is_none())
-            .filter_map(|e| Some((data_str(e, "step")?.to_owned(), e.sequence)))
+            .filter_map(|e| Some((data_str(e, "step")?.to_owned(), e.position)))
             .collect();
         let steps = plan
             .get("steps")
@@ -950,7 +952,7 @@ pub fn graph(rec: &Recorded, name: &str) -> String {
             let _ = writeln!(
                 s,
                 "  #{} {} (unavailable) attempt {}",
-                g.sequence,
+                g.position,
                 clean(&g.reason, 160),
                 g.attempt_id
             );
@@ -994,10 +996,10 @@ fn note(e: &TraceEvent) -> String {
     parts.join(" ")
 }
 
-/// The events in sequence order, one a line, with their level and origin.
+/// The events in event id order, one a line, with their level and origin.
 pub fn timeline(rec: &Recorded, filter: &Filter) -> String {
     let mut order: Vec<&TraceEvent> = rec.events.iter().collect();
-    order.sort_by_key(|e| (e.sequence, e.event_id));
+    order.sort_by_key(|e| e.event_id);
     let mut s = String::from(
         "timeline (sequence, observed by aibus, reported by the vendor, kind, level, origin)\n",
     );
@@ -1032,7 +1034,7 @@ pub fn timeline(rec: &Recorded, filter: &Filter) -> String {
         let _ = writeln!(
             s,
             "#{} {} {} {} {} {} agent={}{tool}{}{corr}",
-            e.sequence,
+            e.position,
             clean(&e.observed_at, 160),
             opt(e.occurred_at.as_deref()),
             wire(e.kind),
@@ -1128,7 +1130,7 @@ fn evidence_row(s: &mut String, x: &Facts, e: &TraceEvent) {
     let _ = writeln!(
         s,
         "  #{} {} {} {} native {} parser {} raw {} payload {}{corr}",
-        e.sequence,
+        e.position,
         wire(e.kind),
         wire(e.visibility),
         wire(e.origin),
@@ -1408,7 +1410,7 @@ fn permission_and_gaps(s: &mut String, events: &[&TraceEvent]) {
         let _ = writeln!(
             s,
             "  permission #{} {} {}",
-            e.sequence,
+            e.position,
             wire(e.kind),
             note(e)
         );
@@ -1417,7 +1419,7 @@ fn permission_and_gaps(s: &mut String, events: &[&TraceEvent]) {
         let _ = writeln!(
             s,
             "  gap #{} {} (unavailable)",
-            e.sequence,
+            e.position,
             opt(data_str(e, "reason"))
         );
     }
@@ -1431,12 +1433,12 @@ pub fn event(rec: &Recorded, sequence: u64) -> Option<String> {
         .events
         .iter()
         .zip(&rec.raw)
-        .filter(|(e, _)| e.sequence == sequence)
+        .filter(|(e, _)| e.position == sequence)
     {
         let _ = writeln!(
             s,
             "event #{} ({} bytes in events.jsonl)",
-            e.sequence,
+            e.position,
             raw.len()
         );
         evidence_row(&mut s, &x, e);
@@ -1453,7 +1455,7 @@ pub fn event(rec: &Recorded, sequence: u64) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// The offline replay (spec 7.3): every recorded state transition in sequence order, then the
+/// The offline replay (spec 7.3): every recorded state transition in event id order, then the
 /// graph they add up to. It reads the trace and nothing else; it re-executes nothing and makes
 /// no model call, so it shows what was recorded and not what a model would do again.
 pub fn replay(rec: &Recorded, name: &str) -> String {
@@ -1516,7 +1518,7 @@ pub fn replay(rec: &Recorded, name: &str) -> String {
 
     let x = Facts::of(rec);
     let mut order: Vec<&TraceEvent> = rec.events.iter().collect();
-    order.sort_by_key(|e| (e.sequence, e.event_id));
+    order.sort_by_key(|e| e.event_id);
     let mut s = String::new();
     let _ = writeln!(
         s,
@@ -1528,7 +1530,7 @@ pub fn replay(rec: &Recorded, name: &str) -> String {
         let _ = writeln!(
             s,
             "#{} {} {}: {}",
-            e.sequence,
+            e.position,
             wire(e.visibility),
             wire(e.origin),
             transition(e, &x)

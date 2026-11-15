@@ -416,3 +416,86 @@ fn a_revoked_key_cannot_be_given_an_empty_reason() {
     assert!(Policy::parse(&text).is_err());
     Policy::parse(&text.replace("\"\"", "\"leaked\"")).unwrap();
 }
+
+// ---- a key taken out of the policy, and installs from before signers were recorded ----
+
+fn installed_signed_by_k1(w: &World) -> (Store, String) {
+    w.signed(A, "0.1.0", "k1", 1);
+    let trusted = format!(
+        "require_signature = true\n{}",
+        key("k1", 1, &format!("ids = [\"{A}\"]"))
+    );
+    let s = w.store();
+    s.install(&w.open(), &policy(&trusted), A, None, &[])
+        .unwrap();
+    (s, trusted)
+}
+
+#[test]
+fn removing_a_key_from_the_policy_quarantines_what_it_signed() {
+    let w = World::new();
+    let (s, _) = installed_signed_by_k1(&w);
+    // Another key stays, so the policy is not empty and still requires signatures.
+    let without = policy(&format!(
+        "require_signature = true\n{}",
+        key("k2", 2, &format!("ids = [\"{B}\"]"))
+    ));
+    let err = s.resolve(A, &without).unwrap_err();
+    assert_eq!(class(&err), "provenance_invalid", "{err:?}");
+    assert!(err.to_string().contains("k1"), "{err}");
+    let s2 = Store::open(&w.t.path().join("store2"));
+    let trusted = policy(&format!(
+        "require_signature = true\n{}",
+        key("k1", 1, &format!("ids = [\"{A}\"]"))
+    ));
+    s2.install(&w.open(), &trusted, A, None, &[]).unwrap();
+    let err = s2.verify(A, &[], &without).unwrap_err();
+    assert_eq!(class(&err), "provenance_invalid", "{err:?}");
+}
+
+#[test]
+fn renaming_a_key_keeps_it_trusted_and_its_new_scope_applies() {
+    let w = World::new();
+    let (s, _) = installed_signed_by_k1(&w);
+    let renamed = policy(&format!(
+        "require_signature = true\n{}",
+        key("k9", 1, &format!("ids = [\"{A}\"]"))
+    ));
+    s.resolve(A, &renamed).unwrap();
+    let renamed_narrow = policy(&format!(
+        "require_signature = true\n{}",
+        key("k9", 1, &format!("ids = [\"{B}\"]"))
+    ));
+    let err = s.resolve(A, &renamed_narrow).unwrap_err();
+    assert_eq!(class(&err), "provenance_invalid", "{err:?}");
+}
+
+#[test]
+fn an_install_from_before_signers_were_recorded_is_quarantined_while_keys_are_trusted() {
+    let w = World::new();
+    let (s, trusted) = installed_signed_by_k1(&w);
+    // Make the record look like one written before this change.
+    let path = w.t.path().join("store/state.json");
+    let mut v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    v["extensions"][A]
+        .as_object_mut()
+        .unwrap()
+        .remove("signers");
+    fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    let err = s.resolve(A, &policy(&trusted)).unwrap_err();
+    assert_eq!(class(&err), "provenance_invalid", "{err:?}");
+    assert!(err.to_string().contains("install"), "{err}");
+}
+
+#[test]
+fn an_unsigned_install_stays_served_when_the_policy_trusts_keys_but_does_not_require_one() {
+    let w = World::new();
+    let p = package_with(&w.t.path().join("src"), "u", &template_as(A, "0.1.0"));
+    Registry::publish(&w.reg(), &p).unwrap();
+    let pol = policy(&key("k2", 2, &format!("ids = [\"{B}\"]")));
+    let s = w.store();
+    s.install(&w.open(), &pol, A, None, &[]).unwrap();
+    s.resolve(A, &pol).unwrap();
+    s.verify(A, &[], &pol).unwrap();
+}

@@ -101,7 +101,7 @@ pub fn observe(pkg: &Package, fixture: &str, ending: &str) -> Result<Observed, S
 
 /// The text of an `.expected.json` for what was observed.
 pub fn expected_json(o: &Observed) -> String {
-    let kinds: Vec<String> = o.kinds.iter().map(|k| wire(k)).collect();
+    let kinds: Vec<String> = o.kinds.iter().map(wire).collect();
     let mut text = serde_json::to_string_pretty(&serde_json::json!({
         "ending": o.ending,
         "status": wire(o.status),
@@ -235,7 +235,7 @@ pub fn run(pkg: &Package) -> Report {
                 continue;
             }
         };
-        let kinds: Vec<String> = observed.kinds.iter().map(|k| wire(k)).collect();
+        let kinds: Vec<String> = observed.kinds.iter().map(wire).collect();
         let matches = wire(observed.status) == expected.status && kinds == expected.kinds;
         let detail = if matches {
             format!("{} events, {}", kinds.len(), expected.status)

@@ -230,6 +230,7 @@ fn validate(index: &Index) -> Result<(), RegistryError> {
     }
     let hash = regex::Regex::new(r"^sha256-tree-v1:[0-9a-f]{64}$").expect("valid regex");
     let key_id = regex::Regex::new(r"^[A-Za-z0-9._-]{1,64}$").expect("valid regex");
+    let part = regex::Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$").expect("valid regex");
     let mut seen = std::collections::BTreeSet::new();
     for e in &index.entries {
         if !crate::manifest::valid_id(&e.id) {
@@ -251,7 +252,6 @@ fn validate(index: &Index) -> Result<(), RegistryError> {
             )));
         }
         // A relative path of one to three plain names.
-        let part = regex::Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$").expect("valid regex");
         let parts: Vec<&str> = e.path.split('/').collect();
         if !(1..=3).contains(&parts.len()) || !parts.iter().all(|x| part.is_match(x)) {
             return Err(invalid(format!(

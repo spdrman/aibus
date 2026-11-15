@@ -55,7 +55,6 @@ impl Declarative {
         &mut self,
         key: &str,
         raw: &[u8],
-        index: u32,
         kind: EventKind,
         origin: Origin,
         visibility: Visibility,
@@ -68,7 +67,7 @@ impl Declarative {
                 self.attempt.attempt_id.as_bytes(),
                 key.as_bytes(),
                 sha.as_bytes(),
-                &index.to_le_bytes(),
+                &0u32.to_le_bytes(),
             ],
         );
         let mut e = TraceEvent::new(&self.attempt, id, kind, origin, visibility, at, PARSER);
@@ -88,7 +87,7 @@ impl Declarative {
     ) -> TraceEvent {
         self.host += 1;
         let key = format!("host-{}", self.host);
-        self.event(&key, key.as_bytes(), 0, kind, origin, visibility, at)
+        self.event(&key, key.as_bytes(), kind, origin, visibility, at)
     }
 
     fn gap(&mut self, key: &str, raw: &[u8], reason: &str, bytes: usize, at: SystemTime) -> Batch {
@@ -96,7 +95,6 @@ impl Declarative {
         let mut e = self.event(
             key,
             raw,
-            0,
             EventKind::GapDetected,
             Origin::CliStream,
             Visibility::Unavailable,
@@ -175,7 +173,6 @@ impl Engine for Declarative {
             let mut e = self.event(
                 &key,
                 line,
-                0,
                 EventKind::TraceWarning,
                 Origin::CliStream,
                 Visibility::Observed,
@@ -197,7 +194,6 @@ impl Engine for Declarative {
         let mut e = self.event(
             &key,
             line,
-            0,
             kind,
             Origin::CliStream,
             Visibility::Observed,
@@ -251,7 +247,6 @@ impl Engine for Declarative {
         let mut e = self.event(
             &key,
             line,
-            0,
             EventKind::TraceWarning,
             Origin::CliStream,
             Visibility::Observed,

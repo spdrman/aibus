@@ -1584,7 +1584,6 @@ async fn live_reference() {
             "checks_passed": c.0,
             "wall_ms": { "value": wall.as_millis(), "unit": "ms", "quality": "derived",
                          "source": "tokio Instant around supervise, this run, n=1, on the host in this row (not a benchmark)" },
-            "host": std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()),
             "events": events.len(),
             "evidence_levels": levels(&events),
             "edges": p.edges.iter().map(|e| json!({"level": wire(e.level), "cross_checked": e.cross_checked})).collect::<Vec<_>>(),

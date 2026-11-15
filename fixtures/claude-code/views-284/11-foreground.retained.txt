@@ -1,6 +1,6 @@
 run 11-foreground.retained
   workflow run 00000000-0000-0000-0000-000002820001
-  provider org.aibus.reference-cli
+  provider org.devshell.aibus.reference-cli
   recorded 40 events, observed 2026-11-14T21:19:41.292Z to 2026-11-14T21:19:45.168Z (aibus clock)
   data quality: every line read
   levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap

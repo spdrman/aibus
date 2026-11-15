@@ -98,6 +98,8 @@ pub enum Ctx {
     Providers,
     /// `/workflow list`.
     Workflows,
+    /// `/runs` (#284): a recorded run as text to scroll.
+    Runs,
     Outcome,
     Confirm,
 }
@@ -522,6 +524,7 @@ fn ctx_name(c: Ctx) -> &'static str {
         Ctx::Models => "models",
         Ctx::Providers => "providers",
         Ctx::Workflows => "workflows",
+        Ctx::Runs => "runs",
         Ctx::Outcome => "outcome",
         Ctx::Confirm => "confirm",
     }

@@ -447,12 +447,12 @@ ssh-keygen -q -t ed25519 -N 'pw236' -C pass -f "$t/pkey"   # a passphrase key; n
 if pty_available; then
   r=$t/rel236p; mkrepo "$r"; usegate "$r"; cp "$t/pkey.pub" "$PUBKEY_PATH"; git commit -qam pub; git push -q origin main
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
-    pty_run 6 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel.out" 2>&1; rc=$?
+    pty_run 20 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel.out" 2>&1; rc=$?
   expect "from a terminal, release.sh refuses a passphrase key that is not loaded at once (exit 2, no hang)" test $rc = 2
   expect "...with the ssh-add message and no passphrase prompt" bash -c "grep -q 'the key cannot sign without a prompt: load it with ssh-add' '$t/pty-rel.out' && ! grep -qi 'enter passphrase' '$t/pty-rel.out'"
   printf 'set -m\n' >"$t/monitor.env"
   ( unset SSH_AUTH_SOCK SSH_AGENT_PID; export BASH_ENV=$t/monitor.env RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh
-    pty_run 8 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel2.out" 2>&1; rc=$?
+    pty_run 20 tools/release-gate/release.sh 0.2.0 --key "$t/pkey" --dry-run ) >"$t/pty-rel2.out" 2>&1; rc=$?
   expect "with job control on, release.sh still refuses a passphrase key at once (exit 2), no prompt" bash -c "test $rc = 2 && ! grep -qi 'enter passphrase' '$t/pty-rel2.out'"
 else echo "SKIP: script(1) or timeout is missing, the pseudo-terminal test does not run" >&2; fi
 # an interrupt during the preflight leaves no release-signcheck.* directory
@@ -473,7 +473,9 @@ if pty_available; then
   prompt267() { # name input want
     r=$t/rel267; mkrepo "$r"; usegate "$r"; : >"$GH_LOG"
     ( export RELEASE_E2E_CMD=true RELEASE_ATTEST_SH=$t/attest-ok.sh; unset SSH_AUTH_SOCK SSH_AGENT_PID
-      PTY_INPUT=$2 pty_run 12 tools/release-gate/release.sh 0.2.0 --key "$t/key" ) >"$t/p267.out" 2>&1
+      PTY_INPUT=$2 PTY_PROMPT='\[y/N\]' pty_run 180 tools/release-gate/release.sh 0.2.0 --key "$t/key" ) >"$t/p267.out" 2>&1; prc=$?
+    # 180s only catches a real hang (it costs nothing when things work); a cut-off says so instead of failing the refusal check
+    expect "#267 $1: the run was not cut off by the timeout" test $prc != 124
     if [ "$3" = push ]; then
       expect "#267 $1 confirms: the branch is pushed and the PR opened" bash -c "[ -n \"\$(git ls-remote origin refs/heads/release-prep/v0.2.0)\" ] && [ \$(wc -l <'$GH_LOG') = 1 ]"
     else

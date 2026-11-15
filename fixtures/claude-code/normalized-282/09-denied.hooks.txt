@@ -1,0 +1,23 @@
+attempt 00000000-0000-0000-0000-000002820002 status=completed reconcile=false evidence=#1:observed/aibus_scheduler,#11:observed/aibus_scheduler
+  usage input_tokens=4 tokens (reported, result.usage)
+  usage output_tokens=185 tokens (reported, result.usage)
+  usage cache_creation_input_tokens=3584 tokens (reported, result.usage)
+  usage cache_read_input_tokens=6951 tokens (reported, result.usage)
+  usage num_turns=2 turns (reported, result.num_turns)
+  usage duration_ms=1649 ms (reported, result.duration_ms)
+  usage cost_usd=0.00087921 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd=unknown usd (unknown, not reported by the CLI)
+agent 726b6f0a-871f-44ff-8d00-4afe98248832 role=lead status=process_exited evidence=#2:observed/cli_stream,#8:correlated/hook,#10:observed/aibus_scheduler
+tool toolu_01J5mV9auXr7GVpP55nLgTC7 agent=726b6f0a-871f-44ff-8d00-4afe98248832 name=Write outcome=failed evidence=#3:observed/cli_stream,#4:observed/cli_stream,#5:observed/cli_stream,#9:correlated/hook
+timeline
+#1 2026-11-14T21:19:06.613Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:19:06.809Z - agent_started observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832
+#3 2026-11-14T21:19:07.822Z 2026-11-14T21:19:07.818Z tool_started observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832
+#4 2026-11-14T21:19:07.857Z - tool_failed observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832
+#5 2026-11-14T21:19:07.859Z 2026-11-14T21:19:07.858Z tool_failed observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832 corroborates
+#6 2026-11-14T21:19:08.385Z 2026-11-14T21:19:08.381Z message_chunk observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832
+#7 2026-11-14T21:19:08.415Z - usage_reported observed cli_stream agent=726b6f0a-871f-44ff-8d00-4afe98248832
+#8 2026-11-14T21:19:09.058Z - agent_started correlated hook agent=726b6f0a-871f-44ff-8d00-4afe98248832 corroborates
+#9 2026-11-14T21:19:09.058Z - tool_started correlated hook agent=726b6f0a-871f-44ff-8d00-4afe98248832 corroborates
+#10 2026-11-14T21:19:09.058Z - agent_stopped observed aibus_scheduler agent=726b6f0a-871f-44ff-8d00-4afe98248832
+#11 2026-11-14T21:19:09.058Z - attempt_completed observed aibus_scheduler agent=726b6f0a-871f-44ff-8d00-4afe98248832

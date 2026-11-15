@@ -100,6 +100,7 @@ pub fn options(
             .map(|p| p.id.clone())
             .collect(),
         workflows: None,
+        recorded: None,
         remote: None,
         remote_permission: false,
     };
@@ -348,6 +349,8 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     };
     app.step(Msg::WorkflowsLoaded { rows: aibus_core::workflow::rows(&workflows.dirs), shown: None, said: None })?;
     opts.workflows = Some(workflows);
+    // `/runs` reads the recorded runs of external CLIs where `aibus runs` does.
+    opts.recorded = Some(paths.state.join("traces"));
     count_session(&paths.state);
     // Permission answers and messages reach the run that is waiting through its mailbox. The
     // map of which run asked is kept from what the runs say.

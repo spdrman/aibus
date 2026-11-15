@@ -1,0 +1,8 @@
+# expect: route 1: `to` names no step: ghost
+[[step]]
+agent = "plan"
+prompt = "p {{input}}"
+
+[[route]]
+from = "plan"
+to = "ghost"

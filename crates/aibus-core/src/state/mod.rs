@@ -36,6 +36,9 @@ pub const WORKFLOWS: &str = "model:workflows";
 pub const WORKFLOW_SHOWN: &str = "model:workflow:shown";
 /// The latest workflow the author drafted: `{toml, summary}`, or null. `/workflow save` writes it.
 pub const WORKFLOW_DRAFT: &str = "model:workflow:draft";
+/// The text `/runs` opens (#284): `{title, text}`, the rendering of a recorded run. Not a static
+/// input: the first `/runs` creates it, so a session that never opens it replays as before.
+pub const RECORDED_SHOWN: &str = "model:recorded:shown";
 pub const RUNS_ORDER: &str = "model:runs:order";
 pub const TOOLS_PENDING: &str = "model:tools:pending";
 pub const PERMISSIONS_OPEN: &str = "model:permissions:open";

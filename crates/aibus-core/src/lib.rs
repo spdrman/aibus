@@ -26,6 +26,7 @@ pub mod replay;
 pub mod router;
 pub mod run;
 pub mod state;
+pub mod text;
 pub mod tool;
 pub mod tools;
 pub mod triggers;

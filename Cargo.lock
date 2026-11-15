@@ -36,6 +36,7 @@ dependencies = [
  "aibus-provider-http",
  "aibus-provider-openai",
  "aibus-testkit",
+ "aibus-trace",
  "aibus-tui",
  "async-trait",
  "base64 0.22.1",
@@ -46,6 +47,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "indexmap",
  "keyring",
  "notify",
  "rand 0.9.5",
@@ -107,6 +109,7 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
+ "sha2 0.10.9",
  "smol_str",
  "tempfile",
  "thiserror 2.0.21",
@@ -246,6 +249,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-supervisor"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-trace",
+ "regex",
+ "rustix 1.1.6",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "aibus-testkit"
 version = "0.2.1"
 dependencies = [
@@ -271,6 +289,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-trace"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "fs4",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "aibus-tui"
 version = "0.2.1"
 dependencies = [
@@ -278,6 +310,7 @@ dependencies = [
  "aibus-graph",
  "aibus-provider",
  "aibus-testkit",
+ "aibus-trace",
  "arboard",
  "crossterm",
  "rataflow",
@@ -4217,6 +4250,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -4555,6 +4589,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

@@ -69,7 +69,8 @@ fn effect(m: &Msg) -> Effect {
                 | Screen::Models(_)
                 | Screen::Providers
                 | Screen::Workflows
-                | Screen::WorkflowShow => Effect::Keys,
+                | Screen::WorkflowShow
+                | Screen::Runs => Effect::Keys,
             },
             Command::Clear => Effect::Confirms,
             Command::WorkflowFile(WorkflowFile::Save { .. })
@@ -83,7 +84,8 @@ fn effect(m: &Msg) -> Effect {
                 }
             }
             // The loop answers these with a screen.
-            Command::WorkflowFile(WorkflowFile::List | WorkflowFile::Show(_)) => Effect::Keys,
+            Command::WorkflowFile(WorkflowFile::List | WorkflowFile::Show(_))
+            | Command::Runs(_) => Effect::Keys,
             Command::CloseModal | Command::OpenHelp => Effect::Screen,
             Command::OpenTranscript(_)
             | Command::OpenPalette

@@ -464,6 +464,9 @@ pub enum Screen {
     /// `/workflow show <name>` and a refused `/workflow save`: one text and its summary line,
     /// from `model:workflow:shown`.
     WorkflowShow,
+    /// `/runs`: the recorded runs, one run's graph and timeline, an inspector or a replay, as
+    /// text from `model:runs:shown`.
+    Runs,
 }
 
 /// What `Command::SetModel` changes: the lead's model, a seat's, or one run's.
@@ -597,6 +600,21 @@ pub enum Command {
         write: bool,
         edit: Option<String>,
     },
+    /// `/runs ...`: read a recorded run (#284). The reducer does nothing with it: the terminal
+    /// loop reads the trace store and answers with `Msg::RunsLoaded`.
+    Runs(RunsQuery),
+}
+
+/// What `/runs` asks of the recorded runs.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum RunsQuery {
+    /// Every run, one line each.
+    Fleet,
+    /// One run's graph and timeline, or with `node` the inspector of one agent, tool use or
+    /// attempt.
+    Inspect { run: String, node: Option<String> },
+    /// The offline replay of one run.
+    Replay(String),
 }
 
 /// What `Command::WorkflowFile` asks the loop to do with the workflow files.
@@ -758,6 +776,11 @@ pub enum Msg {
         shown: Option<WorkflowShown>,
         said: Option<String>,
     },
+    /// What `/runs` read, as text for the runs screen: replaces `model:runs:shown`.
+    RunsLoaded {
+        title: String,
+        text: String,
+    },
     /// The persist effect finished a snapshot. Not in 02 section 3.1: something has to reset
     /// `model:persist:due`, and only a commit can do it.
     Persisted,
@@ -821,6 +844,7 @@ impl Msg {
             Msg::ModelSwitched { .. } => "ModelSwitched",
             Msg::RunSwitched { .. } => "RunSwitched",
             Msg::WorkflowsLoaded { .. } => "WorkflowsLoaded",
+            Msg::RunsLoaded { .. } => "RunsLoaded",
             Msg::Persisted => "Persisted",
             // A client's message is the keyboard's message: the same intent in the commit log.
             Msg::Via { msg, .. } => msg.name(),
@@ -972,6 +996,7 @@ impl Msg {
             Msg::WorkflowsLoaded { rows, shown, .. } => {
                 map([("msg", name), ("rows", n(rows.len())), ("shown", Value::Bool(shown.is_some()))])
             }
+            Msg::RunsLoaded { text, .. } => map([("msg", name), ("text_len", len(text))]),
             Msg::Via { client, msg } => {
                 let inner = msg.summary();
                 let inner = crate::state::value::with(&inner, "via", s("mcp"));
@@ -1019,5 +1044,6 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::SetModel { .. } => "set_model",
         Command::WorkflowFile(_) => "workflow_file",
         Command::WorkflowAuthor { .. } => "workflow_author",
+        Command::Runs(_) => "runs",
     }
 }

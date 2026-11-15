@@ -1,0 +1,45 @@
+attempt 00000000-0000-0000-0000-000002820002 status=completed reconcile=false evidence=#1:observed/aibus_scheduler,#27:observed/aibus_scheduler
+  usage input_tokens=4 tokens (reported, result.usage)
+  usage output_tokens=903 tokens (reported, result.usage)
+  usage cache_creation_input_tokens=5638 tokens (reported, result.usage)
+  usage cache_read_input_tokens=32600 tokens (reported, result.usage)
+  usage num_turns=3 turns (reported, result.num_turns)
+  usage duration_ms=5515 ms (reported, result.duration_ms)
+  usage cost_usd=0.0044801749999999994 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd=unknown usd (unknown, not reported by the CLI)
+agent bc9a5a7b-f4e2-45ed-be44-db448b78d6aa role=lead status=process_exited evidence=#2:observed/cli_stream,#26:observed/aibus_scheduler
+agent ade48dcb641796c9f role=general-purpose status=completed evidence=#5:observed/cli_stream,#13:observed/cli_stream,#14:observed/cli_stream,#16:observed/cli_stream
+agent a391cce54df4a1000 role=general-purpose status=completed evidence=#8:observed/cli_stream,#20:observed/cli_stream,#21:observed/cli_stream,#23:observed/cli_stream
+edge bc9a5a7b-f4e2-45ed-be44-db448b78d6aa -> ade48dcb641796c9f via toolu_01BqRuN8g5vzwuxF5f443Lgk level=observed cross_checked=false sources=#4:observed/cli_stream,#5:observed/cli_stream
+edge bc9a5a7b-f4e2-45ed-be44-db448b78d6aa -> a391cce54df4a1000 via toolu_01Bx2LPCJdUVa2FehFuCBVpy level=observed cross_checked=false sources=#7:observed/cli_stream,#8:observed/cli_stream
+tool toolu_01LM15wqVcfA45eo7XtQresk agent=ade48dcb641796c9f name=Read outcome=completed evidence=#10:observed/cli_stream,#11:observed/cli_stream
+tool toolu_01XjAVV3tU2k7XVja1gaqApd agent=a391cce54df4a1000 name=Read outcome=completed evidence=#17:observed/cli_stream,#18:observed/cli_stream
+gap #3 reasoning_not_exposed
+timeline
+#1 2026-11-14T21:21:24.514Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:21:24.843Z - agent_started observed cli_stream agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#3 2026-11-14T21:21:26.291Z 2026-11-14T21:21:26.290Z gap_detected unavailable cli_stream agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#4 2026-11-14T21:21:27.211Z 2026-11-14T21:21:27.209Z task_delegated observed cli_stream agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#5 2026-11-14T21:21:27.237Z - agent_started observed cli_stream agent=ade48dcb641796c9f
+#6 2026-11-14T21:21:27.239Z 2026-11-14T21:21:27.233Z message_chunk observed cli_stream agent=ade48dcb641796c9f
+#7 2026-11-14T21:21:27.988Z 2026-11-14T21:21:27.987Z task_delegated observed cli_stream agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#8 2026-11-14T21:21:28.014Z - agent_started observed cli_stream agent=a391cce54df4a1000
+#9 2026-11-14T21:21:28.015Z 2026-11-14T21:21:28.012Z message_chunk observed cli_stream agent=a391cce54df4a1000
+#10 2026-11-14T21:21:28.061Z 2026-11-14T21:21:28.059Z tool_started observed cli_stream agent=ade48dcb641796c9f
+#11 2026-11-14T21:21:28.093Z 2026-11-14T21:21:28.091Z tool_completed observed cli_stream agent=ade48dcb641796c9f
+#12 2026-11-14T21:21:28.538Z 2026-11-14T21:21:28.538Z message_chunk observed cli_stream agent=ade48dcb641796c9f
+#13 2026-11-14T21:21:28.586Z 2026-11-14T21:21:28.586Z agent_stopped observed cli_stream agent=ade48dcb641796c9f
+#14 2026-11-14T21:21:28.587Z - agent_stopped observed cli_stream agent=ade48dcb641796c9f corroborates
+#15 2026-11-14T21:21:28.587Z - usage_reported observed cli_stream agent=ade48dcb641796c9f
+#16 2026-11-14T21:21:28.598Z 2026-11-14T21:21:28.597Z agent_stopped observed cli_stream agent=ade48dcb641796c9f corroborates
+#17 2026-11-14T21:21:28.819Z 2026-11-14T21:21:28.812Z tool_started observed cli_stream agent=a391cce54df4a1000
+#18 2026-11-14T21:21:28.858Z 2026-11-14T21:21:28.856Z tool_completed observed cli_stream agent=a391cce54df4a1000
+#19 2026-11-14T21:21:29.486Z 2026-11-14T21:21:29.485Z message_chunk observed cli_stream agent=a391cce54df4a1000
+#20 2026-11-14T21:21:29.512Z 2026-11-14T21:21:29.512Z agent_stopped observed cli_stream agent=a391cce54df4a1000
+#21 2026-11-14T21:21:29.512Z - agent_stopped observed cli_stream agent=a391cce54df4a1000 corroborates
+#22 2026-11-14T21:21:29.512Z - usage_reported observed cli_stream agent=a391cce54df4a1000
+#23 2026-11-14T21:21:29.523Z 2026-11-14T21:21:29.522Z agent_stopped observed cli_stream agent=a391cce54df4a1000 corroborates
+#24 2026-11-14T21:21:30.274Z 2026-11-14T21:21:30.272Z message_chunk observed cli_stream agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#25 2026-11-14T21:21:30.301Z - usage_reported observed cli_stream agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#26 2026-11-14T21:21:30.840Z - agent_stopped observed aibus_scheduler agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa
+#27 2026-11-14T21:21:30.840Z - attempt_completed observed aibus_scheduler agent=bc9a5a7b-f4e2-45ed-be44-db448b78d6aa

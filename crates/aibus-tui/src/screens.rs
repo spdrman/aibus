@@ -742,12 +742,16 @@ pub fn workflows(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &
         column(buf, r, 0, 18, text(row, "name"), fg);
         column(buf, r, 19, 8, text(row, "scope"), dim);
         let rest = inner.width.saturating_sub(28);
+        // #271: a workflow from a bundle says which; one that parses but has an error is a
+        // bundled gate that is not trusted yet.
+        let from = get(row, "bundle").and_then(|b| b.as_text()).map_or(String::new(), |b| format!("[{b}] "));
+        let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
         match get(row, "error").and_then(|e| e.as_text()) {
-            Some(why) => column(buf, r, 28, rest, &format!("broken: {why}"), Style::new().fg(th.error)),
-            None => {
-                let agents: Vec<&str> = as_list(get(row, "agents").unwrap_or(&NULL)).iter().filter_map(|a| a.as_text()).collect();
-                column(buf, r, 28, rest, &format!("{}  {}", agents.join(" > "), text(row, "description")), fg);
+            Some(why) => {
+                let what = if agents.is_empty() { "broken" } else { "not runnable" };
+                column(buf, r, 28, rest, &format!("{from}{what}: {why}"), Style::new().fg(th.error));
             }
+            None => column(buf, r, 28, rest, &format!("{from}{}  {}", agents.join(" > "), text(row, "description")), fg),
         }
         hits.push((hit, r));
     }
@@ -777,6 +781,37 @@ pub fn workflow_show(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointe
     let summary = get(v, "summary").and_then(|t| t.as_text()).unwrap_or("");
     let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
     put(buf, bottom, 0, 0, &clip(summary, usize::from(bottom.width)), Style::new().fg(th.dim_text));
+    let (hits, _) = buttons(buf, bottom, 1, &[("cancel", "Esc", "Close", true)], th, pointer);
+    Placed { area, hits }
+}
+
+/// `/runs` (#284): a recorded run as text (the fleet, a run's graph and timeline, an inspector or
+/// a replay), from the scroll position down, with where that is under it. The text was cleaned of
+/// anything a terminal acts on before it reached the graph; evidence levels are words in it, so
+/// the screen adds no colour of its own.
+pub fn recorded(buf: &mut Buffer, full: Rect, v: &Value, th: &Theme, pointer: &Pointer) -> Placed {
+    let area = centred(full, full.width.saturating_sub(4).max(40), full.height.saturating_sub(2).max(8));
+    Clear.render(area, buf);
+    let title = get(v, "title").and_then(|t| t.as_text()).unwrap_or("runs");
+    let inner = {
+        let i = panel(buf, area, title, th.swarm, th);
+        Rect { x: i.x + 1, width: i.width.saturating_sub(2), ..i }
+    };
+    let lines = as_list(get(v, "lines").unwrap_or(&NULL));
+    let top = usize::try_from(int(v, "sel")).unwrap_or(0);
+    let room = usize::from(inner.height.saturating_sub(3));
+    for (k, l) in lines.iter().skip(top).take(room).enumerate() {
+        let r = Rect { y: inner.y + k as u16, height: 1, ..inner };
+        put(buf, r, 0, 0, &clip(l.as_str_or(""), usize::from(r.width)), Style::new().fg(th.fg));
+    }
+    let bottom = Rect { y: inner.bottom().saturating_sub(2), height: 2, ..inner };
+    let at = format!(
+        "lines {}-{} of {}   Up/Down, PgUp/PgDn, g/G to scroll",
+        (top + 1).min(lines.len()),
+        (top + room).min(lines.len()),
+        lines.len()
+    );
+    put(buf, bottom, 0, 0, &clip(&at, usize::from(bottom.width)), Style::new().fg(th.dim_text));
     let (hits, _) = buttons(buf, bottom, 1, &[("cancel", "Esc", "Close", true)], th, pointer);
     Placed { area, hits }
 }

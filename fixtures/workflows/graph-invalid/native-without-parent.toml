@@ -1,0 +1,6 @@
+# expect: step 1: a native subagent needs a parent step that launches it
+[[step]]
+agent = "explore"
+runtime = "cli.claude"
+mode = "native"
+prompt = "q"

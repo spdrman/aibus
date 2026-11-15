@@ -1,0 +1,11 @@
+# expect: step 1: parent `b` is not a step that comes before this one
+[[step]]
+id = "a"
+agent = "plan"
+parent = "b"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"

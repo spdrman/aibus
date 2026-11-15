@@ -1,0 +1,9 @@
+exe=/opt/homebrew/Caskroom/claude-code/2.1.311/claude
+cwd=/spike/work/teams
+argv=["-p", "Create an agent team with two teammates named alpha and beta. Teammate alpha reads alpha.txt and teammate beta reads beta.txt, each in the current directory. Do not read the files yourself. When both teammates have reported, reply with one line containing what each one found, and say whether they ran as agent-team teammates or as ordinary subagents.", "--output-format", "stream-json", "--verbose", "--include-hook-events", "--forward-subagent-text", "--model", "haiku", "--max-turns", "8", "--max-budget-usd", "0.20", "--no-session-persistence", "--setting-sources", "project", "--strict-mcp-config", "--permission-prompts", "none", "--allowedTools", "Read,Agent"]
+extra_env_keys=["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]
+started_unix_ms=1794691284514
+wall_ms=6326
+stdout_lines=57
+timed_out=false
+exit=Some(0)

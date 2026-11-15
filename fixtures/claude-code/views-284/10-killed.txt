@@ -1,0 +1,164 @@
+run 10-killed
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 28 events, observed 2026-11-14T21:19:15.491Z to 2026-11-14T21:19:18.506Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 interrupted  [observed 2]
+  usage input_tokens 0 tokens (reported, result.usage)
+  usage output_tokens 0 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 0 tokens (reported, result.usage)
+  usage cache_read_input_tokens 0 tokens (reported, result.usage)
+  usage num_turns 0 turns (reported, result.num_turns)
+  usage duration_ms 11 ms (reported, result.duration_ms)
+  usage cost_usd 0.00083856 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 213096be-224b-4ec4-a7b6-7ed0ce963984 lead, process_exited  messages 1 observed  [observed 2]
+  | agent ac73a71c36fbd576c reader-a, async_launched  messages 1 observed  [observed 4]
+  |   edge observed one channel (cli_stream) via toolu_01A3m8EQKHuoGPMYqcqMpgzp sources #3 observed/cli_stream #4 observed/cli_stream
+  | | tool toolu_014HWHqq6rufdHNqiF2eeAcn Read: completed  [observed 2]
+  | agent ad00e31ccc8b7ed63 reader-b, async_launched  messages 1 observed  [observed 4]
+  |   edge observed one channel (cli_stream) via toolu_0113PoJDXYhwWQ7mHShFgWXB sources #6 observed/cli_stream #7 observed/cli_stream
+  | | tool toolu_0127XJ7mfXkUEmRevHJAizRU Read: completed  [observed 2]
+gaps (what the trace does not show)
+  #13 reasoning_not_exposed (unavailable) attempt 00000000-0000-0000-0000-000002820002
+  #16 reasoning_not_exposed (unavailable) attempt 00000000-0000-0000-0000-000002820002
+  #26 stream_truncated (unavailable) attempt 00000000-0000-0000-0000-000002820002
+timeline (sequence, observed by aibus, reported by the vendor, kind, level, origin)
+#1 2026-11-14T21:19:15.491Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:19:15.690Z - agent_started observed cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 role=lead
+#3 2026-11-14T21:19:16.465Z 2026-11-14T21:19:16.461Z task_delegated observed cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 tool_use=toolu_01A3m8EQKHuoGPMYqcqMpgzp tool=Agent subagent_type=reader-a
+#4 2026-11-14T21:19:16.494Z - agent_started observed cli_stream agent=ac73a71c36fbd576c tool_use=toolu_01A3m8EQKHuoGPMYqcqMpgzp subagent_type=reader-a
+#5 2026-11-14T21:19:16.521Z 2026-11-14T21:19:16.520Z agent_stopped observed cli_stream agent=ac73a71c36fbd576c tool_use=toolu_01A3m8EQKHuoGPMYqcqMpgzp status=async_launched
+#6 2026-11-14T21:19:16.729Z 2026-11-14T21:19:16.729Z task_delegated observed cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 tool_use=toolu_0113PoJDXYhwWQ7mHShFgWXB tool=Agent subagent_type=reader-b
+#7 2026-11-14T21:19:16.752Z - agent_started observed cli_stream agent=ad00e31ccc8b7ed63 tool_use=toolu_0113PoJDXYhwWQ7mHShFgWXB subagent_type=reader-b
+#8 2026-11-14T21:19:16.766Z 2026-11-14T21:19:16.766Z agent_stopped observed cli_stream agent=ad00e31ccc8b7ed63 tool_use=toolu_0113PoJDXYhwWQ7mHShFgWXB status=async_launched
+#9 2026-11-14T21:19:17.250Z 2026-11-14T21:19:17.250Z tool_started observed cli_stream agent=ac73a71c36fbd576c tool_use=toolu_014HWHqq6rufdHNqiF2eeAcn tool=Read
+#10 2026-11-14T21:19:17.287Z 2026-11-14T21:19:17.287Z tool_completed observed cli_stream agent=ac73a71c36fbd576c tool_use=toolu_014HWHqq6rufdHNqiF2eeAcn
+#11 2026-11-14T21:19:17.497Z 2026-11-14T21:19:17.497Z tool_started observed cli_stream agent=ad00e31ccc8b7ed63 tool_use=toolu_0127XJ7mfXkUEmRevHJAizRU tool=Read
+#12 2026-11-14T21:19:17.523Z 2026-11-14T21:19:17.523Z tool_completed observed cli_stream agent=ad00e31ccc8b7ed63 tool_use=toolu_0127XJ7mfXkUEmRevHJAizRU
+#13 2026-11-14T21:19:17.742Z 2026-11-14T21:19:17.742Z gap_detected unavailable cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 reason=reasoning_not_exposed
+#14 2026-11-14T21:19:17.909Z 2026-11-14T21:19:17.907Z message_chunk observed cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 role=assistant
+#15 2026-11-14T21:19:17.910Z 2026-11-14T21:19:17.910Z message_chunk observed cli_stream agent=ad00e31ccc8b7ed63 role=assistant
+#16 2026-11-14T21:19:17.911Z 2026-11-14T21:19:17.911Z gap_detected unavailable cli_stream agent=ac73a71c36fbd576c reason=reasoning_not_exposed
+#17 2026-11-14T21:19:17.931Z 2026-11-14T21:19:17.932Z message_chunk observed cli_stream agent=ac73a71c36fbd576c role=assistant
+#18 2026-11-14T21:19:17.961Z 2026-11-14T21:19:17.961Z agent_stopped observed cli_stream agent=ad00e31ccc8b7ed63 status=completed corroborates
+#19 2026-11-14T21:19:17.961Z - agent_stopped observed cli_stream agent=ad00e31ccc8b7ed63 status=completed corroborates
+#20 2026-11-14T21:19:17.961Z - usage_reported observed cli_stream agent=ad00e31ccc8b7ed63 scope=agent
+#21 2026-11-14T21:19:17.974Z 2026-11-14T21:19:17.975Z agent_stopped observed cli_stream agent=ac73a71c36fbd576c status=completed corroborates
+#22 2026-11-14T21:19:17.974Z - agent_stopped observed cli_stream agent=ac73a71c36fbd576c status=completed corroborates
+#23 2026-11-14T21:19:17.974Z - usage_reported observed cli_stream agent=ac73a71c36fbd576c scope=agent
+#24 2026-11-14T21:19:18.054Z - usage_reported observed cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 scope=attempt
+#25 2026-11-14T21:19:18.054Z - usage_reported observed cli_stream agent=213096be-224b-4ec4-a7b6-7ed0ce963984 scope=attempt
+#26 2026-11-14T21:19:18.506Z - gap_detected unavailable cli_stream agent=- reason=stream_truncated
+#27 2026-11-14T21:19:18.506Z - agent_stopped observed aibus_scheduler agent=213096be-224b-4ec4-a7b6-7ed0ce963984 status=process_exited
+#28 2026-11-14T21:19:18.506Z - attempt_failed observed aibus_scheduler agent=213096be-224b-4ec4-a7b6-7ed0ce963984 status=interrupted reason=wall_time
+
+inspect 213096be-224b-4ec4-a7b6-7ed0ce963984
+agent 213096be-224b-4ec4-a7b6-7ed0ce963984
+  attempt 00000000-0000-0000-0000-000002820002
+  role lead
+  status process_exited
+  parent none: the lead is the process aibus started
+  delegated to ac73a71c36fbd576c (observed), ad00e31ccc8b7ed63 (observed)
+  elapsed 2.816 s (derived from aibus's clock, first to last event)
+  model claude-haiku-5-5 (reported)
+  cli_version 2.1.311 (reported)
+  permission_mode default (reported)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage: not reported for this agent (unknown)
+  tools: none recorded
+  permission events: none recorded
+  gap #13 reasoning_not_exposed (unavailable)
+  evidence (open one with --event <sequence>):
+  #2 agent_started observed cli_stream native system/init parser claude-code-stream-json/1 raw sha256:259d5ba9c8cda2bd38c654da58bfe64bd263e22e3cdd1c1a3122fc0a61e06727 payload -
+  #3 task_delegated observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:c64540cc02a76ce52827c4b84a98c0e4de705d2abf99ab6e544fb9524d21a381 payload -
+  #6 task_delegated observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:faaae8831f21eb4990a5f84306c6a89810519f9d92e672f3b1a5a4348dc5b2aa payload -
+  #13 gap_detected unavailable cli_stream native assistant parser claude-code-stream-json/1 raw sha256:3840184ccdd898060c6f7378b1ebb5e026d3b97c8a66d66a3dfdec0cb428d885 payload -
+  #14 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:45d07236066abfb032c515eb92319ca306e337b00b053dddfb1d51ddbf7d9618 payload -
+  #24 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:5425e2dd4842c195531c2cd6e2a220db87f87a03af6ef23c37f293125ce24cd7 payload -
+  #25 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:c547eff81ecf66c3d09d81ee1f6919101d524a57c5e0b584859215ee3ec15557 payload -
+  #27 agent_stopped observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+  #28 attempt_failed observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+
+inspect ac73a71c36fbd576c
+agent ac73a71c36fbd576c
+  attempt 00000000-0000-0000-0000-000002820002
+  role reader-a
+  status async_launched
+  parent 213096be-224b-4ec4-a7b6-7ed0ce963984
+  edge observed one channel (cli_stream) via toolu_01A3m8EQKHuoGPMYqcqMpgzp sources #3 observed/cli_stream #4 observed/cli_stream
+  elapsed 1.480 s (derived from aibus's clock, first to last event)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage total_tokens 2492 tokens (reported, task_notification.usage)
+  usage tool_uses 1 calls (reported, task_notification.usage)
+  usage duration_ms 1487 ms (reported, task_notification.usage)
+  tool toolu_014HWHqq6rufdHNqiF2eeAcn Read: completed  [observed 2]
+  permission events: none recorded
+  gap #16 reasoning_not_exposed (unavailable)
+  evidence (open one with --event <sequence>):
+  #4 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:4c106bbc1a5986ae07dbe4e166962d96b0c2e7315f5098cf301f741c5ac33078 payload -
+  #5 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:b1f05a6a6b35879ded7a08522745d7be843143b754e882ca8b9e31f12c1bc5f5 payload -
+  #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:821bdb8f24e936ea72b1ee4a229642b58c177528ecbddf9e57a03b0304575c8d payload -
+  #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:fe034dd852ed925f03eeccdbe9caa476435d303243a12b7cbcc022a0d8d848d9 payload -
+  #16 gap_detected unavailable cli_stream native assistant parser claude-code-stream-json/1 raw sha256:8265214affc529ac5591e2c13d4b6a1cfadbd7dca253d3b07e292a4669db98cb payload -
+  #17 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:47ee25dbe69d24d1d3e823f8ab7288d22d7e0a49b5af199c98db3ac74cc42618 payload -
+  #21 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:5c7cb1e026e04eb3be9ea6c6e338ae58314adde0b1ad22b46913c735059c73f4 payload - confirms #5
+  #22 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:478e0a1f4aacf38454578cb30658342cce0ccc6801f6da9fb1fadb8c59548eec payload - confirms #5
+  #23 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:478e0a1f4aacf38454578cb30658342cce0ccc6801f6da9fb1fadb8c59548eec payload -
+
+inspect ad00e31ccc8b7ed63
+agent ad00e31ccc8b7ed63
+  attempt 00000000-0000-0000-0000-000002820002
+  role reader-b
+  status async_launched
+  parent 213096be-224b-4ec4-a7b6-7ed0ce963984
+  edge observed one channel (cli_stream) via toolu_0113PoJDXYhwWQ7mHShFgWXB sources #6 observed/cli_stream #7 observed/cli_stream
+  elapsed 1.209 s (derived from aibus's clock, first to last event)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage total_tokens 2310 tokens (reported, task_notification.usage)
+  usage tool_uses 1 calls (reported, task_notification.usage)
+  usage duration_ms 1212 ms (reported, task_notification.usage)
+  tool toolu_0127XJ7mfXkUEmRevHJAizRU Read: completed  [observed 2]
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #7 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:72d9eca37ed65379aff8d358b2f024c53aef2d1c2d353724cb3c2cd1895c7eac payload -
+  #8 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:06bb3eb67346b5db8ea5c195c8262affd4b169e1026cb0266f701be19f187d83 payload -
+  #11 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:3d945aeee642e038e7b48be9155ba159bb4d242358d1780bff61c4ddf7a68e79 payload -
+  #12 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:bba761a852d19f034762b935a689007c2c6294e4334876fd588a591699207c92 payload -
+  #15 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:b045cd444ff5c31d71e22c1b3b8bbc48968fb64d0f99b188f693804f9e817f10 payload -
+  #18 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:c46857a0991237273ae9caf675807e8653fd2278de80790d3a3b30c3f4c81855 payload - confirms #8
+  #19 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:cb3ab067061f7acc9a24382ad2e68145ae0c70b959981e40f97cf97c0c18a765 payload - confirms #8
+  #20 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:cb3ab067061f7acc9a24382ad2e68145ae0c70b959981e40f97cf97c0c18a765 payload -
+
+inspect toolu_014HWHqq6rufdHNqiF2eeAcn
+tool toolu_014HWHqq6rufdHNqiF2eeAcn Read: completed  [observed 2]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent ac73a71c36fbd576c
+  elapsed 0.037 s (derived from aibus's clock, first to last event)
+  input and output: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:821bdb8f24e936ea72b1ee4a229642b58c177528ecbddf9e57a03b0304575c8d payload -
+  #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:fe034dd852ed925f03eeccdbe9caa476435d303243a12b7cbcc022a0d8d848d9 payload -
+
+inspect toolu_0127XJ7mfXkUEmRevHJAizRU
+tool toolu_0127XJ7mfXkUEmRevHJAizRU Read: completed  [observed 2]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent ad00e31ccc8b7ed63
+  elapsed 0.026 s (derived from aibus's clock, first to last event)
+  input and output: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #11 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:3d945aeee642e038e7b48be9155ba159bb4d242358d1780bff61c4ddf7a68e79 payload -
+  #12 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:bba761a852d19f034762b935a689007c2c6294e4334876fd588a591699207c92 payload -

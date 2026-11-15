@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/jev/decision-request-v1.json",
+  "title": "Jev decision request v1",
+  "description": "What Jev is asked for one step (spec section 5.2): structured metadata only, never a token or a prompt to execute.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "requires",
+    "candidates",
+    "policy_revision",
+    "budget_class",
+    "risk_class"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requires": {
+      "description": "Runtime capabilities the step needs.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "candidates": {
+      "description": "Runtime ids, the author's preference first.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "policy_revision": {
+      "type": "string"
+    },
+    "budget_class": {
+      "type": "string"
+    },
+    "risk_class": {
+      "description": "read_only, writes or side_effects; anything else stops the decision.",
+      "type": "string"
+    },
+    "requested_mode": {
+      "enum": [
+        "aibus_managed",
+        "native",
+        "native_or_managed"
+      ]
+    },
+    "parent_runtime": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

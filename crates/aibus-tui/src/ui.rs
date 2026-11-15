@@ -611,6 +611,7 @@ pub fn render(buf: &mut Buffer, sc: &Scene) -> Drawn {
             "cost" => screens::cost(buf, full, v.cost, th, &sc.pointer),
             "workflows" => screens::workflows(buf, full, v.workflows, th, &sc.pointer),
             "workflow_show" => screens::workflow_show(buf, full, v.workflows, th, &sc.pointer),
+            "runs" => screens::recorded(buf, full, v.workflows, th, &sc.pointer),
             t if t.starts_with("transcript:") => {
                 let g = transcript::draw(buf, full, v.transcript, th, &sc.pointer, sc.selection, sc.entry, sc.copied);
                 for (id, r, kind) in &g.hits {

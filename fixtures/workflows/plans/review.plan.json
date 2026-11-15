@@ -1,0 +1,219 @@
+{
+  "agents": {
+    "explore": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    },
+    "plan": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:51b7bd6f1d7643d429b07faae911593bebd5e86415bc515ef032cdb0c9840791",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    }
+  },
+  "approvals": {
+    "required_for": [],
+    "steps": {}
+  },
+  "compiler": "aibus-workflow-compiler/1",
+  "edges": [
+    {
+      "from": "explore",
+      "kind": "sequence",
+      "to": "plan"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "explore",
+      "via": "input"
+    },
+    {
+      "from": "explore",
+      "kind": "data",
+      "to": "plan",
+      "via": "prev.summary"
+    }
+  ],
+  "entry": "explore",
+  "envelope": {
+    "max_agent_runs": null,
+    "max_parallel": null,
+    "max_wall_seconds": null,
+    "worst_case_agent_runs": 2
+  },
+  "fan_out": [],
+  "jev": {
+    "decisions": [
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "explore"
+        },
+        "step": "explore"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "plan"
+        },
+        "step": "plan"
+      }
+    ],
+    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+  },
+  "kind": "aibus.workflow.plan",
+  "manifest_version": 1,
+  "notes": [],
+  "plan_hash": "sha256:7e5b08e628297187a39e177c5a78b8bbf204ce344468ef2a3dd80758cda71d30",
+  "plan_only_because": null,
+  "prompts": {
+    "sha256:96ebd218bb9f2b48a2c0b7ab7de95c7bad7e8a24db6223bdc5019afbedc20c5e": "Find the code that changed for this and the code around it (callers, tests): {{input}}",
+    "sha256:9761bf6d8276bae4e3e0d25f9811a260dff79fc0940f1d46bf03cf2eb16a2255": "Review this change for bugs, missing tests and risks. Quote file paths and lines. Context: {{prev.summary}}"
+  },
+  "runnable_now": true,
+  "runtimes": {
+    "aibus": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "interactive_approval",
+        "one_shot",
+        "session_resume",
+        "structured_events",
+        "tool_events",
+        "usage_report",
+        "workspace_control"
+      ],
+      "status": "available"
+    }
+  },
+  "steps": [
+    {
+      "agent": "explore",
+      "agent_sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "gate": null,
+      "invocation": {
+        "agent": "explore",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "explore",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 1,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "input"
+        ],
+        "sha256": "sha256:96ebd218bb9f2b48a2c0b7ab7de95c7bad7e8a24db6223bdc5019afbedc20c5e",
+        "stable_prefix_bytes": 77,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "aibus"
+    },
+    {
+      "agent": "plan",
+      "agent_sha256": "sha256:51b7bd6f1d7643d429b07faae911593bebd5e86415bc515ef032cdb0c9840791",
+      "gate": null,
+      "invocation": {
+        "agent": "plan",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "plan",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 2,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "prev.summary"
+        ],
+        "sha256": "sha256:9761bf6d8276bae4e3e0d25f9811a260dff79fc0940f1d46bf03cf2eb16a2255",
+        "stable_prefix_bytes": 91,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "aibus"
+    }
+  ],
+  "workflow": {
+    "description": "Find what changed, then review it",
+    "name": "review",
+    "revision": null,
+    "source_sha256": "sha256:965aa0357344903e64370a690f96073823d2ee2001117c15d8b2887c7924287e"
+  }
+}

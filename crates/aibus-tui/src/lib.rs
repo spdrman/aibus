@@ -12,6 +12,7 @@ pub mod keys;
 pub mod layout;
 pub mod prompt;
 pub mod remote;
+pub mod runs;
 pub mod screens;
 pub mod theme;
 pub mod transcript;

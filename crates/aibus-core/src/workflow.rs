@@ -15,6 +15,8 @@ use crate::persist::fs::{create_private_dir, write_atomic};
 use crate::persist::time::rfc3339;
 use crate::run::RunStatus;
 
+pub mod bundle;
+
 /// The four chains shipped as examples (`examples/workflows/`), installed by `aibus init`.
 pub const EXAMPLES: [(&str, &str); 4] = [
     ("fix", include_str!("../../../examples/workflows/fix.toml")),
@@ -29,15 +31,31 @@ const MAX_RETRIES: u32 = 5;
 /// How much of a failed step's text is passed to the re-run as the reason.
 const REASON_BYTES: usize = 2048;
 
+pub mod compile;
+pub mod graph;
+pub mod jev;
+pub mod manifest;
+pub mod native;
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Workflow {
     pub name: String,
     pub description: String,
     pub steps: Vec<Step>,
+    /// The author's label for this version of the file (`revision = "1.0.0"`), shown in a plan.
+    pub revision: Option<String>,
+    /// `[[route]]`: explicit, typed edges. With none, the steps are the chain they always were.
+    pub routes: Vec<Route>,
+    /// `[limits]`: the envelope a scheduler holds the whole workflow to.
+    pub limits: Option<WorkflowLimits>,
+    /// `[approvals] required_for`: what needs a person's yes before it happens.
+    pub approvals: Vec<Capability>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Step {
+    /// The step's key (`Workflow::key`), worked out once when the file is read.
+    pub key: String,
     pub agent: AgentName,
     pub prompt: String,
     /// A hook-style command; exit 2 blocks the chain.
@@ -45,9 +63,120 @@ pub struct Step {
     /// `on_fail = "retry:N"`: when this step fails, the step before it and this one run again,
     /// at most `N` times.
     pub retries: u32,
+    /// A name for the step when its agent is not enough (the same agent twice). The step's key
+    /// is this, or the agent.
+    pub id: Option<AgentName>,
+    pub runtime: Runtime,
+    /// As written; `Workflow::native` says how it resolved.
+    pub mode: Mode,
+    /// The key of the step that launches this one.
+    pub parent: Option<String>,
+    pub requires: Vec<Capability>,
+    pub isolation: StepIsolation,
+    pub output: Output,
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+/// Where a step runs. `aibus` is this binary's own run loop. `cli.claude` is the official Claude
+/// Code CLI started as a process, which the #281 spike proved and #285 gates; it compiles and
+/// plans, and does not run yet. The id is provisional: extensions get their names in #286, and
+/// the spike found a vendor's product name can't be part of one.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
+pub enum Runtime {
+    #[default]
+    #[serde(rename = "aibus")]
+    Aibus,
+    #[serde(rename = "cli.claude")]
+    ClaudeCli,
+}
+
+impl Runtime {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Runtime::Aibus => "aibus",
+            Runtime::ClaudeCli => "cli.claude",
+        }
+    }
+}
+
+/// Who owns a step's execution (spec section 2.3). `native` is a subagent inside its parent's
+/// vendor process; `aibus_managed` is a run aibus starts and tracks itself; `native_or_managed`
+/// lets the routing policy (`jev`) pick, deterministically.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    AibusManaged,
+    Native,
+    NativeOrManaged,
+}
+
+/// What a step needs to be allowed to do, and what `[approvals]` can hold back. Each one maps to
+/// the agent tools that grant it (`compile::capability_problems`).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Capability {
+    RepoRead,
+    RepoWrite,
+    Shell,
+    Network,
+    Delegate,
+    NetworkWrite,
+    GitMerge,
+    DestructiveTool,
+}
+
+impl Capability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Capability::RepoRead => "repo_read",
+            Capability::RepoWrite => "repo_write",
+            Capability::Shell => "shell",
+            Capability::Network => "network",
+            Capability::Delegate => "delegate",
+            Capability::NetworkWrite => "network_write",
+            Capability::GitMerge => "git_merge",
+            Capability::DestructiveTool => "destructive_tool",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepIsolation {
+    #[default]
+    None,
+    GitWorktree,
+}
+
+/// What a step hands on: its summary text, or a JSON artifact a route can check
+/// (`<step>.artifact_valid`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Output {
+    #[default]
+    Summary,
+    Json,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowLimits {
+    pub max_agent_runs: Option<u32>,
+    pub max_parallel: Option<u32>,
+    pub max_wall_seconds: Option<u32>,
+}
+
+/// One `[[route]]`: control passes `from` -> `to` when `when` holds. A route back to an earlier
+/// step is a loop and needs `max_iterations`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Route {
+    pub from: String,
+    pub to: String,
+    pub when: graph::Cond,
+    pub max_iterations: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum WorkflowError {
     #[error("not valid TOML: {0}")]
     Toml(String),
@@ -55,16 +184,29 @@ pub enum WorkflowError {
     NoSteps,
     #[error("step {step}: {why}")]
     Step { step: usize, why: String },
+    #[error("bundle refused: {0}")]
+    Bundle(String),
+    #[error("{0}")]
+    File(String),
+    /// Something about the file as a whole: a route, the limits, the approvals.
+    #[error("{0}")]
+    Invalid(String),
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
+    schema_version: Option<String>,
     name: Option<String>,
     #[serde(default)]
     description: String,
+    revision: Option<String>,
     #[serde(default, rename = "step")]
     steps: Vec<RawStep>,
+    #[serde(default, rename = "route")]
+    routes: Vec<RawRoute>,
+    limits: Option<WorkflowLimits>,
+    approvals: Option<RawApprovals>,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +216,34 @@ struct RawStep {
     prompt: String,
     gate: Option<String>,
     on_fail: Option<String>,
+    id: Option<String>,
+    #[serde(default)]
+    runtime: Runtime,
+    #[serde(default)]
+    mode: Mode,
+    parent: Option<String>,
+    #[serde(default)]
+    requires: Vec<Capability>,
+    #[serde(default)]
+    isolation: StepIsolation,
+    #[serde(default)]
+    output: Output,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRoute {
+    from: String,
+    to: String,
+    when: Option<String>,
+    max_iterations: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawApprovals {
+    #[serde(default)]
+    required_for: Vec<Capability>,
 }
 
 /// One `{{...}}` in a prompt.
@@ -118,6 +288,9 @@ impl Workflow {
         if file.steps.is_empty() {
             return Err(WorkflowError::NoSteps);
         }
+        // With routes the order of the file is not the order of the run, so which step comes
+        // before which is the graph's to say (`graph::check`), not the loop's.
+        let routed = !file.routes.is_empty();
         let mut steps: Vec<Step> = Vec::new();
         for (i, raw) in file.steps.into_iter().enumerate() {
             let n = i + 1;
@@ -131,10 +304,10 @@ impl Workflow {
             for key in seen {
                 match var(key) {
                     None => return Err(bad(format!("unknown template `{{{{{key}}}}}`"))),
-                    Some(Var::Prev) if i == 0 => {
+                    Some(Var::Prev) if i == 0 && !routed => {
                         return Err(bad("the first step has no `{{prev.summary}}`".into()))
                     }
-                    Some(Var::Step(a)) if !steps.iter().any(|s| s.agent.as_str() == a) => {
+                    Some(Var::Step(a)) if !routed && !steps.iter().any(|s| s.answers_to(&a)) => {
                         return Err(bad(format!("`{key}` names a step that does not come before this one")))
                     }
                     Some(_) => {}
@@ -151,18 +324,154 @@ impl Workflow {
             if raw.gate.as_deref().is_some_and(|g| g.trim().is_empty()) {
                 return Err(bad("the gate is empty".into()));
             }
+            let id = raw
+                .id
+                .as_deref()
+                .map(|id| AgentName::new(id).map_err(|_| bad(format!("id {id:?}: want [a-z0-9][a-z0-9_-]{{0,63}}"))))
+                .transpose()?;
             steps.push(Step {
+                key: String::new(),
                 agent,
                 prompt: raw.prompt,
                 gate: raw.gate,
                 retries,
+                id,
+                runtime: raw.runtime,
+                mode: raw.mode,
+                parent: raw.parent,
+                requires: raw.requires,
+                isolation: raw.isolation,
+                output: raw.output,
             });
         }
-        Ok(Self {
+        let mut by_agent: BTreeMap<AgentName, usize> = BTreeMap::new();
+        for s in &steps {
+            *by_agent.entry(s.agent.clone()).or_default() += 1;
+        }
+        for (i, s) in steps.iter_mut().enumerate() {
+            s.key = match &s.id {
+                Some(id) => id.to_string(),
+                None if by_agent[&s.agent] == 1 => s.agent.to_string(),
+                None => format!("{}#{}", s.agent, i + 1),
+            };
+        }
+        if let Some(v) = file.schema_version.as_deref().filter(|v| *v != "1") {
+            return Err(WorkflowError::Invalid(format!(
+                "schema_version {v:?}: this aibus reads \"1\" (or no schema_version at all)"
+            )));
+        }
+        let mut routes = Vec::new();
+        for (i, r) in file.routes.into_iter().enumerate() {
+            let when = r.when.as_deref().unwrap_or("");
+            let when = if when.trim().is_empty() {
+                graph::Cond::Is { step: r.from.clone(), what: graph::Pred::Completed }
+            } else {
+                graph::Cond::parse(when).map_err(|why| WorkflowError::Invalid(format!("route {}: when: {why}", i + 1)))?
+            };
+            routes.push(Route { from: r.from, to: r.to, when, max_iterations: r.max_iterations });
+        }
+        let wf = Self {
             name: file.name.unwrap_or_else(|| stem.to_owned()),
             description: file.description,
             steps,
+            revision: file.revision,
+            routes,
+            limits: file.limits,
+            approvals: file.approvals.map(|a| a.required_for).unwrap_or_default(),
+        };
+        graph::check(&wf)?;
+        Ok(wf)
+    }
+
+    /// The step's key: its `id`, else its agent when no other step has that agent, else
+    /// `<agent>#<n>` (a `#` no name can hold, so a key never collides with one).
+    pub fn key(&self, i: usize) -> &str {
+        &self.steps[i].key
+    }
+
+    /// The index of the step whose key is `key`.
+    pub fn index(&self, key: &str) -> Option<usize> {
+        self.steps.iter().position(|s| s.key == key)
+    }
+
+    /// Whether step `i` runs as a native subagent inside its parent's vendor process. `native` says
+    /// so; `native_or_managed` is decided by the routing policy (`jev::resolve_mode`).
+    pub fn native(&self, i: usize) -> bool {
+        let s = &self.steps[i];
+        let parent = s.parent.as_deref().and_then(|p| self.index(p)).map(|p| self.steps[p].runtime);
+        jev::resolve_mode(s.mode, s.runtime, parent) == Mode::Native
+    }
+
+    /// The step whose summary `read` (`prev.summary` or `steps.<key>.summary`) means in the prompt
+    /// of step `i`. In a chain `prev` is the last step aibus ran before this one and a key the
+    /// last earlier step it names; with routes `prev` is the one step a route comes from and a key
+    /// is that step's.
+    pub fn source(&self, i: usize, read: &str) -> Option<usize> {
+        let wanted = match var(read)? {
+            Var::Input => return None,
+            Var::Prev => None,
+            Var::Step(k) => Some(k),
+        };
+        if self.routes.is_empty() {
+            let earlier = (0..i).rev().filter(|&j| !self.native(j));
+            return match wanted {
+                None => earlier.into_iter().next(),
+                Some(k) => earlier.into_iter().find(|&j| self.steps[j].answers_to(&k)),
+            };
+        }
+        match wanted {
+            None => {
+                let me = self.key(i);
+                let mut from = self.routes.iter().filter(|r| r.to == me && r.max_iterations.is_none());
+                match (from.next(), from.next()) {
+                    (Some(r), None) => self.index(&r.from),
+                    _ => None,
+                }
+            }
+            Some(k) => self.index(&k),
+        }
+    }
+
+    /// Why this workflow can be planned but not run today, if it can't. The chain runner runs a
+    /// chain of aibus runs; everything else (routes, envelopes, approvals, other runtimes, native
+    /// or isolated steps) is the scheduler's (#288), and refusing here is what keeps a run from
+    /// starting with half of what the file asks for.
+    pub fn plan_only(&self) -> Option<String> {
+        let mut uses: Vec<&str> = Vec::new();
+        if !self.routes.is_empty() {
+            uses.push("[[route]]");
+        }
+        if self.limits.is_some() {
+            uses.push("[limits]");
+        }
+        if !self.approvals.is_empty() {
+            uses.push("[approvals]");
+        }
+        if self.steps.iter().any(|s| s.runtime != Runtime::Aibus) {
+            uses.push("a runtime other than aibus");
+        }
+        if self.steps.iter().any(|s| s.mode != Mode::AibusManaged || s.parent.is_some()) {
+            uses.push("mode or parent");
+        }
+        if self.steps.iter().any(|s| s.isolation != StepIsolation::None) {
+            uses.push("isolation");
+        }
+        (!uses.is_empty()).then(|| {
+            format!(
+                "workflow {} uses {}, which the scheduler (#288) runs and the chain runner does not; \
+                 nothing was started (aibus workflow plan {} --dry-run shows the plan)",
+                self.name,
+                uses.join(", "),
+                self.name
+            )
         })
+    }
+}
+
+impl Step {
+    /// Whether `steps.<name>.summary` can mean this step: `name` is its id or its agent.
+    fn answers_to(&self, name: &str) -> bool {
+        self.agent.as_str() == name || self.id.as_ref().is_some_and(|id| id.as_str() == name)
     }
 }
 
@@ -222,6 +531,17 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
         }
         if let Some(gate) = raw.gate.as_ref().filter(|g| !g.trim().is_empty()) {
             note(Some("gate"), format!("runs a shell command after this step: {gate}"));
+        }
+        let info = jev::runtime_info(raw.runtime);
+        if info.status != "available" {
+            note(
+                Some("runtime"),
+                format!(
+                    "runtime {} is {}: the #281 spike proved it and #285 decides on it, so this step plans \
+                     (aibus workflow plan --dry-run) and does not run yet",
+                    info.id, info.status
+                ),
+            );
         }
         // The last step's summary is the workflow's result, so nobody else has to read it.
         let read = |j: usize| {
@@ -312,40 +632,195 @@ pub fn dirs(project: &Path, config: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// One workflow file: its name, and what reading it gave.
-pub type Found = (String, PathBuf, Result<Workflow, WorkflowError>);
+/// Largest workflow file a remote author may write, and the most any file in a bundle may be.
+pub const MAX_BYTES: usize = 64 * 1024;
 
-/// Every `*.toml` in `dirs`, by name; the first directory to have a name wins.
+/// Most steps in a workflow a remote author writes or a bundle carries.
+pub const MAX_STEPS: usize = 32;
+
+/// One workflow as `list` found it: where it came from and what reading it gave.
+#[derive(Clone, Debug)]
+pub struct Found {
+    pub name: String,
+    /// `project` or `user`.
+    pub scope: &'static str,
+    /// The loose `.toml` file, or the bundle the workflow is in.
+    pub path: PathBuf,
+    /// The bundle's file name (`kit.aibus`) when the workflow came from one.
+    pub bundle: Option<String>,
+    /// The file's exact text, when it could be read.
+    pub text: Option<String>,
+    pub parsed: Result<Workflow, WorkflowError>,
+}
+
+impl Found {
+    /// Where it came from, for a person: `project`, `user`, or `project bundle kit.aibus`.
+    pub fn source(&self) -> String {
+        match &self.bundle {
+            None => self.scope.to_owned(),
+            Some(b) => format!("{} bundle {b}", self.scope),
+        }
+    }
+
+    /// The workflow, if it may run. A workflow from a bundle with a `gate` is listed but does not
+    /// run: the gate is a shell command from someone else, and it runs only once the user has
+    /// trusted it by installing the bundle with `--allow gates`.
+    pub fn runnable(&self) -> Result<&Workflow, String> {
+        let w = self
+            .parsed
+            .as_ref()
+            .map_err(|e| format!("{}: {e}", self.path.display()))?;
+        if let Some(b) = &self.bundle {
+            if let Some(i) = w.steps.iter().position(|s| s.gate.is_some()) {
+                return Err(format!(
+                    "{} comes from the bundle {b} and step {} has a gate, a shell command that runs as you; \
+                     it does not run from a bundle until you trust it: aibus workflow install {} --allow gates",
+                    self.name,
+                    i + 1,
+                    self.path.display()
+                ));
+            }
+        }
+        // A plan-only workflow (#283) is refused here too, so every run path that asks for a runnable
+        // workflow refuses it before a step starts.
+        match w.plan_only() {
+            Some(why) => Err(why),
+            None => Ok(w),
+        }
+    }
+}
+
+/// The scope of `dirs[i]`: the first directory is the project's.
+fn scope_of(i: usize) -> &'static str {
+    if i == 0 {
+        "project"
+    } else {
+        "user"
+    }
+}
+
+/// Every workflow of one directory: the loose `*.toml` files, then the workflows of each
+/// `*.aibus` bundle in file name order. A loose file hides a bundled workflow of the same name, and
+/// an earlier bundle a later one. A bundle that is refused is one entry named after its file
+/// (`kit.aibus`, which no workflow name can be) with the reason, and none of its workflows.
+pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = read.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    let mut out: Vec<Found> = Vec::new();
+    for path in paths
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+    {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // Opened without blocking and capped, so a fifo, a device or a huge file is a row that
+        // says so rather than a hang.
+        // 1 MiB, the MCP read tools' cap.
+        let text = crate::persist::fs::read_regular(path, 1024 * 1024)
+            .map_err(|e| e.to_string())
+            .and_then(|b| String::from_utf8(b).map_err(|_| "not UTF-8 text".to_owned()));
+        let parsed = match &text {
+            Ok(t) => Workflow::parse(stem, t),
+            Err(e) => Err(WorkflowError::File(e.clone())),
+        };
+        out.push(Found {
+            name: stem.to_owned(),
+            scope,
+            path: path.clone(),
+            bundle: None,
+            text: text.ok(),
+            parsed,
+        });
+    }
+    let redactor = bundle_redactor();
+    let mut bundles = 0;
+    for path in paths
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == bundle::EXTENSION))
+    {
+        let Some(file) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // A hidden file is not a bundle (a bare `.aibus` is the project directory's name).
+        if path
+            .file_stem()
+            .is_none_or(|s| s.is_empty() || s.to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
+        bundles += 1;
+        if bundles > bundle::MAX_BUNDLES_PER_DIR {
+            out.push(Found {
+                name: file.to_owned(),
+                scope,
+                path: path.clone(),
+                bundle: Some(file.to_owned()),
+                text: None,
+                parsed: Err(WorkflowError::Bundle(format!(
+                    "not read: there are more than {} bundles in this directory",
+                    bundle::MAX_BUNDLES_PER_DIR
+                ))),
+            });
+            continue;
+        }
+        match bundle::read_file(path, redactor) {
+            Ok(b) => {
+                for (name, text) in b.workflows {
+                    if out.iter().any(|f| f.name == name) {
+                        continue;
+                    }
+                    out.push(Found {
+                        parsed: Workflow::parse(&name, &text),
+                        name,
+                        scope,
+                        path: path.clone(),
+                        bundle: Some(file.to_owned()),
+                        text: Some(text),
+                    });
+                }
+            }
+            Err(e) => out.push(Found {
+                name: file.to_owned(),
+                scope,
+                path: path.clone(),
+                bundle: Some(file.to_owned()),
+                text: None,
+                parsed: Err(WorkflowError::Bundle(e.to_string())),
+            }),
+        }
+    }
+    out
+}
+
+/// The redactor a listing checks bundles with: the built-in patterns. A session's registered
+/// keys are checked again when the bundle is installed, with the session's own redactor.
+fn bundle_redactor() -> &'static crate::Redactor {
+    static R: std::sync::OnceLock<crate::Redactor> = std::sync::OnceLock::new();
+    R.get_or_init(crate::Redactor::new)
+}
+
+/// Every workflow in `dirs` (loose files and bundles), by name; the first directory to have a
+/// name wins, so the project's hides the user's. Read again on every call, so a file copied in
+/// shows up the next time anything lists.
 pub fn list(dirs: &[PathBuf]) -> Vec<Found> {
     let mut by_name: BTreeMap<String, Found> = BTreeMap::new();
-    for dir in dirs {
-        let Ok(read) = std::fs::read_dir(dir) else { continue };
-        for entry in read.flatten() {
-            let path = entry.path();
-            let Some(stem) = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .filter(|_| path.extension().is_some_and(|x| x == "toml"))
-            else {
-                continue;
-            };
-            by_name.entry(stem.to_owned()).or_insert_with(|| {
-                let parsed = std::fs::read_to_string(&path)
-                    .map_err(|e| WorkflowError::Toml(e.to_string()))
-                    .and_then(|t| Workflow::parse(stem, &t));
-                (stem.to_owned(), path.clone(), parsed)
-            });
+    for (i, dir) in dirs.iter().enumerate() {
+        for found in list_in(dir, scope_of(i)) {
+            by_name.entry(found.name.clone()).or_insert(found);
         }
     }
     by_name.into_values().collect()
 }
 
-/// The workflow called `name`. `Err` is what to tell the user.
+/// The workflow called `name`, if it may run (`Found::runnable`). `Err` is what to tell the user.
 pub fn load(dirs: &[PathBuf], name: &str) -> Result<Workflow, String> {
-    match list(dirs).into_iter().find(|(n, _, _)| n == name) {
+    match list(dirs).into_iter().find(|f| f.name == name) {
         None => Err(format!("no workflow named {name} (aibus workflow list)")),
-        Some((_, path, Err(e))) => Err(format!("{}: {e}", path.display())),
-        Some((_, _, Ok(w))) => Ok(w),
+        Some(found) => found.runnable().cloned(),
     }
 }
 
@@ -375,21 +850,40 @@ pub struct WorkflowRow {
     pub description: String,
     /// The agent of each step, in order. Empty for a file that does not parse.
     pub agents: Vec<String>,
-    /// Why the file does not parse.
+    /// Why the file does not parse, or why it does not run (a gate in a bundle).
     pub error: Option<String>,
+    /// The bundle's file name when it came from one.
+    pub bundle: Option<String>,
 }
 
-/// The rows of `dirs` (as `list` finds them); the first directory is the project's.
+
+
+/// The rows of `dirs` (as `list` finds them); the first directory is the project's. Text from a
+/// file goes through `strip_ansi`, since the dashboard draws it.
 pub fn rows(dirs: &[PathBuf]) -> Vec<WorkflowRow> {
     list(dirs)
         .into_iter()
-        .map(|(name, path, parsed)| {
-            let scope = if dirs.first().is_some_and(|d| path.starts_with(d)) { "project" } else { "user" };
-            let (description, agents, error) = match parsed {
-                Ok(w) => (w.description, w.steps.iter().map(|s| s.agent.to_string()).collect(), None),
-                Err(e) => (String::new(), Vec::new(), Some(e.to_string())),
+        .map(|found| {
+            let (description, agents, error) = match &found.parsed {
+                Ok(w) => (
+                    crate::text::strip_ansi(&w.description).into_owned(),
+                    w.steps.iter().map(|s| s.agent.to_string()).collect(),
+                    found.runnable().err().map(|e| crate::text::strip_ansi(&e).into_owned()),
+                ),
+                Err(e) => (
+                    String::new(),
+                    Vec::new(),
+                    Some(crate::text::strip_ansi(&e.to_string()).into_owned()),
+                ),
             };
-            WorkflowRow { name, scope: scope.into(), description, agents, error }
+            WorkflowRow {
+                name: found.name,
+                scope: found.scope.into(),
+                description,
+                agents,
+                error,
+                bundle: found.bundle,
+            }
         })
         .collect()
 }
@@ -502,16 +996,37 @@ pub fn reads(prompt: &str) -> Vec<String> {
 /// Every prompt of `wf` rendered for `input`, with `<summary of step N (agent)>` where a later
 /// step would read an earlier one's summary. Nothing runs.
 pub fn preview(wf: &Workflow, input: &str) -> Vec<String> {
-    let mut steps: BTreeMap<String, String> = BTreeMap::new();
-    let mut prev: Option<String> = None;
-    let mut out = Vec::new();
-    for (i, step) in wf.steps.iter().enumerate() {
-        out.push(render(&step.prompt, &Scope { input, prev: prev.as_deref(), steps: &steps }));
-        let placeholder = format!("<summary of step {} ({})>", i + 1, step.agent);
-        steps.insert(step.agent.to_string(), placeholder.clone());
-        prev = Some(placeholder);
+    let placeholder = |i: usize| format!("<summary of step {} ({})>", i + 1, wf.steps[i].agent);
+    if wf.routes.is_empty() && !(0..wf.steps.len()).any(|i| wf.native(i)) {
+        // A plain chain: one pass, as it always was.
+        let mut steps: BTreeMap<String, String> = BTreeMap::new();
+        let mut prev: Option<String> = None;
+        let mut out = Vec::new();
+        for (i, step) in wf.steps.iter().enumerate() {
+            out.push(render(&step.prompt, &Scope { input, prev: prev.as_deref(), steps: &steps }));
+            steps.insert(step.agent.to_string(), placeholder(i));
+            if let Some(id) = &step.id {
+                steps.insert(id.to_string(), placeholder(i));
+            }
+            prev = Some(placeholder(i));
+        }
+        return out;
     }
-    out
+    // Routes or native steps: each read goes to the step `source` says it means.
+    (0..wf.steps.len())
+        .map(|i| {
+            let prompt = &wf.steps[i].prompt;
+            let prev = wf.source(i, "prev.summary").map(placeholder);
+            let steps: BTreeMap<String, String> = reads(prompt)
+                .into_iter()
+                .filter_map(|key| match var(&key)? {
+                    Var::Step(name) => Some((name, placeholder(wf.source(i, &key)?))),
+                    _ => None,
+                })
+                .collect();
+            render(prompt, &Scope { input, prev: prev.as_deref(), steps: &steps })
+        })
+        .collect()
 }
 
 /// What a finished step handed back.
@@ -640,6 +1155,9 @@ pub async fn execute(wf: &Workflow, input: &str, host: &dyn StepHost) -> Report 
                 attempt.status = Some(out.status);
                 attempt.wrapped.clone_from(&out.wrapped);
                 summaries.insert(step.agent.to_string(), out.summary.clone());
+                if let Some(id) = &step.id {
+                    summaries.insert(id.to_string(), out.summary.clone());
+                }
                 if out.status == RunStatus::Cancelled {
                     attempt.failure = Some("cancelled".into());
                     attempts.push(attempt);

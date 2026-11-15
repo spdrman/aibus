@@ -1,5 +1,5 @@
 //! `aibus completions <shell>` (06 section 6): clap's static script, plus names that complete
-//! dynamically. Agent, account, session and workflow names come from the hidden
+//! dynamically. Agent, account, session, workflow and run names come from the hidden
 //! `aibus <kind> list --names` helpers, which the scripts call each time.
 
 use clap::CommandFactory;
@@ -9,11 +9,12 @@ use crate::cli::{Cli, Shell};
 
 /// Subcommands whose next word is a name, and the kind of name (the `<kind> list --names`
 /// helper that lists them).
-const POSITIONAL: [(&str, &[&str], &str); 4] = [
+const POSITIONAL: [(&str, &[&str], &str); 5] = [
     ("agent", &["show"], "agent"),
     ("account", &["show", "test", "remove", "enable", "disable"], "account"),
     ("session", &["show", "resume", "export", "log", "replay"], "session"),
     ("workflow", &["run", "show", "validate"], "workflow"),
+    ("runs", &["inspect", "replay", "rerun"], "runs"),
 ];
 
 /// Global flags whose value is a name.

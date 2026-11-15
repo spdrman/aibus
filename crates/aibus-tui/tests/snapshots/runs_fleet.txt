@@ -1,0 +1,40 @@
+                                              AIBUS   ·   SONNET 5.5 LEADS
+──┌ recorded runs ───────────────────────────────────────────────────────────────────────────────────────────────────┐──
+  │ RUN                          STATE        EVENTS AGENTS  TOOLS EDGES o/c/i/u     GAPS COST                     … │
+ ┌│ 15-killed-midrun             interrupted      15      3      1 2/0/0/0              1 unknown usd (unknown)    … │
+ ││ 15-killed-midrun.hooks       interrupted      22      3      1 2/0/0/0              1 unknown usd (unknown)    … │
+ ││ 14-teams-attempt             completed        27      3      2 2/0/0/0              1 0.0044801749999999994 usd… │
+ ││ 14-teams-attempt.hooks       completed        40      3      2 2/0/0/0              1 0.0044801749999999994 usd… │
+ ││ 13-teams-control             completed         6      1      0 0/0/0/0              0 0.00144902 usd (estimated… │
+ ││ 13-teams-control.hooks       completed         7      1      0 0/0/0/0              0 0.00144902 usd (estimated… │
+ ││ 12-teams-probe               completed         6      1      0 0/0/0/0              0 0.00145127 usd (estimated… │
+ ││ 12-teams-probe.hooks         completed         7      1      0 0/0/0/0              0 0.00145127 usd (estimated… │
+ ││ 11-foreground                completed        27      3      2 2/0/0/0              1 0.0010430450000000005 usd… │
+ ││ 11-foreground.hooks          completed        40      3      2 2/0/0/0              1 0.0010430450000000005 usd… │
+ ││ 11-foreground.retained       completed        40      3      2 2/0/0/0              1 0.0010430450000000005 usd… │
+ ││ 10-killed                    interrupted      28      3      2 2/0/0/0              3 0.00083856 usd (estimated… │
+ ││ 10-killed.hooks              interrupted      41      3      2 2/0/0/0              3 0.00083856 usd (estimated… │
+ ││ 09-denied                    completed         9      1      1 0/0/0/0              0 0.00087921 usd (estimated… │
+ ││ 09-denied.hooks              completed        11      1      1 0/0/0/0              0 0.00087921 usd (estimated… │
+ ││ 08-control                   completed        28      3      2 2/0/0/0              1 0.00111874 usd (estimated… │
+ ││ 08-control.hooks             completed        41      3      2 2/0/0/0              1 0.00111874 usd (estimated… │
+ ││ 07-deleg                     completed        29      3      2 2/0/0/0              1 0.003142075 usd (estimate… │
+ ││ 07-deleg.hooks               completed        42      3      2 2/0/0/0              1 0.003142075 usd (estimate… │
+ ││ 06-basic                     completed         6      1      0 0/0/0/0              0 0.0006140900000000001 usd… │
+ ││ state! = a tool never reported back; edges by evidence level: observed/correlated/inferred/unavailable           │
+ ││                                                                                                                  │
+ ││                                                                                                                  │
+ ││                                                                                                                  │
+ ││                                                                                                                  │
+ ││                                                                                                                  │
+ ││                                                                                                                  │
+ ││                                                                                                                  │
+ └│                                                                                                                  │
+┌ │                                                                                                                  │─┐
+│ │                                                                                                                  │ │
+│ │                                                                                                                  │ │
+│ │                                                                                                                  │ │
+│ │ lines 1-22 of 22   Up/Down, PgUp/PgDn, g/G to scroll                                                             │ │
+└─│  [Esc] Close                                                                                                     │─┘
+ ~└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  swarm [idle]   subagents [0/0]   opus [on call]   jev [ 0 forks]

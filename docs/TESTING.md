@@ -21,6 +21,7 @@ the same command, started by hand.
 | Replay | `cargo test --locked -p aibus-testkit --test replay --test session` and `-p aibus-core --test replay` | every push |
 | Capability matrix | `cargo test --locked -p aibus-testkit --test capability_matrix` (`docs/CAPABILITIES.md` is current, the renderer matches its golden page) | every push |
 | Provider contract | `cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini` (cassettes) | every push |
+| Evidence trace and CLI supervisor | `cargo test --locked -p aibus-trace -p aibus-supervisor` (every spike stream replayed against its golden under `fixtures/claude-code/normalized-282/`, the recorded traces of `fixtures/claude-code/traces-284/` against their golden graph, timeline, inspectors and replay under `views-284/` with a seeded 32,000-trace fuzz run through every view (#284), the store's crash and restart cases, the host against stand-in CLIs, a seeded 40,000-line fuzz run; never the real CLI) | every push |
 | Provider contract, live | `... --features live-tests --test live`, see `docs/PROVIDERS.md` | nightly, opt-in; locally, or `nightly.yml` by hand |
 | Benchmarks | `cargo bench --locked -p aibus-core` and `-p aibus-tui` with `AIBUS_BENCH_GATE=1` | nightly, and when `state/` or `tui/` changed; locally, or `bench.yml` by hand |
 | Security | `cargo test --locked -p aibus-core --test security`, `-p aibus-tui --test security_commands` and `-p aibus --test mcp_security` (the rows of `docs/SECURITY.md`; `security/commands.rs` and `security_commands.rs` are the cross-cutting rules for the registry's commands) | every push |
@@ -41,6 +42,12 @@ The conformance row says "both backends when available": the `causl-differential
 differential tests with `--features causl-rs`, plus the side-by-side `commit_stream` bench. The
 crate is private, so the job's fetch step needs the repository secret `CAUSL_CI_BUILD_1` and is the
 only step that sees it. See `docs/BUILD.md`.
+
+## The evidence trace and the CLI supervisor
+
+`aibus-trace` and `aibus-supervisor` (#282) are tested without the real Claude Code CLI. The spike's captured runs (`fixtures/claude-code/spike-281/`) are fed through the normaliser with the arrival times the spike recorded, so every event is stamped the way a live run would stamp it, and the projection of each one is compared with a golden in `fixtures/claude-code/normalized-282/` (stream alone, and stream plus hooks). A changed golden is rewritten with `AIBUS_BLESS=1 cargo test -p aibus-supervisor --test fixtures`, and read before it is committed. The process host is tested against small shell scripts launched by absolute path the way the real CLI is; `tests/fuzz.rs` is a seeded run of 40,000 random, mutated and shaped lines plus a flood of 100,000 unique ids, every push.
+
+The views of #284 (`aibus_trace::view`, `aibus runs`, `/runs`) are tested on recorded traces rather than on hand-written ones: `aibus-supervisor/tests/traces_284.rs` stores every spike run through the normaliser and a real `TraceStore` under `fixtures/claude-code/traces-284/` (stream alone, stream plus hooks, and one with payloads kept), and checks on every push that the store still writes those exact bytes. `aibus-trace/tests/view.rs` renders every one of them against its golden in `fixtures/claude-code/views-284/` (graph, timeline and an inspector per node in `<run>.txt`, the replay in `<run>.replay.txt`, the fleet in `fleet.txt`), and runs hand-made hostile traces and a seeded 32,000-trace fuzz run through every view. `AIBUS_BLESS=1 cargo test -p aibus-supervisor --test traces_284` rewrites the traces and `AIBUS_BLESS=1 cargo test -p aibus-trace --test view` the goldens; read the diff before committing either. `aibus/tests/runs_cli.rs` checks the commands print the same strings, and `aibus-tui/tests/runs_screen.rs` the screen, with its frames in `tests/snapshots/runs_*.txt`.
 
 ## The test kit
 

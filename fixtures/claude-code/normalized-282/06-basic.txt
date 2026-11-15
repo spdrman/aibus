@@ -1,0 +1,17 @@
+attempt 00000000-0000-0000-0000-000002820002 status=completed reconcile=false evidence=#1:observed/aibus_scheduler,#6:observed/aibus_scheduler
+  usage input_tokens=2 tokens (reported, result.usage)
+  usage output_tokens=4 tokens (reported, result.usage)
+  usage cache_creation_input_tokens=3027 tokens (reported, result.usage)
+  usage cache_read_input_tokens=649 tokens (reported, result.usage)
+  usage num_turns=1 turns (reported, result.num_turns)
+  usage duration_ms=679 ms (reported, result.duration_ms)
+  usage cost_usd=0.0006140900000000001 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd=unknown usd (unknown, not reported by the CLI)
+agent 5f43691f-7cac-4261-9036-872cbd2ac484 role=lead status=process_exited evidence=#2:observed/cli_stream,#5:observed/aibus_scheduler
+timeline
+#1 2026-11-14T21:17:25.047Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:17:25.986Z - agent_started observed cli_stream agent=5f43691f-7cac-4261-9036-872cbd2ac484
+#3 2026-11-14T21:17:26.623Z 2026-11-14T21:17:26.622Z message_chunk observed cli_stream agent=5f43691f-7cac-4261-9036-872cbd2ac484
+#4 2026-11-14T21:17:26.635Z - usage_reported observed cli_stream agent=5f43691f-7cac-4261-9036-872cbd2ac484
+#5 2026-11-14T21:17:27.291Z - agent_stopped observed aibus_scheduler agent=5f43691f-7cac-4261-9036-872cbd2ac484
+#6 2026-11-14T21:17:27.291Z - attempt_completed observed aibus_scheduler agent=5f43691f-7cac-4261-9036-872cbd2ac484

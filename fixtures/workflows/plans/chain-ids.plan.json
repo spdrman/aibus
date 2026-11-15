@@ -1,0 +1,230 @@
+{
+  "agents": {
+    "general": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "tools": [
+        "read",
+        "write",
+        "edit",
+        "glob",
+        "grep",
+        "ls",
+        "bash",
+        "report_artifact",
+        "web_fetch",
+        "delegate",
+        "mcp:*"
+      ]
+    }
+  },
+  "approvals": {
+    "required_for": [],
+    "steps": {}
+  },
+  "compiler": "aibus-workflow-compiler/1",
+  "edges": [
+    {
+      "from": "draft",
+      "kind": "sequence",
+      "to": "check"
+    },
+    {
+      "from": "check",
+      "kind": "retry",
+      "max_iterations": 1,
+      "to": "draft"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "draft",
+      "via": "input"
+    },
+    {
+      "from": "draft",
+      "kind": "data",
+      "to": "check",
+      "via": "steps.draft.summary"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "check",
+      "via": "input"
+    }
+  ],
+  "entry": "draft",
+  "envelope": {
+    "max_agent_runs": null,
+    "max_parallel": null,
+    "max_wall_seconds": null,
+    "worst_case_agent_runs": 4
+  },
+  "fan_out": [],
+  "jev": {
+    "decisions": [
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:side_effects",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "side_effects",
+          "task_id": "draft"
+        },
+        "step": "draft"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:side_effects",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "side_effects",
+          "task_id": "check"
+        },
+        "step": "check"
+      }
+    ],
+    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+  },
+  "kind": "aibus.workflow.plan",
+  "manifest_version": 1,
+  "notes": [],
+  "plan_hash": "sha256:bb0d425865334e27f25fe952772ba73ac40f686075201e86da24da4d1c7dfdd4",
+  "plan_only_because": null,
+  "prompts": {
+    "sha256:1df96bee67e80df75cc3a55dbdee0dcd01fb22f7a8eb72b3630b9c67d1e0e546": "Draft a fix for: {{input}}",
+    "sha256:84fdbb394b7067eeb80e6ff8b8fd2cc347a028b805e5f332b08630e70e9bf1ea": "Check the draft against the task. Draft: {{steps.draft.summary}} Task: {{input}}"
+  },
+  "runnable_now": true,
+  "runtimes": {
+    "aibus": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "interactive_approval",
+        "one_shot",
+        "session_resume",
+        "structured_events",
+        "tool_events",
+        "usage_report",
+        "workspace_control"
+      ],
+      "status": "available"
+    }
+  },
+  "steps": [
+    {
+      "agent": "general",
+      "agent_sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "gate": null,
+      "invocation": {
+        "agent": "general",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "draft",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 1,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "input"
+        ],
+        "sha256": "sha256:1df96bee67e80df75cc3a55dbdee0dcd01fb22f7a8eb72b3630b9c67d1e0e546",
+        "stable_prefix_bytes": 17,
+        "volatile_at_end": true
+      },
+      "requires": [
+        "repo_read"
+      ],
+      "retries": 0,
+      "runtime": "aibus"
+    },
+    {
+      "agent": "general",
+      "agent_sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "gate": null,
+      "invocation": {
+        "agent": "general",
+        "foreground": true,
+        "isolation": "none",
+        "kind": "aibus_run",
+        "parent": null
+      },
+      "isolation": "none",
+      "key": "check",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 2,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "steps.draft.summary",
+          "input"
+        ],
+        "sha256": "sha256:84fdbb394b7067eeb80e6ff8b8fd2cc347a028b805e5f332b08630e70e9bf1ea",
+        "stable_prefix_bytes": 41,
+        "volatile_at_end": true
+      },
+      "requires": [
+        "repo_read"
+      ],
+      "retries": 1,
+      "runtime": "aibus"
+    }
+  ],
+  "workflow": {
+    "description": "A plain chain that runs today: the same agent twice, told apart by id",
+    "name": "chain-ids",
+    "revision": "1.1",
+    "source_sha256": "sha256:caf978eb9c25458dbf22e8ca91b6d00769c67ecd0c60527c58d476b54e1f5287"
+  }
+}

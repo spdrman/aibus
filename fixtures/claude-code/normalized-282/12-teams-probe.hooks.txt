@@ -1,0 +1,18 @@
+attempt 00000000-0000-0000-0000-000002820002 status=completed reconcile=false evidence=#1:observed/aibus_scheduler,#7:observed/aibus_scheduler
+  usage input_tokens=2 tokens (reported, result.usage)
+  usage output_tokens=4 tokens (reported, result.usage)
+  usage cache_creation_input_tokens=6665 tokens (reported, result.usage)
+  usage cache_read_input_tokens=11607 tokens (reported, result.usage)
+  usage num_turns=1 turns (reported, result.num_turns)
+  usage duration_ms=596 ms (reported, result.duration_ms)
+  usage cost_usd=0.00145127 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd=unknown usd (unknown, not reported by the CLI)
+agent 1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7 role=lead status=process_exited evidence=#2:observed/cli_stream,#5:correlated/hook,#6:observed/aibus_scheduler
+timeline
+#1 2026-11-14T21:20:06.445Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:20:06.644Z - agent_started observed cli_stream agent=1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7
+#3 2026-11-14T21:20:07.165Z 2026-11-14T21:20:07.163Z message_chunk observed cli_stream agent=1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7
+#4 2026-11-14T21:20:07.191Z - usage_reported observed cli_stream agent=1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7
+#5 2026-11-14T21:20:07.880Z - agent_started correlated hook agent=1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7 corroborates
+#6 2026-11-14T21:20:07.880Z - agent_stopped observed aibus_scheduler agent=1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7
+#7 2026-11-14T21:20:07.880Z - attempt_completed observed aibus_scheduler agent=1bb96ebe-2cd5-4991-9dd5-a4b723fd0dd7

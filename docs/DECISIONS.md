@@ -652,6 +652,66 @@ Snapshots: regenerated with `AIBUS_UPDATE_SNAPSHOTS=1` on arm64 (MERCURY) after 
 
 **Why.** A right click always means "this card", whether or not another menu is up, and that is what the issue expected. I could not tell what the one "opened, then gone 0.8 s later" in the second session was; the same toggle explains it if the click reached the loop late (the old menu was still on screen until it was handled), but I did not prove that.
 
+## D-283: the workflow compiler keeps the v1 format and adds to it (#283)
+
+**Context.** The spec's A1.3 asks for "workflow schema v1" with routes, runtimes, limits and approvals, and aibus already ships a v1 (#97): an ordered chain of `{agent, prompt, gate?, on_fail?}` that `workflow validate`, the MCP tools, `/workflow save` and the bundles of #271 all read. #283 recorded four open questions about that.
+
+**Decision.**
+1. *The v1 name.* The existing chain stays valid v1 for good. Everything new is an optional field of the same format (`schema_version = "1"` is accepted and means the same as leaving it out), the JSON Schema gains those fields, and every older example and fixture reads, validates and dry-runs exactly as before (`fixtures/workflows/compat/before-283.json`, `fixtures/mcp-server/compat-before-283.json`). The spec's example maps on as `[[step]]`/`[[route]]`, `description` for `objective` and the first step as `entry`. Step `id` is the one #275 asked for, so the studio only has `model` left to add.
+2. *TOML or JSON.* TOML is authoritative and is what people and tools write; JSON is what the compiler produces (the plan) and what the JSON Schema checks the TOML read as. The plan is the content-addressed record: every prompt and agent definition by sha256, line ends normalised, keys sorted, with a `plan_hash` over it, so the same input gives the same bytes on any host.
+3. *`plan --dry-run` and `workflow_dry_run`.* They sit side by side. `workflow_dry_run` keeps its job and shape (render the prompts for an input); `plan --dry-run` and the new `workflow_plan` tool are the compiler's output, which a lock or a diff can hold. A run manifest pins the input separately, by hash.
+4. *`workflow diff` and the config diff.* Two things. `aibus workflow diff <a> <b>` compares two revisions (workflows or saved plans) by step key; `plan --locked` turns that into drift detection with exit 13. The config diff is `aibus workflow export`, the previewed and consented change to `.claude/agents/`; it is optional, because the planned invocation passes native subagents inline with `--agents`, which the #281 spike showed writes nothing.
+
+Plan-only features (routes, limits, approvals, another runtime, native or parented steps, worktrees) compile and plan today and are refused by the chain runner before any step starts, until #288's scheduler runs them. The Claude Code runtime id is `cli.claude` for now, since the spike found the vendor's product name can't be in an extension's name; #286 names it.
+
+**Alternatives.** A v2 format or a second file kind next to the chains: it would split `validate`, the MCP tools and the bundles in two for no gain, since nothing in the old format had to change. JSON as the authoritative source: no comments, worse for people to write, and the existing files are TOML. Folding the plan into `workflow_dry_run`: its output schema is closed (`additionalProperties: false`), so an older client validating against it would see new keys as an error.
+
+**Why.** Nothing that works today breaks, the new fields are all a reader has to learn, and the compiled plan is what later issues (#284's graph, #288's scheduler, #293's comparisons) can pin to.
+
+## D-282: The CLI supervisor and the evidence trace (#282)
+
+**Context.** EPIC A needs an official vendor CLI run as an external runtime and a trace aibus can trust and replay offline (spec A1.2). The spike (#281) gave the stream shapes and a list of traps. #282 left four questions open, and building it raised a few more.
+
+**Decision.**
+
+1. Two new crates: `aibus-trace` (envelope, store, projection) and `aibus-supervisor` (discovery, probes, env, host, the Claude Code normaliser). The inspector and durable state read traces without process code. `docs/spec/14-evidence-trace.md` has the design.
+2. The envelope is the spec's, schema version 1, plus `corroborates`, `native`, `source` and `data`. A second report of a fact is its own event pointing at the first, so duplicates and the hook channel add evidence and never count. Event ids are derived from the raw line, so appending is idempotent.
+3. The store is an append-only JSONL file per run, one write and `sync_data` per batch, a writer lock, a torn tail moved aside on open. Not SQLite and not Causl: an append-only file is the easiest thing to prove crash-safe and to read with no aibus at all.
+4. Redaction goes through the existing `aibus_core::Redactor`, inside the store, before every write. No second redactor.
+5. Payloads are off by default; the raw archive the spec asks for is the payload store under `Retain`, bounded by its byte budget.
+6. The attempt ends at process exit. Statuses: killed by anything but the user is `interrupted`, the user's stop is `cancelled`, children that die with the process are `inferred` stops.
+7. The prompt goes on stdin, never in argv (the same reason `aibus mcp` passes workflow inputs on stdin). `--permission-prompts none` always, no bypass flag ever, `--setting-sources` always explicit (the caller says which; `user` keeps a repo's own hooks out).
+8. The environment is an allowlist plus `CLAUDE_CONFIG_DIR`. Credential-shaped names are refused even when the caller asks for them, so an API key in aibus's environment never reaches the CLI. A user who signs the CLI in with an API key does that in the CLI's own config.
+9. The supervisor does not turn hooks on for a live run yet. The normaliser reads hook payloads and every spike fixture is tested with them, but the only tested way to enable hooks writes a project settings file, and the inline `--settings` route is untested (spike). #286 probes it.
+10. The extension id on events is `org.aibus.reference-cli`, provisional, because the spike found the Claude Code name cannot be part of an aibus product or feature name. The owner picks the final id in #286; it is one constant and a plain string in the trace.
+
+The open questions on #282: restart in A1.2 means a restart never corrupts the trace and appending carries on (sequence, lock, torn tail), and resuming aibus-owned steps is A2.4 (#289). The Causl durability check of spec 7.4 goes to #289, since this store does not use Causl. The replay command is `aibus runs replay` (#280's decision) and lands with #284; #282 ships the projection it calls.
+
+**Alternatives.** One crate (rejected: the inspector would pull in tokio's process code to read a file). SQLite for the trace (rejected for now: the session index already uses it, but a torn-tail-tolerant JSONL file has fewer ways to fail and is greppable; #289 can index it). Dropping duplicate hooks instead of keeping them as corroborations (rejected: the second channel is exactly what makes an edge `correlated`). Passing `ANTHROPIC_API_KEY` through on request (rejected: it would make aibus the one handing a credential to the CLI).
+
+**Why.** Every number and edge in the trace has to say where it came from and how sure aibus is, and nothing the vendor did not show may appear as if it had. Those two rules decided most of the above.
+
+## D-284: Graph, timeline, inspector, replay and the fleet of recorded runs (#284)
+
+**Context.** Spec A1.4 asks for the planned and execution graph, a timeline, an agent and tool inspector, offline replay with run, list, inspect and replay commands, and a compact all-runs view, all over the trace #282 writes, with every edge and number saying how sure it is. #284 left three questions open, and building it raised a few more.
+
+**Decision.**
+
+1. The views are one module, `aibus_trace::view`, that reads files and returns text (and the fleet's typed `RunRow`). `aibus runs` prints it and `/runs` shows it, so the CLI and the TUI cannot drift. It has no process, socket or provider code, and a test checks the source and the crate's dependencies for them. `docs/spec/15-recorded-runs.md` has the design.
+2. Command spelling: `aibus runs list | inspect | replay | rerun`, as #280 decided. `--offline` on replay is accepted for the spec's spelling and changes nothing, since replay is always offline. In the dashboard it is `/runs`, `/runs inspect <run> [<node>]` and `/runs replay <run>`.
+3. Replay is the recording: every stored state transition in sequence order, then the graph, which equals the `inspect` graph byte for byte. `--events` prints the stored lines byte for byte. It never calls a model and never starts anything.
+4. `aibus runs rerun` is refused (exit 2) until the scheduler (#288, #289) can start a new attempt. The refusal says a rerun's outcome may differ from the recording and points at replay; it never claims the same outcome.
+5. The fleet overlaps with A2.5's fleet (#290). This issue builds the shared, read-only view model (`RunRow`, `view::fleet`, `render_fleet`) and #290 consumes it and adds pause and stop, through the `CancellationToken` that `supervise` takes, next to the control socket of #274. Nothing here can stop or pause a run.
+6. The plan view is read-only. It shows `plan.json` (the plan #283 compiles) next to what the trace shows of each step, and is labelled intent, not proof of execution. Editing a workflow stays with `/workflow edit` and the files; the spec's editable designer is deferred work (spec 15).
+7. Runs live in `<state>/traces/<run>/`, one directory per run, the name a plain id (never a path), a unique prefix accepted. `--root` reads another directory. Nothing writes there yet; #285's pilot and #288's scheduler will.
+8. Every piece of trace text is cleaned for the terminal before it leaves the module: controls, bidi and zero-width characters become visible `\u{..}`, single values are cut at 160 characters, payload JSON is cleaned line by line. A payload is opened only for an exact `local://objects/<64 hex>.json` reference inside the run.
+9. What is missing is said, never filled in: `messages none recorded (unavailable)`, `usage: not reported (unknown)`, a billed cost of `unknown`, `parent unavailable`, `outcome unknown (never reported)`, `no end recorded`. Each node line counts its events by level and each edge line names its level, channels and source events.
+10. The TUI screen shows the text with no colour of its own (the levels are words), so no new contrast pair was added. It keeps 5,000 lines; past that it says how many more `aibus runs` prints.
+
+**Alternatives.** A separate `aibus-runs` crate (rejected: one more crate for a module that only needs `aibus-trace`, and `aibus-trace` is already the crate the inspector was meant to read without process code). A graph widget drawn with boxes and colours in the TUI (rejected for now: a tree of text lines carries the same edges, levels and sources, scrolls, copies, and is the same as the CLI's; a canvas is #294's comparison work or the deferred designer). Making `rerun` start the CLI directly from the supervisor (rejected: without the scheduler it would be an unrecorded attempt outside aibus's own state, which is exactly what spec 7.3 separates from replay). Re-serialising events for `--events` (rejected: serde's float parsing does not promise the same digits back, and the raw line is what was recorded).
+
+**Why.** A1.4's acceptance criteria are a walk from the lead to two native children to their tools and the result with the raw events one step away, missing things marked instead of guessed, and a replay that shows the recorded topology without a provider. Keeping one renderer, reading only files and saying the level of every edge and the quality of every number is the shortest way to all three.
+
 ## D-274: aibus mcp drives a live session through a local socket, and a client's input takes the keyboard's path (#274)
 
 **Context.** `aibus mcp` could only start child runs that ran somewhere I was not looking. #274 asks for one place to watch and steer: my own open terminal session, with whatever a client sends shown as if typed and tagged in every log. The owner decided: a client never answers a permission prompt unless the session opts in, same user and same machine only (a Unix socket), the first tool list is `session_list`, `session_status`, `session_send`, `session_command`, `session_cancel` and transcript reads, each behind its own flag, and `--session` takes an id or else the only live session.

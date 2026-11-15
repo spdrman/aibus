@@ -1060,3 +1060,38 @@ async fn issue_329_a_drain_ended_by_a_cancel_after_exit_is_labelled_drain_stall(
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].data["bound"], "drain_stall", "{}", gaps[0].data);
 }
+
+#[tokio::test]
+async fn issue_327_stdout_exactly_at_its_cap_is_not_an_output_limit() {
+    let rig = Rig::new();
+    let limits = Limits {
+        max_stdout_bytes: 100,
+        ..drain_limits(2_000, 1_000, 10_000)
+    };
+    // 99 bytes and the newline: exactly the cap, which is allowed.
+    let body = "head -c 99 /dev/zero | tr '\\\\0' a";
+    let body = format!("{body}; echo");
+    let (out, events) = rig.plain(&body, limits).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    assert!(!events.iter().any(|e| e.data["reason"] == "output_limit"));
+}
+
+#[tokio::test]
+async fn issue_329_an_unstopped_drain_runs_to_drain_max_not_to_the_grace_period() {
+    let rig = Rig::new();
+    let limits = Limits {
+        grace: Duration::from_millis(300),
+        ..drain_limits(20, 5_000, 1_000)
+    };
+    let started = Instant::now();
+    let (out, events) = rig.plain(&flood_body(3_000), limits).await;
+    assert_eq!(out.ending, Ending::Exited(0));
+    // Lines keep arriving until drain_max, so the drain cannot end before it (a lower bound only,
+    // so a slow machine cannot flake it).
+    assert!(
+        started.elapsed() >= Duration::from_millis(950),
+        "ended after {:?}",
+        started.elapsed()
+    );
+    assert_eq!(unread_gaps(&events)[0].data["bound"], "drain_max");
+}

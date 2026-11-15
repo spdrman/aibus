@@ -24,10 +24,10 @@ Every field of spec 7.1 is there with the spec's name and meaning, plus four mor
 
 `kind`, `origin` and `visibility` are exactly the spec's lists. A vendor event that maps to none of them is a `trace_warning` with `reason: unknown_variant` naming the native type.
 
-- `event_id` is a version 8 UUID derived from the attempt, the channel, the raw line's hash and the event's index in that line, so feeding the same line twice gives the same id and the store keeps one. `workflow_run_id` and `attempt_id` are the caller's (v7 is the natural choice).
-- `sequence` is assigned by the store, one counter per run, and continues across restarts.
+- `event_id` is a version 7 UUID and it is the ordering key (#319). A trace is its events sorted by it. `EventIds` makes them: the time is `observed_at` in milliseconds, but never earlier than the id before it, a 12-bit counter in `rand_a` separates events made in the same millisecond, and the rest is a hash of the attempt, the channel, the raw line's hash and the event's index in that line, so feeding the same line twice at the same time gives the same id and the store keeps one. The store refuses an id that is not a v7. `workflow_run_id` and `attempt_id` are the caller's.
+- There is no stored counter. `position` (1-based) is the rank of an event in the `event_id` order, worked out when a trace is read and used only to display (`event #12`, `--event 12`); it is never written and nothing orders by it. Replay, the torn-tail repair and idempotent append all key on `event_id`.
 - `observed_at` is aibus's clock when the line arrived. `occurred_at` is the vendor's own timestamp where there is one (`timestamp` on messages, `end_time` on `task_updated`) and `null` everywhere else. It is never a copy of `observed_at`.
-- `schema_version` is checked on read: a line of another version is counted (`unsupported_schema`) and not read as an event. A new field is added with `#[serde(default)]` under the same version; a changed meaning is a new version.
+- `schema_version` is checked on read: a line of another version is counted (`unsupported_schema`) and not read as an event. A new field is added with `#[serde(default)]` under the same version; a changed meaning is a new version. Version 2 (#319) dropped the integer `sequence` of version 1 and made `event_id` a v7. The format had not been released, so there is no migration: a reader skips a schema 1 line (`unsupported_schema`) and `TraceStore::open` refuses a run that holds one, with a message that says to record it again.
 
 ### Numbers
 
@@ -64,7 +64,7 @@ The default location is the caller's to choose; `aibus runs` and `/runs` (#284) 
 
 ## The projection (offline replay)
 
-`project(&events)` sorts by sequence and rebuilds attempts (status, reconciliation, the last reported usage), agents (role, status, every event that backs them), delegation edges, tools (outcome `completed`, `failed` or `unknown`), gaps and the timeline. It needs no provider and no process. An edge always lists its source events; its `level` is the strongest among them, `cross_checked` says more than one channel backs it, and a child nothing links to a parent is an `unavailable` edge with a `parent_unavailable` gap. `Projection::render` prints it as stable text; the goldens in `fixtures/claude-code/normalized-282/` are those renderings for every spike run.
+`project(&events)` sorts by `event_id` and rebuilds attempts (status, reconciliation, the last reported usage), agents (role, status, every event that backs them), delegation edges, tools (outcome `completed`, `failed` or `unknown`), gaps and the timeline. It needs no provider and no process. An edge always lists its source events; its `level` is the strongest among them, `cross_checked` says more than one channel backs it, and a child nothing links to a parent is an `unavailable` edge with a `parent_unavailable` gap. `Projection::render` prints it as stable text; the goldens in `fixtures/claude-code/normalized-282/` are those renderings for every spike run.
 
 ## The supervisor
 

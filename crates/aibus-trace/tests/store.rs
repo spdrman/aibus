@@ -1,4 +1,4 @@
-//! The append-only store: sequence, restart, crash recovery, the writer lock, idempotence,
+//! The append-only store: id order, restart, crash recovery, the writer lock, idempotence,
 //! redaction before anything reaches the disk, private files and the size limits.
 
 use std::fs;
@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use aibus_core::ids::AccountName;
 use aibus_core::Redactor;
 use aibus_trace::{
-    derived_id, AttemptRef, Batch, EventKind, Origin, PayloadPolicy, StoreError, StoreLimits,
+    AttemptRef, Batch, EventIds, EventKind, Origin, PayloadPolicy, StoreError, StoreLimits,
     TraceEvent, TraceStore, Visibility,
 };
 use serde_json::json;
@@ -28,7 +28,7 @@ fn ev(n: u64, kind: EventKind) -> TraceEvent {
     let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000 + n);
     TraceEvent::new(
         &attempt(),
-        derived_id(&[&n.to_le_bytes()]),
+        EventIds::default().next(at, &[&n.to_le_bytes()]),
         kind,
         Origin::CliStream,
         Visibility::Observed,
@@ -69,23 +69,24 @@ fn grep_tree(dir: &Path, needle: &str) -> Vec<String> {
 }
 
 #[test]
-fn appends_get_monotonic_sequences_and_continue_after_a_reopen() {
+fn appended_events_order_by_id_and_a_reopen_carries_on_after_the_last() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("run");
     {
         let mut s = open(&dir);
         for n in 0..3 {
             let written = s.append(one(ev(n, EventKind::MessageChunk))).unwrap();
-            assert_eq!(written[0].sequence, n + 1);
+            assert_eq!(written[0].event_id, ev(n, EventKind::MessageChunk).event_id);
         }
     }
-    // An aibus restart: the lock is gone with the process, the sequence goes on.
+    // An aibus restart: the lock is gone with the process, the trace goes on.
     let mut s = open(&dir);
-    assert_eq!(s.next_sequence(), 4);
     s.append(one(ev(9, EventKind::AgentStopped))).unwrap();
     let (events, report) = TraceStore::read(&dir).unwrap();
+    let ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
     assert_eq!(
-        events.iter().map(|e| e.sequence).collect::<Vec<_>>(),
+        events.iter().map(|e| e.position).collect::<Vec<_>>(),
         vec![1, 2, 3, 4]
     );
     assert_eq!(report, Default::default());
@@ -101,7 +102,7 @@ fn a_torn_tail_is_moved_aside_and_the_next_append_follows_the_last_whole_line() 
         s.append(one(ev(1, EventKind::ToolStarted))).unwrap();
     }
     // A crash in the middle of the third write.
-    let half = r#"{"schema_version":1,"event_id":"0000"#;
+    let half = r#"{"schema_version":2,"event_id":"0000"#;
     fs::OpenOptions::new()
         .append(true)
         .open(dir.join("events.jsonl"))
@@ -138,10 +139,8 @@ fn a_torn_tail_is_moved_aside_and_the_next_append_follows_the_last_whole_line() 
         ]
     );
     assert_eq!(events[2].data["reason"], "torn_tail_recovered");
-    assert_eq!(
-        events.iter().map(|e| e.sequence).collect::<Vec<_>>(),
-        vec![1, 2, 3, 4]
-    );
+    let ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
 }
 
 /// The child half of `a_writer_killed_mid_append_leaves_only_whole_events`: appends until killed.
@@ -196,18 +195,15 @@ fn a_writer_killed_mid_append_leaves_only_whole_events() {
     )
     .unwrap();
     assert_eq!(recovery.corrupt_lines, 0);
-    let next = s.next_sequence();
-    s.append(one(ev(1 << 40, EventKind::AttemptFailed)))
+    let before = TraceStore::read(&dir).unwrap().0.len();
+    s.append(one(ev(1 << 20, EventKind::AttemptFailed)))
         .unwrap();
     let (events, report) = TraceStore::read(&dir).unwrap();
     assert_eq!(report.corrupt_lines + report.torn_bytes, 0);
-    let seqs: Vec<u64> = events.iter().map(|e| e.sequence).collect();
-    assert_eq!(
-        seqs,
-        (1..=seqs.len() as u64).collect::<Vec<_>>(),
-        "no hole, no repeat"
-    );
-    assert!(seqs.len() as u64 >= next - 1);
+    let ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "no repeat, in order");
+    assert_eq!(events.last().unwrap().kind, EventKind::AttemptFailed);
+    assert!(events.len() > before);
 }
 
 #[test]
@@ -456,8 +452,7 @@ fn a_line_of_another_schema_version_is_not_read_as_an_event() {
         s.append(one(ev(0, EventKind::AttemptStarted))).unwrap();
     }
     let mut v = serde_json::to_value(ev(5, EventKind::AttemptCompleted)).unwrap();
-    v["schema_version"] = json!(2);
-    v["sequence"] = json!(2);
+    v["schema_version"] = json!(3);
     let mut f = fs::OpenOptions::new()
         .append(true)
         .open(dir.join("events.jsonl"))
@@ -584,12 +579,12 @@ fn an_existing_wide_run_dir_and_objects_dir_are_narrowed_to_0700() {
 }
 
 #[test]
-fn a_planted_max_sequence_is_a_corrupt_line_not_an_overflow() {
+fn a_planted_event_id_that_is_not_a_uuid_v7_is_a_corrupt_line() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("run");
     drop(open(&dir));
     let mut e = ev(1, EventKind::MessageChunk);
-    e.sequence = u64::MAX;
+    e.event_id = Uuid::new_v8([9; 16]);
     let mut line = serde_json::to_vec(&e).unwrap();
     line.push(b'\n');
     fs::OpenOptions::new()
@@ -607,7 +602,7 @@ fn a_planted_max_sequence_is_a_corrupt_line_not_an_overflow() {
     .unwrap();
     assert_eq!(recovery.corrupt_lines, 1);
     let written = s.append(one(ev(2, EventKind::MessageChunk))).unwrap();
-    assert!(written[0].sequence < 100, "{}", written[0].sequence);
+    assert_eq!(written.len(), 1);
 }
 
 #[test]

@@ -29,8 +29,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aibus_trace::{
-    derived_id, sha256_hex, AttemptRef, AttemptStatus, Batch, DataQuality, EventKind, Metric,
-    Origin, TraceEvent, Visibility,
+    sha256_hex, AttemptRef, AttemptStatus, Batch, DataQuality, EventIds, EventKind, Metric, Origin,
+    TraceEvent, Visibility,
 };
 use regex::Regex;
 use serde_json::{json, Value};
@@ -120,6 +120,8 @@ pub struct Normalizer {
     recent: HashMap<Channel, (VecDeque<String>, HashSet<String>)>,
     line_no: HashMap<Channel, u64>,
     host_seq: u64,
+    /// Makes the event ids: uuid v7, never going backwards, so the ids order the trace.
+    ids: EventIds,
     last_result_error: Option<bool>,
     auth_required: bool,
     capped: bool,
@@ -181,6 +183,7 @@ impl Normalizer {
             recent: HashMap::new(),
             line_no: HashMap::new(),
             host_seq: 0,
+            ids: EventIds::default(),
             last_result_error: None,
             auth_required: false,
             capped: false,
@@ -259,18 +262,21 @@ impl Normalizer {
     }
 
     fn event(
-        &self,
+        &mut self,
         l: &mut Line,
         kind: EventKind,
         origin: Origin,
         visibility: Visibility,
     ) -> TraceEvent {
-        let id = derived_id(&[
-            self.attempt.attempt_id.as_bytes(),
-            l.channel.name().as_bytes(),
-            l.sha.as_bytes(),
-            &l.index.to_le_bytes(),
-        ]);
+        let id = self.ids.next(
+            l.at,
+            &[
+                self.attempt.attempt_id.as_bytes(),
+                l.channel.name().as_bytes(),
+                l.sha.as_bytes(),
+                &l.index.to_le_bytes(),
+            ],
+        );
         l.index += 1;
         let mut e = TraceEvent::new(&self.attempt, id, kind, origin, visibility, l.at, PARSER);
         if l.channel != Channel::Host {

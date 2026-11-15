@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
-    derived_id, sha256_hex, AttemptRef, EventKind, Origin, TraceEvent, Visibility, SCHEMA_VERSION,
+    sha256_hex, AttemptRef, EventIds, EventKind, Origin, TraceEvent, Visibility, SCHEMA_VERSION,
 };
 
 /// Whether payloads (message text, tool input and output, the raw line of an unknown event) are
@@ -76,6 +76,14 @@ pub enum StoreError {
     Io(io::Error),
     /// Another writer holds the run.
     Locked(PathBuf),
+    /// The run was written by schema 1, which orders by an integer `sequence`. Nothing is read,
+    /// repaired or appended: the format was never released, so there is no migration.
+    OldSchema {
+        dir: PathBuf,
+        lines: u64,
+    },
+    /// An event whose id is not a uuid v7, the key the trace orders by.
+    NotUuidV7(Uuid),
 }
 
 impl std::fmt::Display for StoreError {
@@ -83,6 +91,17 @@ impl std::fmt::Display for StoreError {
         match self {
             Self::Io(e) => write!(f, "trace store: {e}"),
             Self::Locked(p) => write!(f, "trace store {} is held by another writer", p.display()),
+            Self::OldSchema { dir, lines } => write!(
+                f,
+                "trace store {} holds {lines} schema 1 lines (integer sequence numbers); this build \
+                 reads schema 2, where events order by their uuid v7 id. Move the run aside and \
+                 record it again",
+                dir.display()
+            ),
+            Self::NotUuidV7(id) => write!(
+                f,
+                "event id {id} is not a uuid v7, and a trace orders by that id"
+            ),
         }
     }
 }
@@ -114,8 +133,9 @@ pub struct TraceStore {
     redactor: Redactor,
     policy: PayloadPolicy,
     limits: StoreLimits,
-    next_seq: u64,
-    ids: HashSet<Uuid>,
+    /// Makes the ids of the store's own events, after every id seen so far.
+    ids: EventIds,
+    seen: HashSet<Uuid>,
     bytes: u64,
     payload_bytes: u64,
     over_soft_limit: bool,
@@ -181,8 +201,9 @@ impl TraceStore {
         }
 
         let mut recovery = Recovery::default();
-        let mut ids = HashSet::new();
-        let mut last_seq = 0;
+        let mut seen = HashSet::new();
+        let mut last_id: Option<Uuid> = None;
+        let mut old_lines = 0u64;
         let mut warned_corrupt = 0;
         let mut run = None;
         let mut good_len = 0u64;
@@ -195,17 +216,32 @@ impl TraceStore {
             }
             good_len += line.len() as u64;
             match serde_json::from_slice::<TraceEvent>(line) {
-                // A sequence of u64::MAX could only be planted, and `+ 1` would overflow: corrupt.
-                Ok(e) if e.schema_version == SCHEMA_VERSION && e.sequence < u64::MAX => {
-                    last_seq = last_seq.max(e.sequence);
+                Ok(e)
+                    if e.schema_version == SCHEMA_VERSION && e.event_id.get_version_num() == 7 =>
+                {
+                    last_id = last_id.max(Some(e.event_id));
                     if e.kind == EventKind::TraceWarning && e.data["reason"] == "corrupt_lines" {
                         warned_corrupt = warned_corrupt.max(e.data["lines"].as_u64().unwrap_or(0));
                     }
                     run.get_or_insert(e.workflow_run_id);
-                    ids.insert(e.event_id);
+                    seen.insert(e.event_id);
                 }
-                _ => recovery.corrupt_lines += 1,
+                _ => {
+                    let old = serde_json::from_slice::<Value>(line)
+                        .is_ok_and(|v| v["schema_version"] == 1);
+                    if old {
+                        old_lines += 1;
+                    }
+                    recovery.corrupt_lines += 1;
+                }
             }
+        }
+        // Before anything is repaired or written: a schema 1 run is left exactly as it is.
+        if old_lines > 0 {
+            return Err(StoreError::OldSchema {
+                dir: dir.to_owned(),
+                lines: old_lines,
+            });
         }
         let total = raw.len() as u64;
         if good_len < total {
@@ -230,8 +266,8 @@ impl TraceStore {
             redactor,
             policy,
             limits,
-            next_seq: last_seq + 1,
-            ids,
+            ids: last_id.map_or_else(EventIds::default, EventIds::after),
+            seen,
             bytes: good_len,
             payload_bytes: 0,
             over_soft_limit: false,
@@ -265,7 +301,7 @@ impl TraceStore {
     }
 
     /// An event about the trace itself (a repair, a budget), run-wide: the nil attempt.
-    fn own_event(&self, kind: EventKind, visibility: Visibility, data: Value) -> TraceEvent {
+    fn own_event(&mut self, kind: EventKind, visibility: Visibility, data: Value) -> TraceEvent {
         const PARSER: &str = "aibus-trace-store/1";
 
         let attempt = AttemptRef {
@@ -274,11 +310,9 @@ impl TraceStore {
             parent_attempt_id: None,
             provider_extension: String::new(),
         };
-        let id = derived_id(&[
-            b"store",
-            &self.next_seq.to_le_bytes(),
-            data.to_string().as_bytes(),
-        ]);
+        let id = self
+            .ids
+            .next(SystemTime::now(), &[b"store", data.to_string().as_bytes()]);
         let mut e = TraceEvent::new(
             &attempt,
             id,
@@ -292,14 +326,18 @@ impl TraceStore {
         e
     }
 
-    /// Redacts, numbers and appends a batch, then syncs. An event whose id is already in the trace
-    /// is skipped. Returns the events as written.
+    /// Redacts and appends a batch, then syncs. The event id is the order and the identity: an id
+    /// that is not a uuid v7 is refused (nothing from the batch is written), and an event whose id
+    /// is already in the trace is skipped. Returns the events as written.
     pub fn append(&mut self, batch: Batch) -> Result<Vec<TraceEvent>, StoreError> {
         let Batch { events, payload } = batch;
         let mut keep: Vec<TraceEvent> = Vec::with_capacity(events.len());
-        let mut extra = Vec::new();
+        let mut storage_gap = false;
+        if let Some(bad) = events.iter().find(|e| e.event_id.get_version_num() != 7) {
+            return Err(StoreError::NotUuidV7(bad.event_id));
+        }
         for e in events {
-            if self.ids.contains(&e.event_id) || keep.iter().any(|k| k.event_id == e.event_id) {
+            if self.seen.contains(&e.event_id) || keep.iter().any(|k| k.event_id == e.event_id) {
                 continue;
             }
             self.run.get_or_insert(e.workflow_run_id);
@@ -310,17 +348,24 @@ impl TraceStore {
             if droppable && self.bytes >= self.limits.soft_max_bytes {
                 if !self.over_soft_limit {
                     self.over_soft_limit = true;
-                    extra.push(self.own_event(
-                        EventKind::GapDetected,
-                        Visibility::Unavailable,
-                        json!({ "reason": "storage_limit", "soft_max_bytes": self.limits.soft_max_bytes }),
-                    ));
+                    storage_gap = true;
                 }
                 continue;
             }
             keep.push(e);
         }
-        keep.extend(extra);
+        // The store's own events go after everything in this batch, in the id order as well.
+        for e in &keep {
+            self.ids.observe(e.event_id);
+        }
+        if storage_gap {
+            let soft = self.limits.soft_max_bytes;
+            keep.push(self.own_event(
+                EventKind::GapDetected,
+                Visibility::Unavailable,
+                json!({ "reason": "storage_limit", "soft_max_bytes": soft }),
+            ));
+        }
         if keep.is_empty() {
             return Ok(keep);
         }
@@ -357,7 +402,6 @@ impl TraceStore {
         let mut out = Vec::with_capacity(keep.len());
         let mut buf = Vec::new();
         for mut e in keep {
-            e.sequence = self.next_seq;
             if e.payload_ref.is_none() && e.origin != Origin::Derived {
                 e.payload_ref.clone_from(&payload_ref);
             }
@@ -386,8 +430,7 @@ impl TraceStore {
             }
             line.push(b'\n');
             buf.extend_from_slice(&line);
-            self.next_seq += 1;
-            self.ids.insert(e.event_id);
+            self.seen.insert(e.event_id);
             out.push(e);
         }
         self.file.write_all(&buf)?;
@@ -396,15 +439,11 @@ impl TraceStore {
         Ok(out)
     }
 
-    /// The next sequence number.
-    pub fn next_sequence(&self) -> u64 {
-        self.next_seq
-    }
-
-    /// Every event in a run directory, in file order, without taking the lock.
+    /// Every event in a run directory, in event id order, without taking the lock. `position` is
+    /// each event's rank in that order.
     pub fn read(dir: &Path) -> io::Result<(Vec<TraceEvent>, ReadReport)> {
         let mut report = ReadReport::default();
-        let mut events = Vec::new();
+        let mut events: Vec<TraceEvent> = Vec::new();
         let mut reader = BufReader::new(File::open(dir.join(EVENTS))?);
         let mut line = Vec::new();
         loop {
@@ -432,6 +471,10 @@ impl TraceStore {
                 Some(_) => report.unsupported_schema += 1,
                 None => report.corrupt_lines += 1,
             }
+        }
+        events.sort_by_key(|e| e.event_id);
+        for (i, e) in events.iter_mut().enumerate() {
+            e.position = i as u64 + 1;
         }
         Ok((events, report))
     }

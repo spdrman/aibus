@@ -668,6 +668,21 @@ Plan-only features (routes, limits, approvals, another runtime, native or parent
 
 **Why.** Nothing that works today breaks, the new fields are all a reader has to learn, and the compiled plan is what later issues (#284's graph, #288's scheduler, #293's comparisons) can pin to.
 
+## D-319: Trace events order by their uuid v7 id, not an integer counter (#319)
+
+**Context.** The trace store (D-282) gave each event an integer `sequence`, handed out by the store, and replay, torn-tail repair and append leaned on it. That is a number something has to assign centrally and that stays right only while nothing else appends. The repo rule is no integer sequence numbers for ordering, v7 keys everywhere (#306 wants the same event order on the desktop and should not pick a key of its own).
+
+**Decision.**
+1. `event_id` is a uuid v7 and is the ordering key. `read`, `Recorded::load` and `project` sort by it, and `append` refuses an id that is not a v7.
+2. `EventIds` makes the ids. The time is `observed_at` in milliseconds but never earlier than the previous id, and a 12-bit counter in `rand_a` keeps two events from one millisecond in order (a full counter moves on to the next millisecond). The remaining bits are a hash of the attempt, channel, raw line hash and index, so the same line at the same time gives the same id. The store's own events (torn-tail warning, gaps) continue after the largest id it has seen, so they sort next to what they are about.
+3. Idempotent append, torn-tail repair and the corrupt-line warning key on the id. There is no stored counter. `position` is the 1-based rank in id order, set on read, skipped by serde, and only for display (`event #12`, `--event 12`).
+4. **Break, not compatibility.** The envelope is schema 2 and has no `sequence`. The format was never released, so I did not write a compatibility path. A reader skips a schema 1 line and counts it (`unsupported_schema`), and `TraceStore::open` refuses a run that holds one, before it repairs or appends anything, and says to record the run again. Every recorded trace in `fixtures/claude-code/traces-284/` (all twenty `events.jsonl`) was regenerated with `AIBUS_BLESS=1`; the view goldens and the spike goldens did not change, because positions come out the same.
+5. The ExecutionEvent sketch in #303 still has a `u64` sequence; B1.3 (#306) uses the v7 event id instead.
+
+**Alternatives.** Keep the counter as a per-run position only (the issue's own alternative): that is what `position` is now, but derived on read rather than stored, so it cannot disagree with the order. A compatibility reader for schema 1 (rejected: nothing was released, and it would keep two orderings alive). Random v7 ids from `Uuid::now_v7()` (rejected: not reproducible, so the recorded fixtures could not be rebuilt byte for byte, and no tie-break inside a millisecond).
+
+**Why.** The id is sortable and unique on its own, so any number of writers can append without agreeing on a counter, and a replay needs nothing but the lines.
+
 ## D-282: The CLI supervisor and the evidence trace (#282)
 
 **Context.** EPIC A needs an official vendor CLI run as an external runtime and a trace aibus can trust and replay offline (spec A1.2). The spike (#281) gave the stream shapes and a list of traps. #282 left four questions open, and building it raised a few more.

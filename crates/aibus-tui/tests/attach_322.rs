@@ -404,3 +404,22 @@ fn a_result_with_escape_and_bidi_characters_is_clean_in_the_stored_log() {
         "{log:?}"
     );
 }
+
+#[test]
+fn the_transcript_a_client_reads_does_not_carry_the_acceptance_code() {
+    let mut r = rig(true, false);
+    connect(&mut r);
+    call(&mut r, attach_ask()).unwrap();
+    let code = screen_code(&r);
+    let out = call(&mut r, Ask::Transcript { run: None }).unwrap();
+    let shown = out.to_string();
+    assert!(shown.contains("wants to attach"), "{shown}");
+    assert!(
+        !shown.contains(&code),
+        "the code is on the screen only: {shown}"
+    );
+    assert!(
+        log_text(&r).contains(&code),
+        "the user's own log still has it"
+    );
+}

@@ -369,11 +369,44 @@ pub fn transcript<G: Graph>(app: &App<G>, run: Option<&str>) -> Result<Json, Str
         .store
         .log_rows(LOG_ROWS)
         .iter()
-        .map(|r| serde_json::to_value(r).unwrap_or(Json::Null))
+        .map(|r| {
+            let mut row = serde_json::to_value(r).unwrap_or(Json::Null);
+            mask_json(&mut row);
+            row
+        })
         .collect();
     Ok(
         json!({"run": id.to_string(), "transcript": text, "bytes": total, "cut": total > TRANSCRIPT_MAX, "log": log}),
     )
+}
+
+/// `text` with the four characters after `code ` and after `/attach accept ` hidden. The
+/// acceptance code is on the user's screen, and the log a client can read must not carry it (#322).
+fn mask_codes(text: &str) -> String {
+    let mut out = text.to_owned();
+    for key in ["code ", "/attach accept "] {
+        let mut from = 0;
+        while let Some(at) = out[from..].find(key) {
+            let start = from + at + key.len();
+            let end = out[start..]
+                .char_indices()
+                .nth(4)
+                .map_or(out.len(), |(i, _)| start + i);
+            out.replace_range(start..end, "****");
+            from = start + 4;
+        }
+    }
+    out
+}
+
+/// `mask_codes` over every string in `v`.
+fn mask_json(v: &mut Json) {
+    match v {
+        Json::String(t) => *t = mask_codes(t),
+        Json::Array(a) => a.iter_mut().for_each(mask_json),
+        Json::Object(o) => o.values_mut().for_each(mask_json),
+        _ => {}
+    }
 }
 
 /// One event from the control socket: a connection said on screen, or a call answered on its

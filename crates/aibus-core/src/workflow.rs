@@ -318,9 +318,6 @@ pub fn dirs(project: &Path, config: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The most a loose workflow file may be for aibus to read it (the MCP read tools' cap).
-pub const LOOSE_MAX_BYTES: u64 = 1024 * 1024;
-
 /// Largest workflow file a remote author may write, and the most any file in a bundle may be.
 pub const MAX_BYTES: usize = 64 * 1024;
 
@@ -403,7 +400,8 @@ pub fn list_in(dir: &Path, scope: &'static str) -> Vec<Found> {
         };
         // Opened without blocking and capped, so a fifo, a device or a huge file is a row that
         // says so rather than a hang.
-        let text = crate::persist::fs::read_regular(path, LOOSE_MAX_BYTES)
+        // 1 MiB, the MCP read tools' cap.
+        let text = crate::persist::fs::read_regular(path, 1024 * 1024)
             .map_err(|e| e.to_string())
             .and_then(|b| String::from_utf8(b).map_err(|_| "not UTF-8 text".to_owned()));
         let parsed = match &text {

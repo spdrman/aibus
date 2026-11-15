@@ -754,8 +754,14 @@ fn a_bundle_cannot_shadow_a_built_in_agent_without_force() {
 }
 
 #[test]
-fn a_bundled_agent_with_an_account_or_an_initial_prompt_needs_the_gates_flag() {
-    for extra in ["account: work", "initial_prompt: run the deploy script"] {
+fn a_bundled_agent_with_an_account_a_fallback_user_memory_or_an_initial_prompt_needs_the_gates_flag(
+) {
+    for extra in [
+        "account: work",
+        "initial_prompt: run the deploy script",
+        "fallback: [work-paid]",
+        "memory: user",
+    ] {
         let def = format!("---\nname: helper\ndescription: helps\n{extra}\n---\nHelp.\n");
         let root = tempfile::tempdir().unwrap();
         let err = install_into(root.path(), &with_agent("helper", &def), false, false).unwrap_err();
@@ -779,6 +785,15 @@ fn control_characters_in_bundled_text_are_refused_and_never_echoed() {
         let bytes = tar(&[entry("manifest.toml", b'0', &manifest(&["x"])), entry("workflows/x.toml", b'0', flow.as_bytes())]);
         let err = refused(&bytes);
         assert!(matches!(err, BundleError::Control(_)), "{flow}: {err:?}");
+    }
+    // The same through a YAML escape in an agent: a value and a list item (a key outside the typed fields is dropped by the parser).
+    for def in [
+        "---\nname: helper\ndescription: \"a\\e[2J\"\n---\nx\n",
+        "---\nname: helper\ndescription: d\nskills: [\"a\\e[2J\"]\n---\nx\n",
+    ] {
+        let bytes = with_agent("helper", def);
+        let err = refused(&bytes);
+        assert!(matches!(err, BundleError::Control(_)), "{def}: {err:?}");
     }
     // Raw bytes too, in a README and the manifest's description.
     let _ = refused(&with(entry("README", b'0', b"hi \x1b[2J")));
@@ -946,6 +961,10 @@ fn a_failed_install_leaves_nothing_behind() {
         .map(|d| d.flatten().map(|e| e.file_name()).collect())
         .unwrap_or_default();
     assert!(left.is_empty(), "left behind: {left:?}");
+    assert!(
+        !wd.exists(),
+        "the workflows dir the install made is removed again"
+    );
 }
 
 #[test]

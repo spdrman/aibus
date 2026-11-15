@@ -629,10 +629,12 @@ pub fn install(
         let (d, _) = def::parse(text, source)
             .map_err(|e| InstallError::Invalid(name.clone(), e.to_string()))?;
         // What an agent can do as you without asking: hooks, a permission mode, an account it
-        // spends on, a prompt it starts with.
+        // spends on or falls back to, a prompt it starts with, the user's cross-project memory.
         let powers = !d.hooks.is_empty()
             || d.permission_mode != PermissionMode::Default
             || d.account.is_some()
+            || d.fallback.as_ref().is_some_and(|f| !f.is_empty())
+            || d.memory == Some(crate::agent::MemoryScope::User)
             || d.initial_prompt.is_some();
         if !to.allow_gates && powers {
             return Err(InstallError::AgentPowers(name.clone()));

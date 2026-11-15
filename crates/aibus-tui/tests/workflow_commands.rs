@@ -219,3 +219,16 @@ fn list_and_show_never_draw_an_escape_sequence_from_a_workflow() {
     let shown = r.app.graph.read_key(aibus_core::state::WORKFLOW_SHOWN).map(|v| format!("{v:?}")).unwrap_or_default();
     assert!(!shown.contains("\\u{1b}") && !shown.contains('\u{1b}'), "{shown}");
 }
+
+#[test]
+fn a_parse_error_that_echoes_an_escape_never_reaches_the_dashboard_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut r, files) = rig_in(root.path());
+    let dir = root.path().join("project/.aibus/workflows");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("bad.toml"), "x = \u{1b}[2J\u{1b}]0;pwned\u{7}\n").unwrap();
+    line(&mut r, &files, "/workflow list");
+    let rows = r.app.graph.read_key(aibus_core::state::WORKFLOWS).map(|v| format!("{v:?}")).unwrap_or_default();
+    assert!(rows.contains("bad"), "{rows}");
+    assert!(!rows.contains("\\u{1b}") && !rows.contains('\u{1b}') && !rows.contains("\\u{7}"), "{rows}");
+}

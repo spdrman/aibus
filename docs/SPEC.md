@@ -18,6 +18,7 @@ This is the index. The spec is split into sections under `docs/spec/`; read them
 | 11 | [Delivery](spec/11-delivery.md) | Milestones M0 to M6 with exit criteria, out of scope for v1, dependency risks |
 | 12 | [Open questions](spec/12-open-questions.md) | Each with the panel's recommended default |
 | 13 | [Issue map](spec/13-issue-map.md) | How the spec became GitHub issues: the EPIC, phase and task scheme, the panel's decisions, the task table with issue numbers, milestone mapping, coverage |
+| 14 | [CLI supervisor and evidence trace](spec/14-evidence-trace.md) | EPIC A #282: the supervisor that runs an official vendor CLI, the versioned evidence envelope, the append-only trace store and offline replay |
 
 Contested decisions and why they went the way they did: [DECISIONS.md](DECISIONS.md).
 

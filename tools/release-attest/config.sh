@@ -21,6 +21,7 @@ cli|cargo test --locked -p aibus --tests
 replay|cargo test --locked -p aibus-testkit --test replay --test session && cargo test --locked -p aibus-core --test replay
 capability-matrix|cargo test --locked -p aibus-testkit --test capability_matrix
 provider-contract|cargo test --locked -p aibus-provider-anthropic -p aibus-provider-openai -p aibus-provider-gemini
+trace|cargo test --locked -p aibus-trace -p aibus-supervisor
 security|cargo test --locked -p aibus-core --test security && cargo test --locked -p aibus-tui --test security_commands && cargo test --locked -p aibus --test mcp_security'
 
 # Every git that reads the tree for the attestation goes through this: replace refs (refs/replace,

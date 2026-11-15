@@ -708,16 +708,7 @@ fn a_safe_value_for_the_same_flag_names_is_not_refused() {
 // ---- #332 review round 2 ----
 
 fn as_codex(argv: &str) -> String {
-    let m = edit(
-        &template_manifest(),
-        "executable_candidates = [\"examplecli\"]",
-        "executable_candidates = [\"codex\"]",
-    );
-    edit(
-        &m,
-        "argv = [\"run\", \"--json\"]",
-        &format!("argv = {argv}"),
-    )
+    for_clis(&["codex"], argv)
 }
 
 /// An allowlisted CLI's own subcommands are its own: `codex exec --json` is Codex's headless mode.
@@ -810,10 +801,15 @@ fn ordinary_flags_of_an_official_cli_are_not_swept_up() {
         r#"["exec", "--sandbox", "read-only"]"#,
         r#"["exec", "--ask-for-approval", "untrusted"]"#,
         r#"["exec", "--config", "model=gpt-5"]"#,
-        r#"["exec", "--output-format", "stream-json", "--verbose"]"#,
     ] {
         assert!(Manifest::parse(&as_codex(argv)).is_ok(), "{argv}");
     }
+    // Claude's own flags are Claude's (#339: the list is per CLI).
+    let claude = for_clis(
+        &["claude"],
+        r#"["-p", "--output-format", "stream-json", "--verbose"]"#,
+    );
+    assert!(Manifest::parse(&claude).is_ok());
 }
 
 // ---- #339: a per-CLI allowlist of flags, the denylist as the second check ----

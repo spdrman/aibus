@@ -316,7 +316,7 @@ fn https(field: &str, s: &str) -> Result<(), ManifestError> {
 /// with the value inline or as the next token, and those values on their own. It is a denylist of
 /// what is known, not a proof: the user sees the whole argv at install, and the real boundary is
 /// the host's allowlist of programs (`sandbox::OFFICIAL_CLIS`).
-fn unattended(tokens: &[String]) -> Option<&str> {
+pub(crate) fn unattended(tokens: &[String]) -> Option<&str> {
     // Flags that say it in their name, with any value.
     const NAMES: [&str; 20] = [
         "dangerously",
@@ -502,10 +502,15 @@ fn argv_tokens(
     field: &str,
     tokens: &[String],
     max: usize,
+    official: &[&str],
     shape: bool,
 ) -> Result<(), ManifestError> {
     if tokens.len() > max {
         return Err(bad(field, format!("more than {max} tokens")));
+    }
+    // The host's list of flags for every official CLI the manifest names (#339).
+    for cli in official {
+        crate::flags::check(cli, tokens).map_err(|why| bad(field, why))?;
     }
     for t in tokens {
         matches_re(
@@ -647,16 +652,29 @@ impl Manifest {
         if self.auth.credential_access != "forbidden" {
             return Err(bad("auth.credential_access", "must be \"forbidden\""));
         }
-        let shape = !self
-            .cli
-            .executable_candidates
+        let official: Vec<&str> = exes
             .iter()
-            .all(|e| crate::sandbox::OFFICIAL_CLIS.contains(&e.as_str()));
-        argv_tokens("auth.login_argv", &self.auth.login_argv, 16, shape)?;
-        argv_tokens("auth.status_argv", &self.auth.status_argv, 16, shape)?;
+            .map(String::as_str)
+            .filter(|e| crate::sandbox::OFFICIAL_CLIS.contains(e))
+            .collect();
+        let shape = official.len() != exes.len();
+        argv_tokens(
+            "auth.login_argv",
+            &self.auth.login_argv,
+            16,
+            &official,
+            shape,
+        )?;
+        argv_tokens(
+            "auth.status_argv",
+            &self.auth.status_argv,
+            16,
+            &official,
+            shape,
+        )?;
 
         let ex = &self.execution;
-        argv_tokens("execution.argv", &ex.argv, 32, shape)?;
+        argv_tokens("execution.argv", &ex.argv, 32, &official, shape)?;
         if ex.prompt != "stdin" {
             return Err(bad(
                 "execution.prompt",
@@ -711,6 +729,10 @@ impl Manifest {
                 &o.flag,
                 "a long flag",
             )?;
+            for cli in &official {
+                crate::flags::check(cli, std::slice::from_ref(&o.flag))
+                    .map_err(|why| bad("execution.optional", why))?;
+            }
             if unattended(std::slice::from_ref(&o.flag)).is_some() {
                 return Err(bad(
                     "execution.optional",

@@ -96,6 +96,13 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
     if !OFFICIAL_CLIS.contains(&name) && !extra.iter().any(|e| e == name) {
         return Err(SandboxError::NotOfficial(name.to_owned()));
     }
+    // The same list the manifest was read against, over what is really about to run.
+    let args: Vec<String> = launch
+        .args
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    crate::flags::check(name, &args).map_err(refused)?;
     let fixed: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
     if launch.args.len() < fixed.len() || launch.args[..fixed.len()] != fixed[..] {
         return Err(refused(

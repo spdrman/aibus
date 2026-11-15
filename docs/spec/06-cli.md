@@ -14,7 +14,9 @@ aibus session list | show <id> | resume <id> [--run <run-id>] [MESSAGE] | export
 aibus handoff create [--topic T] [--outcome O] | list | show [PATH]
 aibus ledger show | new <topic> | update <section> <text>
 aibus memory recall <query> [-k N] | add <text> [--type T] [--scope S] | index
-aibus workflow list | show <name> | validate [<name>|<path>] | run <name> <input>
+aibus workflow list | show <name> | validate [<name>|<path>|<file>.aibus] | run <name> <input>
+               pack <name>... -o <file>.aibus [--description T] [--with-agents] [--force]
+               install <file>.aibus [--user] [--force] [--allow gates]
 aibus config path | show | init | validate | edit
 aibus mcp [--allow write|gates|run]... [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)
 aibus doctor
@@ -99,7 +101,8 @@ Stdin after the prompt is a control channel when `--json` is set: lines like `{"
 | `agent list` | `[{name, scope, path, role, model, tools, description}]` |
 | `agent show` | the full definition as JSON (frontmatter fields plus `prompt`) |
 | `agent validate` | `{ok, errors:[{path, field, message}], warnings:[..]}` |
-| `workflow show` | `{name, path, description, steps:[{agent, prompt, gate?, on_fail?}]}` |
+| `workflow list` | `[{name, path, description, steps, scope, bundle, source, runnable, not_runnable?}]`, or `{name, path, error, scope, bundle, source, runnable}` for a broken file or a refused bundle |
+| `workflow show` | `{name, path, description, steps:[{agent, prompt, gate?, on_fail?}], source, not_runnable?}` |
 | `workflow validate` | `{ok, errors:[{path, step, field, message}], warnings:[..]}` |
 | `account list` | `[{name, provider, label, auth:"keyring|env|file|none", default_model, status}]` |
 | `account test` | `{name, ok, label, org, models:[..], latency_ms}` or `{name, ok:false, error:{kind, message}}` |
@@ -156,3 +159,30 @@ An MCP server for other programs to read workflows through. It starts read-only,
 | `--max-runs`, `--max-concurrent-runs`, `--max-cost-usd` | parse, and exit 2 with "not available yet" |
 
 The tools, resources and prompts are in `docs/MCP.md`. Logging goes to stderr, and each call leaves a redacted line under `<state>/logs/mcp/`.
+
+## 9. Where workflows come from, and `.aibus` bundles
+
+aibus reads two directories, in this order: the project's `.aibus/workflows/` (the project is `--cwd`, or the directory the session starts in; aibus does not walk up from it) and the user's `workflows/` in the config directory (`~/.config/aibus/workflows/`). In each it reads the loose `*.toml` files and the `*.aibus` bundles. A name in the project hides the same name in the user's directory; inside one directory a loose file hides a bundled workflow of the same name, and an earlier bundle (by file name) a later one. The list is read again every time anything lists or runs, so a file copied in mid-session shows up on the next `/workflow list` without a restart.
+
+`workflow list` says where each one came from in its last column (`--json`: `scope`, `bundle`, `source`): `project`, `user`, or `project bundle kit.aibus`. A workflow written as a project workflow is only seen by sessions started in that same project directory; one that every session should see belongs in the user scope (`workflow install --user`, or `scope: "user"` through MCP).
+
+A bundle is a plain, uncompressed tar with the extension `.aibus` (always `<name>.aibus`, never a bare `.aibus`, which is the project directory's name):
+
+```
+manifest.toml            format = 1, name, description, workflows = [...], agents = [...]
+workflows/<name>.toml    one per workflow the manifest lists, byte for byte as on disk
+agents/<name>.md         optional: agent definitions the workflows name
+README or README.md      optional
+```
+
+`aibus workflow pack` writes one. By hand, list the files by name and keep to ustar: GNU `tar --format=ustar -cf kit.aibus manifest.toml workflows` (GNU's default format works too), or on macOS `COPYFILE_DISABLE=1 tar --format=ustar -cf kit.aibus manifest.toml workflows`, so no `._` or extended-attribute entries go in. A pax archive (`tar --format=posix`, or any tar that adds pax headers) is refused, and so is `tar -cf kit.aibus .`, whose entries start with `./`.
+
+Loose `.toml` files stay the editable source: `/workflow save` and the MCP write tools write loose files, `pack` builds a bundle from them, `install` unpacks one. A bundle is read in memory and never unpacked to disk just to be listed. It is refused whole, with nothing of it listed or run, when any of these holds: it is over 1 MiB or has more than 64 entries; an entry is over 64 KiB, a symlink, a hard link, a device, a fifo, a pax or GNU extension header, an absolute path, a path with `..`, a duplicate, or anything outside the layout above; a name does not match `^[a-z0-9][a-z0-9_-]{0,63}$`; a header is cut short, has a bad checksum or a size that is not plain octal; a file is not UTF-8, holds a control character (raw, or through a TOML or YAML escape, so no escape sequence can reach a terminal) or text the redactor would change; the manifest does not list exactly what is there; a workflow does not parse, has more than 32 steps or a `name` that is not its file name; an agent file does not parse or names another agent. A refused bundle shows in `workflow list` as one row named after its file, with the reason. At most 64 bundles are read in one directory; past that each further bundle is a row saying it was not read.
+
+Every file is opened without blocking and has to be a regular file of a sane size (a bundle 1 MiB, a loose workflow 1 MiB), so a fifo, a link to a device or a huge file in a workflows directory is a row with the reason, never a hang. What `workflow list`, `show` and `validate` print, and what the dashboard draws, has escape sequences and control characters taken out, since a loose file can hold them too.
+
+A bundled workflow with a `gate` is listed but does not run (`workflow run`, `run --workflow`, `/workflow`, the `workflow` tool and MCP `workflow_run` all refuse it, and `workflow validate` warns): a gate is a shell command from someone else that runs as you. You trust it by installing the bundle with `--allow gates`, which writes the workflow as a loose file of yours.
+
+- `workflow pack <name>... -o <file>.aibus` puts the named workflows (whichever source wins each name) into a bundle named after the file. `--with-agents` adds the project or user definition of each agent the steps name (built-ins need none). It never replaces a file without `--force`, and the bundle it writes is read back through every check first. The output is deterministic: the same files give the same bytes.
+- `workflow install <file>.aibus` writes the workflows (and agents) into the project's `.aibus/` or, with `--user`, the user's config directory, through the checks of `workflow_create`: the name rule, 64 KiB, 32 steps, `workflow validate` against the agents you have plus the bundle's own, the redactor, and the gate rule. `--allow gates` is also what an agent needs that has hooks, a permission mode, an `account`, a non-empty `fallback`, `memory: user` or an `initial_prompt` (`memory: project` and `local` stay in the project and are not gated); its `tools` are not gated, since every tool call still goes through the permission rules. An agent with a built-in's name (`lead`, `explore`, ...) replaces that built-in for every session, so it needs `--force` and install says which built-in it replaces. Every check runs before anything is written. A file that is already there is only replaced with `--force`. The workflows and agents directories, and the `.aibus` (or config) directory above them, have to be real directories: a symlink at any of them is refused (the user's config directory itself may be a link, which install resolves first). Install stages every file under a random name made with `O_CREAT|O_EXCL` (which never follows a symlink), mode 0600, then renames them into place, and a failure removes the files and directories it made, but a file replaced with `--force` before a later rename failed cannot be put back. The files are byte for byte as in the bundle, so pack then install gives identical files.
+- `workflow validate <file>.aibus` checks a bundle; `workflow validate` with no argument checks every loose file and bundle in both directories.

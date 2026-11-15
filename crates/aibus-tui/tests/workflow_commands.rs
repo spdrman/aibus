@@ -168,3 +168,67 @@ fn run_is_the_existing_workflow_command() {
     assert_eq!(a, b);
     assert!(a.iter().any(|m| m.contains("Workflow { name: \"review\", input: \"the diff\" }")));
 }
+
+/// #271: the list is read again on every `/workflow list`, so a bundle copied in mid-session
+/// shows up without a restart, with the bundle it came from on its row and in `show`.
+#[test]
+fn a_bundle_copied_in_mid_session_shows_on_the_next_list_with_its_source() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut r, files) = rig_in(root.path());
+    line(&mut r, &files, "/workflow list");
+    assert!(!r.text().contains("kit.aibus"));
+    r.key(K::Esc);
+    let user = root.path().join("config/workflows");
+    std::fs::create_dir_all(&user).unwrap();
+    let bytes = workflow::bundle::pack(
+        "kit",
+        "",
+        &[("review".to_owned(), REVIEW.to_owned())],
+        &[],
+        None,
+        &Redactor::default(),
+    )
+    .unwrap();
+    std::fs::write(user.join("kit.aibus"), bytes).unwrap();
+    line(&mut r, &files, "/workflow list");
+    assert_eq!(modal(&r).as_deref(), Some("workflows"));
+    let text = r.text();
+    assert!(text.contains("review"), "{text}");
+    assert!(text.contains("kit.aibus"), "{text}");
+    r.key(K::Esc);
+    r.ui.prompt.set("");
+    line(&mut r, &files, "/workflow show review");
+    assert!(r.text().contains("user bundle kit.aibus"), "{}", r.text());
+}
+
+/// Review of #277: a workflow's text reaches the dashboard with no escape sequence in it.
+#[test]
+fn list_and_show_never_draw_an_escape_sequence_from_a_workflow() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut r, files) = rig_in(root.path());
+    let dir = root.path().join("project/.aibus/workflows");
+    std::fs::create_dir_all(&dir).unwrap();
+    let flow = "description = \"ok\\u001b]0;pwned\\u0007\\u001b[2J\"\n[[step]]\nagent = \"explore\"\nprompt = \"look\\u001b[31m at {{input}}\"\n";
+    std::fs::write(dir.join("esc.toml"), flow).unwrap();
+    line(&mut r, &files, "/workflow list");
+    let rows = r.app.graph.read_key(aibus_core::state::WORKFLOWS).map(|v| format!("{v:?}")).unwrap_or_default();
+    assert!(!rows.contains("\\u{1b}") && !rows.contains('\u{1b}'), "{rows}");
+    r.key(K::Esc);
+    r.ui.prompt.set("");
+    line(&mut r, &files, "/workflow show esc");
+    let shown = r.app.graph.read_key(aibus_core::state::WORKFLOW_SHOWN).map(|v| format!("{v:?}")).unwrap_or_default();
+    assert!(!shown.contains("\\u{1b}") && !shown.contains('\u{1b}'), "{shown}");
+}
+
+#[test]
+fn a_parse_error_that_echoes_an_escape_never_reaches_the_dashboard_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut r, files) = rig_in(root.path());
+    let dir = root.path().join("project/.aibus/workflows");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("bad.toml"), "x = \u{1b}[2J\u{1b}]0;pwned\u{7}\n").unwrap();
+    line(&mut r, &files, "/workflow list");
+    let rows = r.app.graph.read_key(aibus_core::state::WORKFLOWS).map(|v| format!("{v:?}")).unwrap_or_default();
+    assert!(rows.contains("bad"), "{rows}");
+    assert!(!rows.contains("\\u{1b}") && !rows.contains('\u{1b}') && !rows.contains("\\u{7}"), "{rows}");
+}

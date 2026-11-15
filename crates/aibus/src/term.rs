@@ -2,8 +2,6 @@
 //! `NO_COLOR`, `COLORTERM`, `TERM` and `EDITOR` are read here and in `config edit`. Colour here
 //! is plain SGR (dim, bold), so `COLORTERM` has nothing to add; it only matters to the TUI theme.
 
-use std::borrow::Cow;
-
 use aibus_core::AibusError;
 
 /// Whether human output on a stream may carry ANSI: it must be a terminal, `NO_COLOR` must be
@@ -23,52 +21,9 @@ pub fn check_tui(term: Option<&str>) -> Result<(), AibusError> {
     Ok(())
 }
 
-/// Removes ANSI escape sequences (CSI and OSC) and other C0 controls except tab and newline,
-/// from text that is about to be printed for a person whose output is not a colour terminal.
-pub fn strip_ansi(text: &str) -> Cow<'_, str> {
-    if !text.bytes().any(|b| (b < 0x20 && b != b'\n' && b != b'\t') || b == 0x7f) {
-        return Cow::Borrowed(text);
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\u{1b}' => match chars.peek() {
-                // CSI: parameters, then a final byte in 0x40..=0x7e.
-                Some('[') => {
-                    chars.next();
-                    for n in chars.by_ref() {
-                        if ('\u{40}'..='\u{7e}').contains(&n) {
-                            break;
-                        }
-                    }
-                }
-                // OSC: up to BEL or ST (ESC \).
-                Some(']') => {
-                    chars.next();
-                    while let Some(n) = chars.next() {
-                        if n == '\u{7}' {
-                            break;
-                        }
-                        if n == '\u{1b}' {
-                            chars.next();
-                            break;
-                        }
-                    }
-                }
-                // Any other two-byte escape.
-                Some(_) => {
-                    chars.next();
-                }
-                None => {}
-            },
-            '\n' | '\t' => out.push(c),
-            c if c.is_control() => {}
-            c => out.push(c),
-        }
-    }
-    Cow::Owned(out)
-}
+/// Removes escape sequences and control characters from text about to be printed (it lives in
+/// `aibus_core::text` so the dashboard uses the same one).
+pub use aibus_core::text::strip_ansi;
 
 /// Columns and rows of the controlling terminal, or 80 by 24 when there is none.
 pub fn size() -> (u16, u16) {
@@ -89,6 +44,7 @@ pub fn size() -> (u16, u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
 
     #[test]
     fn colour_needs_a_tty_and_no_opt_out() {

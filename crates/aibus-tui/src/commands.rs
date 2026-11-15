@@ -722,13 +722,25 @@ fn open_status(c: &Call, target: Option<ModelTarget>, out: &mut Out) -> Result<(
 /// `show`, `save` or `run` is reached as `/workflow run list <input>`).
 fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
     let (sub, rest) = c.args.split_once(char::is_whitespace).map_or((c.args, ""), |(w, r)| (w, r.trim()));
-    let run = |args: &str, out: &mut Out| match args.split_once(char::is_whitespace) {
-        _ if c.env.lacking(c.name, LEAD, None).is_some() => {
-            Err(format!("/{} is not available: no lead is running", c.name))
+    let run = |args: &str, out: &mut Out| {
+        let (name, input) = args.split_once(char::is_whitespace).map_or((args, ""), |(n, i)| (n, i.trim()));
+        if name.is_empty() {
+            return need(c, "a workflow name");
         }
-        Some((name, input)) => command(out, Command::Workflow { name: name.to_owned(), input: input.trim().to_owned() }),
-        None if !args.is_empty() => command(out, Command::Workflow { name: args.to_owned(), input: String::new() }),
-        None => need(c, "a workflow name"),
+        if c.env.lacking(c.name, LEAD, None).is_none() {
+            return command(out, Command::Workflow { name: name.to_owned(), input: input.to_owned() });
+        }
+        // A session with no run yet has no lead, because the first prompt starts it. A workflow
+        // is a fine first prompt: the launcher opens the lead with the `workflow` call. A lead
+        // that has finished is not started again.
+        if !c.env.runs.is_empty() {
+            return Err(format!("/{} is not available: no lead is running", c.name));
+        }
+        if c.env.account_names.is_empty() {
+            return Err(format!("/{} needs a lead, and no account is set up to run it; add one with: aibus account add <name> --provider <id>", c.name));
+        }
+        out.msgs.push(Msg::SubmitPrompt { text: format!("/workflow {name} {input}").trim_end().to_owned() });
+        Ok(())
     };
     match sub {
         "new" | "edit" => {

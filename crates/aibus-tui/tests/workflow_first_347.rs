@@ -41,7 +41,7 @@ fn line(r: &mut Rig, text: &str) -> Vec<Msg> {
 fn runs(r: &Rig) -> usize {
     r.app
         .graph
-        .read_key("model:runs_order")
+        .read_key(aibus_core::state::RUNS_ORDER)
         .map_or(0, |v| as_list(v).len())
 }
 

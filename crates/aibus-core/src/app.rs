@@ -16,7 +16,7 @@ use crate::persist::time::rfc3339;
 use crate::orchestrator::Limits;
 use crate::state::reduce::{reduce, Env};
 use crate::state::store::Store;
-use crate::state::{self, register_run, router_last, ANIMATING, PERMISSIONS_BYPASS, SHUTDOWN};
+use crate::state::{self, register_run, router_last, ANIMATING, PERMISSIONS_BYPASS, RECORDED_SHOWN, SHUTDOWN};
 
 /// Capacity of the `Msg` channel (08 section 3).
 pub const MSG_CAPACITY: usize = 4096;
@@ -209,6 +209,11 @@ impl<G: Graph> App<G> {
             let k = router_last(kind);
             self.graph.input(&k, Value::Null);
             vec![k]
+        } else if key == RECORDED_SHOWN {
+            // Made by the first `/runs`, so a session without one replays as it always did.
+            let k = NodeKey::from(RECORDED_SHOWN);
+            self.graph.input(&k, Value::Null);
+            vec![k]
         } else {
             return Err(std::io::Error::other(format!("write to unregistered key {key}")).into());
         };
@@ -303,7 +308,7 @@ impl<G: Graph> App<G> {
         let run_keys: Vec<NodeKey> = snap
             .inputs
             .keys()
-            .filter(|k| k.starts_with("model:run:") || k.starts_with("model:router:last:"))
+            .filter(|k| k.starts_with("model:run:") || k.starts_with("model:router:last:") || k.starts_with(RECORDED_SHOWN))
             .cloned()
             .collect();
         for k in run_keys {

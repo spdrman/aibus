@@ -158,6 +158,9 @@ pub enum Command {
     /// Workflows
     #[command(subcommand)]
     Workflow(WorkflowCmd),
+    /// Recorded runs of an external CLI: list, inspect, replay offline
+    #[command(subcommand)]
+    Runs(RunsCmd),
     /// The config file
     #[command(subcommand)]
     Config(ConfigCmd),
@@ -323,6 +326,66 @@ pub struct AccountAdd {
     pub project: Option<String>,
 }
 
+
+/// `aibus runs` (#284): recorded runs read from `<state>/traces/<run>/`, or from `--root`. All of it
+/// reads files; none of it starts a provider or a process.
+#[derive(Subcommand, Debug)]
+pub enum RunsCmd {
+    /// Every recorded run, one line each: state, counts, edges by evidence level, cost and data quality
+    List {
+        /// Read runs from this directory instead of <state>/traces
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        /// Ids only, one per line (the completion scripts call this)
+        #[arg(long, hide = true)]
+        names: bool,
+    },
+    /// One run's planned and execution graph, gaps and timeline, or one node or event of it
+    Inspect {
+        run: String,
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        /// The inspector for one agent id, tool use id or attempt id
+        #[arg(long, value_name = "ID", conflicts_with = "event")]
+        node: Option<String>,
+        /// One recorded event in full, with its payload when the trace kept it
+        #[arg(long, value_name = "SEQUENCE")]
+        event: Option<u64>,
+        /// Timeline: only this agent's events
+        #[arg(long, value_name = "ID")]
+        agent_id: Option<String>,
+        /// Timeline: only this tool use's events
+        #[arg(long, value_name = "ID")]
+        tool_use: Option<String>,
+        /// Timeline: only events of this kind (tool_started, gap_detected, ...)
+        #[arg(long, value_name = "KIND")]
+        kind: Option<String>,
+        /// Timeline: only events at this evidence level
+        #[arg(long, value_parser = ["observed", "correlated", "inferred", "unavailable"])]
+        level: Option<String>,
+    },
+    /// Replay the recorded run offline: every state transition in order, then the graph
+    Replay {
+        run: String,
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        /// Replay is always offline; the flag is accepted for the spelling in the spec
+        #[arg(long)]
+        offline: bool,
+        /// Print the recorded events exactly as they are stored (JSON lines)
+        #[arg(long)]
+        events: bool,
+    },
+    /// Run it again as a new attempt (not available yet; its outcome could differ from the recording)
+    Rerun {
+        run: String,
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        /// Run in a new, isolated attempt
+        #[arg(long)]
+        isolated: bool,
+    },
+}
 #[derive(Subcommand, Debug)]
 pub enum SessionCmd {
     List {
@@ -503,6 +566,10 @@ mod tests {
         "workflow validate",
         "workflow show",
         "workflow run",
+        "runs list",
+        "runs inspect",
+        "runs replay",
+        "runs rerun",
         "init",
         "config path",
         "config show",

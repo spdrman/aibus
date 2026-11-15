@@ -1,0 +1,650 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/extension/manifest-v2.json",
+  "title": "aibus extension manifest v2",
+  "description": "aibus-extension.toml read as JSON. Strict: no other key is accepted. Rules a schema cannot say (all 13 capabilities declared, a probe_required capability has a probe, an optional flag is listed by a probe, session_resume is unsupported when native_child_lineage is not, the id and name never contain the vendor product name Claude Code, the built-in engine takes no rules and the declarative one needs at least one) are in docs/spec/16-extensions.md and enforced by the host.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "version",
+    "name",
+    "kind",
+    "provider",
+    "license",
+    "source_url",
+    "publisher",
+    "compat",
+    "cli",
+    "auth",
+    "execution",
+    "normalizer",
+    "capabilities",
+    "runtime",
+    "permissions",
+    "policy",
+    "fixtures",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,30}(\\.[a-z][a-z0-9-]{0,30}){2,7}$",
+      "description": "Reverse-DNS, lower case, three to eight labels. The reference extension is org.devshell.aibus.reference-cli."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "kind": {
+      "const": "official_cli"
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "source_url": {
+      "type": "string",
+      "pattern": "^https://[A-Za-z0-9]([A-Za-z0-9.-]{0,98}[A-Za-z0-9])?(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]{0,200})?$"
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9]([A-Za-z0-9.-]{0,98}[A-Za-z0-9])?(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]{0,200})?$"
+        }
+      }
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "os",
+        "cli_versions"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "description": "A range such as >=1.1.0, <2.0.0 that does not contain 1.0.0, so a host that reads protocol 1.0.0 only can tell it is not for it (a host from before schema 2 refuses it earlier, as an unknown field). This host speaks 1.1.0."
+        },
+        "os": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "macos",
+              "linux",
+              "windows"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "cli_versions": {
+          "type": "string",
+          "description": "A range of the vendor CLI's versions."
+        }
+      }
+    },
+    "cli": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executable_candidates",
+        "vendor_urls"
+      ],
+      "properties": {
+        "executable_candidates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "minItems": 1,
+          "maxItems": 4
+        },
+        "vendor_urls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https://[A-Za-z0-9]([A-Za-z0-9.-]{0,98}[A-Za-z0-9])?(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]{0,200})?$"
+          },
+          "minItems": 1,
+          "maxItems": 8
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "credential_access",
+        "login_argv",
+        "status_argv"
+      ],
+      "properties": {
+        "owner": {
+          "const": "vendor_cli"
+        },
+        "credential_access": {
+          "const": "forbidden"
+        },
+        "login_argv": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
+            "description": "A plain argv token. No space, slash, quote, $, @, backtick, tilde or brace, no install, exec or eval shape, every flag on the host's allowlist of flags for the official CLI named in cli.executable_candidates (per CLI, maintained per CLI version; the schema cannot express it), and, as a second check, none of the known spellings of a flag that would run without asking (a denylist of known spellings, not a proof)."
+          },
+          "maxItems": 16
+        },
+        "status_argv": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
+            "description": "A plain argv token. No space, slash, quote, $, @, backtick, tilde or brace, no install, exec or eval shape, every flag on the host's allowlist of flags for the official CLI named in cli.executable_candidates (per CLI, maintained per CLI version; the schema cannot express it), and, as a second check, none of the known spellings of a flag that would run without asking (a denylist of known spellings, not a proof)."
+          },
+          "maxItems": 16
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argv",
+        "prompt",
+        "stdout"
+      ],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
+            "description": "A plain argv token. No space, slash, quote, $, @, backtick, tilde or brace, no install, exec or eval shape, every flag on the host's allowlist of flags for the official CLI named in cli.executable_candidates (per CLI, maintained per CLI version; the schema cannot express it), and, as a second check, none of the known spellings of a flag that would run without asking (a denylist of known spellings, not a proof)."
+          },
+          "maxItems": 32
+        },
+        "prompt": {
+          "const": "stdin"
+        },
+        "stdout": {
+          "const": "jsonl"
+        },
+        "env_allow": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "maxItems": 16,
+          "description": "Never a credential-shaped name, an AIBUS_ name, a loader variable, PATH, CLAUDECODE or CLAUDE_CODE_*."
+        },
+        "optional": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "flag",
+              "capability"
+            ],
+            "properties": {
+              "flag": {
+                "type": "string",
+                "pattern": "^--[a-z][a-z0-9-]{0,63}$"
+              },
+              "capability": {
+                "type": "string",
+                "enum": [
+                  "login_status",
+                  "one_shot",
+                  "structured_events",
+                  "native_child_lineage",
+                  "tool_events",
+                  "usage_report",
+                  "session_resume",
+                  "interactive_approval",
+                  "cancel",
+                  "workspace_control",
+                  "headless",
+                  "supported_os",
+                  "hook_channel"
+                ]
+              }
+            }
+          }
+        },
+        "typed": {
+          "type": "array",
+          "maxItems": 8,
+          "description": "Flags whose value the host fills from the plan. A manifest names the flag and the kind of value, never a value, a template or an argument string. Which flags can be typed, and as which kind, is the host's list per CLI (`--model` as model_id, `--agents` as agent_list for claude, `--output-last-message` as workdir_path for codex), and such a flag is never also a static argv token.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "flag",
+              "kind"
+            ],
+            "properties": {
+              "flag": {
+                "type": "string",
+                "pattern": "^--[a-z][a-z0-9-]{0,63}$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "model_id",
+                  "agent_list",
+                  "workdir_path"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "wall_time_secs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_stdout_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_line_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_stderr_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lines_per_second": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "What the extension asks for. The host's ceiling wins."
+    },
+    "normalizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine"
+      ],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": [
+            "builtin:claude-stream-json",
+            "declarative-jsonl",
+            "wasm-module"
+          ],
+          "description": "wasm-module names a guest in `module`. It is refused by a build of aibus without the `wasm` feature."
+        },
+        "module": {
+          "type": "string",
+          "pattern": "^wasm/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.wasm$",
+          "description": "Only with engine wasm-module: the guest, a .wasm file directly under wasm/. It is part of the package, so the content hash and the signature cover it. It may import only aibus.read_line, aibus.emit and aibus.next_seq."
+        },
+        "rule": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pointer",
+              "equals",
+              "kind"
+            ],
+            "properties": {
+              "pointer": {
+                "type": "string",
+                "pattern": "^(/[A-Za-z0-9_-]{1,32}){1,6}$"
+              },
+              "equals": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "message_chunk",
+                  "tool_started",
+                  "tool_completed",
+                  "tool_failed",
+                  "usage_reported"
+                ]
+              },
+              "id_pointer": {
+                "type": "string",
+                "pattern": "^(/[A-Za-z0-9_-]{1,32}){1,6}$"
+              },
+              "tokens_in_pointer": {
+                "type": "string",
+                "pattern": "^(/[A-Za-z0-9_-]{1,32}){1,6}$"
+              },
+              "tokens_out_pointer": {
+                "type": "string",
+                "pattern": "^(/[A-Za-z0-9_-]{1,32}){1,6}$"
+              }
+            }
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "login_status",
+        "one_shot",
+        "structured_events",
+        "native_child_lineage",
+        "tool_events",
+        "usage_report",
+        "session_resume",
+        "interactive_approval",
+        "cancel",
+        "workspace_control",
+        "headless",
+        "supported_os",
+        "hook_channel"
+      ],
+      "properties": {
+        "login_status": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "one_shot": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "structured_events": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "native_child_lineage": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "tool_events": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "usage_report": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "session_resume": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "interactive_approval": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "cancel": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "workspace_control": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "headless": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "supported_os": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        },
+        "hook_channel": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "probe_required",
+            "unsupported"
+          ]
+        }
+      }
+    },
+    "probe": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "flags"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "enum": [
+              "login_status",
+              "one_shot",
+              "structured_events",
+              "native_child_lineage",
+              "tool_events",
+              "usage_report",
+              "session_resume",
+              "interactive_approval",
+              "cancel",
+              "workspace_control",
+              "headless",
+              "supported_os",
+              "hook_channel"
+            ]
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^--[a-z][a-z0-9-]{0,63}$"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "min_version": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+          }
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "needs_delivery"
+      ],
+      "properties": {
+        "needs_delivery": {
+          "type": "boolean"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage_quality"
+      ],
+      "properties": {
+        "usage_quality": {
+          "type": "string",
+          "enum": [
+            "reported",
+            "estimated",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spawn_only_declared_cli",
+        "read_provider_credentials",
+        "external_network_from_parser"
+      ],
+      "properties": {
+        "spawn_only_declared_cli": {
+          "const": true
+        },
+        "read_provider_credentials": {
+          "const": false
+        },
+        "external_network_from_parser": {
+          "const": false
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "review_date"
+      ],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "review_date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+        }
+      }
+    },
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^fixtures/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.jsonl$"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      }
+    },
+    "notes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "upgrade",
+        "rollback"
+      ],
+      "properties": {
+        "upgrade": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "rollback": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    }
+  }
+}

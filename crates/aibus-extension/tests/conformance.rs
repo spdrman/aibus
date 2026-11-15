@@ -310,6 +310,32 @@ mod labels {
         Declarative::new(a, m.normalizer.rule, q)
     }
 
+    /// #339 test gap: nothing pinned the declarative engine's `observe`. After the host shows it an
+    /// id from the store, whose clock may be ahead of this machine's, the ids it makes sort after.
+    #[test]
+    fn issue_339_the_declarative_engine_observes_ids_so_its_own_sort_after() {
+        let ahead_ms: u128 = (SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis())
+            + 3_600_000;
+        let seen = Uuid::from_u128((ahead_ms << 80) | (0x7 << 76) | (0x8 << 62));
+        let mut e = engine(UsageQuality::Reported);
+        e.observe(seen);
+        let first = e.stream_line(br#"{"type":"text"}"#, SystemTime::now());
+        let second = e.stream_line(br#"{"type":"text"}"#, SystemTime::now());
+        assert!(
+            first.events[0].event_id > seen,
+            "{} vs {seen}",
+            first.events[0].event_id
+        );
+        assert!(second.events[0].event_id > first.events[0].event_id);
+        // An older id does not pull the generator back.
+        e.observe(Uuid::from_u128((1u128 << 80) | (0x7 << 76) | (0x8 << 62)));
+        let third = e.stream_line(br#"{"type":"text"}"#, SystemTime::now());
+        assert!(third.events[0].event_id > second.events[0].event_id);
+    }
+
     #[test]
     fn evidence_refs_count_stdout_and_stderr_lines_separately() {
         let mut e = engine(UsageQuality::Reported);

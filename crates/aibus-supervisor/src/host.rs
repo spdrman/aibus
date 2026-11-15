@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use aibus_trace::{AttemptStatus, StoreError, TraceStore};
+use aibus_trace::{AttemptStatus, Batch, StoreError, TraceEvent, TraceStore};
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -150,6 +150,21 @@ fn signal_group(pid: Option<u32>, sig: rustix::process::Signal) {
     }
 }
 
+/// Appends `batch` and tells `norm` the last id the store holds, so the store's own events (its
+/// gaps) never tie with the normaliser's next id. A refusal ends the run with the store error;
+/// the store restores its state first, so nothing is dropped without a gap.
+fn put(
+    store: &mut TraceStore,
+    batch: Batch,
+    norm: &mut Normalizer,
+) -> Result<Vec<TraceEvent>, StoreError> {
+    let out = store.append(batch)?;
+    if let Some(id) = store.last_id() {
+        norm.observe(id);
+    }
+    Ok(out)
+}
+
 /// Runs one attempt: spawns the CLI in its own process group, writes the prompt, feeds every
 /// stdout and stderr line through `norm` into `store` as it arrives, and stops it on `cancel`, the
 /// wall-time limit or the output limit (SIGTERM to the group, then SIGKILL after `grace`). Returns
@@ -204,10 +219,18 @@ pub async fn supervise(
         }
     }
     let mut guard = GroupGuard(pid);
-    store.append(norm.start(
-        SystemTime::now(),
-        json!({ "executable": exe.display().to_string(), "pid": pid }),
-    ))?;
+    if let Some(id) = store.last_id() {
+        // Seed from the run, so this writer sorts after whatever is already in it.
+        norm.observe(id);
+    }
+    put(
+        store,
+        norm.start(
+            SystemTime::now(),
+            json!({ "executable": exe.display().to_string(), "pid": pid }),
+        ),
+        norm,
+    )?;
 
     if let Some(mut pipe) = child.stdin.take() {
         tokio::spawn(async move {
@@ -270,12 +293,12 @@ pub async fn supervise(
                 match piece {
                     None => open_pipes = 0,
                     Some(Piece::Eof) => open_pipes -= 1,
-                    Some(Piece::Line(Channel::Stdout, l)) => { store.append(norm.stream_line(&l, now))?; }
-                    Some(Piece::Line(_, l)) => { store.append(norm.stderr_line(&l, now))?; }
-                    Some(Piece::TooLong(ch, bytes)) => { store.append(norm.gap(ch, "line_too_long", bytes, now))?; }
+                    Some(Piece::Line(Channel::Stdout, l)) => { put(store, norm.stream_line(&l, now), norm)?; }
+                    Some(Piece::Line(_, l)) => { put(store, norm.stderr_line(&l, now), norm)?; }
+                    Some(Piece::TooLong(ch, bytes)) => { put(store, norm.gap(ch, "line_too_long", bytes, now), norm)?; }
                     Some(Piece::OutputLimit(bytes)) => {
                         open_pipes -= 1;
-                        store.append(norm.gap(Channel::Host, "output_limit", bytes, now))?;
+                        put(store, norm.gap(Channel::Host, "output_limit", bytes, now), norm)?;
                         if stopped.is_none() {
                             stopped = Some(Ending::OutputLimit);
                             kill_at = Some(tokio::time::Instant::now() + limits.grace);
@@ -389,14 +412,18 @@ pub async fn supervise(
             let mut gap = norm.gap(Channel::Host, "unread_after_exit", bytes, SystemTime::now());
             gap.events[0].data["lines"] = json!(lines);
             gap.events[0].data["bound"] = json!(if hit_bound { cap_name } else { "drain_stall" });
-            store.append(gap)?;
+            put(store, gap, norm)?;
         }
     }
     // Written once, here, however the read ended: a drain cut off before the pipe closed still
     // reports what was dropped so far (a lower bound, like the unread count).
     let dropped = stderr_dropped.load(Ordering::Relaxed);
     if dropped > 0 {
-        store.append(norm.gap(Channel::Stderr, "stderr_limit", dropped, SystemTime::now()))?;
+        put(
+            store,
+            norm.gap(Channel::Stderr, "stderr_limit", dropped, SystemTime::now()),
+            norm,
+        )?;
     }
     guard.0 = None;
 
@@ -412,10 +439,58 @@ pub async fn supervise(
             Ending::Signalled(0)
         }
     });
-    let written = store.append(norm.finish(ending, started.elapsed(), SystemTime::now()))?;
+    let written = put(
+        store,
+        norm.finish(ending, started.elapsed(), SystemTime::now()),
+        norm,
+    )?;
     let status = written
         .last()
         .and_then(|e| serde_json::from_value(e.data["status"].clone()).ok())
         .unwrap_or(AttemptStatus::Failed);
     Ok(Outcome { ending, status })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aibus_trace::{AttemptRef, PayloadPolicy, StoreLimits};
+    use std::time::Duration;
+
+    #[test]
+    fn put_keeps_the_normaliser_after_the_stores_own_gap_328() {
+        let tmp = tempfile::tempdir().unwrap();
+        let limits = StoreLimits {
+            soft_max_bytes: 0,
+            ..StoreLimits::default()
+        };
+        let (mut store, _) = TraceStore::open(
+            &tmp.path().join("run"),
+            aibus_core::Redactor::new(),
+            PayloadPolicy::MetadataOnly,
+            limits,
+        )
+        .unwrap();
+        let mut norm = Normalizer::new(AttemptRef {
+            workflow_run_id: uuid::Uuid::from_u128(1),
+            attempt_id: uuid::Uuid::from_u128(2),
+            parent_attempt_id: None,
+            provider_extension: "org.aibus.test".into(),
+        });
+        // In the past, so the store's gap (stamped with its own clock) lands in a later millisecond.
+        let then = SystemTime::now() - Duration::from_secs(5);
+        put(&mut store, norm.start(then, json!({})), &mut norm).unwrap();
+        // Past the soft limit a stderr warning is dropped and the store writes its own gap.
+        put(&mut store, norm.stderr_line(b"dropped", then), &mut norm).unwrap();
+        let gap = store.last_id().unwrap();
+        let gap_ms = gap.as_bytes()[..6]
+            .iter()
+            .fold(0u64, |a, x| a << 8 | u64::from(*x));
+        let next = norm.stderr_line(
+            b"next",
+            SystemTime::UNIX_EPOCH + Duration::from_millis(gap_ms),
+        );
+        // Time and counter, not the hash tail, put the next event after the gap.
+        assert!(next.events[0].event_id.as_bytes()[..8] > gap.as_bytes()[..8]);
+    }
 }

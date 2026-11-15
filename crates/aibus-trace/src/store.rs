@@ -84,6 +84,12 @@ pub enum StoreError {
     },
     /// An event whose id is not a uuid v7, the key the trace orders by.
     NotUuidV7(Uuid),
+    /// An event that would not sort after the last one written: the id space is exhausted (a
+    /// maximum id in the run) or a writer was not seeded from the store. Nothing is written.
+    OutOfOrder {
+        id: Uuid,
+        last: Uuid,
+    },
 }
 
 impl std::fmt::Display for StoreError {
@@ -101,6 +107,10 @@ impl std::fmt::Display for StoreError {
             Self::NotUuidV7(id) => write!(
                 f,
                 "event id {id} is not a uuid v7, and a trace orders by that id"
+            ),
+            Self::OutOfOrder { id, last } => write!(
+                f,
+                "event id {id} does not sort after {last}, the last id in the run"
             ),
         }
     }
@@ -135,6 +145,8 @@ pub struct TraceStore {
     limits: StoreLimits,
     /// Makes the ids of the store's own events, after every id seen so far.
     ids: EventIds,
+    /// The largest id written so far: every new id must sort after it.
+    last: Option<Uuid>,
     seen: HashSet<Uuid>,
     bytes: u64,
     payload_bytes: u64,
@@ -267,6 +279,7 @@ impl TraceStore {
             policy,
             limits,
             ids: last_id.map_or_else(EventIds::default, EventIds::after),
+            last: last_id,
             seen,
             bytes: good_len,
             payload_bytes: 0,
@@ -300,6 +313,16 @@ impl TraceStore {
         Ok((store, recovery))
     }
 
+    /// A generator seeded from the run: its next id sorts after every id the store holds.
+    pub fn ids(&self) -> EventIds {
+        self.ids
+    }
+
+    /// The largest id the store holds: every new event must sort after it.
+    pub fn last_id(&self) -> Option<Uuid> {
+        self.last
+    }
+
     /// An event about the trace itself (a repair, a budget), run-wide: the nil attempt.
     fn own_event(&mut self, kind: EventKind, visibility: Visibility, data: Value) -> TraceEvent {
         const PARSER: &str = "aibus-trace-store/1";
@@ -330,113 +353,144 @@ impl TraceStore {
     /// that is not a uuid v7 is refused (nothing from the batch is written), and an event whose id
     /// is already in the trace is skipped. Returns the events as written.
     pub fn append(&mut self, batch: Batch) -> Result<Vec<TraceEvent>, StoreError> {
-        let Batch { events, payload } = batch;
-        let mut keep: Vec<TraceEvent> = Vec::with_capacity(events.len());
-        let mut storage_gap = false;
-        if let Some(bad) = events.iter().find(|e| e.event_id.get_version_num() != 7) {
-            return Err(StoreError::NotUuidV7(bad.event_id));
-        }
-        for e in events {
-            if self.seen.contains(&e.event_id) || keep.iter().any(|k| k.event_id == e.event_id) {
-                continue;
+        // A refused batch changes nothing: the id generator, the gap flags and the payload count
+        // go back, so the next event still gets its gap instead of being dropped without one.
+        let saved = (
+            self.ids,
+            self.over_soft_limit,
+            self.payload_budget_gap,
+            self.payload_bytes,
+        );
+        let out = (|| {
+            let Batch { events, payload } = batch;
+            let mut keep: Vec<TraceEvent> = Vec::with_capacity(events.len());
+            let mut storage_gap = false;
+            if let Some(bad) = events.iter().find(|e| e.event_id.get_version_num() != 7) {
+                return Err(StoreError::NotUuidV7(bad.event_id));
             }
-            self.run.get_or_insert(e.workflow_run_id);
-            let droppable = matches!(
-                e.kind,
-                EventKind::MessageChunk | EventKind::UsageReported | EventKind::TraceWarning
-            );
-            if droppable && self.bytes >= self.limits.soft_max_bytes {
-                if !self.over_soft_limit {
-                    self.over_soft_limit = true;
-                    storage_gap = true;
+            for e in events {
+                if self.seen.contains(&e.event_id) || keep.iter().any(|k| k.event_id == e.event_id)
+                {
+                    continue;
                 }
-                continue;
+                self.run.get_or_insert(e.workflow_run_id);
+                let droppable = matches!(
+                    e.kind,
+                    EventKind::MessageChunk | EventKind::UsageReported | EventKind::TraceWarning
+                );
+                if droppable && self.bytes >= self.limits.soft_max_bytes {
+                    if !self.over_soft_limit {
+                        self.over_soft_limit = true;
+                        storage_gap = true;
+                    }
+                    continue;
+                }
+                keep.push(e);
             }
-            keep.push(e);
-        }
-        // The store's own events go after everything in this batch, in the id order as well.
-        for e in &keep {
-            self.ids.observe(e.event_id);
-        }
-        if storage_gap {
-            let soft = self.limits.soft_max_bytes;
-            keep.push(self.own_event(
-                EventKind::GapDetected,
-                Visibility::Unavailable,
-                json!({ "reason": "storage_limit", "soft_max_bytes": soft }),
-            ));
-        }
-        if keep.is_empty() {
-            return Ok(keep);
-        }
+            // The store's own events go after everything in this batch, in the id order as well.
+            for e in &keep {
+                self.ids.observe(e.event_id);
+            }
+            if storage_gap {
+                let soft = self.limits.soft_max_bytes;
+                keep.push(self.own_event(
+                    EventKind::GapDetected,
+                    Visibility::Unavailable,
+                    json!({ "reason": "storage_limit", "soft_max_bytes": soft }),
+                ));
+            }
+            if keep.is_empty() {
+                return Ok(keep);
+            }
 
-        let payload_ref = match (payload, self.policy) {
-            (Some(mut p), PayloadPolicy::Retain { max_bytes }) => {
-                self.redactor.redact_json(&mut p);
-                let body = serde_json::to_vec(&p).map_err(io::Error::other)?;
-                if self.payload_bytes + body.len() as u64 > max_bytes {
-                    if !self.payload_budget_gap {
-                        self.payload_budget_gap = true;
-                        keep.push(self.own_event(
+            let payload_ref = match (payload, self.policy) {
+                (Some(mut p), PayloadPolicy::Retain { max_bytes }) => {
+                    self.redactor.redact_json(&mut p);
+                    let body = serde_json::to_vec(&p).map_err(io::Error::other)?;
+                    if self.payload_bytes + body.len() as u64 > max_bytes {
+                        if !self.payload_budget_gap {
+                            self.payload_budget_gap = true;
+                            keep.push(self.own_event(
                             EventKind::GapDetected,
                             Visibility::Unavailable,
                             json!({ "reason": "payload_budget_exhausted", "max_bytes": max_bytes }),
                         ));
+                        }
+                        None
+                    } else {
+                        let hash = sha256_hex(&body);
+                        let objects = self.dir.join("objects");
+                        private_dir(&objects)?;
+                        let path = objects.join(format!("{hash}.json"));
+                        if !path.exists() {
+                            write_atomic(&path, &body)?;
+                            self.payload_bytes += body.len() as u64;
+                        }
+                        Some(format!("local://objects/{hash}.json"))
                     }
-                    None
-                } else {
-                    let hash = sha256_hex(&body);
-                    let objects = self.dir.join("objects");
-                    private_dir(&objects)?;
-                    let path = objects.join(format!("{hash}.json"));
-                    if !path.exists() {
-                        write_atomic(&path, &body)?;
-                        self.payload_bytes += body.len() as u64;
-                    }
-                    Some(format!("local://objects/{hash}.json"))
                 }
-            }
-            _ => None,
-        };
+                _ => None,
+            };
 
-        let mut out = Vec::with_capacity(keep.len());
-        let mut buf = Vec::new();
-        for mut e in keep {
-            if e.payload_ref.is_none() && e.origin != Origin::Derived {
-                e.payload_ref.clone_from(&payload_ref);
-            }
-            self.redactor.redact_json(&mut e.data);
-            // The ids come from the CLI's stream too: same redaction as the data.
-            for id in [
-                &mut e.agent_id,
-                &mut e.parent_agent_id,
-                &mut e.parent_tool_use_id,
-                &mut e.native.session_id,
-                &mut e.native.tool_use_id,
-                &mut e.native.native_type,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                if let Cow::Owned(clean) = self.redactor.redact(id) {
-                    *id = clean;
+            let mut prev = self.last;
+            for e in &keep {
+                if let Some(p) = prev.filter(|p| e.event_id <= *p) {
+                    return Err(StoreError::OutOfOrder {
+                        id: e.event_id,
+                        last: p,
+                    });
                 }
+                prev = Some(e.event_id);
             }
-            let mut line = serde_json::to_vec(&e).map_err(io::Error::other)?;
-            if line.len() >= self.limits.max_event_bytes {
-                e.data = json!({ "truncated": true, "bytes": line.len() });
-                e.evidence_refs.truncate(8);
-                line = serde_json::to_vec(&e).map_err(io::Error::other)?;
+            self.last = prev;
+            let mut out = Vec::with_capacity(keep.len());
+            let mut buf = Vec::new();
+            for mut e in keep {
+                if e.payload_ref.is_none() && e.origin != Origin::Derived {
+                    e.payload_ref.clone_from(&payload_ref);
+                }
+                self.redactor.redact_json(&mut e.data);
+                // The ids come from the CLI's stream too: same redaction as the data.
+                for id in [
+                    &mut e.agent_id,
+                    &mut e.parent_agent_id,
+                    &mut e.parent_tool_use_id,
+                    &mut e.native.session_id,
+                    &mut e.native.tool_use_id,
+                    &mut e.native.native_type,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if let Cow::Owned(clean) = self.redactor.redact(id) {
+                        *id = clean;
+                    }
+                }
+                let mut line = serde_json::to_vec(&e).map_err(io::Error::other)?;
+                if line.len() >= self.limits.max_event_bytes {
+                    e.data = json!({ "truncated": true, "bytes": line.len() });
+                    e.evidence_refs.truncate(8);
+                    line = serde_json::to_vec(&e).map_err(io::Error::other)?;
+                }
+                line.push(b'\n');
+                buf.extend_from_slice(&line);
+                self.seen.insert(e.event_id);
+                out.push(e);
             }
-            line.push(b'\n');
-            buf.extend_from_slice(&line);
-            self.seen.insert(e.event_id);
-            out.push(e);
+            self.file.write_all(&buf)?;
+            self.file.sync_data()?;
+            self.bytes += buf.len() as u64;
+            Ok(out)
+        })();
+        if matches!(out, Err(StoreError::OutOfOrder { .. })) {
+            (
+                self.ids,
+                self.over_soft_limit,
+                self.payload_budget_gap,
+                self.payload_bytes,
+            ) = saved;
         }
-        self.file.write_all(&buf)?;
-        self.file.sync_data()?;
-        self.bytes += buf.len() as u64;
-        Ok(out)
+        out
     }
 
     /// Every event in a run directory, in event id order, without taking the lock. `position` is

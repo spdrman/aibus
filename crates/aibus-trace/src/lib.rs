@@ -248,9 +248,13 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// Makes uuid v7 event ids that never go backwards: the same millisecond (or a clock that steps
 /// back) bumps a 12-bit counter in `rand_a`, so two events made in one millisecond still sort in
 /// the order they were made, and a full counter moves on to the next millisecond. The rest of the
-/// id is a hash of `parts`, so the same raw line in the same attempt at the same time gets the same
-/// id and appending it twice is a no-op. The counter only breaks ties inside one writer; the order
-/// of a trace is the id.
+/// id is a hash of `parts`. A fresh generator given the same `parts` and the same time makes the
+/// same id, so normalising the same lines again from the start gives the same ids and the store
+/// keeps one of each (idempotent append is keyed on the id). That does not hold for one generator
+/// fed the same line twice, nor for one seeded from a store (`TraceStore::ids`): each moves on and
+/// makes a new id. The counter only breaks ties inside one writer; the order of a trace is the id.
+/// The time saturates at 2^48 - 1 (a planted maximum id) with a full counter, it never wraps to 0;
+/// the store then refuses an id that does not sort after the last one (`StoreError::OutOfOrder`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EventIds {
     ms: u64,
@@ -284,7 +288,11 @@ impl EventIds {
         if at_ms > self.ms {
             (self.ms, self.counter) = (at_ms, 0);
         } else if self.counter == 0x0fff {
-            (self.ms, self.counter) = (self.ms + 1, 0);
+            // At the very top of the 48-bit range there is no next millisecond: stay put (the ids
+            // then tie on time and counter and order by their hash) rather than wrap to time 0.
+            if self.ms < 0xffff_ffff_ffff {
+                (self.ms, self.counter) = (self.ms + 1, 0);
+            }
         } else {
             self.counter += 1;
         }

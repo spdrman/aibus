@@ -76,6 +76,8 @@ pub struct Options {
     pub oauth_providers: Vec<String>,
     /// Where `/workflow list`, `show` and `save` find the files. Without it they do nothing.
     pub workflows: Option<crate::workflows::WorkflowFiles>,
+    /// Where `/runs` reads recorded runs (`<state>/traces`). Without it `/runs` does nothing.
+    pub recorded: Option<PathBuf>,
 }
 
 /// Validates the agent definition `name` (at `path`, if it has a file) and says what it found.
@@ -410,6 +412,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let mut writer = opts.writer.take();
     let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
     let workflows = opts.workflows.take();
+    let recorded = opts.recorded.take();
     let mut input = Input::default();
     input.oauth_providers = std::mem::take(&mut opts.oauth_providers);
     let mut ctrl_c = CtrlC::default();
@@ -477,10 +480,11 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                 let mut step = |app: &mut App<G>, m: Msg| -> Result<(), AibusError> {
                     user(&m);
                     // A workflow file command is answered with what the files say.
-                    let answer = match (&m, &workflows) {
-                        (Msg::Command(Command::WorkflowFile(op)), Some(files)) => {
+                    let answer = match (&m, &workflows, &recorded) {
+                        (Msg::Command(Command::WorkflowFile(op)), Some(files), _) => {
                             crate::workflows::apply(op, app, files, std::time::SystemTime::now())
                         }
+                        (Msg::Command(Command::Runs(q)), _, Some(root)) => crate::runs::apply(q, root),
                         _ => Vec::new(),
                     };
                     step_written(app, &mut writer, m)?;

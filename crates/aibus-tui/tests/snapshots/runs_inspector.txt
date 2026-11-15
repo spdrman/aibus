@@ -1,0 +1,40 @@
+                                              AIBUS   ·   SONNET 5.5 LEADS
+──┌ 11-foreground.hooks: a51dc098ebaef1926 ──────────────────────────────────────────────────────────────────────────┐──
+  │ agent a51dc098ebaef1926                                                                                          │
+ ┌│   attempt 00000000-0000-0000-0000-000002820002                                                                   │
+ ││   role reader-a                                                                                                  │
+ ││   status completed                                                                                               │
+ ││   parent 20d7adb0-33a7-4cb1-b8b8-661dcf32e384                                                                    │
+ ││   edge observed cross-checked (cli_stream, hook) via toolu_01Mogri4cjssotDxPiAw6PWk sources #3 observed/cli_str… │
+ ││   elapsed 2.618 s (derived from aibus's clock, first to last event)                                              │
+ ││   prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)                       │
+ ││   messages 2 observed                                                                                            │
+ ││   messages: text not retained (a metadata-only trace; payloads are kept only when asked for)                     │
+ ││   usage total_tokens 2522 tokens (reported, task_notification.usage)                                             │
+ ││   usage tool_uses 1 calls (reported, task_notification.usage)                                                    │
+ ││   usage duration_ms 1561 ms (reported, task_notification.usage)                                                  │
+ ││   tool toolu_01JeiGnoxNemZFWUdfSfJttH Read: completed  [observed 2, correlated 2]                                │
+ ││   permission events: none recorded                                                                               │
+ ││   gap #18 reasoning_not_exposed (unavailable)                                                                    │
+ ││   evidence (open one with --event <sequence>):                                                                   │
+ ││   #4 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:9… │
+ ││   #5 message_chunk observed cli_stream native user parser claude-code-stream-json/1 raw sha256:fe51940d1c8dabc1… │
+ ││   #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:a2640ad8e70b… │
+ ││   #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:850b55a53d31fd… │
+ ││   #18 gap_detected unavailable cli_stream native assistant parser claude-code-stream-json/1 raw sha256:79a41e4f… │
+ ││   #19 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:7dedc5b4fd… │
+ ││   #20 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:… │
+ ││   #21 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sh… │
+ ││   #22 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw s… │
+ ││   #23 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:78176b033de9bea… │
+ ││   #28 agent_started correlated hook native hook/SubagentStart parser claude-code-stream-json/1 raw sha256:a354b… │
+ ││   #31 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:827942927… │
+ └│   #32 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:811bcb… │
+┌ │   #37 agent_stopped correlated hook native hook/SubagentStop parser claude-code-stream-json/1 raw sha256:8b6491… │─┐
+│ │   #38 agent_stopped correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:a6690e8… │ │
+│ │                                                                                                                  │ │
+│ │                                                                                                                  │ │
+│ │ lines 1-32 of 32   Up/Down, PgUp/PgDn, g/G to scroll                                                             │ │
+└─│  [Esc] Close                                                                                                     │─┘
+ ~└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  swarm [idle]   subagents [0/0]   opus [on call]   jev [ 0 forks]

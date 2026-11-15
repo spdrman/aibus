@@ -150,6 +150,7 @@ Everything below is typed in the prompt line of the dashboard. `/` and then `Tab
 | `/quit` |  | quit | no |
 | `/exit` |  | quit (same as /quit) | no |
 | `/q` |  | quit (same as /quit) | no |
+| `/runs` | `[inspect <run> [<node>] \| replay <run>]` | recorded runs of an external CLI: the list, one run's graph and timeline, a node's inspector, the offline replay | no |
 <!-- aibus:commands:end -->
 
 The ones that act on a run take an optional `@target` first: `@lead`, `@advisor` or `@router`, an agent name for its newest run (`@grep`), or a prefix of a run id. With no target they act on the focused card, and on the lead when no card is focused.

@@ -1,0 +1,194 @@
+run 07-deleg.hooks
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 42 events, observed 2026-11-14T21:17:59.020Z to 2026-11-14T21:18:04.479Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 completed  [observed 2]
+  usage input_tokens 2 tokens (reported, result.usage)
+  usage output_tokens 18 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 709 tokens (reported, result.usage)
+  usage cache_read_input_tokens 8963 tokens (reported, result.usage)
+  usage num_turns 1 turns (reported, result.num_turns)
+  usage duration_ms 702 ms (reported, result.duration_ms)
+  usage cost_usd 0.003142075 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 66c1b90b-108d-44ea-93e8-7ca746d289c7 lead, process_exited  messages 3 observed  [observed 2, correlated 1]
+  | agent a1d31999c4945865c reader-a, async_launched  messages 1 observed  [observed 4, correlated 3]
+  |   edge observed cross-checked (cli_stream, hook) via toolu_01GxrovGWcky9zgEdL347ku5 sources #3 observed/cli_stream #4 observed/cli_stream #29 correlated/hook #30 correlated/hook
+  | | tool toolu_014p7gutMk723YoqaPent2Hy Read: completed  [observed 2, correlated 2]
+  | agent a2b043bb27fdf0eb2 reader-b, async_launched  messages 1 observed  [observed 4, correlated 3]
+  |   edge observed cross-checked (cli_stream, hook) via toolu_01R6F1drv5h48J2yGbxWSEwx sources #6 observed/cli_stream #7 observed/cli_stream #32 correlated/hook #33 correlated/hook
+  | | tool toolu_017Hoc9YLFJ4qe3rMaVk5zDL Read: completed  [observed 2, correlated 2]
+gaps (what the trace does not show)
+  #22 reasoning_not_exposed (unavailable) attempt 00000000-0000-0000-0000-000002820002
+timeline (sequence, observed by aibus, reported by the vendor, kind, level, origin)
+#1 2026-11-14T21:17:59.020Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:17:59.236Z - agent_started observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 role=lead
+#3 2026-11-14T21:18:00.338Z 2026-11-14T21:18:00.335Z task_delegated observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 tool_use=toolu_01GxrovGWcky9zgEdL347ku5 tool=Agent subagent_type=reader-a
+#4 2026-11-14T21:18:00.377Z - agent_started observed cli_stream agent=a1d31999c4945865c tool_use=toolu_01GxrovGWcky9zgEdL347ku5 subagent_type=reader-a
+#5 2026-11-14T21:18:00.394Z 2026-11-14T21:18:00.394Z agent_stopped observed cli_stream agent=a1d31999c4945865c tool_use=toolu_01GxrovGWcky9zgEdL347ku5 status=async_launched
+#6 2026-11-14T21:18:00.617Z 2026-11-14T21:18:00.616Z task_delegated observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 tool_use=toolu_01R6F1drv5h48J2yGbxWSEwx tool=Agent subagent_type=reader-b
+#7 2026-11-14T21:18:00.637Z - agent_started observed cli_stream agent=a2b043bb27fdf0eb2 tool_use=toolu_01R6F1drv5h48J2yGbxWSEwx subagent_type=reader-b
+#8 2026-11-14T21:18:00.653Z 2026-11-14T21:18:00.653Z agent_stopped observed cli_stream agent=a2b043bb27fdf0eb2 tool_use=toolu_01R6F1drv5h48J2yGbxWSEwx status=async_launched
+#9 2026-11-14T21:18:01.280Z 2026-11-14T21:18:01.279Z tool_started observed cli_stream agent=a1d31999c4945865c tool_use=toolu_014p7gutMk723YoqaPent2Hy tool=Read
+#10 2026-11-14T21:18:01.329Z 2026-11-14T21:18:01.328Z tool_completed observed cli_stream agent=a1d31999c4945865c tool_use=toolu_014p7gutMk723YoqaPent2Hy
+#11 2026-11-14T21:18:01.376Z 2026-11-14T21:18:01.376Z message_chunk observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 role=assistant
+#12 2026-11-14T21:18:01.458Z 2026-11-14T21:18:01.458Z tool_started observed cli_stream agent=a2b043bb27fdf0eb2 tool_use=toolu_017Hoc9YLFJ4qe3rMaVk5zDL tool=Read
+#13 2026-11-14T21:18:01.485Z 2026-11-14T21:18:01.485Z tool_completed observed cli_stream agent=a2b043bb27fdf0eb2 tool_use=toolu_017Hoc9YLFJ4qe3rMaVk5zDL
+#14 2026-11-14T21:18:01.874Z 2026-11-14T21:18:01.874Z message_chunk observed cli_stream agent=a1d31999c4945865c role=assistant
+#15 2026-11-14T21:18:01.902Z 2026-11-14T21:18:01.902Z agent_stopped observed cli_stream agent=a1d31999c4945865c status=completed corroborates
+#16 2026-11-14T21:18:01.902Z - agent_stopped observed cli_stream agent=a1d31999c4945865c status=completed corroborates
+#17 2026-11-14T21:18:01.902Z - usage_reported observed cli_stream agent=a1d31999c4945865c scope=agent
+#18 2026-11-14T21:18:01.958Z 2026-11-14T21:18:01.959Z message_chunk observed cli_stream agent=a2b043bb27fdf0eb2 role=assistant
+#19 2026-11-14T21:18:01.977Z 2026-11-14T21:18:01.977Z agent_stopped observed cli_stream agent=a2b043bb27fdf0eb2 status=completed corroborates
+#20 2026-11-14T21:18:01.977Z - agent_stopped observed cli_stream agent=a2b043bb27fdf0eb2 status=completed corroborates
+#21 2026-11-14T21:18:01.977Z - usage_reported observed cli_stream agent=a2b043bb27fdf0eb2 scope=agent
+#22 2026-11-14T21:18:02.934Z 2026-11-14T21:18:02.934Z gap_detected unavailable cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 reason=reasoning_not_exposed
+#23 2026-11-14T21:18:03.083Z 2026-11-14T21:18:03.083Z message_chunk observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 role=assistant
+#24 2026-11-14T21:18:03.114Z - usage_reported observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 scope=attempt
+#25 2026-11-14T21:18:03.114Z - usage_reported observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 scope=attempt
+#26 2026-11-14T21:18:03.789Z 2026-11-14T21:18:03.788Z message_chunk observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 role=assistant
+#27 2026-11-14T21:18:03.817Z - usage_reported observed cli_stream agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 scope=attempt
+#28 2026-11-14T21:18:04.479Z - agent_started correlated hook agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 role=lead corroborates
+#29 2026-11-14T21:18:04.479Z - task_delegated correlated hook agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 tool_use=toolu_01GxrovGWcky9zgEdL347ku5 tool=Agent subagent_type=reader-a corroborates
+#30 2026-11-14T21:18:04.479Z - agent_started correlated hook agent=a1d31999c4945865c subagent_type=reader-a corroborates
+#31 2026-11-14T21:18:04.479Z - agent_stopped correlated hook agent=a1d31999c4945865c tool_use=toolu_01GxrovGWcky9zgEdL347ku5 status=async_launched corroborates
+#32 2026-11-14T21:18:04.479Z - task_delegated correlated hook agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 tool_use=toolu_01R6F1drv5h48J2yGbxWSEwx tool=Agent subagent_type=reader-b corroborates
+#33 2026-11-14T21:18:04.479Z - agent_started correlated hook agent=a2b043bb27fdf0eb2 subagent_type=reader-b corroborates
+#34 2026-11-14T21:18:04.479Z - agent_stopped correlated hook agent=a2b043bb27fdf0eb2 tool_use=toolu_01R6F1drv5h48J2yGbxWSEwx status=async_launched corroborates
+#35 2026-11-14T21:18:04.479Z - tool_started correlated hook agent=a1d31999c4945865c tool_use=toolu_014p7gutMk723YoqaPent2Hy tool=Read corroborates
+#36 2026-11-14T21:18:04.479Z - tool_completed correlated hook agent=a1d31999c4945865c tool_use=toolu_014p7gutMk723YoqaPent2Hy tool=Read corroborates
+#37 2026-11-14T21:18:04.479Z - tool_started correlated hook agent=a2b043bb27fdf0eb2 tool_use=toolu_017Hoc9YLFJ4qe3rMaVk5zDL tool=Read corroborates
+#38 2026-11-14T21:18:04.479Z - tool_completed correlated hook agent=a2b043bb27fdf0eb2 tool_use=toolu_017Hoc9YLFJ4qe3rMaVk5zDL tool=Read corroborates
+#39 2026-11-14T21:18:04.479Z - agent_stopped correlated hook agent=a1d31999c4945865c status=stopped corroborates
+#40 2026-11-14T21:18:04.479Z - agent_stopped correlated hook agent=a2b043bb27fdf0eb2 status=stopped corroborates
+#41 2026-11-14T21:18:04.479Z - agent_stopped observed aibus_scheduler agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 status=process_exited
+#42 2026-11-14T21:18:04.479Z - attempt_completed observed aibus_scheduler agent=66c1b90b-108d-44ea-93e8-7ca746d289c7 status=completed reason=completed
+
+inspect 66c1b90b-108d-44ea-93e8-7ca746d289c7
+agent 66c1b90b-108d-44ea-93e8-7ca746d289c7
+  attempt 00000000-0000-0000-0000-000002820002
+  role lead
+  status process_exited
+  parent none: the lead is the process aibus started
+  delegated to a1d31999c4945865c (observed), a2b043bb27fdf0eb2 (observed)
+  elapsed 5.243 s (derived from aibus's clock, first to last event)
+  model claude-haiku-5-5 (reported)
+  cli_version 2.1.311 (reported)
+  permission_mode default (reported)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 3 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage: not reported for this agent (unknown)
+  tools: none recorded
+  permission events: none recorded
+  gap #22 reasoning_not_exposed (unavailable)
+  evidence (open one with --event <sequence>):
+  #2 agent_started observed cli_stream native system/init parser claude-code-stream-json/1 raw sha256:956dc3fe8a7098365a3fe2de53be79804985bb202a5af2d2ff325bd2ab4f6c8e payload -
+  #3 task_delegated observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:ef2ba6af9570f26c749132b0da70873ffb8d5094fbab305102503ff9e58bad69 payload -
+  #6 task_delegated observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:d667a193c40fe1170031c7b8a49be6667c9b8209b88ffc466d8af461d5bb2270 payload -
+  #11 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:b02a770e72864e8251e5e9a798bf40d5aa603df7eeaf51ce733ba4c0eb123e66 payload -
+  #22 gap_detected unavailable cli_stream native assistant parser claude-code-stream-json/1 raw sha256:a22fd9a34b910e416607bf9cb70f667088942cf76396ced1274e39577fbab5ea payload -
+  #23 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:634e1d84b8a2894bf3889dd9978de4272829a827a9cc319f76395cabd42c9f77 payload -
+  #24 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:1e7ecdba12f504da3dad39f8a502f76f047b8d155dc032a81ff9f63609a0907f payload -
+  #25 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:53ed5f011a811c5bca3b689d730bf9f71a67c6fbc4de5cfb65306251a4f98490 payload -
+  #26 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:c4dd1e7ece70cad3b2da60f0f44389373af12ebee553b2437deb069004e29bac payload -
+  #27 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:a83f9f4bfb5f1d7402f2f201d3e5e28ca99cc2f74d5ce594ade377802451636a payload -
+  #28 agent_started correlated hook native hook/SessionStart parser claude-code-stream-json/1 raw sha256:52f3276630bb8a2c3de0f4735b6c281738ff3938414b0990fd20567d1f28fb5a payload - confirms #2
+  #29 task_delegated correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:fcb4426dd2a0c4b81b15a3bfe811d2e0d2daad31c0d24848134a9cb1b860659e payload - confirms #3
+  #32 task_delegated correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:a2ee6a18e2c3b23d90403755f4aca85155e01a69d4da3ae10f5ae463d849d2a3 payload - confirms #6
+  #41 agent_stopped observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+  #42 attempt_completed observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+
+inspect a1d31999c4945865c
+agent a1d31999c4945865c
+  attempt 00000000-0000-0000-0000-000002820002
+  role reader-a
+  status async_launched
+  parent 66c1b90b-108d-44ea-93e8-7ca746d289c7
+  edge observed cross-checked (cli_stream, hook) via toolu_01GxrovGWcky9zgEdL347ku5 sources #3 observed/cli_stream #4 observed/cli_stream #29 correlated/hook #30 correlated/hook
+  elapsed 4.102 s (derived from aibus's clock, first to last event)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage total_tokens 2315 tokens (reported, task_notification.usage)
+  usage tool_uses 1 calls (reported, task_notification.usage)
+  usage duration_ms 1536 ms (reported, task_notification.usage)
+  tool toolu_014p7gutMk723YoqaPent2Hy Read: completed  [observed 2, correlated 2]
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #4 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:4a9ad61cf57aab26dc2c94e5c9fdcc157cca7703c47a59d65237f49e39841d2b payload -
+  #5 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:037b8556ed44c6e0ad3789fc9b45330f2f955cadb73fef9f2ff5fbb567df7891 payload -
+  #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:2a2aeb6f51c7d47024033b7146f0a9c9e020ca4ad219e0fa23243175342a27e1 payload -
+  #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:f7b4ad16ed0cb94653beaa97caa1e451ff71acb5db2cbdc6fe2f29e546b9be7b payload -
+  #14 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:5d82972f88b20bfe1028a4a5af22082a3dc3e13d78d0d20bd38360ad800f8415 payload -
+  #15 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:b6802f298ff0c6989b340d42624014d7e42d1da214441a1beab69b1ef792a4b6 payload - confirms #5
+  #16 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:f492f1a6c2931f7cb2131e8ee1110fcbe1d956bfc0bd770189e985b5cb45e7e0 payload - confirms #5
+  #17 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:f492f1a6c2931f7cb2131e8ee1110fcbe1d956bfc0bd770189e985b5cb45e7e0 payload -
+  #30 agent_started correlated hook native hook/SubagentStart parser claude-code-stream-json/1 raw sha256:af63f845512206ba894d626bd19f5185ade81fa6746e030006c60318915312af payload - confirms #4
+  #31 agent_stopped correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:324267d5b22e35ed0ab2f9935739360bc9584fd8576e5ab9b6a41140c0023de4 payload - confirms #5
+  #35 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:33b5243cb048165955e965b5e7e70f29d5dfa43f3ed5b3679c09e677df808a59 payload - confirms #9
+  #36 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:29a677cd7fb2ff41265dfb92025af81cb8631d27f758595bdb59095a29b52641 payload - confirms #10
+  #39 agent_stopped correlated hook native hook/SubagentStop parser claude-code-stream-json/1 raw sha256:30f773bf45a14e91f86b0549e116b584559e78c5348b499e876e055654e2c1dc payload - confirms #5
+
+inspect a2b043bb27fdf0eb2
+agent a2b043bb27fdf0eb2
+  attempt 00000000-0000-0000-0000-000002820002
+  role reader-b
+  status async_launched
+  parent 66c1b90b-108d-44ea-93e8-7ca746d289c7
+  edge observed cross-checked (cli_stream, hook) via toolu_01R6F1drv5h48J2yGbxWSEwx sources #6 observed/cli_stream #7 observed/cli_stream #32 correlated/hook #33 correlated/hook
+  elapsed 3.842 s (derived from aibus's clock, first to last event)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage total_tokens 2310 tokens (reported, task_notification.usage)
+  usage tool_uses 1 calls (reported, task_notification.usage)
+  usage duration_ms 1342 ms (reported, task_notification.usage)
+  tool toolu_017Hoc9YLFJ4qe3rMaVk5zDL Read: completed  [observed 2, correlated 2]
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #7 agent_started observed cli_stream native system/task_started parser claude-code-stream-json/1 raw sha256:092e2ab5868c2bdaaaf97755ba608ca51c16befb37364e5b04f5d6061626b59f payload -
+  #8 agent_stopped observed cli_stream native user parser claude-code-stream-json/1 raw sha256:27997f1dfffb0851c5b99c607a3a9728ac51e200959b778b9c7c3aae1ce5d8d6 payload -
+  #12 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:180510009e58b91509af44a1c2f0ef6d753d372c31ad7e05c3546b716a0ad668 payload -
+  #13 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:613d9127d78501772c8eb96b9acd776ab7b82b9632145eb43dd3c237cdc941a1 payload -
+  #18 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:a567ac839fbd36954a60da46d0852e2c035c9f12bcbdc150753160b953ed4428 payload -
+  #19 agent_stopped observed cli_stream native system/task_updated parser claude-code-stream-json/1 raw sha256:b8c7ce767a3046cacd7738e3d796dffaf9d9275bd1b6b68c383e68033d3713e4 payload - confirms #8
+  #20 agent_stopped observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:a1e8b55bfe0d4b6a9bb23bf6eaf0ffbe641e899120683db32b96f0f3c6a38bf9 payload - confirms #8
+  #21 usage_reported observed cli_stream native system/task_notification parser claude-code-stream-json/1 raw sha256:a1e8b55bfe0d4b6a9bb23bf6eaf0ffbe641e899120683db32b96f0f3c6a38bf9 payload -
+  #33 agent_started correlated hook native hook/SubagentStart parser claude-code-stream-json/1 raw sha256:4fa80b49258fd1d1c55d0da727244fc776c5acedffa95eb812e3726e113dbb73 payload - confirms #7
+  #34 agent_stopped correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:a477732022337465a1850d7431636b8c918d7e01fcbb1f574cbaf2d6a5ed9dbf payload - confirms #8
+  #37 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:b93ed5d7f0a2e040cb01c8624acb4ae5984de18269701f8cae64275e5f81786c payload - confirms #12
+  #38 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:c180eb53d9dd96af66744ed5b1c9ce04e9cb9f7f730ce7a70531c5d653f3b99b payload - confirms #13
+  #40 agent_stopped correlated hook native hook/SubagentStop parser claude-code-stream-json/1 raw sha256:00c064fa762258c86c7f94b8e6ce282701cf09d8c2884abd22fc31a85e944df5 payload - confirms #8
+
+inspect toolu_014p7gutMk723YoqaPent2Hy
+tool toolu_014p7gutMk723YoqaPent2Hy Read: completed  [observed 2, correlated 2]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent a1d31999c4945865c
+  elapsed 3.199 s (derived from aibus's clock, first to last event)
+  input and output: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #9 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:2a2aeb6f51c7d47024033b7146f0a9c9e020ca4ad219e0fa23243175342a27e1 payload -
+  #10 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:f7b4ad16ed0cb94653beaa97caa1e451ff71acb5db2cbdc6fe2f29e546b9be7b payload -
+  #35 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:33b5243cb048165955e965b5e7e70f29d5dfa43f3ed5b3679c09e677df808a59 payload - confirms #9
+  #36 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:29a677cd7fb2ff41265dfb92025af81cb8631d27f758595bdb59095a29b52641 payload - confirms #10
+
+inspect toolu_017Hoc9YLFJ4qe3rMaVk5zDL
+tool toolu_017Hoc9YLFJ4qe3rMaVk5zDL Read: completed  [observed 2, correlated 2]
+  attempt 00000000-0000-0000-0000-000002820002
+  agent a2b043bb27fdf0eb2
+  elapsed 3.021 s (derived from aibus's clock, first to last event)
+  input and output: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #12 tool_started observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:180510009e58b91509af44a1c2f0ef6d753d372c31ad7e05c3546b716a0ad668 payload -
+  #13 tool_completed observed cli_stream native user parser claude-code-stream-json/1 raw sha256:613d9127d78501772c8eb96b9acd776ab7b82b9632145eb43dd3c237cdc941a1 payload -
+  #37 tool_started correlated hook native hook/PreToolUse parser claude-code-stream-json/1 raw sha256:b93ed5d7f0a2e040cb01c8624acb4ae5984de18269701f8cae64275e5f81786c payload - confirms #12
+  #38 tool_completed correlated hook native hook/PostToolUse parser claude-code-stream-json/1 raw sha256:c180eb53d9dd96af66744ed5b1c9ce04e9cb9f7f730ce7a70531c5d653f3b99b payload - confirms #13

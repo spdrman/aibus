@@ -6,8 +6,8 @@ use aibus_core::state::store::{Row, Store};
 use aibus_core::state::value::{as_i64, as_list, as_str, get, list, map, n, s};
 use aibus_core::state::{
     router_last, run_key, transcript_body, ADVISOR_STATE, AGENTS_DEFS, AGENTS_WARNINGS, ACCOUNTS, CLOCK_MS, MODAL,
-    PALETTE_TEXT, PERMISSIONS_OPEN, ROUTER_FORKS, RUNS_ORDER, SCREEN_SEL, SESSION_ASSIST, SIZE, TRANSCRIPT_UI, WORKFLOWS,
-    WORKFLOW_SHOWN,
+    PALETTE_TEXT, PERMISSIONS_OPEN, RECORDED_SHOWN, ROUTER_FORKS, RUNS_ORDER, SCREEN_SEL, SESSION_ASSIST, SIZE,
+    TRANSCRIPT_UI, WORKFLOWS, WORKFLOW_SHOWN,
 };
 use aibus_core::{ModelTarget, RunStatus};
 use aibus_graph::{Tracker, Value};
@@ -160,8 +160,9 @@ pub fn agents(store: &Store, t: &mut Tracker) -> Value {
     ])
 }
 
-/// `view:workflows`: the rows of `/workflow list` with the selection, or the text of `/workflow
-/// show` as lines with its summary. Null unless one of those two modals is open.
+/// `view:workflows`: the rows of `/workflow list` with the selection, the text of `/workflow
+/// show` as lines with its summary, or the text `/runs` read. Null unless one of those modals is
+/// open.
 pub fn workflows(store: &Store, t: &mut Tracker) -> Value {
     let modal = t.get_key(MODAL).and_then(as_str).map(str::to_owned);
     match modal.as_deref() {
@@ -176,6 +177,22 @@ pub fn workflows(store: &Store, t: &mut Tracker) -> Value {
             let word = |k: &str| get(&shown, k).cloned().unwrap_or_else(|| s(""));
             let lines: Vec<Value> = body.lines().take(400).map(s).collect();
             map([("name", word("name")), ("lines", list(lines)), ("summary", word("summary"))])
+        }
+        // `/runs` (#284): the text it read as lines, from the scroll position (`sel`, so the keys
+        // read it the way they read a list's) down, with how many there are.
+        Some("runs") => {
+            /// The most lines the screen keeps; the rest is the CLI's to print.
+            const RECORDED_LINES: usize = 5000;
+            let shown = t.get_key(RECORDED_SHOWN).cloned().unwrap_or(Value::Null);
+            let body = get(&shown, "text").map(|x| text_of(store, x)).unwrap_or_default();
+            let mut lines: Vec<Value> = body.lines().take(RECORDED_LINES).map(s).collect();
+            let total = body.lines().count();
+            if total > RECORDED_LINES {
+                lines.push(s(&format!("... {} more lines: `aibus runs` prints all of them", total - RECORDED_LINES)));
+            }
+            let sel = t.get_key(SCREEN_SEL).and_then(as_i64).unwrap_or(0).clamp(0, lines.len().saturating_sub(1) as i64);
+            let title = get(&shown, "title").cloned().unwrap_or_else(|| s("runs"));
+            map([("title", title), ("total", n(lines.len() as i64)), ("sel", n(sel)), ("lines", list(lines))])
         }
         _ => Value::Null,
     }

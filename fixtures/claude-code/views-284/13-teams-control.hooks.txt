@@ -1,0 +1,54 @@
+run 13-teams-control.hooks
+  workflow run 00000000-0000-0000-0000-000002820001
+  provider org.aibus.reference-cli
+  recorded 7 events, observed 2026-11-14T21:20:14.447Z to 2026-11-14T21:20:15.875Z (aibus clock)
+  data quality: every line read
+  levels: observed = a native event, correlated = linked across ids or channels, inferred = a labelled guess, unavailable = a gap
+plan (the definition graph: intent, not proof of execution)
+  not recorded: this run has no plan.json
+execution (what the trace shows)
+attempt 00000000-0000-0000-0000-000002820002 completed  [observed 2]
+  usage input_tokens 2 tokens (reported, result.usage)
+  usage output_tokens 4 tokens (reported, result.usage)
+  usage cache_creation_input_tokens 6665 tokens (reported, result.usage)
+  usage cache_read_input_tokens 11382 tokens (reported, result.usage)
+  usage num_turns 1 turns (reported, result.num_turns)
+  usage duration_ms 624 ms (reported, result.duration_ms)
+  usage cost_usd 0.00144902 usd (estimated, result.total_cost_usd (client-side list-price estimate))
+  usage billed_cost_usd unknown usd (unknown, not reported by the CLI)
+  lineage: provider-native, as the CLI's stream and hooks show it
+  agent 4e7753d6-e214-44ba-ad50-7b0747e5bf1f lead, process_exited  messages 1 observed  [observed 2, correlated 1]
+gaps (what the trace does not show)
+  none recorded
+timeline (sequence, observed by aibus, reported by the vendor, kind, level, origin)
+#1 2026-11-14T21:20:14.447Z - attempt_started observed aibus_scheduler agent=-
+#2 2026-11-14T21:20:14.646Z - agent_started observed cli_stream agent=4e7753d6-e214-44ba-ad50-7b0747e5bf1f role=lead
+#3 2026-11-14T21:20:15.194Z 2026-11-14T21:20:15.193Z message_chunk observed cli_stream agent=4e7753d6-e214-44ba-ad50-7b0747e5bf1f role=assistant
+#4 2026-11-14T21:20:15.225Z - usage_reported observed cli_stream agent=4e7753d6-e214-44ba-ad50-7b0747e5bf1f scope=attempt
+#5 2026-11-14T21:20:15.875Z - agent_started correlated hook agent=4e7753d6-e214-44ba-ad50-7b0747e5bf1f role=lead corroborates
+#6 2026-11-14T21:20:15.875Z - agent_stopped observed aibus_scheduler agent=4e7753d6-e214-44ba-ad50-7b0747e5bf1f status=process_exited
+#7 2026-11-14T21:20:15.875Z - attempt_completed observed aibus_scheduler agent=4e7753d6-e214-44ba-ad50-7b0747e5bf1f status=completed reason=completed
+
+inspect 4e7753d6-e214-44ba-ad50-7b0747e5bf1f
+agent 4e7753d6-e214-44ba-ad50-7b0747e5bf1f
+  attempt 00000000-0000-0000-0000-000002820002
+  role lead
+  status process_exited
+  parent none: the lead is the process aibus started
+  elapsed 1.229 s (derived from aibus's clock, first to last event)
+  model claude-haiku-5-5 (reported)
+  cli_version 2.1.311 (reported)
+  permission_mode default (reported)
+  prompt: not in the trace (a plan keeps prompt hashes; text only under payload retention)
+  messages 1 observed
+  messages: text not retained (a metadata-only trace; payloads are kept only when asked for)
+  usage: not reported for this agent (unknown)
+  tools: none recorded
+  permission events: none recorded
+  evidence (open one with --event <sequence>):
+  #2 agent_started observed cli_stream native system/init parser claude-code-stream-json/1 raw sha256:a0c58206d66989e1f673f44a8dfd1c78fb130da32dbaa6596e8ddfc0712c1dcf payload -
+  #3 message_chunk observed cli_stream native assistant parser claude-code-stream-json/1 raw sha256:88cf4fce0f2d1dd25d3062042a935a656a72eb144827710774031d8fe223989f payload -
+  #4 usage_reported observed cli_stream native result parser claude-code-stream-json/1 raw sha256:3fe8f460b1fc009b303a7d8d6e0b556972b06d8de09d01102e5a384ffbb7d9d2 payload -
+  #5 agent_started correlated hook native hook/SessionStart parser claude-code-stream-json/1 raw sha256:be07b2082140f721b062de974cbff996eafa6f3a40c5dbd48e738f5316f72698 payload - confirms #2
+  #6 agent_stopped observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -
+  #7 attempt_completed observed aibus_scheduler native - parser claude-code-stream-json/1 raw - payload -

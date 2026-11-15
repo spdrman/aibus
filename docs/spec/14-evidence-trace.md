@@ -60,7 +60,7 @@ The table is at the top of `crates/aibus-supervisor/src/claude.rs`. The points t
 - Payloads are off by default (`PayloadPolicy::MetadataOnly`, spec 10.3). With `Retain { max_bytes }` each line's parsed payload is redacted and written once by hash, and every event of that line points at it (`payload_ref: local://objects/<sha256>.json`); past the budget the payload is dropped with one `gap_detected` (`payload_budget_exhausted`). The raw line of an unknown event is kept this way, which is the spec's "bounded, optional raw archive".
 - Limits: an event line over `max_event_bytes` keeps its envelope and loses its `data` (marked `truncated`); past `soft_max_bytes` the store stops writing `message_chunk`, `usage_reported` and `trace_warning` and says so once with a `gap_detected` (`storage_limit`), and every lifecycle event still lands.
 
-The default location is the caller's to choose; #284 will put runs under the XDG state directory next to the session store.
+The default location is the caller's to choose; `aibus runs` and `/runs` (#284) read runs from `<state>/traces/<run>/`, next to the session store (`15-recorded-runs.md`).
 
 ## The projection (offline replay)
 
@@ -83,4 +83,4 @@ The default location is the caller's to choose; #284 will put runs under the XDG
 
 ## Not here
 
-The `aibus runs list|inspect|replay` commands and the graph view are #284. Turning hooks on for a live run, the extension manifest and the final extension id are #286. Retrying and resuming attempts are #289.
+The `aibus runs list|inspect|replay|rerun` commands, the `/runs` screen and the views are #284 (`15-recorded-runs.md`). Turning hooks on for a live run, the extension manifest and the final extension id are #286. Retrying and resuming attempts are #289.

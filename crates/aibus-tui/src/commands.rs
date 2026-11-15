@@ -6,7 +6,7 @@
 //! menu item are three ways into one function and cannot drift apart.
 
 use aibus_core::workflow::{valid_name, SaveError};
-use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, Screen, UiIntent, WorkflowFile};
+use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, RunsQuery, Screen, UiIntent, WorkflowFile};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
@@ -324,6 +324,18 @@ pub const REGISTRY: &[Spec] = &[
         needs: 0,
         surfaces: at(10, 0, 0),
         run: workflow,
+    },
+    Spec {
+        name: "runs",
+        args: "[inspect <run> [<node>] | replay <run>]",
+        help: "recorded runs of an external CLI: the list, one run's graph and timeline, a node's inspector, the offline replay",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(31, 0, 0),
+        run: recorded,
     },
     Spec {
         name: "agents",
@@ -768,6 +780,20 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
         "run" => run(rest, out),
         _ => run(c.args, out),
     }
+}
+
+/// `/runs`, `/runs inspect <run> [<node>]` and `/runs replay <run>`. The terminal loop reads the
+/// trace store; a run id is checked there, where the directory is.
+fn recorded(c: &Call, out: &mut Out) -> Result<(), String> {
+    let words: Vec<&str> = c.args.split_whitespace().collect();
+    let query = match words.as_slice() {
+        [] => RunsQuery::Fleet,
+        ["inspect", run] => RunsQuery::Inspect { run: (*run).to_owned(), node: None },
+        ["inspect", run, node] => RunsQuery::Inspect { run: (*run).to_owned(), node: Some((*node).to_owned()) },
+        ["replay", run] => RunsQuery::Replay((*run).to_owned()),
+        _ => return Err(format!("/{} takes no argument, inspect <run> [<node>] or replay <run>", c.name)),
+    };
+    command(out, Command::Runs(query))
 }
 
 /// `/quit`, `/exit` and `/q` share this: the same messages as the palette row, and no arguments.
@@ -1278,7 +1304,7 @@ mod tests {
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().all(|(n, _)| n != "/fix"), "a workflow command needs a lead as well");
         assert!(slash_offered(&Env { lead: Some(lead_run()), ..Env::bare(&[], &wf) }).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 18);
+        assert_eq!(slash_offered(&env).len(), 19);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
     }

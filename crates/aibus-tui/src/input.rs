@@ -88,6 +88,8 @@ pub struct Context {
     pub palette: Vec<String>,
     pub palette_text: String,
     pub screen_sel: usize,
+    /// How many lines the `/runs` screen holds (0 when it is closed).
+    pub recorded_lines: usize,
     /// The agents screen's rows: name and the file it lives in, when it has one.
     pub agent_rows: Vec<(String, Option<PathBuf>)>,
     pub account_rows: Vec<String>,
@@ -176,6 +178,8 @@ impl Context {
             .find_map(|k| view(k).and_then(|v| get(v, "sel")).and_then(as_i64))
             .unwrap_or(0)
             .max(0) as usize;
+        // Only the `/runs` text has a `total` on this view.
+        let recorded_lines = view(WORKFLOWS_VIEW).and_then(|v| get(v, "total")).and_then(as_i64).unwrap_or(0).max(0) as usize;
         let agent_rows = view(AGENTS)
             .and_then(|a| get(a, "rows"))
             .map_or(&[][..], as_list)
@@ -259,6 +263,7 @@ impl Context {
             palette,
             palette_text,
             screen_sel,
+            recorded_lines,
             agent_rows,
             account_rows,
             account_names,
@@ -309,6 +314,7 @@ impl Context {
             Some("accounts") => Ctx::Accounts,
             Some("providers") => Ctx::Providers,
             Some("workflows") => Ctx::Workflows,
+            Some("runs") => Ctx::Runs,
             Some(m) if m.starts_with("models:") => Ctx::Models,
             Some("outcome") => Ctx::Outcome,
             Some(m) if m.starts_with("confirm:") => Ctx::Confirm,
@@ -734,6 +740,11 @@ impl Input {
             Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows => {
                 return out.msgs.push(ui(UiIntent::Pick(if up { Selection::Prev } else { Selection::Next })));
             }
+            Ctx::Runs => {
+                let last = cx.recorded_lines.saturating_sub(1) as i64;
+                let at = cx.screen_sel as i64 + if up { -i64::from(WHEEL_LINES) } else { i64::from(WHEEL_LINES) };
+                return out.msgs.push(ui(UiIntent::Pick(Selection::Index(at.clamp(0, last)))));
+            }
             _ if cx.chrome.modal.is_some() => return,
             _ => {}
         }
@@ -1131,7 +1142,15 @@ impl Input {
         }
         match ctx {
             Ctx::Prompt => self.prompt_key(ev, cx, keys, drawn, prompt, &mut out),
-            Ctx::Palette | Ctx::Agents | Ctx::Accounts | Ctx::Models | Ctx::Providers | Ctx::Workflows | Ctx::Outcome | Ctx::Confirm => {
+            Ctx::Palette
+            | Ctx::Agents
+            | Ctx::Accounts
+            | Ctx::Models
+            | Ctx::Providers
+            | Ctx::Workflows
+            | Ctx::Runs
+            | Ctx::Outcome
+            | Ctx::Confirm => {
                 self.screen_key(ev, ctx, cx, prompt, &mut out);
             }
             _ => {
@@ -1273,6 +1292,21 @@ impl Input {
                     _ => return,
                 };
                 self.screen(a, cx, prompt, out);
+            }
+            // A recorded run is text: the keys move the first line shown, never past the last.
+            Ctx::Runs => {
+                const PAGE: i64 = 20;
+                let (sel, last) = (cx.screen_sel as i64, cx.recorded_lines.saturating_sub(1) as i64);
+                let to = match (ev.code, c) {
+                    (KeyCode::Up, _) | (_, Some('k')) => sel - 1,
+                    (KeyCode::Down, _) | (_, Some('j')) => sel + 1,
+                    (KeyCode::PageUp, _) => sel - PAGE,
+                    (KeyCode::PageDown, _) | (_, Some(' ')) => sel + PAGE,
+                    (_, Some('g')) => 0,
+                    (_, Some('G')) => last,
+                    _ => return,
+                };
+                out.msgs.push(ui(UiIntent::Pick(Selection::Index(to.clamp(0, last.max(0))))));
             }
             Ctx::Outcome => {
                 let a = match c {

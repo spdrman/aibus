@@ -196,3 +196,21 @@ async fn issue_338_a_child_in_the_group_that_forks_a_setsid_grandchild_is_ended_
         "the grandchild {pid} outlived the deadline"
     );
 }
+
+/// The gap, written down: a standard daemon double fork, where the middle process exits at once
+/// (`setsid -f`, `daemon(3)`), is usually not seen by a 50 ms sampler, so the child is adopted by
+/// init before anything remembers it. The sweep is user-space, not containment; the kernel
+/// guarantee on Linux is the subreaper helper in #352. Run it with `--ignored` to see it fail.
+#[tokio::test]
+#[ignore = "known gap (#338, D-338): a double fork with no linger escapes the user-space sweep, see #352"]
+async fn issue_338_a_daemon_double_fork_with_no_linger_does_not_outlive_the_deadline() {
+    let body = format!(
+        "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+        detach(Some(0.0))
+    );
+    let (_, pid) = run(&body, quick(), None).await;
+    assert!(
+        dead_within(&pid, Duration::from_secs(3)).await,
+        "the daemon {pid} outlived the deadline"
+    );
+}

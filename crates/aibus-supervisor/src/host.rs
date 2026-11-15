@@ -219,9 +219,8 @@ pub async fn supervise(
             #[cfg(unix)]
             {
                 signal_group(self.0, rustix::process::Signal::KILL);
-                // Past the clean path `self.0` is cleared, and the leader's pid may be reused.
-                if let (Some(t), Some(_)) = (&self.1, self.0) {
-                    t.kill_all(true);
+                if let Some(t) = &self.1 {
+                    t.kill_all();
                 }
             }
         }
@@ -384,12 +383,7 @@ pub async fn supervise(
                 kill_at = None;
                 // The documented last resort: the whole group, by force.
                 #[cfg(unix)]
-                {
-                    signal_group(pid, rustix::process::Signal::KILL);
-                    if let Some(t) = &guard.1 {
-                        t.kill_all(exit.is_none());
-                    }
-                }
+                signal_group(pid, rustix::process::Signal::KILL);
                 #[cfg(not(unix))]
                 let _ = child.start_kill();
             }
@@ -425,7 +419,7 @@ pub async fn supervise(
     {
         signal_group(pid, rustix::process::Signal::KILL);
         if let Some(t) = &guard.1 {
-            t.kill_all(exit.is_none());
+            t.kill_all();
         }
     }
     if let Some(hit_bound) = drained {

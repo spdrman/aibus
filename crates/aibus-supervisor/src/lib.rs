@@ -46,6 +46,12 @@ pub struct Limits {
     /// Lines read a second, stdout and stderr together. Past this the host stops reading for a
     /// moment and the pipe pushes back on the CLI: nothing is dropped.
     pub lines_per_second: u32,
+    /// After the CLI exits, the pipes may still hold output (or a descendant may hold them open).
+    /// The host keeps reading and only ends the drain when nothing has arrived for this long.
+    pub drain_stall: Duration,
+    /// The most the drain after exit may take in all, whatever keeps arriving. If lines are still
+    /// coming when it ends, a `gap_detected` (`unread_after_exit`) says so.
+    pub drain_max: Duration,
 }
 
 impl Default for Limits {
@@ -57,6 +63,8 @@ impl Default for Limits {
             max_stdout_bytes: 1024 * 1024 * 1024,
             max_stderr_bytes: 1024 * 1024,
             lines_per_second: 2_000,
+            drain_stall: Duration::from_secs(2),
+            drain_max: Duration::from_secs(30),
         }
     }
 }

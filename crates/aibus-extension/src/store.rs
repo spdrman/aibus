@@ -41,6 +41,10 @@ pub struct Record {
     /// nothing to compare against.
     #[serde(default)]
     pub accepted: Option<Manifest>,
+    /// Version to the key id whose signature the policy verified at install, so a key revoked or
+    /// narrowed later takes the versions it stood behind and no others.
+    #[serde(default)]
+    pub signers: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -330,6 +334,14 @@ impl Store {
         if rec.active.as_deref() != Some(entry.version.as_str()) {
             rec.previous = rec.active.take().filter(|v| *v != entry.version);
         }
+        if let Some(sig) = entry
+            .signature
+            .as_ref()
+            .filter(|s| policy.trusted_keys.contains_key(&s.key_id))
+        {
+            rec.signers
+                .insert(entry.version.clone(), sig.key_id.clone());
+        }
         rec.versions.insert(entry.version.clone(), pkg.hash);
         rec.active = Some(entry.version.clone());
         rec.accepted = Some(pkg.manifest);
@@ -443,7 +455,11 @@ impl Store {
                 require_signature: false,
                 ..policy.clone()
             };
-            match registry::check(&pkg, &entry, &known, &relaxed) {
+            let signer = rec
+                .signers
+                .get(&version)
+                .map_or(Ok(()), |k| registry::signer_ok(policy, k, id));
+            match registry::check(&pkg, &entry, &known, &relaxed).and(signer) {
                 Ok(()) => Ok(pkg),
                 Err(r) => Err(fail(rec, r.class(), r.to_string())),
             }
@@ -472,7 +488,12 @@ impl Store {
         let wrong = match &loaded {
             Err(b) => Some((b.0.clone(), b.1.clone())),
             Ok(_) => revoked_by(st.revoked.iter().chain(&policy.revoke), id, &version, &hash)
-                .map(|r| ("revoked".to_owned(), format!("revoked: {}", r.reason))),
+                .map(|r| ("revoked".to_owned(), format!("revoked: {}", r.reason)))
+                .or_else(|| {
+                    let key = rec.signers.get(&version)?;
+                    let r = registry::signer_ok(policy, key, id).err()?;
+                    Some((r.class().to_owned(), r.to_string()))
+                }),
         };
         match wrong {
             None => loaded.map_err(|b| StoreError::State(b.1)),
@@ -537,6 +558,17 @@ impl Store {
                 return Err(StoreError::Quarantined {
                     class: "revoked".to_owned(),
                     reason: why,
+                });
+            }
+            if let Some(r) = rec
+                .signers
+                .get(&prev)
+                .and_then(|k| registry::signer_ok(policy, k, id).err())
+            {
+                quarantine(rec, &prev, &hash, r.class(), &r.to_string());
+                return Err(StoreError::Quarantined {
+                    class: r.class().to_owned(),
+                    reason: r.to_string(),
                 });
             }
             rec.active = Some(prev);

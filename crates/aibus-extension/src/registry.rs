@@ -75,6 +75,10 @@ pub enum Refusal {
     BadSignature(String),
     #[error("the policy requires a signature from a trusted key and this entry has none")]
     SignatureRequired,
+    #[error("key {key_id} may not sign {id}: it is trusted for other ids, and only the policy file widens that")]
+    KeyOutOfScope { key_id: String, id: String },
+    #[error("key {key_id} is revoked: {reason}")]
+    KeyRevoked { key_id: String, reason: String },
     #[error("publisher {0} is not allowed by the policy")]
     PublisherNotAllowed(String),
     #[error("incompatible: {0}")]
@@ -88,11 +92,12 @@ impl Refusal {
     /// or `malformed`.
     pub fn class(&self) -> &'static str {
         match self {
-            Self::Revoked(_) => "revoked",
+            Self::Revoked(_) | Self::KeyRevoked { .. } => "revoked",
             Self::HashMismatch { .. }
             | Self::IdentityMismatch { .. }
             | Self::BadSignature(_)
             | Self::SignatureRequired
+            | Self::KeyOutOfScope { .. }
             | Self::PublisherNotAllowed(_) => "provenance_invalid",
             Self::Incompatible(_) => "incompatible",
             Self::Package(_) => "malformed",
@@ -113,6 +118,27 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
         .collect()
+}
+
+/// Whether the policy still lets `key_id` stand behind `id`: the key is not revoked and `id` is in
+/// its scope. A key the policy does not list is not this function's business.
+pub fn signer_ok(policy: &Policy, key_id: &str, id: &str) -> Result<(), Refusal> {
+    let Some(k) = policy.trusted_keys.get(key_id) else {
+        return Ok(());
+    };
+    if let Some(reason) = &k.revoked {
+        return Err(Refusal::KeyRevoked {
+            key_id: key_id.to_owned(),
+            reason: reason.clone(),
+        });
+    }
+    if !k.covers(id) {
+        return Err(Refusal::KeyOutOfScope {
+            key_id: key_id.to_owned(),
+            id: id.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// The first revocation that names this id, version and content (a revocation without a version
@@ -166,7 +192,8 @@ pub fn check(
     ) {
         (Some(sig), Some(key)) => {
             let bad = |why: &str| Refusal::BadSignature(why.to_owned());
-            let key = unhex(key).ok_or_else(|| bad("the trusted key is not hex"))?;
+            signer_ok(policy, &sig.key_id, &entry.id)?;
+            let key = unhex(&key.key).ok_or_else(|| bad("the trusted key is not hex"))?;
             let raw = unhex(&sig.signature).ok_or_else(|| bad("the signature is not hex"))?;
             ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
                 .verify(

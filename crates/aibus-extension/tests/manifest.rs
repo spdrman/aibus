@@ -649,9 +649,28 @@ fn every_spelling_of_a_run_without_asking_flag_is_refused_in_argv() {
 
 #[test]
 fn a_run_without_asking_flag_is_refused_as_an_optional_flag_and_in_the_auth_argv() {
-    for (name, _) in UNATTENDED {
-        let f = refused_field("flag = \"--usage\"", &format!("flag = \"--{name}\""));
-        assert_eq!(f, "execution.optional", "{name}");
+    // An optional flag has no value, so only the names that mean it on their own count.
+    for (name, value) in UNATTENDED {
+        if !(value.is_empty() || name.to_lowercase().starts_with("allowed")) {
+            continue;
+        }
+        let m = edit(
+            &template_manifest(),
+            "flag = \"--usage\"",
+            &format!("flag = \"--{name}\""),
+        );
+        let m = edit(
+            &m,
+            "flags = [\"--usage\"]",
+            &format!("flags = [\"--{name}\"]"),
+        );
+        let (field, why) = refused(&m);
+        assert_eq!(field, "execution.optional", "{name}");
+        // (a mixed-case flag name is refused earlier, as not a long flag)
+        assert!(
+            why.contains("without asking") || why.contains("long flag"),
+            "{name}: {why}"
+        );
     }
     assert_eq!(
         refused_field(

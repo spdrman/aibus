@@ -162,7 +162,7 @@
           "items": {
             "type": "string",
             "pattern": "^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
-            "description": "A plain argv token. No space, slash, quote, $, backtick, tilde or brace, and never a flag that would run without asking."
+            "description": "A plain argv token. No space, slash, quote, $, @, backtick, tilde or brace, no install, exec or eval shape, and none of the known spellings of a flag that would run without asking (a denylist of known spellings, not a proof)."
           },
           "maxItems": 16
         },
@@ -171,7 +171,7 @@
           "items": {
             "type": "string",
             "pattern": "^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
-            "description": "A plain argv token. No space, slash, quote, $, backtick, tilde or brace, and never a flag that would run without asking."
+            "description": "A plain argv token. No space, slash, quote, $, @, backtick, tilde or brace, no install, exec or eval shape, and none of the known spellings of a flag that would run without asking (a denylist of known spellings, not a proof)."
           },
           "maxItems": 16
         }
@@ -191,7 +191,7 @@
           "items": {
             "type": "string",
             "pattern": "^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
-            "description": "A plain argv token. No space, slash, quote, $, backtick, tilde or brace, and never a flag that would run without asking."
+            "description": "A plain argv token. No space, slash, quote, $, @, backtick, tilde or brace, no install, exec or eval shape, and none of the known spellings of a flag that would run without asking (a denylist of known spellings, not a proof)."
           },
           "maxItems": 32
         },

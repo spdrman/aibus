@@ -310,10 +310,14 @@ fn https(field: &str, s: &str) -> Result<(), ManifestError> {
     )
 }
 
-/// Words that mean "run without asking": never in an argv or an optional flag.
-fn bypass(token: &str) -> bool {
-    let t = token.to_ascii_lowercase();
-    [
+/// The first token that means "run without asking", in any spelling: a flag whose name says it
+/// (`--full-auto`, `--yolo`, `-y`, `--allowedTools=Bash`), a mode flag given a value that skips the
+/// prompts (`--permission-mode acceptEdits`, `--ask-for-approval=never`, `-s danger-full-access`),
+/// with the value inline or as the next token, and those values on their own. It is a denylist of
+/// what is known, not a proof: the user sees the whole argv at install, and the real boundary is
+/// the host's allowlist of programs (`sandbox::OFFICIAL_CLIS`).
+fn unattended(tokens: &[String]) -> Option<&str> {
+    const NAMES: [&str; 14] = [
         "dangerously",
         "skip-permissions",
         "yolo",
@@ -321,9 +325,131 @@ fn bypass(token: &str) -> bool {
         "no-sandbox",
         "auto-approve",
         "allow-all",
-    ]
-    .iter()
-    .any(|w| t.contains(w))
+        "full-auto",
+        "trust-all",
+        "trust-tools",
+        "allowedtools",
+        "allowed-tools",
+        "allowed_tools",
+        "auto-edit",
+    ];
+    const MODE_FLAGS: [&str; 7] = [
+        "permission-mode",
+        "approval-mode",
+        "approval-policy",
+        "ask-for-approval",
+        "sandbox",
+        "a",
+        "s",
+    ];
+    const RISKY_VALUES: [&str; 9] = [
+        "acceptedits",
+        "bypasspermissions",
+        "dontask",
+        "never",
+        "yolo",
+        "auto_edit",
+        "auto-edit",
+        "danger-full-access",
+        "unrestricted",
+    ];
+    const ALWAYS_RISKY: [&str; 4] = [
+        "acceptedits",
+        "bypasspermissions",
+        "dontask",
+        "danger-full-access",
+    ];
+    for (i, t) in tokens.iter().enumerate() {
+        let is_flag = t.starts_with('-');
+        let body = t.trim_start_matches('-');
+        let (name, inline) = body
+            .split_once('=')
+            .map_or((body, None), |(n, v)| (n, Some(v)));
+        let name = name.to_ascii_lowercase();
+        if NAMES.iter().any(|w| name.contains(w))
+            || (is_flag && matches!(name.as_str(), "y" | "yes"))
+        {
+            return Some(t);
+        }
+        if is_flag && MODE_FLAGS.contains(&name.as_str()) {
+            let next = tokens
+                .get(i + 1)
+                .filter(|n| !n.starts_with('-'))
+                .map(String::as_str);
+            let value = inline.or(next).unwrap_or_default().to_ascii_lowercase();
+            if RISKY_VALUES.contains(&value.as_str()) {
+                return Some(t);
+            }
+        }
+        if ALWAYS_RISKY.contains(&t.to_ascii_lowercase().as_str()) {
+            return Some(t);
+        }
+    }
+    None
+}
+
+/// Whether `name` is a program that is never an official CLI: an interpreter, a shell, a package
+/// manager, a fetcher, a privilege or remote-execution tool. A trailing version is ignored
+/// (`python3.12`, `pip3`). Used on a manifest's executable names, on the user's additions to the
+/// allowlist and on what an allowlisted name resolves to.
+pub fn forbidden_program(name: &str) -> bool {
+    const FORBIDDEN: [&str; 52] = [
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "dash",
+        "ksh",
+        "csh",
+        "tcsh",
+        "python",
+        "perl",
+        "ruby",
+        "node",
+        "deno",
+        "bun",
+        "php",
+        "lua",
+        "java",
+        "npx",
+        "npm",
+        "pnpm",
+        "yarn",
+        "pip",
+        "pipx",
+        "uv",
+        "gem",
+        "bundle",
+        "cargo",
+        "go",
+        "brew",
+        "apt",
+        "apt-get",
+        "dpkg",
+        "curl",
+        "wget",
+        "env",
+        "sudo",
+        "doas",
+        "su",
+        "ssh",
+        "scp",
+        "sftp",
+        "nc",
+        "ncat",
+        "netcat",
+        "socat",
+        "busybox",
+        "xargs",
+        "osascript",
+        "pwsh",
+        "powershell",
+        "cmd",
+        "open",
+    ];
+    let lower = name.to_ascii_lowercase();
+    let base = lower.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    FORBIDDEN.contains(&lower.as_str()) || FORBIDDEN.contains(&base)
 }
 
 fn argv_tokens(field: &str, tokens: &[String], max: usize) -> Result<(), ManifestError> {
@@ -333,13 +459,33 @@ fn argv_tokens(field: &str, tokens: &[String], max: usize) -> Result<(), Manifes
     for t in tokens {
         matches_re(
             field,
-            r"^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,@%+-]{0,127}$",
+            r"^-{0,2}[A-Za-z0-9][A-Za-z0-9_.:=,%+-]{0,127}$",
             t,
-            "a plain token (no space, slash, quote, $, `, ~ or braces)",
+            "a plain token (no space, slash, quote, $, `, ~, @ or braces)",
         )?;
-        if bypass(t) {
-            return Err(bad(field, format!("{t:?} would run without asking")));
+        // The shapes of an install, an eval and a one-liner: not what an official CLI is launched with.
+        if matches!(
+            t.as_str(),
+            "install"
+                | "uninstall"
+                | "add"
+                | "exec"
+                | "eval"
+                | "-c"
+                | "-e"
+                | "-m"
+                | "--eval"
+                | "--exec"
+                | "--command"
+        ) {
+            return Err(bad(
+                field,
+                format!("{t:?} is the shape of an install, an exec or an eval"),
+            ));
         }
+    }
+    if let Some(t) = unattended(tokens) {
+        return Err(bad(field, format!("{t:?} would run without asking")));
     }
     Ok(())
 }
@@ -421,6 +567,12 @@ impl Manifest {
             return Err(bad("cli.executable_candidates", "one to four file names"));
         }
         for e in exes {
+            if forbidden_program(e) {
+                return Err(bad(
+                    "cli.executable_candidates",
+                    format!("{e} is an interpreter, shell, package manager or fetcher, never an official CLI"),
+                ));
+            }
             matches_re(
                 "cli.executable_candidates",
                 r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
@@ -500,7 +652,7 @@ impl Manifest {
                 &o.flag,
                 "a long flag",
             )?;
-            if bypass(&o.flag) {
+            if unattended(std::slice::from_ref(&o.flag)).is_some() {
                 return Err(bad(
                     "execution.optional",
                     format!("{} would run without asking", o.flag),

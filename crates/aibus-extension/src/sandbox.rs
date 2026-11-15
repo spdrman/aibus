@@ -3,9 +3,11 @@
 //! own search path (by `cli::discover`, which refuses a relative directory and a file others can
 //! write), the argv is its static tokens plus the optional flags the probe found, the environment
 //! is `cli::bounded_env` over its declared names, the directory is the one the host granted, and
-//! the limits are the smaller of what it asked and the host's ceiling. There is no ambient
-//! credential: the keychain is never opened here and no `AIBUS_*`, credential-shaped or loader
-//! variable is ever passed.
+//! the limits are the smaller of what it asked and the host's ceiling. The program has to be on
+//! the host's allowlist of official CLIs ([`OFFICIAL_CLIS`] and the user's additions). The keychain
+//! is never opened here and no `AIBUS_*`, credential-shaped or loader variable is passed. This is
+//! not an operating system sandbox: the CLI runs as the user, with `HOME`, and can reach what the
+//! user can.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -79,7 +81,6 @@ fn refused(why: impl Into<String>) -> SandboxError {
 /// one the manifest declared, argv that is the manifest's tokens plus its optional flags only, an
 /// environment of allowed names only, and an existing absolute working directory.
 pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(), SandboxError> {
-    let _ = extra;
     let name = launch
         .exe
         .file_name()
@@ -91,6 +92,9 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
             launch.exe.display(),
             m.cli.executable_candidates
         )));
+    }
+    if !OFFICIAL_CLIS.contains(&name) && !extra.iter().any(|e| e == name) {
+        return Err(SandboxError::NotOfficial(name.to_owned()));
     }
     let fixed: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
     if launch.args.len() < fixed.len() || launch.args[..fixed.len()] != fixed[..] {
@@ -142,13 +146,29 @@ pub async fn prepare(
     want: &[Capability],
 ) -> Result<Prepared, SandboxError> {
     check_host(m, &grant.os)?;
+    // Which programs may run is the host's decision (its four, and the user's own additions), never
+    // the manifest's: a manifest names a program, and only a name on the list is searched for.
+    let official =
+        |n: &str| OFFICIAL_CLIS.contains(&n) || grant.extra_programs.iter().any(|e| e == n);
+    let programs: Vec<String> = m
+        .cli
+        .executable_candidates
+        .iter()
+        .filter(|n| official(n))
+        .cloned()
+        .collect();
+    if programs.is_empty() {
+        return Err(SandboxError::NotOfficial(
+            m.cli.executable_candidates[0].clone(),
+        ));
+    }
     let names: Vec<&str> = m.execution.env_allow.iter().map(String::as_str).collect();
     let env = cli::bounded_env(grant.parent_env.iter().cloned(), &names, &[])
         .map_err(|e| SandboxError::Env(e.to_string()))?;
 
     let mut why = Vec::new();
     let mut found = None;
-    for name in &m.cli.executable_candidates {
+    for name in &programs {
         let d = cli::discover_from(
             &grant.search_dirs,
             name,
@@ -174,6 +194,14 @@ pub async fn prepare(
         });
     };
     let real = found.resolved.clone().unwrap_or_else(|| found.path.clone());
+    // `claude` that is really a shell or an interpreter is not the official CLI.
+    let target = real
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if crate::manifest::forbidden_program(target) {
+        return Err(SandboxError::NotOfficial(target.to_owned()));
+    }
     let say = |args: &'static [&'static str]| async {
         cli::capture(&real, args, &env, Duration::from_secs(10), 256 * 1024)
             .await

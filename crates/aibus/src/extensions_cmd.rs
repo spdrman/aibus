@@ -12,6 +12,7 @@ use aibus_extension::conformance;
 use aibus_extension::package;
 use aibus_extension::policy::Policy;
 use aibus_extension::registry::Registry;
+use aibus_extension::sandbox::OFFICIAL_CLIS;
 use aibus_extension::store::{Store, StoreError};
 use aibus_extension::version::exact;
 use aibus_trace::view::clean;
@@ -63,6 +64,32 @@ fn policy(g: &Global) -> Result<Policy, AibusError> {
         .map_err(|e| AibusError::Usage(format!("policy: {}", clean(&e, 300))))
 }
 
+/// What an install or update lets the host run, so the user sees it: each program, whether the
+/// host would run it, and the argv. Nothing here is run; a package has no setup step.
+fn show_grant(
+    out: &mut impl Write,
+    store: &Store,
+    id: &str,
+    policy: &Policy,
+) -> Result<(), AibusError> {
+    let pkg = store.resolve(id, policy).map_err(store_error)?;
+    for p in &pkg.manifest.cli.executable_candidates {
+        let on = OFFICIAL_CLIS.contains(&p.as_str()) || policy.extra_official_clis.contains(p);
+        let line = if on {
+            "on the host's allowlist".to_owned()
+        } else {
+            "not on the host's allowlist, so it will not run (add it to extra_official_clis in extension-policy.toml if you trust it)".to_owned()
+        };
+        writeln!(out, "  program {}: {line}", clean(p, 64))?;
+    }
+    writeln!(
+        out,
+        "  argv: {}",
+        clean(&pkg.manifest.execution.argv.join(" "), 300)
+    )?;
+    Ok(())
+}
+
 pub fn extensions(a: &ExtensionsArgs, g: &Global) -> Result<u8, AibusError> {
     let store = Store::open(&g.paths()?.data.join("extensions"));
     let mut out = std::io::stdout().lock();
@@ -93,26 +120,31 @@ pub fn extensions(a: &ExtensionsArgs, g: &Global) -> Result<u8, AibusError> {
                 ),
                 None => (spec.as_str(), None),
             };
+            let pol = policy(g)?;
             let rec = store
-                .install(
-                    &open_registry(a, g)?,
-                    &policy(g)?,
-                    id,
-                    version.as_ref(),
-                    accept,
-                )
+                .install(&open_registry(a, g)?, &pol, id, version.as_ref(), accept)
                 .map_err(store_error)?;
             writeln!(out, "installed {id} {}", rec.active.unwrap_or_default())?;
+            show_grant(&mut out, &store, id, &pol)?;
         }
         ExtensionsCmd::Update { id, accept } => {
+            let pol = policy(g)?;
             let rec = store
-                .update(&open_registry(a, g)?, &policy(g)?, id, accept)
+                .update(&open_registry(a, g)?, &pol, id, accept)
                 .map_err(store_error)?;
             writeln!(out, "{id} is now {}", rec.active.unwrap_or_default())?;
+            show_grant(&mut out, &store, id, &pol)?;
         }
         ExtensionsCmd::Verify { id } => {
-            // The revocations of the registry, when there is one to read; the policy's own always.
-            let revoked = open_registry(a, g).map(|r| r.revoked).unwrap_or_default();
+            // The registry's revocations are part of the check, so a registry that cannot be read is
+            // a failure here, never a quiet "ok".
+            let revoked = open_registry(a, g)
+                .map_err(|e| {
+                    usage(format!(
+                        "{e}; verify could not check the registry's revocations"
+                    ))
+                })?
+                .revoked;
             let pkg = store
                 .verify(id, &revoked, &policy(g)?)
                 .map_err(store_error)?;
@@ -171,7 +203,7 @@ pub fn extensions(a: &ExtensionsArgs, g: &Global) -> Result<u8, AibusError> {
             writeln!(out, "unpinned {id}")?;
         }
         ExtensionsCmd::Rollback { id } => {
-            let rec = store.rollback(id).map_err(store_error)?;
+            let rec = store.rollback(id, &policy(g)?).map_err(store_error)?;
             writeln!(out, "{id} is back to {}", rec.active.unwrap_or_default())?;
         }
         ExtensionsCmd::Remove { id } => {
@@ -192,7 +224,7 @@ pub fn extensions(a: &ExtensionsArgs, g: &Global) -> Result<u8, AibusError> {
             } else if target.contains('/') {
                 return Err(usage(format!("{} is not a directory", clean(target, 120))));
             } else {
-                store.resolve(target).map_err(store_error)?
+                store.resolve(target, &policy(g)?).map_err(store_error)?
             };
             let report = conformance::run(&pkg);
             if g.json {

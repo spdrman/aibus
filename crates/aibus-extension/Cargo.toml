@@ -11,8 +11,8 @@ publish.workspace = true
 # negotiation, the hostile-input package reader, the local registry and the installed store, and
 # the sandbox that turns a verified manifest into the one launch the host is willing to make. An
 # extension is data (a manifest, fixtures and, for the declarative engine, a few mapping rules):
-# no code from a package ever runs inside aibus, and only the host starts a process, only the
-# official CLI the manifest names, with a bounded environment and the host's limits.
+# no code from a package ever runs inside aibus, and only the host starts a process, and only a program on the host's
+# allowlist of official CLIs, with a bounded environment and the host's limits.
 [dependencies]
 aibus-core.workspace = true
 aibus-supervisor = { path = "../aibus-supervisor" }
@@ -27,7 +27,7 @@ toml = "0.8"
 uuid = { version = "1", features = ["v7"] }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

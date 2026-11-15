@@ -6,7 +6,7 @@
 //! [`package::read`] (hostile input: names, links, sizes), pins it by content hash, checks it
 //! against the registry, policy and revocation list ([`registry`], [`policy`]), keeps it in the
 //! [`store`], negotiates what it can do against the real CLI ([`negotiate`]) and turns it into one
-//! launch ([`sandbox`]) of the official CLI it names. The normaliser that reads the CLI's events is
+//! launch ([`sandbox`]) of a program on the host's allowlist of official CLIs. The normaliser that reads the CLI's events is
 //! an [`aibus_supervisor::Engine`]: the host's own for the built-in Claude parser, or the
 //! declarative one in [`declarative`] for CLIs whose events are one line, one event. A stateful
 //! parser for any other CLI needs a WASI component, which this release does not host (see

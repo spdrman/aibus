@@ -95,15 +95,13 @@ pub fn negotiate(m: &Manifest, os: &str, cli: &CliProbe) -> Result<Negotiated, I
         };
         capabilities.insert(*c, verdict);
     }
-    // Amendment E4: the extension's evidence is better with hook payloads, and the host has no live
-    // way to receive them yet, so the capability is not offered whatever the CLI lists.
-    if m.hooks.as_ref().is_some_and(|h| h.needs_delivery) {
-        capabilities.insert(
-            Capability::HookChannel,
-            Verdict::Unsupported(
-                "the host has no live way to receive hook payloads yet (#281, inline --settings is untried); the stream is the only evidence".into(),
-            ),
-        );
-    }
+    // Amendment E4: the host has no live way to receive hook payloads yet, so the capability is not
+    // offered whatever the manifest declares or the CLI lists. The stream is the only evidence.
+    capabilities.insert(
+        Capability::HookChannel,
+        Verdict::Unsupported(
+            "the host has no live way to receive hook payloads yet (#281, inline --settings is untried); the stream is the only evidence".into(),
+        ),
+    );
     Ok(Negotiated { capabilities })
 }

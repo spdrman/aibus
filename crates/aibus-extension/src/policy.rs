@@ -45,6 +45,15 @@ impl Policy {
                 ));
             }
         }
+        let program = regex::Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$").expect("valid regex");
+        for name in &p.extra_official_clis {
+            if !program.is_match(name) || crate::manifest::forbidden_program(name) {
+                return Err(format!("extra_official_clis: {name:?} is not a plain program name that may run as an official CLI"));
+            }
+        }
+        if p.extra_official_clis.len() > 16 {
+            return Err("extra_official_clis: more than 16 names".into());
+        }
         if p.allow_publishers.as_ref().is_some_and(|a| a.len() > 64) || p.revoke.len() > 1024 {
             return Err("the policy lists too many publishers or revocations".into());
         }
@@ -54,6 +63,21 @@ impl Policy {
     /// The policy at `path`, or the default one when there is no file. A file that is there and
     /// wrong is an error, never a silent fall back to a more permissive policy.
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
+        // A policy another user can write could add a trusted key or drop `require_signature`.
+        #[cfg(unix)]
+        if let Ok(meta) = std::fs::metadata(path) {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            if meta.permissions().mode() & 0o022 != 0 {
+                return Err(format!("{} is writable by other users", path.display()));
+            }
+            if meta.uid() != rustix::process::geteuid().as_raw() && meta.uid() != 0 {
+                return Err(format!(
+                    "{} is owned by uid {}, not this user or root",
+                    path.display(),
+                    meta.uid()
+                ));
+            }
+        }
         match aibus_core::persist::fs::read_regular(path, MAX_POLICY_BYTES as u64) {
             Ok(bytes) => Self::parse(
                 &String::from_utf8(bytes).map_err(|_| "the policy file is not UTF-8".to_owned())?,

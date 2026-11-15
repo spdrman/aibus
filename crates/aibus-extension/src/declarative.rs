@@ -20,14 +20,14 @@ use crate::manifest::{Rule, RuleKind, UsageQuality};
 
 pub const PARSER: &str = "declarative-jsonl/1";
 
-/// Tool uses remembered as open; past this the engine stops tracking new ones.
-const MAX_OPEN_TOOLS: usize = 4_096;
-
 pub struct Declarative {
     attempt: AttemptRef,
     rules: Vec<Rule>,
     ids: EventIds,
     lines: u64,
+    stdout_lines: u64,
+    stderr_lines: u64,
+    usage_quality: UsageQuality,
     host: u64,
     malformed: u64,
     unknown: u64,
@@ -37,12 +37,14 @@ pub struct Declarative {
 
 impl Declarative {
     pub fn new(attempt: AttemptRef, rules: Vec<Rule>, usage_quality: UsageQuality) -> Self {
-        let _ = usage_quality;
         Self {
             attempt,
             rules,
             ids: EventIds::default(),
             lines: 0,
+            stdout_lines: 0,
+            stderr_lines: 0,
+            usage_quality,
             host: 0,
             malformed: 0,
             unknown: 0,
@@ -115,19 +117,23 @@ fn pointer_text(v: &Value, p: &str) -> Option<String> {
         .map(|s| s.chars().take(256).collect())
 }
 
-fn metric(v: &Value, pointer: Option<&String>, name: &str) -> Metric {
+/// One token count: a whole number from zero up to 2^53 (so a negative, fractional, huge or
+/// non-numeric value is `unknown`, never `reported`), labelled as the manifest says its usage is.
+fn metric(v: &Value, pointer: Option<&String>, name: &str, quality: UsageQuality) -> Metric {
     let value = pointer
         .and_then(|p| v.pointer(p))
-        .and_then(Value::as_f64)
-        .filter(|f| f.is_finite());
+        .and_then(Value::as_u64)
+        .filter(|n| *n <= 1 << 53)
+        .map(|n| n as f64)
+        .filter(|_| quality != UsageQuality::Unknown);
     Metric {
         name: name.into(),
         value,
         unit: "tokens".into(),
-        quality: if value.is_some() {
-            DataQuality::Reported
-        } else {
-            DataQuality::Unknown
+        quality: match (value, quality) {
+            (None, _) | (_, UsageQuality::Unknown) => DataQuality::Unknown,
+            (_, UsageQuality::Reported) => DataQuality::Reported,
+            (_, UsageQuality::Estimated) => DataQuality::Estimated,
         },
         source: "the CLI's own usage line".into(),
     }
@@ -150,7 +156,8 @@ impl Engine for Declarative {
 
     fn stream_line(&mut self, line: &[u8], at: SystemTime) -> Batch {
         self.lines += 1;
-        let key = format!("stdout:L{}", self.lines);
+        self.stdout_lines += 1;
+        let key = format!("stdout:L{}", self.stdout_lines);
         let Ok(text) = std::str::from_utf8(line) else {
             return self.gap(&key, line, "invalid_utf8", line.len(), at);
         };
@@ -207,7 +214,8 @@ impl Engine for Declarative {
                 let id = rule.id_pointer.as_deref().and_then(|p| pointer_text(&v, p));
                 if let Some(id) = &id {
                     if kind == EventKind::ToolStarted {
-                        if self.open_tools.len() < MAX_OPEN_TOOLS {
+                        // Tool uses remembered as open; past this the engine stops tracking new ones.
+                        if self.open_tools.len() < 4_096 {
                             self.open_tools.insert(id.clone());
                         }
                     } else {
@@ -222,8 +230,8 @@ impl Engine for Declarative {
                     "scope": "attempt",
                     "cumulative": false,
                     "metrics": [
-                        metric(&v, rule.tokens_in_pointer.as_ref(), "input_tokens"),
-                        metric(&v, rule.tokens_out_pointer.as_ref(), "output_tokens"),
+                        metric(&v, rule.tokens_in_pointer.as_ref(), "input_tokens", self.usage_quality),
+                        metric(&v, rule.tokens_out_pointer.as_ref(), "output_tokens", self.usage_quality),
                     ],
                 });
             }
@@ -244,7 +252,8 @@ impl Engine for Declarative {
             return Batch::default();
         }
         self.lines += 1;
-        let key = format!("stderr:L{}", self.lines);
+        self.stderr_lines += 1;
+        let key = format!("stderr:L{}", self.stderr_lines);
         let mut e = self.event(
             &key,
             line,

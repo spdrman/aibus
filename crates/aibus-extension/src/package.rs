@@ -164,23 +164,38 @@ impl Package {
     }
 }
 
-fn io(e: &std::io::Error) -> PackageError {
+fn io(e: impl std::fmt::Display) -> PackageError {
     PackageError::Io(e.to_string())
 }
 
-fn walk(
-    dir: &Path,
-    prefix: &str,
-    files: &mut BTreeMap<String, Vec<u8>>,
-    total: &mut u64,
-) -> Result<(), PackageError> {
+/// What `walk` has counted so far.
+#[cfg(unix)]
+#[derive(Default)]
+struct Tally {
+    files: BTreeMap<String, Vec<u8>>,
+    total: u64,
+    /// Files and directories, empty ones too.
+    entries: usize,
+}
+
+/// Walks a directory by descriptor: every step is an `openat` or `statat` relative to the directory
+/// above, with `O_NOFOLLOW`, so a directory swapped for a link while the walk is under way is
+/// refused instead of followed, and a file is typed from the open descriptor, not from a path.
+#[cfg(unix)]
+fn walk(dir: &rustix::fd::OwnedFd, prefix: &str, tally: &mut Tally) -> Result<(), PackageError> {
+    use rustix::fs::{fstat, openat, statat, AtFlags, Dir, FileType, Mode, OFlags};
+    use std::io::Read;
+
     let mut names = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|e| io(&e))? {
-        let entry = entry.map_err(|e| io(&e))?;
-        let name = entry.file_name();
-        let name = name.to_str().ok_or_else(|| {
+    for entry in Dir::read_from(dir).map_err(io)? {
+        let entry = entry.map_err(io)?;
+        let raw = entry.file_name().to_bytes();
+        if raw == b"." || raw == b".." {
+            continue;
+        }
+        let name = std::str::from_utf8(raw).map_err(|_| {
             PackageError::BadName(
-                name.to_string_lossy()
+                String::from_utf8_lossy(raw)
                     .chars()
                     .flat_map(char::escape_default)
                     .collect(),
@@ -189,6 +204,14 @@ fn walk(
         names.push(name.to_owned());
     }
     names.sort();
+    let link = |rel: &str, e: rustix::io::Errno| {
+        // O_NOFOLLOW on something that became a link, or stopped being a directory, after the stat.
+        if e == rustix::io::Errno::LOOP || e == rustix::io::Errno::NOTDIR {
+            PackageError::Link(rel.to_owned())
+        } else {
+            io(e)
+        }
+    };
     for name in names {
         let rel = if prefix.is_empty() {
             name.clone()
@@ -196,79 +219,94 @@ fn walk(
             format!("{prefix}/{name}")
         };
         check_name(&rel)?;
-        let path = dir.join(&name);
-        let kind = std::fs::symlink_metadata(&path)
-            .map_err(|e| io(&e))?
-            .file_type();
-        if kind.is_symlink() {
-            return Err(PackageError::Link(rel));
-        } else if kind.is_dir() {
-            walk(&path, &rel, files, total)?;
-        } else if kind.is_file() {
-            if files.len() >= MAX_FILES {
-                return Err(PackageError::TooManyFiles);
+        tally.entries += 1;
+        if tally.entries > MAX_FILES {
+            return Err(PackageError::TooManyFiles);
+        }
+        let kind = FileType::from_raw_mode(
+            statat(dir, name.as_str(), AtFlags::SYMLINK_NOFOLLOW)
+                .map_err(io)?
+                .st_mode,
+        );
+        match kind {
+            FileType::Symlink => return Err(PackageError::Link(rel)),
+            FileType::Directory => {
+                let child = openat(
+                    dir,
+                    name.as_str(),
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )
+                .map_err(|e| link(&rel, e))?;
+                walk(&child, &rel, tally)?;
             }
-            // One regular file, opened without following a link and read up to the cap.
-            let bytes = {
-                use std::io::Read;
-                let mut opts = std::fs::OpenOptions::new();
-                opts.read(true);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::OpenOptionsExt;
-                    opts.custom_flags(
-                        (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
-                    );
-                }
-                let file = opts.open(&path).map_err(|e| {
-                    // O_NOFOLLOW on a link that was swapped in after the lstat.
-                    if e.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
-                        PackageError::Link(rel.clone())
-                    } else {
-                        io(&e)
-                    }
-                })?;
-                let meta = file.metadata().map_err(|e| io(&e))?;
-                if !meta.is_file() {
+            FileType::RegularFile => {
+                let fd = openat(
+                    dir,
+                    name.as_str(),
+                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )
+                .map_err(|e| link(&rel, e))?;
+                let st = fstat(&fd).map_err(io)?;
+                if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile {
                     return Err(PackageError::Special(rel));
                 }
-                if meta.len() > MAX_FILE_BYTES {
+                // Another name for the same file may live outside the package: not a plain copy.
+                if st.st_nlink > 1 {
+                    return Err(PackageError::Link(rel));
+                }
+                if st.st_size as u64 > MAX_FILE_BYTES {
                     return Err(PackageError::FileTooBig(rel));
                 }
                 let mut bytes = Vec::new();
-                file.take(MAX_FILE_BYTES + 1)
+                std::fs::File::from(fd)
+                    .take(MAX_FILE_BYTES + 1)
                     .read_to_end(&mut bytes)
-                    .map_err(|e| io(&e))?;
+                    .map_err(io)?;
                 if bytes.len() as u64 > MAX_FILE_BYTES {
                     return Err(PackageError::FileTooBig(rel));
                 }
-                bytes
-            };
-            *total += bytes.len() as u64;
-            if *total > MAX_TOTAL_BYTES {
-                return Err(PackageError::TooBig);
+                tally.total += bytes.len() as u64;
+                if tally.total > MAX_TOTAL_BYTES {
+                    return Err(PackageError::TooBig);
+                }
+                tally.files.insert(rel, bytes);
             }
-            files.insert(rel, bytes);
-        } else {
-            return Err(PackageError::Special(rel));
+            _ => return Err(PackageError::Special(rel)),
         }
     }
     Ok(())
 }
 
 /// Reads a package directory without following a link anywhere.
+#[cfg(unix)]
 pub fn read(dir: &Path) -> Result<Package, PackageError> {
+    use rustix::fs::{open, statat, AtFlags, FileType, Mode, OFlags, CWD};
     let shown = dir.display().to_string();
-    let kind = std::fs::symlink_metadata(dir)
-        .map_err(|_| PackageError::NotADirectory(shown.clone()))?
-        .file_type();
-    if kind.is_symlink() {
-        return Err(PackageError::Link(shown));
+    let st = statat(CWD, dir, AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(|_| PackageError::NotADirectory(shown.clone()))?;
+    match FileType::from_raw_mode(st.st_mode) {
+        FileType::Symlink => return Err(PackageError::Link(shown)),
+        FileType::Directory => {}
+        _ => return Err(PackageError::NotADirectory(shown)),
     }
-    if !kind.is_dir() {
-        return Err(PackageError::NotADirectory(shown));
-    }
-    let (mut files, mut total) = (BTreeMap::new(), 0u64);
-    walk(dir, "", &mut files, &mut total)?;
-    Package::from_files(files)
+    let fd = open(
+        dir,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| PackageError::Link(shown))?;
+    let mut tally = Tally::default();
+    walk(&fd, "", &mut tally)?;
+    Package::from_files(tally.files)
+}
+
+/// Packages are read on unix only: the walk is by descriptor.
+#[cfg(not(unix))]
+pub fn read(dir: &Path) -> Result<Package, PackageError> {
+    Err(PackageError::Io(format!(
+        "{} cannot be read on this platform",
+        dir.display()
+    )))
 }

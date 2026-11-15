@@ -115,6 +115,21 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// The first revocation that names this id, version and content (a revocation without a version
+/// covers every version, one without a hash any content).
+pub fn revoked_by<'a>(
+    list: impl IntoIterator<Item = &'a Revocation>,
+    id: &str,
+    version: &str,
+    hash: &str,
+) -> Option<&'a Revocation> {
+    list.into_iter().find(|r| {
+        r.id == id
+            && r.version.as_ref().is_none_or(|v| v == version)
+            && r.hash.as_ref().is_none_or(|h| h == hash)
+    })
+}
+
 /// Checks `pkg` against `entry`, the revocations (the registry's and the policy's) and the policy.
 pub fn check(
     pkg: &Package,
@@ -135,13 +150,13 @@ pub fn check(
             actual: pkg.hash.clone(),
         });
     }
-    for r in revoked.iter().chain(&policy.revoke) {
-        if r.id == entry.id
-            && r.version.as_ref().is_none_or(|v| *v == entry.version)
-            && r.hash.as_ref().is_none_or(|h| *h == entry.hash)
-        {
-            return Err(Refusal::Revoked(r.reason.clone()));
-        }
+    if let Some(r) = revoked_by(
+        revoked.iter().chain(&policy.revoke),
+        &entry.id,
+        &entry.version,
+        &entry.hash,
+    ) {
+        return Err(Refusal::Revoked(r.reason.clone()));
     }
     match (
         &entry.signature,

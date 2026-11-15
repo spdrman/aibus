@@ -9,14 +9,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{escalations, valid_id};
+use crate::manifest::{escalations, valid_id, Manifest};
 use crate::package::{self, Package};
 use crate::policy::Policy;
-use crate::registry::{self, Entry, Registry, Revocation};
+use crate::registry::{self, revoked_by, Entry, Registry, Revocation};
 use crate::version::{exact, Version};
-
-/// `state.json` larger than this is not read.
-const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Quarantined {
@@ -39,12 +36,21 @@ pub struct Record {
     /// Installed versions and their content hashes.
     pub versions: BTreeMap<String, String>,
     pub quarantined: Vec<Quarantined>,
+    /// The manifest of the last version the user accepted (installed, updated or rolled back to).
+    /// An install compares with this, so a quarantined or unreadable active copy never leaves
+    /// nothing to compare against.
+    #[serde(default)]
+    pub accepted: Option<Manifest>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
     pub extensions: BTreeMap<String, Record>,
+    /// The registries' revocations, as of the last time any command read one, so `resolve` and
+    /// `rollback` need no registry to know them.
+    #[serde(default)]
+    pub revoked: Vec<Revocation>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +89,17 @@ pub struct Store {
     pub root: PathBuf,
 }
 
+/// Remembers the revocations a command has just read, most recent last, at most 4096.
+fn note_revocations(st: &mut State, seen: &[Revocation]) {
+    for r in seen {
+        if !st.revoked.contains(r) {
+            st.revoked.push(r.clone());
+        }
+    }
+    let excess = st.revoked.len().saturating_sub(4096);
+    st.revoked.drain(..excess);
+}
+
 fn bad_id(id: &str) -> Result<(), StoreError> {
     if valid_id(id) {
         Ok(())
@@ -105,7 +122,9 @@ fn quarantine(rec: &mut Record, version: &str, hash: &str, class: &str, reason: 
     {
         rec.quarantined.push(q);
     }
-    if rec.active.as_deref() == Some(version) {
+    // New content under a version that is installed is quarantined without touching the installed one.
+    if rec.active.as_deref() == Some(version) && rec.versions.get(version).is_none_or(|h| h == hash)
+    {
         rec.active = None;
     }
 }
@@ -123,7 +142,7 @@ impl Store {
 
     /// The installed state; an absent file is an empty store, a damaged one is an error.
     pub fn state(&self) -> Result<State, StoreError> {
-        let bytes = match aibus_core::persist::fs::read_regular(&self.state_file(), MAX_STATE_BYTES)
+        let bytes = match aibus_core::persist::fs::read_regular(&self.state_file(), 4 * 1024 * 1024)
         {
             Ok(b) => b,
             Err(aibus_core::persist::fs::ReadError::Io(e))
@@ -214,8 +233,14 @@ impl Store {
         entry: &Entry,
         accept: &[String],
     ) -> Result<Record, StoreError> {
+        note_revocations(st, &reg.revoked);
         let rec = st.extensions.entry(entry.id.clone()).or_default();
         let new_version = exact(&entry.version).expect("the registry validated it");
+        // A pin holds against `install` as much as against `update`; the version already active is
+        // not a move.
+        if rec.pinned && rec.active.as_deref() != Some(entry.version.as_str()) {
+            return Err(StoreError::Pinned(entry.id.clone()));
+        }
         if let Some(active) = rec.active.as_deref().and_then(exact) {
             if new_version < active {
                 return Err(StoreError::Downgrade {
@@ -241,19 +266,43 @@ impl Store {
                 });
             }
         };
-        if let Some(old_version) = rec.active.clone().filter(|v| *v != entry.version) {
-            if let Some(old) = rec
-                .versions
-                .get(&old_version)
-                .and_then(|h| self.read_installed(&entry.id, &old_version, h).ok())
-            {
-                let unaccepted: Vec<String> = escalations(&old.manifest, &pkg.manifest)
-                    .into_iter()
-                    .filter(|e| !accept.contains(e))
-                    .collect();
-                if !unaccepted.is_empty() {
-                    return Err(StoreError::Escalation(unaccepted));
-                }
+        // A version number names one content: a registry that re-points an installed version at
+        // different bytes is lying, not updating.
+        if rec
+            .versions
+            .get(&entry.version)
+            .is_some_and(|h| *h != pkg.hash)
+        {
+            let why = format!(
+                "{} {} is installed with other content than this registry now offers",
+                entry.id, entry.version
+            );
+            quarantine(rec, &entry.version, &pkg.hash, "provenance_invalid", &why);
+            return Err(StoreError::Quarantined {
+                class: "provenance_invalid".to_owned(),
+                reason: why,
+            });
+        }
+        // The active copy has to be readable and what was recorded: the check never fails open.
+        if let Some(active) = rec.active.clone() {
+            let hash = rec.versions.get(&active).cloned().unwrap_or_default();
+            if let Err(b) = self.read_installed(&entry.id, &active, &hash) {
+                quarantine(rec, &active, &hash, &b.0, &b.1);
+                return Err(StoreError::Quarantined {
+                    class: b.0,
+                    reason: b.1,
+                });
+            }
+        }
+        // What the user accepted last is the baseline, even when the active version has been
+        // quarantined since.
+        if let Some(old) = &rec.accepted {
+            let unaccepted: Vec<String> = escalations(old, &pkg.manifest)
+                .into_iter()
+                .filter(|e| !accept.contains(e))
+                .collect();
+            if !unaccepted.is_empty() {
+                return Err(StoreError::Escalation(unaccepted));
             }
         }
         let target = self.version_dir(&entry.id, &entry.version);
@@ -283,6 +332,7 @@ impl Store {
         }
         rec.versions.insert(entry.version.clone(), pkg.hash);
         rec.active = Some(entry.version.clone());
+        rec.accepted = Some(pkg.manifest);
         Ok(rec.clone())
     }
 
@@ -315,6 +365,7 @@ impl Store {
     ) -> Result<Record, StoreError> {
         bad_id(id)?;
         self.transact(|st| {
+            note_revocations(st, &reg.revoked);
             let rec = st
                 .extensions
                 .get(id)
@@ -359,6 +410,8 @@ impl Store {
     ) -> Result<Package, StoreError> {
         bad_id(id)?;
         self.transact(|st| {
+            note_revocations(st, revoked);
+            let known = st.revoked.clone();
             let rec = st
                 .extensions
                 .get_mut(id)
@@ -390,7 +443,7 @@ impl Store {
                 require_signature: false,
                 ..policy.clone()
             };
-            match registry::check(&pkg, &entry, revoked, &relaxed) {
+            match registry::check(&pkg, &entry, &known, &relaxed) {
                 Ok(()) => Ok(pkg),
                 Err(r) => Err(fail(rec, r.class(), r.to_string())),
             }
@@ -399,7 +452,6 @@ impl Store {
 
     /// The active package for use: not disabled, not quarantined, re-hashed on every call.
     pub fn resolve(&self, id: &str, policy: &Policy) -> Result<Package, StoreError> {
-        let _ = policy;
         bad_id(id)?;
         let st = self.state()?;
         let rec = st
@@ -414,15 +466,23 @@ impl Store {
             .clone()
             .ok_or_else(|| StoreError::ActiveQuarantined(id.to_owned()))?;
         let hash = rec.versions.get(&version).cloned().unwrap_or_default();
-        match self.read_installed(id, &version, &hash) {
-            Ok(p) => Ok(p),
-            Err(b) => self.transact(|st| {
+        // What is wrong with the active copy, if anything: changed on disk, or revoked since (by the
+        // registry's list as the store last saw it, or by the user's own policy).
+        let loaded = self.read_installed(id, &version, &hash);
+        let wrong = match &loaded {
+            Err(b) => Some((b.0.clone(), b.1.clone())),
+            Ok(_) => revoked_by(st.revoked.iter().chain(&policy.revoke), id, &version, &hash)
+                .map(|r| ("revoked".to_owned(), format!("revoked: {}", r.reason))),
+        };
+        match wrong {
+            None => loaded.map_err(|b| StoreError::State(b.1)),
+            Some((class, reason)) => self.transact(|st| {
                 if let Some(rec) = st.extensions.get_mut(id) {
-                    quarantine(rec, &version, &hash, &b.0, &b.1);
+                    quarantine(rec, &version, &hash, &class, &reason);
                 }
                 Err(StoreError::Quarantined {
-                    class: b.0.clone(),
-                    reason: b.1.clone(),
+                    class: class.clone(),
+                    reason: reason.clone(),
                 })
             }),
         }
@@ -450,7 +510,6 @@ impl Store {
 
     /// Makes the previous version active again, after re-hashing it.
     pub fn rollback(&self, id: &str, policy: &Policy) -> Result<Record, StoreError> {
-        let _ = policy;
         bad_id(id)?;
         self.transact(|st| {
             let rec = st
@@ -462,15 +521,27 @@ impl Store {
                 .clone()
                 .ok_or_else(|| StoreError::NoPrevious(id.to_owned()))?;
             let hash = rec.versions.get(&prev).cloned().unwrap_or_default();
-            if let Err(b) = self.read_installed(id, &prev, &hash) {
-                quarantine(rec, &prev, &hash, &b.0, &b.1);
+            let pkg = match self.read_installed(id, &prev, &hash) {
+                Ok(p) => p,
+                Err(b) => {
+                    quarantine(rec, &prev, &hash, &b.0, &b.1);
+                    return Err(StoreError::Quarantined {
+                        class: b.0,
+                        reason: b.1,
+                    });
+                }
+            };
+            if let Some(r) = revoked_by(st.revoked.iter().chain(&policy.revoke), id, &prev, &hash) {
+                let why = format!("revoked: {}", r.reason);
+                quarantine(rec, &prev, &hash, "revoked", &why);
                 return Err(StoreError::Quarantined {
-                    class: b.0,
-                    reason: b.1,
+                    class: "revoked".to_owned(),
+                    reason: why,
                 });
             }
             rec.active = Some(prev);
             rec.previous = None;
+            rec.accepted = Some(pkg.manifest);
             Ok(rec.clone())
         })
     }

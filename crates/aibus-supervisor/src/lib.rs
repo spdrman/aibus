@@ -56,7 +56,7 @@ pub struct Limits {
     pub max_line_bytes: usize,
     /// All stdout together; past this the attempt is stopped.
     pub max_stdout_bytes: u64,
-    /// stderr kept for the trace; past this it is still drained, and only counted.
+    /// stderr kept for the trace; past this it is drained and dropped, and one `stderr_limit` gap records the dropped bytes (the head up to the cap is kept).
     pub max_stderr_bytes: u64,
     /// Lines read a second, stdout and stderr together. Past this the host stops reading for a
     /// moment and the pipe pushes back on the CLI: nothing is dropped.

@@ -20,3 +20,6 @@ uuid = { version = "1", features = ["v7", "v8", "serde"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }

@@ -255,3 +255,69 @@ fn a_hostile_trace_reaches_the_terminal_without_a_single_escape_sequence() {
         }
     }
 }
+
+/// `aibus runs replay run1 --events` with stdout on `tty` (a pseudo terminal) or on a pipe.
+#[cfg(unix)]
+fn replay_events_bytes(tty: bool) -> Vec<u8> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let home = aibus_testkit::xdg_temp();
+    let root = home.path().join("hostile");
+    let dir = root.join("run1");
+    fs::create_dir_all(&dir).unwrap();
+    // A raw right-to-left override inside one recorded string.
+    let line = fs::read_to_string(traces().join("07-deleg/events.jsonl"))
+        .unwrap()
+        .replace("reader-a", "reader\u{202e}gnp");
+    fs::write(dir.join("events.jsonl"), line).unwrap();
+    let mut c = command(home.path());
+    c.arg("runs")
+        .args(["replay", "run1", "--events", "--root"])
+        .arg(&root)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    if !tty {
+        return c.output().unwrap().stdout;
+    }
+    let master =
+        rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
+            .unwrap();
+    rustix::pty::grantpt(&master).unwrap();
+    rustix::pty::unlockpt(&master).unwrap();
+    let name = rustix::pty::ptsname(&master, Vec::new()).unwrap();
+    let slave = rustix::fs::open(
+        name.to_str().unwrap(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap();
+    c.stdout(Stdio::from(slave));
+    let mut child = c.spawn().unwrap();
+    // `c` holds the only other copy of the slave end; dropping it lets the master see the hang-up.
+    drop(c);
+    let mut out = Vec::new();
+    let mut master = fs::File::from(master);
+    let mut buf = [0u8; 8192];
+    while let Ok(n) = master.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    assert!(child.wait().unwrap().success());
+    out
+}
+
+#[cfg(unix)]
+#[test]
+fn issue_284_replay_events_on_a_terminal_writes_hidden_characters_as_json_escapes() {
+    let tty = String::from_utf8(replay_events_bytes(true)).unwrap();
+    assert!(
+        !tty.contains('\u{202e}'),
+        "a terminal got a raw character it acts on: {tty:?}"
+    );
+    assert!(tty.contains("reader\\u202egnp"), "{tty:?}");
+    // Into a pipe the recorded bytes stay as they were, the override included.
+    let pipe = String::from_utf8(replay_events_bytes(false)).unwrap();
+    assert!(pipe.contains('\u{202e}'), "{pipe:?}");
+}

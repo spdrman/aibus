@@ -56,3 +56,6 @@ zstd = "0.13"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net", "io-util", "test-util"] }
 regex = "1"
 ulid = "1"
+
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs", "pty"] }

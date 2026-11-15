@@ -916,3 +916,223 @@ fn the_views_have_no_way_to_run_anything_or_reach_a_provider() {
         assert!(!deps.contains(word), "aibus-trace depends on {word}");
     }
 }
+
+/// Runs `f` on its own thread and fails the test when it has not answered in `secs`, so a view
+/// that blocks on a FIFO fails instead of hanging the run.
+fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(Duration::from_secs(secs))
+        .expect("the view did not answer: it is blocked on something in the run directory")
+}
+
+#[cfg(unix)]
+fn mkfifo(path: &Path) {
+    assert!(std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .unwrap()
+        .success());
+}
+
+/// A one-tool trace whose tool carries `payload_ref`.
+fn one_payload_trace(payload_ref: &str) -> tempfile::TempDir {
+    let t = Trace::new();
+    t.write(&[t.ev(1, EventKind::ToolStarted, |e| {
+        e.native.tool_use_id = Some("t1".into());
+        e.payload_ref = Some(payload_ref.into());
+    })])
+}
+
+#[cfg(unix)]
+#[test]
+fn issue_284_a_fifo_plan_json_does_not_hang_load_or_the_fleet() {
+    let t = Trace::new();
+    let dir = t.write(&[t.ev(1, EventKind::AgentStarted, |e| {
+        e.agent_id = Some("lead".into())
+    })]);
+    mkfifo(&dir.path().join("plan.json"));
+    let path = dir.path().to_owned();
+    let rec = within(10, move || Recorded::load(&path).unwrap());
+    assert!(rec.plan.is_none());
+    assert!(
+        rec.plan_error
+            .as_deref()
+            .is_some_and(|e| e.contains("plan.json")),
+        "{:?}",
+        rec.plan_error
+    );
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("r1")).unwrap();
+    fs::copy(
+        dir.path().join("events.jsonl"),
+        root.path().join("r1/events.jsonl"),
+    )
+    .unwrap();
+    mkfifo(&root.path().join("r1/plan.json"));
+    let r = root.path().to_owned();
+    let rows = within(10, move || view::fleet(&r));
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "r1");
+    // A dangling link is refused too, not read as "no plan".
+    let l = tempfile::tempdir().unwrap();
+    fs::copy(
+        dir.path().join("events.jsonl"),
+        l.path().join("events.jsonl"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("/nonexistent-284", l.path().join("plan.json")).unwrap();
+    assert!(Recorded::load(l.path()).unwrap().plan_error.is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn issue_284_a_fifo_events_file_and_a_device_plan_are_refused_promptly() {
+    let dir = tempfile::tempdir().unwrap();
+    mkfifo(&dir.path().join("events.jsonl"));
+    let path = dir.path().to_owned();
+    assert!(within(10, move || Recorded::load(&path)).is_err());
+    let d = tempfile::tempdir().unwrap();
+    let t = Trace::new();
+    let src = t.write(&[]);
+    fs::copy(
+        src.path().join("events.jsonl"),
+        d.path().join("events.jsonl"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("/dev/zero", d.path().join("plan.json")).unwrap();
+    let path = d.path().to_owned();
+    let rec = within(10, move || Recorded::load(&path).unwrap());
+    assert!(rec.plan.is_none() && rec.plan_error.is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn issue_284_a_fifo_payload_object_does_not_hang_inspect() {
+    let hash = "a".repeat(64);
+    let dir = one_payload_trace(&format!("local://objects/{hash}.json"));
+    fs::create_dir(dir.path().join("objects")).unwrap();
+    mkfifo(&dir.path().join("objects").join(format!("{hash}.json")));
+    let path = dir.path().to_owned();
+    let (node, event) = within(10, move || {
+        let rec = Recorded::load(&path).unwrap();
+        (
+            view::inspect(&rec, "t1").unwrap(),
+            view::event(&rec, 1).unwrap(),
+        )
+    });
+    assert!(node.contains("(unavailable)"), "{node}");
+    assert!(event.contains("(unavailable)"), "{event}");
+}
+
+#[cfg(unix)]
+#[test]
+fn issue_284_a_payload_object_that_is_a_link_out_of_the_run_is_not_opened() {
+    let secret = tempfile::tempdir().unwrap();
+    fs::write(secret.path().join("secret.txt"), "CANARY-284-LINK").unwrap();
+    let hash = "b".repeat(64);
+    let dir = one_payload_trace(&format!("local://objects/{hash}.json"));
+    fs::create_dir(dir.path().join("objects")).unwrap();
+    std::os::unix::fs::symlink(
+        secret.path().join("secret.txt"),
+        dir.path().join("objects").join(format!("{hash}.json")),
+    )
+    .unwrap();
+    let rec = Recorded::load(dir.path()).unwrap();
+    for text in [
+        view::inspect(&rec, "t1").unwrap(),
+        view::event(&rec, 1).unwrap(),
+    ] {
+        assert!(!text.contains("CANARY-284-LINK"), "{text}");
+        assert!(text.contains("(unavailable)"), "{text}");
+    }
+    // The same when the objects directory itself is the link.
+    let other = one_payload_trace(&format!("local://objects/{hash}.json"));
+    let real = tempfile::tempdir().unwrap();
+    fs::write(
+        real.path().join(format!("{hash}.json")),
+        "\"CANARY-284-DIR\"",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(real.path(), other.path().join("objects")).unwrap();
+    let rec = Recorded::load(other.path()).unwrap();
+    assert!(!view::inspect(&rec, "t1")
+        .unwrap()
+        .contains("CANARY-284-DIR"));
+}
+
+#[cfg(unix)]
+#[test]
+fn issue_284_a_linked_run_directory_is_not_listed_or_resolved() {
+    let root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(traces().join("06-basic"), root.path().join("linked")).unwrap();
+    assert!(view::fleet(root.path()).is_empty());
+    assert!(view::resolve(root.path(), "linked").is_err());
+}
+
+#[test]
+fn issue_284_invisible_format_characters_are_written_out() {
+    for c in [
+        '\u{e0041}',
+        '\u{00ad}',
+        '\u{180e}',
+        '\u{3164}',
+        '\u{115f}',
+        '\u{ffa0}',
+        '\u{fe0f}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{200b}',
+        '\u{202e}',
+        '\u{feff}',
+        '\u{061c}',
+        '\u{e007f}',
+    ] {
+        let out = view::clean(&format!("a{c}b"), 100);
+        assert_eq!(out, format!("a\\u{{{:x}}}b", u32::from(c)), "{c:?}");
+        let line = view::terminal_safe_line(format!("{{\"k\":\"a{c}b\"}}\n").as_bytes());
+        assert!(!String::from_utf8(line).unwrap().contains(c), "{c:?}");
+    }
+    assert_eq!(
+        view::clean("plain \u{e9} \u{4e2d} \u{1f600}", 100),
+        "plain \u{e9} \u{4e2d} \u{1f600}"
+    );
+}
+
+#[test]
+fn issue_284_the_graph_and_replay_of_50000_attempts_stay_near_linear() {
+    let t = Trace::new();
+    let evs: Vec<TraceEvent> = (1..=50_000u64)
+        .map(|n| {
+            let mut a = t.attempt.clone();
+            a.attempt_id = Uuid::from_u128(1000 + u128::from(n));
+            let at = SystemTime::UNIX_EPOCH + Duration::from_millis(1_800_000_000_000 + n);
+            let mut e = TraceEvent::new(
+                &a,
+                derived_id(&[&n.to_le_bytes()]),
+                EventKind::AgentStarted,
+                Origin::CliStream,
+                Visibility::Observed,
+                at,
+                "test/1",
+            );
+            e.sequence = n;
+            e.agent_id = Some(format!("agent{n}"));
+            e
+        })
+        .collect();
+    let dir = t.write(&evs);
+    let rec = Recorded::load(dir.path()).unwrap();
+    let start = std::time::Instant::now();
+    let g = view::graph(&rec, "big");
+    let g_time = start.elapsed();
+    let r = view::replay(&rec, "big");
+    let both = start.elapsed();
+    assert!(g.contains("agent agent50000 "));
+    assert!(r.contains("final state"));
+    // About a second in a debug build; the quadratic version took minutes at this size.
+    assert!(g_time < Duration::from_secs(8), "graph {g_time:?}");
+    assert!(both < Duration::from_secs(16), "graph and replay {both:?}");
+}

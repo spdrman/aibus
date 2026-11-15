@@ -40,12 +40,30 @@ pub struct Recorded {
     pub plan_error: Option<String>,
 }
 
+/// Opens `path` for reading only when it is a regular file inside its directory: a symbolic link
+/// is refused (`O_NOFOLLOW`), the open of a FIFO or a device returns at once (`O_NONBLOCK`) and is
+/// then refused, so a hostile run directory cannot hang or redirect a view.
+fn open_regular(path: &Path) -> io::Result<File> {
+    let mut o = fs::OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags((rustix::fs::OFlags::NONBLOCK | rustix::fs::OFlags::NOFOLLOW).bits() as i32);
+    }
+    let file = o.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("not a regular file"));
+    }
+    Ok(file)
+}
+
 impl Recorded {
     /// Reads `<dir>/events.jsonl` and `<dir>/plan.json` without taking the writer's lock.
     pub fn load(dir: &Path) -> io::Result<Self> {
         /// The largest `events.jsonl` a view reads. The store's own soft limit is 256 MiB.
         const MAX_TRACE_BYTES: u64 = 512 << 20;
-        let file = File::open(dir.join("events.jsonl"))?;
+        let file = open_regular(&dir.join("events.jsonl"))?;
         if file.metadata()?.len() > MAX_TRACE_BYTES {
             return Err(io::Error::other(format!(
                 "the trace is over {} MiB, the most a view reads",
@@ -56,16 +74,22 @@ impl Recorded {
         file.take(MAX_TRACE_BYTES).read_to_end(&mut bytes)?;
         let mut rec = Self::from_bytes(dir, &bytes);
         let plan_path = dir.join("plan.json");
-        if plan_path.exists() {
-            match fs::metadata(&plan_path) {
-                Ok(m) if m.len() > 4 << 20 => {
+        // `symlink_metadata`: a link (even a dangling one) is something there that must be refused,
+        // not an absent plan.
+        if fs::symlink_metadata(&plan_path).is_ok() {
+            let read = open_regular(&plan_path).and_then(|f| {
+                let mut b = Vec::new();
+                f.take((4 << 20) + 1).read_to_end(&mut b).map(|_| b)
+            });
+            match read {
+                Ok(b) if b.len() > 4 << 20 => {
                     rec.plan_error = Some("plan.json is over 4 MiB".into())
                 }
-                _ => match fs::read(&plan_path).map(|b| serde_json::from_slice::<Value>(&b)) {
-                    Ok(Ok(v)) => rec.plan = Some(v),
-                    Ok(Err(e)) => rec.plan_error = Some(format!("plan.json is not JSON: {e}")),
-                    Err(e) => rec.plan_error = Some(format!("plan.json: {e}")),
+                Ok(b) => match serde_json::from_slice::<Value>(&b) {
+                    Ok(v) => rec.plan = Some(v),
+                    Err(e) => rec.plan_error = Some(format!("plan.json is not JSON: {e}")),
                 },
+                Err(e) => rec.plan_error = Some(format!("plan.json: {e}")),
             }
         }
         Ok(rec)
@@ -111,11 +135,39 @@ impl Recorded {
     }
 }
 
-/// A character a terminal acts on or does not show: controls (C0, DEL, C1), bidi overrides and
-/// isolates, zero-width characters and the byte order mark.
+/// A character a terminal acts on or does not show: controls (C0, DEL, C1), every character of
+/// the Unicode Format category (bidi overrides and isolates, zero-width characters, the soft
+/// hyphen, the byte order mark, tag characters), the line and paragraph separators, the
+/// variation selectors and the blank Hangul fillers.
 fn hidden(c: char) -> bool {
     c.is_control()
-        || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{061c}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}')
+        || matches!(
+            c,
+            '\u{00ad}'
+                | '\u{0600}'..='\u{0605}'
+                | '\u{061c}'
+                | '\u{06dd}'
+                | '\u{070f}'
+                | '\u{0890}'..='\u{0891}'
+                | '\u{08e2}'
+                | '\u{115f}'..='\u{1160}'
+                | '\u{17b4}'..='\u{17b5}'
+                | '\u{180b}'..='\u{180f}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{3164}'
+                | '\u{fe00}'..='\u{fe0f}'
+                | '\u{feff}'
+                | '\u{ffa0}'
+                | '\u{fff9}'..='\u{fffb}'
+                | '\u{110bd}'
+                | '\u{110cd}'
+                | '\u{13430}'..='\u{1343f}'
+                | '\u{1bca0}'..='\u{1bca3}'
+                | '\u{1d173}'..='\u{1d17a}'
+                | '\u{e0000}'..='\u{e0fff}'
+        )
 }
 
 /// `s` with every control, bidi and zero-width character written out as `\u{..}`, cut to `max`
@@ -446,6 +498,8 @@ fn run_dirs(root: &Path) -> Vec<String> {
         .into_iter()
         .flatten()
         .flatten()
+        // A link to a directory is not a run of this root (`file_type` does not follow it).
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| valid_id(n) && root.join(n).join("events.jsonl").is_file())
         .collect();
@@ -703,8 +757,25 @@ pub fn graph(rec: &Recorded, name: &str) -> String {
                 ids.push(id);
             }
         }
+        // Index once by attempt, so a trace with many attempts costs one pass, not one per attempt.
+        let mut attempt_of: HashMap<Uuid, &crate::AttemptView> = HashMap::new();
+        for a in &x.p.attempts {
+            attempt_of.entry(a.attempt_id).or_insert(a);
+        }
+        let mut agents_of: HashMap<Uuid, Vec<&crate::AgentNode>> = HashMap::new();
+        for n in &x.p.agents {
+            agents_of.entry(n.attempt_id).or_default().push(n);
+        }
+        let mut edges_of: HashMap<Uuid, Vec<&Edge>> = HashMap::new();
+        for e in &x.p.edges {
+            edges_of.entry(e.attempt_id).or_default().push(e);
+        }
+        let mut tools_of: HashMap<Uuid, Vec<&crate::ToolNode>> = HashMap::new();
+        for t in &x.p.tools {
+            tools_of.entry(t.attempt_id).or_default().push(t);
+        }
         for attempt in ids {
-            match x.p.attempts.iter().find(|a| a.attempt_id == attempt) {
+            match attempt_of.get(&attempt).copied() {
                 Some(a) => {
                     let status = a.status.map_or_else(|| "no end recorded".into(), wire);
                     let reconcile = if a.requires_reconciliation {
@@ -743,20 +814,12 @@ pub fn graph(rec: &Recorded, name: &str) -> String {
                     "  lineage: provider-native, as the CLI's stream and hooks show it\n",
                 ),
             }
-            let agents: Vec<&crate::AgentNode> =
-                x.p.agents
-                    .iter()
-                    .filter(|n| n.attempt_id == attempt)
-                    .collect();
-            let edges: Vec<&Edge> =
-                x.p.edges
-                    .iter()
-                    .filter(|e| e.attempt_id == attempt)
-                    .collect();
+            let agents: &[&crate::AgentNode] = agents_of.get(&attempt).map_or(&[], Vec::as_slice);
+            let edges: &[&Edge] = edges_of.get(&attempt).map_or(&[], Vec::as_slice);
             let known: HashSet<&str> = agents.iter().map(|n| n.agent_id.as_str()).collect();
             let mut children: HashMap<&str, Vec<&Edge>> = HashMap::new();
             let mut edge_of: HashMap<&str, &Edge> = HashMap::new();
-            for e in &edges {
+            for e in edges {
                 edge_of.entry(e.child.as_str()).or_insert(e);
                 if let Some(p) = e
                     .parent
@@ -768,10 +831,10 @@ pub fn graph(rec: &Recorded, name: &str) -> String {
             }
             let mut tools: HashMap<&str, Vec<&crate::ToolNode>> = HashMap::new();
             let mut loose_tools = Vec::new();
-            for t in x.p.tools.iter().filter(|t| t.attempt_id == attempt) {
+            for t in tools_of.get(&attempt).map_or(&[][..], Vec::as_slice) {
                 match t.agent_id.as_deref().filter(|id| known.contains(id)) {
-                    Some(id) => tools.entry(id).or_default().push(t),
-                    None => loose_tools.push(t),
+                    Some(id) => tools.entry(id).or_default().push(*t),
+                    None => loose_tools.push(*t),
                 }
             }
             // Roots: agents no known parent delegated to.
@@ -1012,7 +1075,14 @@ fn push_payload(s: &mut String, rec: &Recorded, payload_ref: &str, pad: &str) {
         );
         return;
     };
-    let body = fs::File::open(&path).and_then(|file| {
+    // The `objects` directory itself must not be a link out of the run.
+    let in_run = fs::symlink_metadata(rec.dir.join("objects")).is_ok_and(|m| m.is_dir());
+    let body = (if in_run {
+        open_regular(&path)
+    } else {
+        Err(io::Error::other("objects is not a directory of the run"))
+    })
+    .and_then(|file| {
         let mut b = Vec::new();
         file.take(1 << 20).read_to_end(&mut b).map(|_| b)
     });

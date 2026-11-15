@@ -44,7 +44,7 @@ pub const PARSER: &str = "claude-code-stream-json/1";
 /// The provider extension id on every event. Provisional: Anthropic's legal page says the Claude
 /// Code name cannot be part of another product's or feature's name (spike #281, condition 2), so
 /// the final id is the owner's to pick in #286. A trace stores it as a plain string.
-pub const EXTENSION_ID: &str = "org.aibus.reference-cli";
+pub const EXTENSION_ID: &str = "org.devshell.aibus.reference-cli";
 
 /// Names and ids copied into an event are cut to this many bytes.
 const MAX_NAME: usize = 256;

@@ -1,0 +1,98 @@
+{
+  "corpus_version": 1,
+  "name": "repo-review reference corpus",
+  "pilot_workflow": "fixtures/workflows/graph/repo-review.toml",
+  "note": "The recorded streams are the spike's two-subagent read tasks (#281): repo-review shaped (a lead delegating lookups to two native subagents), not a review of a real pull request. Every case says which part is a real recording and what, if anything, was changed or stood in.",
+  "cases": [
+    {
+      "id": "01-native-delegation",
+      "kind": "native_delegation",
+      "source": "recorded_real",
+      "recording": "fixtures/claude-code/spike-281/11-foreground",
+      "change": null,
+      "stand_in": "stand-ins/replay.sh",
+      "proves": "Lead, two native subagents, a Read each, final result; edges observed and hook cross-checked"
+    },
+    {
+      "id": "02-failed-tool",
+      "kind": "failed_tool",
+      "source": "recorded_real_with_one_change",
+      "recording": "fixtures/claude-code/spike-281/11-foreground",
+      "change": "the last child tool_result gets is_error=true",
+      "stand_in": "stand-ins/replay.sh",
+      "proves": "A tool fails, the attempt completes, the graph is unchanged"
+    },
+    {
+      "id": "03-timeout",
+      "kind": "timeout",
+      "source": "recorded_real_prefix_plus_stand_in",
+      "recording": "fixtures/claude-code/spike-281/11-foreground",
+      "change": "first 40 lines, then the stand-in never finishes",
+      "stand_in": "stand-ins/timeout.sh",
+      "proves": "The host's wall-time limit interrupts the attempt"
+    },
+    {
+      "id": "04-cancelled-run",
+      "kind": "cancelled_run",
+      "source": "recorded_real_prefix_plus_stand_in",
+      "recording": "fixtures/claude-code/spike-281/11-foreground",
+      "change": "first 40 lines, then the stand-in waits for SIGTERM",
+      "stand_in": "stand-ins/cancel.sh",
+      "proves": "User cancel: SIGTERM first, attempt cancelled"
+    },
+    {
+      "id": "05-restart",
+      "kind": "restart",
+      "source": "recorded_real_prefix_plus_stand_in",
+      "recording": "fixtures/claude-code/spike-281/11-foreground",
+      "change": "cut after the first child Read tool_use; the process is then killed; the store is torn; a second attempt runs",
+      "stand_in": "stand-ins/killed.sh",
+      "proves": "Interrupted attempt with an open tool, torn-tail repair, new attempt, nothing resumed"
+    },
+    {
+      "id": "06-overlapping-output",
+      "kind": "overlapping_output",
+      "source": "recorded_real_plus_stand_in",
+      "recording": "fixtures/claude-code/spike-281/07-deleg",
+      "change": "20 stderr lines written in parallel",
+      "stand_in": "stand-ins/overlap.sh",
+      "proves": "Interleaved children and concurrent stderr lose nothing"
+    },
+    {
+      "id": "07-malformed-event",
+      "kind": "malformed_event",
+      "source": "recorded_real_plus_stand_in",
+      "recording": "fixtures/claude-code/spike-281/06-basic",
+      "change": "broken JSON, invalid UTF-8, an unknown event type and a cut-off last line are inserted",
+      "stand_in": "stand-ins/malformed.sh",
+      "proves": "Damage becomes labelled gaps and warnings, the graph is unchanged"
+    },
+    {
+      "id": "08-missing-usage",
+      "kind": "missing_usage",
+      "source": "recorded_real_with_one_change",
+      "recording": "fixtures/claude-code/spike-281/11-foreground",
+      "change": "usage, cost, durations and turn counts removed",
+      "stand_in": "stand-ins/replay.sh",
+      "proves": "No usage reported stays unknown in the store and every view"
+    },
+    {
+      "id": "09-approval",
+      "kind": "approval",
+      "source": "recorded_real_plus_compiled_plan",
+      "recording": "fixtures/claude-code/spike-281/09-denied",
+      "change": "none; also the compiled plan of fixtures/workflows/graph/repo-review.toml and the argv builder",
+      "stand_in": null,
+      "proves": "Denial is vendor auto-deny, never an approval aibus invented; held steps are in the plan; interactive approval is unsupported"
+    },
+    {
+      "id": "10-trace-replay",
+      "kind": "trace_replay",
+      "source": "recorded_real",
+      "recording": "fixtures/claude-code/traces-284/11-foreground.hooks",
+      "change": "none",
+      "stand_in": null,
+      "proves": "Offline replay with an empty PATH, byte for byte repeatable, rerun refused"
+    }
+  ]
+}

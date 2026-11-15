@@ -88,6 +88,7 @@ impl Bench {
             } else {
                 "linux".into()
             },
+            typed: Default::default(),
         }
     }
 }

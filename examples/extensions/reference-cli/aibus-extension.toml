@@ -6,7 +6,7 @@
 # (an API key, a Console sign-in or, for local use only, a subscription sign-in); aibus never reads
 # or stores the token. Bundled, preinstalled, hosted and commercial use stay blocked (#280, #281).
 
-schema_version = "1"
+schema_version = "2"
 id = "org.devshell.aibus.reference-cli"
 version = "0.1.0"
 name = "Reference CLI"
@@ -20,7 +20,8 @@ name = "devshell"
 url = "https://devshell.org"
 
 [compat]
-protocol = ">=1.0.0, <2.0.0"
+# Schema 2 needs a host that speaks protocol 1.1.0; a host from before schema 2 refuses it (as an unknown field).
+protocol = ">=1.1.0, <2.0.0"
 os = ["macos", "linux"]
 # 2.1.0 is the oldest the probe accepts; 2.1.311 is the only version tested (#281, #285).
 cli_versions = ">=2.1.0"
@@ -48,6 +49,17 @@ env_allow = []
 [[execution.optional]]
 flag = "--include-hook-events"
 capability = "hook_channel"
+
+# Flags whose value the host fills from the workflow plan (schema 2, #334). The manifest names the
+# flag and the kind of value, never a value: the host checks it and puts it in the launch as one
+# argument. The model and the agents are the plan's, not the extension's.
+[[execution.typed]]
+flag = "--model"
+kind = "model_id"
+
+[[execution.typed]]
+flag = "--agents"
+kind = "agent_list"
 
 [limits]
 wall_time_secs = 1800

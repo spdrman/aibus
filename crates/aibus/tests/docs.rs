@@ -117,3 +117,19 @@ fn issue_339_the_docs_describe_the_per_cli_flag_allowlist() {
     }
     assert!(spec.contains("second check"), "spec 16 does not keep the denylist as a second check");
 }
+
+/// #334: spec 16 and D-286 describe schema 2, the typed flags, who fills the values and the
+/// negotiation rule for an older host.
+#[test]
+fn issue_334_the_docs_describe_schema_2_and_the_typed_flags() {
+    let spec = fs::read_to_string(root().join("docs/spec/16-extensions.md")).unwrap();
+    let decisions = fs::read_to_string(root().join("docs/DECISIONS.md")).unwrap();
+    let d286 = decisions.split("## D-286").nth(1).unwrap().split("\n## D-").next().unwrap();
+    for (name, text) in [("spec 16", spec.as_str()), ("D-286", d286)] {
+        for needle in ["schema 2", "typed", "model_id", "agent_list", "workdir_path", "protocol 1.1.0"] {
+            assert!(text.contains(needle), "{name} does not mention {needle:?}");
+        }
+    }
+    assert!(spec.contains("manifest-v2.json"), "spec 16 does not name the schema 2 file");
+    assert!(spec.contains("never an argument string"), "spec 16 does not say a manifest cannot inject one");
+}

@@ -87,6 +87,17 @@ fn show_grant(
         "  argv: {}",
         clean(&pkg.manifest.execution.argv.join(" "), 300)
     )?;
+    for t in &pkg.manifest.execution.typed {
+        let kind = serde_json::to_value(t.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        writeln!(
+            out,
+            "  typed {}: {kind}, filled by the host",
+            clean(&t.flag, 64)
+        )?;
+    }
     Ok(())
 }
 

@@ -8,6 +8,8 @@
 //! until someone reads what it does and adds it here. A program the user added in their policy file (`extra_official_clis`) has no list,
 //! so only the denylist applies to it.
 
+use crate::manifest::ValueKind;
+
 /// A flag, and the values it may have. An empty list means the flag is a switch: it takes no value
 /// and nothing may be attached to it (`-pc` is refused, not read as `-p` and `-c`). `["*"]` means
 /// any value that passes the denylist. Otherwise the value (inline, attached or the next token) has
@@ -101,6 +103,37 @@ fn list(cli: &str) -> Option<Allowed> {
         "kimi" => Some(KIMI),
         _ => None,
     }
+}
+
+/// The kind of value the host fills for a typed flag of `cli` (schema 2, #334). Only flags listed
+/// here can be typed, each with one kind, and a manifest's static argv never carries them.
+pub fn typed(cli: &str, flag: &str) -> Option<ValueKind> {
+    match (cli, flag) {
+        ("claude" | "codex" | "gemini" | "kimi", "--model") => Some(ValueKind::ModelId),
+        ("claude", "--agents") => Some(ValueKind::AgentList),
+        ("codex", "--output-last-message") => Some(ValueKind::WorkdirPath),
+        _ => None,
+    }
+}
+
+/// The first of `tokens` that writes, in any spelling, a value the host fills for `cli` (schema 2):
+/// the typed flag itself (`--model`, `--model=x`), its short alias (`-m`, `-mgpt-5`) and, for
+/// Codex, the config key that sets the same thing (`-c model=x`, `--config=model=x`). The host
+/// fills these, so a manifest cannot write them as static tokens.
+pub fn writes_typed<'a>(cli: &str, tokens: &'a [String]) -> Option<&'a str> {
+    let config_model = |v: &str| cli == "codex" && v.trim_start_matches('=').starts_with("model=");
+    for (i, t) in tokens.iter().enumerate() {
+        let name = t.split('=').next().unwrap_or_default();
+        let alias = cli != "claude" && t.starts_with("-m") && !t.starts_with("--");
+        let attached = t.strip_prefix("--config=").or_else(|| t.strip_prefix("-c"));
+        let separate =
+            matches!(name, "-c" | "--config") && tokens.get(i + 1).is_some_and(|n| config_model(n));
+        let config = separate || attached.is_some_and(config_model);
+        if typed(cli, name).is_some() || alias || config {
+            return Some(t);
+        }
+    }
+    None
 }
 
 /// Whether every token in `tokens` is on `cli`'s list: a flag with an allowed value, or one of the

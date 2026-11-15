@@ -60,6 +60,8 @@ impl std::fmt::Display for ProbeError {
     }
 }
 
+impl std::error::Error for ProbeError {}
+
 /// `2.1.311 (Claude Code)` to `Version(2, 1, 311)`.
 pub fn parse_version(out: &str) -> Option<Version> {
     let re = Regex::new(r"^\s*(\d{1,6})\.(\d{1,6})\.(\d{1,6})\b").expect("valid regex");
@@ -98,19 +100,11 @@ pub fn probe(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
         out
     }
 
-    let version = parse_version(version_out)
-        .ok_or_else(|| ProbeError::Version(version_out.chars().take(80).collect()))?;
-    if version < MIN_VERSION {
-        return Err(ProbeError::TooOld(version));
+    let found = parse_help(version_out, help_out)?;
+    if found.version < MIN_VERSION {
+        return Err(ProbeError::TooOld(found.version));
     }
-    let re = Regex::new(r"(?m)^ {2}(?:-\w, )?(--[A-Za-z][\w-]*)(?:, (--[A-Za-z][\w-]*))?")
-        .expect("valid regex");
-    let flags: BTreeSet<String> = re
-        .captures_iter(help_out)
-        .flat_map(|c| [c.get(1), c.get(2)])
-        .flatten()
-        .map(|m| m.as_str().to_owned())
-        .collect();
+    let flags = &found.flags;
     if let Some(missing) = REQUIRED.iter().find(|f| !flags.contains(**f)) {
         return Err(ProbeError::MissingFlag((*missing).into()));
     }
@@ -121,6 +115,23 @@ pub fn probe(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
     if says_default("--bare", "") || says_default("--print", "bare") {
         return Err(ProbeError::BareDefault);
     }
+    Ok(found)
+}
+
+/// What `--version` and `--help` say, for any CLI: the version and every long flag, with no
+/// opinion about which ones matter (an extension's manifest says that). `probe` adds the Claude
+/// Code rules on top.
+pub fn parse_help(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
+    let version = parse_version(version_out)
+        .ok_or_else(|| ProbeError::Version(version_out.chars().take(80).collect()))?;
+    let re = Regex::new(r"(?m)^ {2}(?:-\w, )?(--[A-Za-z][\w-]*)(?:, (--[A-Za-z][\w-]*))?")
+        .expect("valid regex");
+    let flags: BTreeSet<String> = re
+        .captures_iter(help_out)
+        .flat_map(|c| [c.get(1), c.get(2)])
+        .flatten()
+        .map(|m| m.as_str().to_owned())
+        .collect();
     Ok(Probe {
         version,
         tested: version == TESTED_VERSION,

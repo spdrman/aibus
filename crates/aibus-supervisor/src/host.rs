@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::claude::Channel;
-use crate::{Ending, Limits, Normalizer};
+use crate::{Ending, Engine, Limits};
 
 /// Everything needed to start the CLI. `exe` must be absolute (from `cli::discover`), `cwd` an
 /// existing directory, and `env` is the whole environment (from `cli::bounded_env`).
@@ -148,7 +148,7 @@ fn signal_group(pid: Option<u32>, sig: rustix::process::Signal) {
 /// once the process has exited and `attempt_completed` or `attempt_failed` is in the store.
 pub async fn supervise(
     launch: Launch,
-    norm: &mut Normalizer,
+    norm: &mut dyn Engine,
     store: &mut TraceStore,
     cancel: CancellationToken,
 ) -> Result<Outcome, SupervisorError> {

@@ -1,0 +1,137 @@
+# Extension authoring template (#286). Copy this directory, change the id, publisher, executable
+# name, rules and fixtures, then:
+#
+#   aibus extensions test ./my-extension --fixtures
+#   aibus extensions publish ./my-extension --registry ./my-registry
+#   aibus extensions install <id> --registry ./my-registry
+#
+# Everything below is read strictly: an unknown key or a value outside the rules is a refusal.
+# See docs/spec/16-extensions.md for what each field means and what the host will never do.
+
+schema_version = "1"
+# Reverse-DNS under a domain you own, lower case. It must not contain a vendor's product name
+# where the vendor's terms forbid it.
+id = "org.example.aibus.examplecli"
+version = "0.1.0"
+name = "Example CLI"
+kind = "official_cli"
+provider = "Example Corp"
+license = "MIT"
+source_url = "https://example.org/aibus-examplecli"
+
+[publisher]
+name = "Example Corp"
+url = "https://example.org"
+
+[compat]
+# The SDK protocol versions this extension speaks; this host speaks 1.0.0.
+protocol = ">=1.0.0, <2.0.0"
+os = ["macos", "linux"]
+# The versions of the vendor CLI you wrote and tested it for.
+cli_versions = ">=1.0.0"
+
+[cli]
+# File names only. The host looks for them on its own search path.
+executable_candidates = ["examplecli"]
+vendor_urls = ["https://example.org/docs/cli"]
+
+[auth]
+# The vendor CLI owns its sign-in. aibus never reads, copies or stores its credentials.
+owner = "vendor_cli"
+credential_access = "forbidden"
+login_argv = ["login"]
+status_argv = ["status"]
+
+[execution]
+# Static tokens after the executable. There is no placeholder: the prompt goes on stdin.
+argv = ["run", "--json"]
+prompt = "stdin"
+stdout = "jsonl"
+# Extra environment names to pass through. Credential-shaped names are refused.
+env_allow = []
+
+# A flag added only when the CLI's --help lists it and the capability is asked for.
+[[execution.optional]]
+flag = "--usage"
+capability = "usage_report"
+
+[limits]
+# What you ask for. The host's ceiling wins.
+wall_time_secs = 600
+
+[normalizer]
+# One JSON object per line, one event per line. A CLI whose events need state across lines
+# (a tool use matched to the agent that made it, for one) needs a parser the host does not host yet.
+engine = "declarative-jsonl"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "text"
+kind = "message_chunk"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool_start"
+kind = "tool_started"
+id_pointer = "/id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool_end"
+kind = "tool_completed"
+id_pointer = "/id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool_error"
+kind = "tool_failed"
+id_pointer = "/id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "usage"
+kind = "usage_reported"
+tokens_in_pointer = "/usage/in"
+tokens_out_pointer = "/usage/out"
+
+# Every capability is declared, so a missing one is explicit and never assumed.
+# supported, probe_required (decided from the real CLI's --help) or unsupported.
+[capabilities]
+login_status = "supported"
+one_shot = "supported"
+structured_events = "supported"
+native_child_lineage = "unsupported"
+tool_events = "supported"
+usage_report = "probe_required"
+session_resume = "unsupported"
+interactive_approval = "unsupported"
+cancel = "supported"
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "unsupported"
+
+[[probe]]
+capability = "usage_report"
+flags = ["--usage"]
+
+[runtime]
+# reported (the CLI says), estimated or unknown. Never claim more than the CLI gives.
+usage_quality = "reported"
+
+[permissions]
+# One acceptable value each. A manifest asking for more is refused.
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "Example Corp security team"
+review_date = "2026-11-15"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/failed-tool.jsonl"]
+
+[notes]
+upgrade = "Reinstall from the registry; a new version that asks for more has to be accepted by name."
+rollback = "aibus extensions rollback org.example.aibus.examplecli returns to the previous version."

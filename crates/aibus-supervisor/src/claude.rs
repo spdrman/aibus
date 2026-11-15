@@ -1276,3 +1276,24 @@ impl Normalizer {
         }
     }
 }
+
+impl crate::Engine for Normalizer {
+    fn start(&mut self, at: SystemTime, info: Value) -> Batch {
+        Self::start(self, at, info)
+    }
+    fn stream_line(&mut self, line: &[u8], at: SystemTime) -> Batch {
+        Self::stream_line(self, line, at)
+    }
+    fn hook_line(&mut self, line: &[u8], at: SystemTime) -> Batch {
+        Self::hook_line(self, line, at)
+    }
+    fn stderr_line(&mut self, line: &[u8], at: SystemTime) -> Batch {
+        Self::stderr_line(self, line, at)
+    }
+    fn gap(&mut self, channel: Channel, reason: &str, bytes: u64, at: SystemTime) -> Batch {
+        Self::gap(self, channel, reason, bytes, at)
+    }
+    fn finish(&mut self, ending: Ending, wall: Duration, at: SystemTime) -> Batch {
+        Self::finish(self, ending, wall, at)
+    }
+}

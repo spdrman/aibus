@@ -1,0 +1,105 @@
+# The reference extension (#286): the official, unmodified Claude Code CLI as an aibus extension,
+# built on the supervisor. Its id is the owner's reverse-DNS, and neither the id nor the name has the
+# vendor's product name in it (A1.5 amendment E6).
+#
+# Use is local and opt-in, with the user's own installed CLI. The user signs in with the CLI itself
+# (an API key, a Console sign-in or, for local use only, a subscription sign-in); aibus never reads
+# or stores the token. Bundled, preinstalled, hosted and commercial use stay blocked (#280, #281).
+
+schema_version = "1"
+id = "org.devshell.aibus.reference-cli"
+version = "0.1.0"
+name = "Reference CLI"
+kind = "official_cli"
+provider = "Anthropic"
+license = "MIT"
+source_url = "https://github.com/spdrman/aibus/tree/main/examples/extensions/reference-cli"
+
+[publisher]
+name = "devshell"
+url = "https://devshell.org"
+
+[compat]
+protocol = ">=1.0.0, <2.0.0"
+os = ["macos", "linux"]
+# 2.1.0 is the oldest the probe accepts; 2.1.311 is the only version tested (#281, #285).
+cli_versions = ">=2.1.0"
+
+[cli]
+executable_candidates = ["claude"]
+vendor_urls = ["https://code.claude.com/docs/en/cli-reference", "https://code.claude.com/docs/en/legal-and-compliance"]
+
+[auth]
+owner = "vendor_cli"
+credential_access = "forbidden"
+login_argv = ["auth", "login"]
+status_argv = ["auth", "status", "--json"]
+
+[execution]
+# The prompt goes on stdin, never in argv (amendment E2). `user` keeps a repository's own hooks and
+# MCP servers from running under -p.
+argv = ["-p", "--output-format", "stream-json", "--verbose", "--permission-prompts", "none", "--setting-sources", "user"]
+prompt = "stdin"
+stdout = "jsonl"
+# The host's own allowlist already carries CLAUDE_CONFIG_DIR (amendment E3); the host strips
+# CLAUDECODE and CLAUDE_CODE_* whatever a manifest says.
+env_allow = []
+
+[[execution.optional]]
+flag = "--include-hook-events"
+capability = "hook_channel"
+
+[limits]
+wall_time_secs = 1800
+
+# Claude's normaliser is stateful (tool-use to agent maps, dedupe across channels, a finish step), so
+# the host's own engine reads it: amendment E1.
+[normalizer]
+engine = "builtin:claude-stream-json"
+
+[capabilities]
+login_status = "supported"
+one_shot = "supported"
+structured_events = "supported"
+native_child_lineage = "supported"
+tool_events = "supported"
+usage_report = "supported"
+# Native children live inside the lead process and die with it (#281, case 05): amendment C1/E5.
+session_resume = "unsupported"
+# Only --permission-prompts none is used and recorded; host approval is untested (#285).
+interactive_approval = "unsupported"
+cancel = "supported"
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "probe_required"
+
+[[probe]]
+capability = "hook_channel"
+flags = ["--include-hook-events"]
+
+[hooks]
+# Hook payloads cross-check the stream, but the host has no live way to receive them yet
+# (amendment E4), so a live run has stream evidence only.
+needs_delivery = true
+
+[runtime]
+# Tokens are reported by the CLI; the cost it prints is a list-price estimate, so billed cost
+# stays unknown.
+usage_quality = "reported"
+
+[permissions]
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "aibus maintainers"
+review_date = "2026-11-15"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/native-subagent.jsonl"]
+
+[notes]
+upgrade = "Install the new version from the registry. A version that asks for more executables, environment names, flags or capabilities has to be accepted by name."
+rollback = "aibus extensions rollback org.devshell.aibus.reference-cli returns to the previous installed version."

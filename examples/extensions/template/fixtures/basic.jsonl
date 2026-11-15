@@ -1,0 +1,4 @@
+{"type":"text","text":"hello"}
+{"type":"tool_start","id":"t1"}
+{"type":"tool_end","id":"t1"}
+{"type":"usage","usage":{"in":12,"out":7}}

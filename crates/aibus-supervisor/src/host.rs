@@ -14,6 +14,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::claude::Channel;
+#[cfg(unix)]
+use crate::descendants::Tracker;
 use crate::{Ending, Engine, Limits};
 
 /// Everything needed to start the CLI. `exe` must be absolute (from `cli::discover`), `cwd` an
@@ -211,14 +213,24 @@ pub async fn supervise(
     let pid = child.id();
     /// Ends the CLI's whole group when `supervise` returns early (a store error), so the CLI's
     /// tool processes are not orphaned. `kill_on_drop` only reaches the leader.
-    struct GroupGuard(Option<u32>);
+    struct GroupGuard(Option<u32>, #[cfg(unix)] Option<Tracker>);
     impl Drop for GroupGuard {
         fn drop(&mut self) {
             #[cfg(unix)]
-            signal_group(self.0, rustix::process::Signal::KILL);
+            {
+                signal_group(self.0, rustix::process::Signal::KILL);
+                // Past the clean path `self.0` is cleared, and the leader's pid may be reused.
+                if let (Some(t), Some(_)) = (&self.1, self.0) {
+                    t.kill_all(true);
+                }
+            }
         }
     }
-    let mut guard = GroupGuard(pid);
+    let mut guard = GroupGuard(
+        pid,
+        #[cfg(unix)]
+        pid.map(Tracker::start),
+    );
     if let Some(id) = store.last_id() {
         // Seed from the run, so this writer sorts after whatever is already in it.
         norm.observe(id);
@@ -372,7 +384,12 @@ pub async fn supervise(
                 kill_at = None;
                 // The documented last resort: the whole group, by force.
                 #[cfg(unix)]
-                signal_group(pid, rustix::process::Signal::KILL);
+                {
+                    signal_group(pid, rustix::process::Signal::KILL);
+                    if let Some(t) = &guard.1 {
+                        t.kill_all(exit.is_none());
+                    }
+                }
                 #[cfg(not(unix))]
                 let _ = child.start_kill();
             }
@@ -403,9 +420,14 @@ pub async fn supervise(
             }
         }
     }
-    // Whatever the CLI left in its group goes with it.
+    // Whatever the CLI left in its group goes with it, and so does what left the group (#338).
     #[cfg(unix)]
-    signal_group(pid, rustix::process::Signal::KILL);
+    {
+        signal_group(pid, rustix::process::Signal::KILL);
+        if let Some(t) = &guard.1 {
+            t.kill_all(exit.is_none());
+        }
+    }
     if let Some(hit_bound) = drained {
         // Count what was already read off the pipes but not yet recorded. What is still in the
         // kernel pipe is not counted (the host does not read it), so the count is a lower bound.

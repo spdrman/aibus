@@ -17,12 +17,16 @@ use aibus_supervisor::{cli, supervise, Launch, Limits, Normalizer};
 use aibus_trace::{AttemptStatus, PayloadPolicy, StoreLimits, TraceStore};
 use tokio_util::sync::CancellationToken;
 
-/// Starts `sleep 300` in a session of its own (`setsid`), after a double fork when `double` is
-/// set, and writes its pid to `$1`. Output goes to /dev/null so only the pid escape is tested.
-fn detach(double: bool) -> String {
-    let fork = if double { "fork and exit;" } else { "" };
+/// Starts `sleep 300` in a session of its own (`setsid`) and writes its pid to `$1`. With
+/// `Some(wait)` it double-forks first: the parent lingers for `wait` seconds and exits, so the
+/// child is adopted by init. Output goes to /dev/null so only the pid escape is tested.
+fn detach(double: Option<f64>) -> String {
+    let fork = match double {
+        Some(wait) => format!("if (fork) {{ select(undef, undef, undef, {wait}); exit }}"),
+        None => String::new(),
+    };
     format!(
-        "perl -e 'use POSIX; $p = fork; exit if $p; {fork} POSIX::setsid(); \
+        "perl -e 'use POSIX; {fork} POSIX::setsid(); \
          open F, \">$ARGV[0]\"; print F $$; close F; \
          open STDIN, \"</dev/null\"; open STDOUT, \">/dev/null\"; open STDERR, \">/dev/null\"; \
          exec \"sleep\", \"300\"' "
@@ -112,7 +116,7 @@ fn quick() -> Limits {
 
 #[tokio::test]
 async fn issue_338_a_setsid_child_does_not_outlive_the_wall_deadline() {
-    let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(false));
+    let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(None));
     let (status, pid) = run(&body, quick(), None).await;
     assert_eq!(status, AttemptStatus::Interrupted);
     assert!(
@@ -123,7 +127,10 @@ async fn issue_338_a_setsid_child_does_not_outlive_the_wall_deadline() {
 
 #[tokio::test]
 async fn issue_338_a_double_forked_setsid_child_does_not_outlive_the_wall_deadline() {
-    let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(true));
+    let body = format!(
+        "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+        detach(Some(0.4))
+    );
     let (_, pid) = run(&body, quick(), None).await;
     assert!(
         dead_within(&pid, Duration::from_secs(3)).await,
@@ -133,7 +140,10 @@ async fn issue_338_a_double_forked_setsid_child_does_not_outlive_the_wall_deadli
 
 #[tokio::test]
 async fn issue_338_a_deactivated_run_leaves_no_escaped_child() {
-    let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(true));
+    let body = format!(
+        "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+        detach(Some(0.4))
+    );
     let limits = Limits {
         wall_time: Duration::from_secs(60),
         ..quick()
@@ -150,7 +160,7 @@ async fn issue_338_a_deactivated_run_leaves_no_escaped_child() {
 async fn issue_338_a_cli_that_ignores_term_still_loses_its_escaped_child() {
     let body = format!(
         "trap '' TERM\n{} PIDFILE &\nwhile :; do sleep 0.05; done",
-        detach(true)
+        detach(Some(0.4))
     );
     let (_, pid) = run(&body, quick(), None).await;
     assert!(
@@ -162,7 +172,7 @@ async fn issue_338_a_cli_that_ignores_term_still_loses_its_escaped_child() {
 #[tokio::test]
 async fn issue_338_a_child_left_behind_by_a_cli_that_exits_by_itself_is_ended_with_the_attempt() {
     // The CLI returns normally while its detached child is still running.
-    let body = format!("{} PIDFILE &\nsleep 0.5\necho '{{}}'", detach(true));
+    let body = format!("{} PIDFILE &\nsleep 0.5\necho '{{}}'", detach(Some(0.4)));
     let limits = Limits {
         wall_time: Duration::from_secs(20),
         ..quick()
@@ -178,7 +188,7 @@ async fn issue_338_a_child_left_behind_by_a_cli_that_exits_by_itself_is_ended_wi
 async fn issue_338_a_child_in_the_group_that_forks_a_setsid_grandchild_is_ended_too() {
     let body = format!(
         "sh -c '{} PIDFILE &\nwhile :; do sleep 0.05; done' &\nwhile :; do sleep 0.05; done",
-        detach(true).replace('\'', "'\\''")
+        detach(Some(0.4)).replace('\'', "'\\''")
     );
     let (_, pid) = run(&body, quick(), None).await;
     assert!(

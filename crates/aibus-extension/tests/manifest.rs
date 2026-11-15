@@ -47,7 +47,7 @@ fn the_reference_extension_parses_with_the_ratified_id_and_the_builtin_engine() 
 #[test]
 fn a_schema_version_other_than_1_is_refused() {
     assert_eq!(
-        refused_field("schema_version = \"1\"", "schema_version = \"2\""),
+        refused_field("schema_version = \"1\"", "schema_version = \"3\""),
         "schema_version"
     );
 }
@@ -708,16 +708,7 @@ fn a_safe_value_for_the_same_flag_names_is_not_refused() {
 // ---- #332 review round 2 ----
 
 fn as_codex(argv: &str) -> String {
-    let m = edit(
-        &template_manifest(),
-        "executable_candidates = [\"examplecli\"]",
-        "executable_candidates = [\"codex\"]",
-    );
-    edit(
-        &m,
-        "argv = [\"run\", \"--json\"]",
-        &format!("argv = {argv}"),
-    )
+    for_clis(&["codex"], argv)
 }
 
 /// An allowlisted CLI's own subcommands are its own: `codex exec --json` is Codex's headless mode.
@@ -726,7 +717,6 @@ fn an_official_clis_own_subcommands_are_not_refused_for_their_name() {
     for argv in [
         r#"["exec", "--json"]"#,
         r#"["exec", "--json", "--skip-git-repo-check"]"#,
-        r#"["run", "--json"]"#,
     ] {
         assert!(Manifest::parse(&as_codex(argv)).is_ok(), "{argv}");
     }
@@ -810,8 +800,289 @@ fn ordinary_flags_of_an_official_cli_are_not_swept_up() {
         r#"["exec", "--sandbox", "read-only"]"#,
         r#"["exec", "--ask-for-approval", "untrusted"]"#,
         r#"["exec", "--config", "model=gpt-5"]"#,
-        r#"["exec", "--output-format", "stream-json", "--verbose"]"#,
     ] {
         assert!(Manifest::parse(&as_codex(argv)).is_ok(), "{argv}");
+    }
+    // Claude's own flags are Claude's (#339: the list is per CLI).
+    let claude = for_clis(
+        &["claude"],
+        r#"["-p", "--output-format", "stream-json", "--verbose"]"#,
+    );
+    assert!(Manifest::parse(&claude).is_ok());
+}
+
+// ---- #339: a per-CLI allowlist of flags, the denylist as the second check ----
+
+/// The template with its executables and execution argv replaced.
+fn for_clis(exes: &[&str], argv: &str) -> String {
+    let names: Vec<String> = exes.iter().map(|e| format!("\"{e}\"")).collect();
+    let m = edit(
+        &template_manifest(),
+        "executable_candidates = [\"examplecli\"]",
+        &format!("executable_candidates = [{}]", names.join(", ")),
+    );
+    let m = edit(
+        &m,
+        "argv = [\"run\", \"--json\"]",
+        &format!("argv = {argv}"),
+    );
+    // The template's optional flag has to be one the first official CLI's list has.
+    let optional = match exes[0] {
+        "claude" => "--verbose",
+        "codex" => "--json",
+        "gemini" => "--debug",
+        "kimi" => "--print",
+        _ => return m,
+    };
+    let m = edit(&m, "flag = \"--usage\"", &format!("flag = \"{optional}\""));
+    edit(
+        &m,
+        "flags = [\"--usage\"]",
+        &format!("flags = [\"{optional}\"]"),
+    )
+}
+
+fn argv_of(tokens: &[&str]) -> String {
+    let quoted: Vec<String> = tokens.iter().map(|t| format!("\"{t}\"")).collect();
+    format!("[{}]", quoted.join(", "))
+}
+
+/// Every spelling the reviews of #332 found that the denylist missed, each as the argv of the CLI
+/// it belongs to.
+const MISSED: [(&str, &[&str]); 12] = [
+    ("claude", &["-p", "--setting-sources=project"]),
+    ("claude", &["-p", "--setting-sources", "project"]),
+    ("claude", &["-p", "--setting-sources=user,project"]),
+    ("claude", &["-p", "--plugin-dir=plugins"]),
+    ("claude", &["-p", "--plugin-dir", "plugins"]),
+    ("kimi", &["--print", "--mcp-config-file=mcp.json"]),
+    ("kimi", &["--print", "--mcp-config-file", "mcp.json"]),
+    ("kimi", &["--print", "--settings-file=s.json"]),
+    (
+        "codex",
+        &["exec", "-c", "sandbox_workspace_write.network_access=true"],
+    ),
+    ("codex", &["exec", "--profile", "work"]),
+    ("codex", &["exec", "--profile=work"]),
+    ("codex", &["exec", "-c", "profile=yolo"]),
+];
+
+#[test]
+fn issue_339_every_spelling_the_denylist_missed_is_refused() {
+    for (cli, tokens) in MISSED {
+        let (field, _) = refused(&for_clis(&[cli], &argv_of(tokens)));
+        assert_eq!(field, "execution.argv", "{cli} {tokens:?}");
+    }
+}
+
+#[test]
+fn issue_339_a_flag_that_is_not_on_the_clis_list_is_refused_and_named() {
+    for cli in ["claude", "codex", "gemini", "kimi"] {
+        let (field, why) = refused(&for_clis(&[cli], r#"["--a-flag-nobody-listed"]"#));
+        assert_eq!(field, "execution.argv", "{cli}");
+        assert!(
+            why.contains("--a-flag-nobody-listed")
+                && why.contains(cli)
+                && why.contains("allowlist"),
+            "{cli}: {why}"
+        );
+        // A short flag and a single-dash long spelling are flags too.
+        for odd in [r#"["-Z"]"#, r#"["-zzz"]"#, r#"["-zzz=1"]"#] {
+            assert_eq!(
+                refused(&for_clis(&[cli], odd)).0,
+                "execution.argv",
+                "{cli} {odd}"
+            );
+        }
+    }
+}
+
+/// The lists are per CLI: a flag that is Codex's is not Claude's.
+#[test]
+fn issue_339_one_clis_flag_is_not_another_clis() {
+    let codex_only = r#"["exec", "--skip-git-repo-check"]"#;
+    assert!(Manifest::parse(&for_clis(&["codex"], codex_only)).is_ok());
+    for cli in ["claude", "gemini", "kimi"] {
+        assert_eq!(
+            refused(&for_clis(&[cli], codex_only)).0,
+            "execution.argv",
+            "{cli}"
+        );
+    }
+}
+
+/// The flags each CLI's own extension needs stay accepted, so the allowlist is not just a wall.
+#[test]
+fn issue_339_what_each_clis_extension_needs_is_on_its_list() {
+    for (cli, argv) in [
+        (
+            "claude",
+            r#"["-p", "--output-format", "stream-json", "--verbose", "--permission-prompts", "none", "--setting-sources", "user"]"#,
+        ),
+        ("codex", r#"["exec", "--json", "--skip-git-repo-check"]"#),
+        (
+            "codex",
+            r#"["exec", "--sandbox", "read-only", "--ask-for-approval", "untrusted"]"#,
+        ),
+        (
+            "codex",
+            r#"["exec", "--config", "model=gpt-5", "-c", "model_reasoning_effort=low"]"#,
+        ),
+        (
+            "gemini",
+            r#"["--output-format", "stream-json", "--approval-mode", "default"]"#,
+        ),
+        ("kimi", r#"["--print", "--output-format", "stream-json"]"#),
+    ] {
+        assert!(
+            Manifest::parse(&for_clis(&[cli], argv)).is_ok(),
+            "{cli} {argv}"
+        );
+    }
+}
+
+#[test]
+fn issue_339_the_allowlist_applies_to_the_auth_argv_and_to_optional_flags() {
+    let m = edit(
+        &for_clis(&["claude"], r#"["-p"]"#),
+        "login_argv = [\"login\"]",
+        "login_argv = [\"login\", \"--plugin-dir\", \"x\"]",
+    );
+    assert_eq!(refused(&m).0, "auth.login_argv");
+    let m = edit(
+        &for_clis(&["claude"], r#"["-p"]"#),
+        "status_argv = [\"status\"]",
+        "status_argv = [\"status\", \"--mcp-config-file\", \"x\"]",
+    );
+    assert_eq!(refused(&m).0, "auth.status_argv");
+    // An optional flag the list does not know, with a probe that lists it, is still refused.
+    let m = for_clis(&["claude"], r#"["-p"]"#);
+    let m = edit(&m, "flag = \"--verbose\"", "flag = \"--brand-new\"");
+    let m = edit(&m, "flags = [\"--verbose\"]", "flags = [\"--brand-new\"]");
+    assert_eq!(refused(&m).0, "execution.optional");
+}
+
+/// A manifest that names an official CLI and a name the host does not know has to satisfy every
+/// official name's list, and the shape and denylist rules for the other.
+#[test]
+fn issue_339_a_manifest_mixing_official_and_other_names_meets_every_official_list() {
+    // Fine for both of the official ones named.
+    assert!(Manifest::parse(&for_clis(&["codex", "examplecli"], r#"["--json"]"#)).is_ok());
+    // On Codex's list but not on Claude's.
+    assert_eq!(
+        refused(&for_clis(
+            &["claude", "codex"],
+            r#"["--sandbox", "read-only"]"#
+        ))
+        .0,
+        "execution.argv"
+    );
+    // On neither list.
+    assert_eq!(
+        refused(&for_clis(
+            &["codex", "examplecli"],
+            r#"["exec", "--profile", "work"]"#
+        ))
+        .0,
+        "execution.argv"
+    );
+    // The program the host does not know brings the install, exec and eval shapes back.
+    assert_eq!(
+        refused(&for_clis(&["codex", "examplecli"], r#"["exec", "--json"]"#)).0,
+        "execution.argv"
+    );
+    // And the denylist still applies on top of the list.
+    assert_eq!(
+        refused(&for_clis(&["codex", "examplecli"], r#"["--full-auto"]"#)).0,
+        "execution.argv"
+    );
+}
+
+/// The denylist is the second check: a flag that is on the list with a value that is not.
+#[test]
+fn issue_339_a_listed_flag_with_a_risky_or_unlisted_value_is_refused() {
+    for (cli, tokens) in [
+        ("codex", &["exec", "--sandbox", "danger-full-access"][..]),
+        ("codex", &["exec", "--ask-for-approval", "never"][..]),
+        ("codex", &["exec", "-s", "workspace-write-plus"][..]),
+        ("claude", &["-p", "--permission-prompts", "auto"][..]),
+        ("claude", &["-p", "--output-format", "../x"][..]),
+        ("gemini", &["--approval-mode", "yolo"][..]),
+        ("gemini", &["--approval-mode", "auto_edit"][..]),
+    ] {
+        assert_eq!(
+            refused(&for_clis(&[cli], &argv_of(tokens))).0,
+            "execution.argv",
+            "{cli} {tokens:?}"
+        );
+    }
+}
+
+/// A launch built by hand, from a manifest value that was changed after the parse, is checked
+/// against the same list.
+#[test]
+fn issue_339_the_launch_check_applies_the_list_too() {
+    use aibus_extension::sandbox::check_launch;
+    use aibus_supervisor::{Launch, Limits};
+    let mut m = Manifest::parse(&for_clis(&["codex"], r#"["exec", "--json"]"#)).unwrap();
+    m.execution.argv.push("--profile".into());
+    m.execution.argv.push("work".into());
+    let launch = Launch {
+        exe: std::path::PathBuf::from("/usr/bin/codex"),
+        args: m.execution.argv.iter().map(Into::into).collect(),
+        env: vec![],
+        cwd: std::env::temp_dir(),
+        stdin: Vec::new(),
+        limits: Limits::default(),
+    };
+    let err = check_launch(&m, &launch, &[]).unwrap_err().to_string();
+    assert!(
+        err.contains("--profile") && err.contains("allowlist"),
+        "{err}"
+    );
+}
+
+/// Review of #342: subcommands are on the list too, and a grouped short switch is not read.
+#[test]
+fn issue_339_a_subcommand_that_is_not_on_the_list_is_refused() {
+    for (cli, argv) in [
+        ("claude", r#"["mcp", "add", "evil", "npx", "evilpkg"]"#),
+        ("claude", r#"["update"]"#),
+        ("claude", r#"["-p", "mcp"]"#),
+        ("codex", r#"["apply", "task1"]"#),
+        ("codex", r#"["run", "--json"]"#),
+        (
+            "gemini",
+            r#"["--output-format", "json", "mcp", "add", "x"]"#,
+        ),
+        ("kimi", r#"["--print", "web"]"#),
+    ] {
+        assert_eq!(
+            refused(&for_clis(&[cli], argv)).0,
+            "execution.argv",
+            "{cli} {argv}"
+        );
+    }
+    let m = edit(
+        &for_clis(&["claude"], r#"["-p"]"#),
+        "login_argv = [\"login\"]",
+        "login_argv = [\"mcp\", \"add\"]",
+    );
+    assert_eq!(refused(&m).0, "auth.login_argv");
+}
+
+#[test]
+fn issue_339_a_grouped_short_switch_is_refused() {
+    for (cli, argv) in [
+        ("gemini", r#"["-dy"]"#),
+        ("claude", r#"["-pc"]"#),
+        ("claude", r#"["-pverbose"]"#),
+        ("claude", r#"["--verbose=true"]"#),
+    ] {
+        assert_eq!(
+            refused(&for_clis(&[cli], argv)).0,
+            "execution.argv",
+            "{cli} {argv}"
+        );
     }
 }

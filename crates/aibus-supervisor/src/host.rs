@@ -277,6 +277,9 @@ pub async fn supervise(
     let mut stall_at: Option<tokio::time::Instant> = None;
     let mut cap_at: Option<tokio::time::Instant> = None;
     let (mut window, mut in_window) = (tokio::time::Instant::now(), 0u32);
+    // Set while the rate limit holds reading back. The wait is an arm of its own, so the exit, a
+    // cancel and the deadlines are all still watched meanwhile (#336).
+    let mut throttled_until: Option<tokio::time::Instant> = None;
 
     loop {
         if exit.is_some() && open_pipes == 0 {
@@ -287,8 +290,30 @@ pub async fn supervise(
             drained = Some(true);
             break;
         }
+        // An exit that has already happened is acted on before a cancel that is ready at the
+        // same moment, so `select!` picking at random cannot change how the drain is labelled
+        // (#336).
+        if exit.is_none() {
+            if let Some(status) = child.try_wait().map_err(SupervisorError::Spawn)? {
+                exit = Some(status);
+                // The pipes may still hold output, or a descendant may hold them open. Keep reading
+                // while lines arrive; end the group when they stop or the bound is reached.
+                let now = tokio::time::Instant::now();
+                stall_at = Some(now + limits.drain_stall);
+                // A run that was already being stopped (cancel, wall time, output limit) has had its
+                // chance: its drain is capped at the grace period, not the full bound.
+                let cap = if stopped.is_some() && limits.grace < limits.drain_max {
+                    cap_name = "grace";
+                    limits.grace
+                } else {
+                    limits.drain_max
+                };
+                cap_at = Some(now + cap);
+                continue;
+            }
+        }
         tokio::select! {
-            piece = rx.recv(), if open_pipes > 0 => {
+            piece = rx.recv(), if open_pipes > 0 && throttled_until.is_none() => {
                 let now = SystemTime::now();
                 match piece {
                     None => open_pipes = 0,
@@ -313,31 +338,24 @@ pub async fn supervise(
                 if in_window >= limits.lines_per_second.max(1) {
                     let next = window + Duration::from_secs(1);
                     if next > tokio::time::Instant::now() {
-                        tokio::time::sleep_until(next.min(deadline)).await;
+                        throttled_until = Some(next.min(deadline));
+                    } else {
+                        window = tokio::time::Instant::now();
+                        in_window = 0;
                     }
-                    window = tokio::time::Instant::now();
-                    in_window = 0;
                 }
                 if exit.is_some() {
                     stall_at = Some(tokio::time::Instant::now() + limits.drain_stall);
                 }
             }
-            status = child.wait(), if exit.is_none() => {
-                exit = Some(status.map_err(SupervisorError::Spawn)?);
-                // The pipes may still hold output, or a descendant may hold them open. Keep reading
-                // while lines arrive; end the group when they stop or the bound is reached.
-                let now = tokio::time::Instant::now();
-                stall_at = Some(now + limits.drain_stall);
-                // A run that was already being stopped (cancel, wall time, output limit) has had its
-                // chance: its drain is capped at the grace period, not the full bound.
-                let cap = if stopped.is_some() && limits.grace < limits.drain_max {
-                    cap_name = "grace";
-                    limits.grace
-                } else {
-                    limits.drain_max
-                };
-                cap_at = Some(now + cap);
+            _ = tokio::time::sleep_until(throttled_until.unwrap_or(deadline)), if throttled_until.is_some() => {
+                throttled_until = None;
+                window = tokio::time::Instant::now();
+                in_window = 0;
             }
+            // The exit itself is handled at the top of the loop, where it is checked before any
+            // cancel: waking here is enough.
+            _ = child.wait(), if exit.is_none() => continue,
             _ = cancel.cancelled(), if stopped.is_none() && exit.is_none() => {
                 stopped = Some(Ending::Cancelled);
                 kill_at = Some(tokio::time::Instant::now() + limits.grace);

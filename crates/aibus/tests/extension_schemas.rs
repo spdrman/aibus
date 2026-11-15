@@ -36,6 +36,7 @@ const EXAMPLES: [&str; 2] = [
 fn every_schema_is_2020_12_and_lints_clean() {
     for n in [
         "manifest-v1",
+        "manifest-v2",
         "registry-v1",
         "event-v1",
         "fixture-expected-v1",
@@ -51,10 +52,10 @@ fn every_schema_is_2020_12_and_lints_clean() {
 
 #[test]
 fn the_template_and_the_reference_manifest_validate() {
-    let s = schema("manifest-v1");
-    for dir in EXAMPLES {
+    // The template is schema 1, the reference extension schema 2 (typed flags, #334).
+    for (dir, file) in [(EXAMPLES[0], "manifest-v1"), (EXAMPLES[1], "manifest-v2")] {
         assert_eq!(
-            check_against(&s, &manifest_json(dir)),
+            check_against(&schema(file), &manifest_json(dir)),
             Vec::<String>::new(),
             "{dir}"
         );
@@ -203,4 +204,61 @@ fn every_expected_file_validates() {
             );
         }
     }
+}
+
+/// #334: schema 2 has its own file; each schema file accepts its own version and refuses the other.
+#[test]
+fn issue_334_manifest_v2_accepts_typed_flags_and_v1_refuses_them() {
+    let v1 = schema("manifest-v1");
+    let v2 = schema("manifest-v2");
+    assert_eq!(lint_2020_12(&v2), Vec::<String>::new());
+    let reference = manifest_json(EXAMPLES[1]);
+    assert_eq!(check_against(&v2, &reference), Vec::<String>::new());
+    assert!(
+        !check_against(&v1, &reference).is_empty(),
+        "v1 accepted a schema 2 manifest"
+    );
+    let template = manifest_json(EXAMPLES[0]);
+    assert!(
+        !check_against(&v2, &template).is_empty(),
+        "v2 accepted a schema 1 manifest"
+    );
+    assert_eq!(check_against(&v1, &template), Vec::<String>::new());
+
+    let cases: [(&str, fn(&mut Value)); 5] = [
+        ("a value", |v| {
+            v["execution"]["typed"][0]["value"] = json!("gpt-5")
+        }),
+        ("a free-text kind", |v| {
+            v["execution"]["typed"][0]["kind"] = json!("string")
+        }),
+        ("a flag with a value in it", |v| {
+            v["execution"]["typed"][0]["flag"] = json!("--model=x")
+        }),
+        ("protocol text of schema 1", |v| {
+            v["schema_version"] = json!("1")
+        }),
+        ("eleven typed flags", |v| {
+            let t = v["execution"]["typed"][0].clone();
+            v["execution"]["typed"] = json!(vec![t; 9]);
+        }),
+    ];
+    for (what, edit) in cases {
+        let mut v = reference.clone();
+        edit(&mut v);
+        assert!(!check_against(&v2, &v).is_empty(), "v2 accepted {what}");
+    }
+}
+
+/// #345 review: schema 2 carries the WASM engine fields schema 1 has (#344), so a schema 2 WASM
+/// manifest does not fail the published schema.
+#[test]
+fn issue_334_manifest_v2_names_the_wasm_module_engine_and_its_module() {
+    let n = &schema("manifest-v2")["properties"]["normalizer"]["properties"];
+    let engines = n["engine"]["enum"].as_array().unwrap();
+    assert!(engines.iter().any(|e| e == "wasm-module"));
+    assert!(n["module"]["pattern"]
+        .as_str()
+        .unwrap()
+        .starts_with("^wasm/"));
 }

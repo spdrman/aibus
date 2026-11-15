@@ -77,6 +77,10 @@ pub enum Refusal {
     SignatureRequired,
     #[error("key {key_id} may not sign {id}: it is trusted for other ids, and only the policy file widens that")]
     KeyOutOfScope { key_id: String, id: String },
+    #[error("key {key_id} signed this install and the policy no longer trusts it; install it again from a key you trust")]
+    KeyNotTrusted { key_id: String },
+    #[error("this install was made before the signing key was recorded and the policy trusts keys; install it again so it is checked against them")]
+    SignerUnknown,
     #[error("key {key_id} is revoked: {reason}")]
     KeyRevoked { key_id: String, reason: String },
     #[error("publisher {0} is not allowed by the policy")]
@@ -98,6 +102,8 @@ impl Refusal {
             | Self::BadSignature(_)
             | Self::SignatureRequired
             | Self::KeyOutOfScope { .. }
+            | Self::KeyNotTrusted { .. }
+            | Self::SignerUnknown
             | Self::PublisherNotAllowed(_) => "provenance_invalid",
             Self::Incompatible(_) => "incompatible",
             Self::Package(_) => "malformed",
@@ -139,6 +145,43 @@ pub fn signer_ok(policy: &Policy, key_id: &str, id: &str) -> Result<(), Refusal>
         });
     }
     Ok(())
+}
+
+/// The key that stood behind an installed version, kept by its public key so a rename in the
+/// policy does not lose it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Signer {
+    pub key_id: String,
+    /// The public key as lower-case hex.
+    pub key: String,
+}
+
+/// `signer_ok` for an installed version. `recorded` is what the store kept: nothing for an install
+/// from before signers were recorded, `Some(None)` for one made unsigned, `Some(Some(_))` for one a
+/// key signed. A key the policy no longer lists (by public key, so a rename is fine) takes what it
+/// signed with it, and an install with no record is not trusted while the policy lists any key.
+pub fn recorded_signer_ok(
+    policy: &Policy,
+    id: &str,
+    recorded: Option<&Option<Signer>>,
+) -> Result<(), Refusal> {
+    match recorded {
+        None if policy.trusted_keys.is_empty() => Ok(()),
+        None => Err(Refusal::SignerUnknown),
+        Some(None) => Ok(()),
+        Some(Some(s)) => {
+            match policy
+                .trusted_keys
+                .iter()
+                .find(|(_, k)| k.key.eq_ignore_ascii_case(&s.key))
+            {
+                Some((name, _)) => signer_ok(policy, name, id),
+                None => Err(Refusal::KeyNotTrusted {
+                    key_id: s.key_id.clone(),
+                }),
+            }
+        }
+    }
 }
 
 /// The first revocation that names this id, version and content (a revocation without a version

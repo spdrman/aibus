@@ -45,13 +45,41 @@ pub(crate) fn uid() -> u32 {
     rustix::process::getuid().as_raw()
 }
 
-/// `$XDG_RUNTIME_DIR/aibus/sessions`, or `<tmp>/aibus-<uid>/sessions` where there is none (macOS).
+/// The longest name a session puts in its directory: an id of `valid_id`'s longest, and the
+/// `.<16 hex>.tmp` a socket has while it is made. `sun_path` takes 104 bytes on macOS and 108 on
+/// Linux, and 100 leaves room under both.
 #[cfg(unix)]
-pub fn runtime_dir(xdg_runtime: Option<&OsStr>, tmp: &Path) -> PathBuf {
-    match xdg_runtime.map(Path::new).filter(|p| p.is_absolute()) {
-        Some(run) => run.join("aibus").join("sessions"),
-        None => tmp.join(format!("aibus-{}", uid())).join("sessions"),
+const SOCKET_PATH_MAX: usize = 100;
+#[cfg(unix)]
+const LONGEST_NAME: usize = 40 + ".0123456789abcdef.tmp".len();
+
+/// `$XDG_RUNTIME_DIR/aibus/sessions`, or `<tmp>/aibus-<uid>/sessions` where there is none
+/// (macOS). When the second would put a socket past what `sun_path` takes (macOS's `$TMPDIR` is
+/// about 49 characters), it is `<short>/aibus-<uid>/sessions` instead, with `short` a base the
+/// binary takes as `/tmp`. `$XDG_RUNTIME_DIR` is the user's own choice and is never replaced.
+#[cfg(unix)]
+pub fn runtime_dir(xdg_runtime: Option<&OsStr>, tmp: &Path, short: &Path) -> PathBuf {
+    if let Some(run) = xdg_runtime.map(Path::new).filter(|p| p.is_absolute()) {
+        return run.join("aibus").join("sessions");
     }
+    let under = |base: &Path| base.join(format!("aibus-{}", uid())).join("sessions");
+    let dir = under(tmp);
+    if dir.as_os_str().len() + 1 + LONGEST_NAME <= SOCKET_PATH_MAX {
+        dir
+    } else {
+        under(short)
+    }
+}
+
+/// The directory this process uses: `runtime_dir` of `$XDG_RUNTIME_DIR`, the temporary directory
+/// and `/tmp`. The session and `aibus mcp` both call it, so they always agree on where to look.
+#[cfg(unix)]
+pub fn default_runtime_dir() -> PathBuf {
+    runtime_dir(
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        &std::env::temp_dir(),
+        Path::new("/tmp"),
+    )
 }
 
 /// Makes the session directory, or checks the one that is there. `dir` is `<base>/<aibus>/sessions`

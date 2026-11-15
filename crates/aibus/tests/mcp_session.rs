@@ -5,7 +5,7 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,13 +19,17 @@ use tokio::sync::mpsc;
 
 type Seen = Arc<Mutex<Vec<String>>>;
 
-fn run_dir(home: &Path) -> PathBuf {
-    home.join("run")
+/// A short `XDG_RUNTIME_DIR`: the throwaway home's path is too long for a socket on macOS (#320).
+fn short_run() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("ab")
+        .tempdir_in("/tmp")
+        .unwrap()
 }
 
 /// A live session `id` in `home`'s runtime directory, answered by a stand-in loop.
-fn session(rt: &Rt, home: &Path, id: &str, seen: Seen) -> Endpoint {
-    let dir = runtime_dir(Some(run_dir(home).as_os_str()), home);
+fn session(rt: &Rt, run: &Path, id: &str, seen: Seen) -> Endpoint {
+    let dir = runtime_dir(Some(run.as_os_str()), run, run);
     private_dir(&dir).unwrap();
     let info = json!({"id": id, "cwd": "~/app", "lead": "lead", "model": "sonnet", "started": "2026-11-14T10:00:00Z"});
     let mut ep = Endpoint::open(&dir, id, &info).unwrap();
@@ -74,9 +78,9 @@ fn runtime() -> Rt {
     }
 }
 
-fn client(home: &Path, p: Protocol, args: &[&str]) -> McpClient {
+fn client(home: &Path, run: &Path, p: Protocol, args: &[&str]) -> McpClient {
     let mut cmd = mcp_command(home, args);
-    cmd.env("XDG_RUNTIME_DIR", run_dir(home));
+    cmd.env("XDG_RUNTIME_DIR", run);
     let mut c = McpClient::spawn(cmd, p, home);
     if p == Protocol::V2025_11_25 {
         c.initialize_legacy().expect("initialize");
@@ -105,11 +109,13 @@ fn wait_for(seen: &Seen, what: &str) -> bool {
 fn aibus_mcp_drives_a_live_session_through_its_socket() {
     for p in Protocol::BOTH {
         let home = xdg_temp();
+        let run = short_run();
         let rt = runtime();
         let seen: Seen = Arc::default();
-        let ep = session(&rt, home.path(), "01JCE2E0000000000000000000", seen.clone());
+        let ep = session(&rt, run.path(), "01JCE2E0000000000000000000", seen.clone());
         let mut c = client(
             home.path(),
+            run.path(),
             p,
             &[
                 "--allow",
@@ -169,12 +175,14 @@ fn aibus_mcp_drives_a_live_session_through_its_socket() {
 #[test]
 fn with_several_live_sessions_and_no_id_the_server_refuses_and_lists_them() {
     let home = xdg_temp();
+    let run = short_run();
     let rt = runtime();
     let seen: Seen = Arc::default();
-    let _a = session(&rt, home.path(), "01JCTWO0000000000000000000", seen.clone());
-    let _b = session(&rt, home.path(), "01JCTWO0000000000000000001", seen.clone());
+    let _a = session(&rt, run.path(), "01JCTWO0000000000000000000", seen.clone());
+    let _b = session(&rt, run.path(), "01JCTWO0000000000000000001", seen.clone());
     let mut c = client(
         home.path(),
+        run.path(),
         Protocol::V2026_07_28,
         &["--allow", "session-status", "--allow", "session-list"],
     );
@@ -207,6 +215,7 @@ fn with_several_live_sessions_and_no_id_the_server_refuses_and_lists_them() {
 
     let mut c = client(
         home.path(),
+        run.path(),
         Protocol::V2026_07_28,
         &[
             "--allow",
@@ -223,7 +232,8 @@ fn with_several_live_sessions_and_no_id_the_server_refuses_and_lists_them() {
 #[test]
 fn the_session_tools_are_not_there_by_default_and_session_needs_one() {
     let home = xdg_temp();
-    let mut c = client(home.path(), Protocol::V2026_07_28, &[]);
+    let run = short_run();
+    let mut c = client(home.path(), run.path(), Protocol::V2026_07_28, &[]);
     let names = tool_names(&mut c);
     assert!(
         !names.iter().any(|n| n.starts_with("session_")),
@@ -269,15 +279,16 @@ fn every_session_flag_is_on_the_help_text() {
 #[test]
 fn a_client_that_can_be_asked_confirms_a_change_by_retyping_the_tail_of_the_id() {
     let home = xdg_temp();
+    let run = short_run();
     let rt = runtime();
     let seen: Seen = Arc::default();
     let id = "01JCASK0000000000000000XYZ";
-    let _ep = session(&rt, home.path(), id, seen.clone());
+    let _ep = session(&rt, run.path(), id, seen.clone());
     let mut cmd = mcp_command(
         home.path(),
         &["--allow", "session-send", "--allow", "session-status"],
     );
-    cmd.env("XDG_RUNTIME_DIR", run_dir(home.path()));
+    cmd.env("XDG_RUNTIME_DIR", run.path());
     let mut c = McpClient::spawn(cmd, Protocol::V2026_07_28, home.path());
     c.capabilities = json!({ "elicitation": { "form": {} } });
     let read = c.call("session_status", json!({})).unwrap();
@@ -302,4 +313,37 @@ fn a_client_that_can_be_asked_confirms_a_change_by_retyping_the_tail_of_the_id()
     assert_ne!(done["isError"], true, "{done}");
     assert!(wait_for(&seen, "fix it"), "{:?}", seen.lock().unwrap());
     c.finish();
+}
+
+/// #320: no `XDG_RUNTIME_DIR` and a macOS-length `TMPDIR`: the session and `aibus mcp` both end
+/// up in the short fallback directory, so `session_list` sees the session.
+#[test]
+fn issue_320_aibus_mcp_finds_a_session_with_a_macos_length_tmpdir_and_no_xdg() {
+    let home = xdg_temp();
+    let tmpdir = "/var/folders/zz/0123456789abcdefghijklmnopqrstuvwxyz0/T";
+    assert!(tmpdir.len() >= 49);
+    let rt = runtime();
+    let id = "01JCT320000000000000000000";
+    let dir = runtime_dir(None, Path::new(tmpdir), Path::new("/tmp"));
+    private_dir(&dir).unwrap();
+    let info = json!({"id": id, "cwd": "~/app", "lead": "lead", "model": "sonnet", "started": "2026-11-14T10:00:00Z"});
+    let ep = Endpoint::open(&dir, id, &info).unwrap();
+    let (tx, _rx) = mpsc::channel::<Remote>(16);
+    {
+        let _in = rt.handle.enter();
+        let mut ep = ep;
+        ep.serve(tx, Redactor::new()).unwrap();
+        let mut cmd = mcp_command(home.path(), &["--allow", "session-list"]);
+        cmd.env_remove("XDG_RUNTIME_DIR").env("TMPDIR", tmpdir);
+        let mut c = McpClient::spawn(cmd, Protocol::V2026_07_28, home.path());
+        let listed = c.call("session_list", json!({})).expect("session_list");
+        let ids: Vec<&str> = listed["structuredContent"]["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .filter_map(|s| s["id"].as_str())
+            .collect();
+        assert!(ids.contains(&id), "{ids:?} in {}", dir.display());
+        c.finish();
+    }
 }

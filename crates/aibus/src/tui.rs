@@ -259,11 +259,16 @@ impl std::io::Write for Lines {
 
 /// The session's control socket for `aibus mcp --session` (#274), served on `rt`: what a client
 /// sends reaches the loop through `opts.remote`. A socket that cannot be opened is a line in the
-/// log, not a reason to refuse the session.
+/// log and a line on the screen, not a reason to refuse the session.
 #[cfg(unix)]
-fn control(ctx: &Ctx, rt: &tokio::runtime::Runtime, opts: &mut Options) -> Option<aibus_control::Endpoint> {
-    let id = ctx.session.as_ref()?.id.to_string();
-    let dir = aibus_control::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), &std::env::temp_dir());
+fn control(
+    ctx: &Ctx,
+    id: &str,
+    dir: &Path,
+    rt: &tokio::runtime::Runtime,
+    opts: &mut Options,
+    app: &mut aibus_core::App<aibus_graph::mini::MiniGraph>,
+) -> Option<aibus_control::Endpoint> {
     let info = serde_json::json!({
         "id": id,
         "pid": std::process::id(),
@@ -272,7 +277,7 @@ fn control(ctx: &Ctx, rt: &tokio::runtime::Runtime, opts: &mut Options) -> Optio
         "model": ctx.global.model,
         "started": aibus_core::persist::time::rfc3339(std::time::SystemTime::now()),
     });
-    let opened = aibus_control::Endpoint::open(&dir, &id, &info).and_then(|mut ep| {
+    let opened = aibus_control::Endpoint::open(dir, id, &info).and_then(|mut ep| {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
         let _in = rt.enter();
         ep.serve(tx, ctx.redactor.clone())?;
@@ -284,6 +289,17 @@ fn control(ctx: &Ctx, rt: &tokio::runtime::Runtime, opts: &mut Options) -> Optio
         Ok(ep) => Some(ep),
         Err(e) => {
             tracing::warn!("no control socket for this session: {e}");
+            // The log line is for the file; the session's own screen says it too, so a missing
+            // socket is never silent. The reducer logs `io error in <context>`.
+            // A path under the home directory is shown with `~`, like the prompt's directory.
+            let why = match std::env::var("HOME") {
+                Ok(home) if !home.is_empty() => e.to_string().replace(&home, "~"),
+                _ => e.to_string(),
+            };
+            let _ = app.step(Msg::IoError {
+                context: format!("control socket, so `aibus mcp` will not find this session: {why}"),
+                error: String::new(),
+            });
             None
         }
     }
@@ -435,7 +451,14 @@ fn drive(ctx: &mut Ctx) -> Result<(), AibusError> {
     opts.account = Some(Box::new(move |op, tx| account_op(op, tx, &g, &project_settings, &r, launcher.clone(), &mut login)));
     // Held until the loop ends: dropping it closes the socket and removes its files.
     #[cfg(unix)]
-    let _control = if ctx.global.no_control { None } else { control(ctx, rt, &mut opts) };
+    let id = ctx.session.as_ref().map(|s| s.id.to_string());
+    let _control = match id {
+        Some(id) if !ctx.global.no_control => {
+            let dir = aibus_control::default_runtime_dir();
+            control(ctx, &id, &dir, rt, &mut opts, &mut app)
+        }
+        _ => None,
+    };
     let ran = rt.block_on(aibus_tui::app::run(app, opts));
     if let Some(orch) = &ctx.orch {
         orch.cancel_all();
@@ -529,5 +552,24 @@ mod tests {
         assert_eq!(tilde(Path::new("/home/me"), Some("/home/me")), "~");
         assert_eq!(tilde(Path::new("/home/mex/app"), Some("/home/me")), "/home/mex/app");
         assert_eq!(tilde(Path::new("/srv/app"), None), "/srv/app");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn issue_320_a_socket_that_cannot_open_is_said_on_the_screen() {
+        use std::os::unix::fs::PermissionsExt;
+        let ctx = Ctx::new(Global::default(), RunArgs::default(), Redactor::new());
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let (mut opts, _) = build(&[], &Config::default(), &Env::default());
+        let mut app = aibus_core::App::new(aibus_graph::mini::MiniGraph::new(), crate::startup::now_ms);
+        // A base anyone can rename in and that is not sticky: the open is refused.
+        let base = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(base.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let dir = base.path().join("aibus").join("sessions");
+        let ep = control(&ctx, "01JCSCREEN0000000000000000", &dir, &rt, &mut opts, &mut app);
+        assert!(ep.is_none());
+        let log = format!("{:?}", app.store.log_rows(1_000));
+        assert!(log.contains("control socket"), "the screen's log says nothing: {log}");
+        assert!(opts.remote.is_none());
     }
 }

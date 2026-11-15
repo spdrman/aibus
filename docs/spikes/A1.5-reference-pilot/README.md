@@ -34,7 +34,7 @@ The Claude spike did not fail, so the clause "failing the Claude spike blocks th
 ### Conditions on the go
 
 1. The owner answers the two #281 questions (subscription sign-in, extension name) before #286 fixes the extension id.
-2. #324 (below) is fixed before #286 builds the extension host on the supervisor.
+2. #324 (below, fixed by #326) is fixed before #286 builds the extension host on the supervisor.
 3. The contract amendments below are accepted or replaced, since A2.1 starts from them.
 4. Phase 2 does not advertise anything the [capability note](capability-note.md) lists as unsupported.
 
@@ -42,7 +42,7 @@ The Claude spike did not fail, so the clause "failing the Claude spike blocks th
 
 | Issue | What | Blocks? |
 |---|---|---|
-| #324 | The supervisor drops output still queued two seconds after the CLI exits, with no gap event. Red test `defect_a_backlog_after_exit_is_not_dropped_silently` (ignored until fixed) | **Does not block the go.** Real Claude streams are small (73 lines at most in the spike) and the cases pass, but it is a silent loss in the evidence pipeline, so it blocks #286 (condition 2) |
+| #324 | The supervisor drops output still queued two seconds after the CLI exits, with no gap event. **Fixed by #326 (merged).** The test `defect_a_backlog_after_exit_is_not_dropped_silently` was red when I found it and now passes | Did not block the go (real Claude streams are small, 73 lines at most in the spike), but it was a silent loss in the evidence pipeline, so condition 2 (fixed before #286 builds on the supervisor) is met |
 
 No other defect turned up in the ten cases.
 

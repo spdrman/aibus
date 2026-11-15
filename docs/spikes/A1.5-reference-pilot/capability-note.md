@@ -11,7 +11,7 @@ Evidence date 2026-11-15. Every number carries its data quality (invariant 9): *
 | A failed tool does not fail the attempt | Case 02 | Recorded real with one changed field (`is_error`) |
 | Wall-time interruption, user cancel (SIGTERM first, kill after the grace period, whole process group) | Cases 03, 04 | Stand-in CLI behind a recorded prefix |
 | Crash and restart: torn tail repaired, new attempt, old attempt kept, open tool flagged `requires_reconciliation` | Case 05 | Stand-in plus the real store |
-| Overlapping children and a concurrent stderr stream | Case 06 | Recorded 07-deleg; **limited**: see #324 for the case where output is dropped |
+| Overlapping children and a concurrent stderr stream | Case 06 | Recorded 07-deleg. The case where a backlog was dropped after exit (#324) is fixed by #326, and its test passes |
 | Malformed, truncated, invalid-UTF-8 and unknown events become labelled gaps and warnings, graph unchanged | Case 07 | Recorded 06-basic with damage inserted |
 | Missing usage stays `unknown` in the store, the projection and the fleet row; nothing is zero-filled | Case 08 | Recorded with usage removed |
 | Denied permission is an observed `tool_failed`; aibus never invents an approval; the argv never carries a bypass flag | Case 09 | Recorded real (09-denied) plus the compiled plan |

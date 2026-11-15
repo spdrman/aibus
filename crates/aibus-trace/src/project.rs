@@ -15,7 +15,7 @@ use crate::{AttemptStatus, EventKind, Metric, Origin, TraceEvent, Visibility};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Evidence {
     pub event_id: Uuid,
-    pub sequence: u64,
+    pub position: u64,
     pub visibility: Visibility,
     pub origin: Origin,
 }
@@ -75,7 +75,7 @@ pub struct ToolNode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineRow {
-    pub sequence: u64,
+    pub position: u64,
     pub observed_at: String,
     pub occurred_at: Option<String>,
     pub kind: EventKind,
@@ -87,7 +87,7 @@ pub struct TimelineRow {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GapRow {
-    pub sequence: u64,
+    pub position: u64,
     pub attempt_id: Uuid,
     pub reason: String,
 }
@@ -113,7 +113,7 @@ fn wire(v: impl Serialize) -> String {
 
 fn evidence_list(ev: &[Evidence]) -> String {
     ev.iter()
-        .map(|e| format!("#{}:{}/{}", e.sequence, wire(e.visibility), wire(e.origin)))
+        .map(|e| format!("#{}:{}/{}", e.position, wire(e.visibility), wire(e.origin)))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -183,14 +183,14 @@ impl Projection {
             );
         }
         for g in &self.gaps {
-            let _ = writeln!(s, "gap #{} {}", g.sequence, g.reason);
+            let _ = writeln!(s, "gap #{} {}", g.position, g.reason);
         }
         s.push_str("timeline\n");
         for r in &self.timeline {
             let _ = writeln!(
                 s,
                 "#{} {} {} {} {} {} agent={}{}",
-                r.sequence,
+                r.position,
                 r.observed_at,
                 opt(&r.occurred_at),
                 wire(r.kind),
@@ -208,10 +208,11 @@ fn text(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-/// Replays `events` (in any order: they are sorted by `sequence` first).
+/// Replays `events` (in any order: they are sorted by event id, a uuid v7, first). `position` in
+/// the rows is the 1-based rank in that order, for display only.
 pub fn project(events: &[TraceEvent]) -> Projection {
     let mut sorted: Vec<&TraceEvent> = events.iter().collect();
-    sorted.sort_by_key(|e| (e.sequence, e.event_id));
+    sorted.sort_by_key(|e| e.event_id);
 
     let mut p = Projection::default();
     let mut attempts: HashMap<Uuid, usize> = HashMap::new();
@@ -224,15 +225,16 @@ pub fn project(events: &[TraceEvent]) -> Projection {
     // (attempt, child) -> its agent_started evidence
     let mut started: HashMap<(Uuid, String), Vec<Evidence>> = HashMap::new();
 
-    for e in sorted {
+    for (rank, e) in sorted.into_iter().enumerate() {
+        let position = rank as u64 + 1;
         let ev = Evidence {
             event_id: e.event_id,
-            sequence: e.sequence,
+            position,
             visibility: e.visibility,
             origin: e.origin,
         };
         p.timeline.push(TimelineRow {
-            sequence: e.sequence,
+            position,
             observed_at: e.observed_at.clone(),
             occurred_at: e.occurred_at.clone(),
             kind: e.kind,
@@ -353,7 +355,7 @@ pub fn project(events: &[TraceEvent]) -> Projection {
             }
             EventKind::GapDetected => {
                 p.gaps.push(GapRow {
-                    sequence: e.sequence,
+                    position,
                     attempt_id: att,
                     reason: text(&e.data, "reason").unwrap_or_else(|| "unspecified".into()),
                 });
@@ -377,7 +379,7 @@ pub fn project(events: &[TraceEvent]) -> Projection {
         if sources.is_empty() {
             sources.extend(a.evidence.iter().cloned());
         }
-        sources.sort_by_key(|s| s.sequence);
+        sources.sort_by_key(|s| s.position);
         let origins: BTreeSet<Origin> = sources.iter().map(|s| s.origin).collect();
         let level = if parent.is_some() {
             sources
@@ -386,9 +388,9 @@ pub fn project(events: &[TraceEvent]) -> Projection {
                 .min()
                 .unwrap_or(Visibility::Unavailable)
         } else {
-            let first = sources.first().map_or(0, |s| s.sequence);
+            let first = sources.first().map_or(0, |s| s.position);
             p.gaps.push(GapRow {
-                sequence: first,
+                position: first,
                 attempt_id: a.attempt_id,
                 reason: "parent_unavailable".into(),
             });
@@ -404,6 +406,6 @@ pub fn project(events: &[TraceEvent]) -> Projection {
             sources,
         });
     }
-    p.gaps.sort_by_key(|g| g.sequence);
+    p.gaps.sort_by_key(|g| g.position);
     p
 }

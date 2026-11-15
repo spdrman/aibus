@@ -1,0 +1,385 @@
+{
+  "agents": {
+    "explore": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    },
+    "general": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "tools": [
+        "read",
+        "write",
+        "edit",
+        "glob",
+        "grep",
+        "ls",
+        "bash",
+        "report_artifact",
+        "web_fetch",
+        "delegate",
+        "mcp:*"
+      ]
+    },
+    "plan": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:51b7bd6f1d7643d429b07faae911593bebd5e86415bc515ef032cdb0c9840791",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    }
+  },
+  "approvals": {
+    "required_for": [
+      "network_write",
+      "git_merge",
+      "destructive_tool"
+    ],
+    "steps": {
+      "lead": [
+        "network_write",
+        "git_merge",
+        "destructive_tool"
+      ]
+    }
+  },
+  "compiler": "aibus-workflow-compiler/1",
+  "edges": [
+    {
+      "from": "lead",
+      "kind": "route",
+      "to": "audit",
+      "when": "lead.completed"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "lead",
+      "via": "input"
+    },
+    {
+      "from": "lead",
+      "kind": "data",
+      "to": "audit",
+      "via": "steps.lead.summary"
+    },
+    {
+      "from": "lead",
+      "kind": "delegation",
+      "lineage": "native",
+      "to": "search"
+    },
+    {
+      "from": "lead",
+      "kind": "delegation",
+      "lineage": "aibus_managed",
+      "to": "audit"
+    }
+  ],
+  "entry": "lead",
+  "envelope": {
+    "max_agent_runs": 8,
+    "max_parallel": 3,
+    "max_wall_seconds": 1800,
+    "worst_case_agent_runs": 2
+  },
+  "fan_out": [],
+  "jev": {
+    "decisions": [
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:side_effects",
+            "status:cli.claude=experimental",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "cli.claude"
+        },
+        "request": {
+          "budget_class": "bounded",
+          "candidates": [
+            "cli.claude"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "side_effects",
+          "task_id": "lead"
+        },
+        "step": "lead"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "native",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:cli.claude=experimental",
+            "mode:native_child_lineage"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "cli.claude"
+        },
+        "request": {
+          "budget_class": "bounded",
+          "candidates": [
+            "cli.claude"
+          ],
+          "parent_runtime": "cli.claude",
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "native_or_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "search"
+        },
+        "step": "search"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:aibus=available",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "aibus"
+        },
+        "request": {
+          "budget_class": "bounded",
+          "candidates": [
+            "aibus"
+          ],
+          "parent_runtime": "cli.claude",
+          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "audit"
+        },
+        "step": "audit"
+      }
+    ],
+    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+  },
+  "kind": "aibus.workflow.plan",
+  "manifest_version": 1,
+  "notes": [],
+  "plan_hash": "sha256:0b89c75d9877be262b7dc69a1cb86d0b9102eb5a6df1a1858633d1c393b9afcc",
+  "plan_only_because": "workflow repo-review uses [[route]], [limits], [approvals], a runtime other than aibus, mode or parent, isolation, which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan repo-review --dry-run shows the plan)",
+  "prompts": {
+    "sha256:2bc4a1ec34bfe242b4deef1a6dd6853bf5036f41971b96c02f1b8c64d3635a7a": "Lead the review of a pull request. Ask the search subagent for the code the change touches, wait for it in the foreground, and hand back what changed and where.\nPull request: {{input}}",
+    "sha256:7114af13b91b532068a8cea939c8393a0e17c44ce4f22af9c420e8c2e0233f2b": "Find the code the change touches, its callers and its tests. Quote paths and lines.",
+    "sha256:bf2860afd5689ad2925e5aabb225752713999804e6515c5168801e0350431d18": "Review this change on your own and answer in JSON with keys verdict and reasons. What changed: {{steps.lead.summary}}"
+  },
+  "runnable_now": false,
+  "runtimes": {
+    "aibus": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "interactive_approval",
+        "one_shot",
+        "session_resume",
+        "structured_events",
+        "tool_events",
+        "usage_report",
+        "workspace_control"
+      ],
+      "status": "available"
+    },
+    "cli.claude": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "login_status",
+        "native_child_lineage",
+        "one_shot",
+        "structured_events",
+        "tool_events",
+        "usage_report"
+      ],
+      "status": "experimental"
+    }
+  },
+  "steps": [
+    {
+      "agent": "general",
+      "agent_sha256": "sha256:b8c604b26443eb1bd35d057c422fd1497337c4f43e7ad740b9843c477d4df191",
+      "gate": null,
+      "invocation": {
+        "agents": {
+          "search": {
+            "description": "Read-only codebase search. Say how thorough to be (quick, medium, very_thorough).",
+            "prompt": "You search a codebase and report what you found. You never edit anything. The prompt may carry a\nthoroughness hint: quick (one or two searches), medium, or very_thorough (try several naming\nconventions and locations). Answer with file paths and line numbers.\n\nFind the code the change touches, its callers and its tests. Quote paths and lines.",
+            "tools": [
+              "Glob",
+              "Grep",
+              "Read"
+            ]
+          }
+        },
+        "argv": [
+          "-p",
+          "<prompt of step lead, template sha256:2bc4a1ec34bfe242b4deef1a6dd6853bf5036f41971b96c02f1b8c64d3635a7a, rendered at run time>",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--no-session-persistence",
+          "--setting-sources",
+          "project",
+          "--strict-mcp-config",
+          "--permission-prompts",
+          "none",
+          "--tools",
+          "Agent,Bash,Edit,Glob,Grep,Read,WebFetch,Write",
+          "--allowedTools",
+          "Agent,Glob,Grep,Read",
+          "--agents",
+          "<agents json sha256:7d6d5535bfb252d22fc8cbee26a2e3a4a3f782bfd337526feb0db91f0287a7d6>"
+        ],
+        "delegation": {
+          "foreground": "requested_in_prompt",
+          "host_enforced": false
+        },
+        "denied_until_approved": [
+          "Bash",
+          "Edit",
+          "WebFetch",
+          "Write"
+        ],
+        "env_allowlist": [
+          "CLAUDE_CONFIG_DIR",
+          "HOME",
+          "LANG",
+          "PATH",
+          "USER"
+        ],
+        "kind": "process",
+        "program": "claude",
+        "shell": false,
+        "stdin": "null",
+        "writes_files": []
+      },
+      "isolation": "none",
+      "key": "lead",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 1,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "input"
+        ],
+        "sha256": "sha256:2bc4a1ec34bfe242b4deef1a6dd6853bf5036f41971b96c02f1b8c64d3635a7a",
+        "stable_prefix_bytes": 175,
+        "volatile_at_end": true
+      },
+      "requires": [
+        "repo_read",
+        "delegate"
+      ],
+      "retries": 0,
+      "runtime": "cli.claude"
+    },
+    {
+      "agent": "explore",
+      "agent_sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "gate": null,
+      "invocation": {
+        "kind": "native_subagent",
+        "launched_by": "lead",
+        "via": "--agents"
+      },
+      "isolation": "none",
+      "key": "search",
+      "mode": "native",
+      "mode_requested": "native_or_managed",
+      "n": 2,
+      "output": "summary",
+      "parent": "lead",
+      "prompt": {
+        "reads": [],
+        "sha256": "sha256:7114af13b91b532068a8cea939c8393a0e17c44ce4f22af9c420e8c2e0233f2b",
+        "stable_prefix_bytes": 83,
+        "volatile_at_end": true
+      },
+      "requires": [
+        "repo_read"
+      ],
+      "retries": 0,
+      "runtime": "cli.claude"
+    },
+    {
+      "agent": "plan",
+      "agent_sha256": "sha256:51b7bd6f1d7643d429b07faae911593bebd5e86415bc515ef032cdb0c9840791",
+      "gate": null,
+      "invocation": {
+        "agent": "plan",
+        "foreground": true,
+        "isolation": "git_worktree",
+        "kind": "aibus_run",
+        "parent": "lead"
+      },
+      "isolation": "git_worktree",
+      "key": "audit",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 3,
+      "output": "json",
+      "parent": "lead",
+      "prompt": {
+        "reads": [
+          "steps.lead.summary"
+        ],
+        "sha256": "sha256:bf2860afd5689ad2925e5aabb225752713999804e6515c5168801e0350431d18",
+        "stable_prefix_bytes": 95,
+        "volatile_at_end": true
+      },
+      "requires": [
+        "repo_read"
+      ],
+      "retries": 0,
+      "runtime": "aibus"
+    }
+  ],
+  "workflow": {
+    "description": "Review a pull request and produce a verified recommendation",
+    "name": "repo-review",
+    "revision": "1.0.0",
+    "source_sha256": "sha256:e02ec779a43a8972728f034a2754c718752c34b5a671a7658cabc1956ce96019"
+  }
+}

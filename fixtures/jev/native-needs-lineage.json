@@ -1,0 +1,19 @@
+{
+  "about": "native on a runtime without native child lineage: nothing fits, and the decision goes to a person.",
+  "request": {
+    "task_id": "search",
+    "requires": ["one_shot"],
+    "candidates": ["aibus"],
+    "policy_revision": "{{policy_revision}}",
+    "budget_class": "bounded",
+    "risk_class": "read_only",
+    "requested_mode": "native"
+  },
+  "decision": {
+    "selected_runtime": null,
+    "execution_mode": null,
+    "reason_code": "no_candidate",
+    "policy_evidence": ["risk:read_only", "missing:native_child_lineage@aibus"],
+    "decision_source": "jev_deterministic"
+  }
+}

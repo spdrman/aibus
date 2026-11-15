@@ -369,7 +369,8 @@ fn with_no_flag_nothing_writes_runs_connects_or_spawns() {
             "workflow_dry_run" => json!({ "name": "trap", "input": "x" }),
             _ => json!({ "name": "trap", "scope": "project" }),
         };
-        assert_eq!(listed.len(), 6, "{p:?}: {listed:?}");
+        // The six read tools and `workflow_plan` (#283), which compiles the trap and runs no gate.
+        assert_eq!(listed.len(), 7, "{p:?}: {listed:?}");
         for name in &listed {
             let r = c.call(name, args(name)).unwrap_or_else(|e| panic!("{p:?}: {name}: {e:?}"));
             assert_ne!(r["isError"], true, "{p:?}: {name}: {r}");

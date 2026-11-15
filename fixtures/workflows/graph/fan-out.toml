@@ -1,0 +1,57 @@
+name = "fan-out"
+revision = "2"
+description = "Plan, look in two places at once, build, and loop back to planning while the build fails"
+
+[[step]]
+agent = "plan"
+prompt = "Plan the change: {{input}}"
+output = "json"
+
+[[step]]
+id = "code"
+agent = "explore"
+requires = ["repo_read"]
+prompt = "Find the code this plan touches: {{prev.summary}}"
+
+[[step]]
+id = "tests"
+agent = "search"
+requires = ["repo_read"]
+prompt = "Find the tests this plan touches: {{steps.plan.summary}}"
+
+[[step]]
+id = "build"
+agent = "general"
+requires = ["repo_write", "shell"]
+prompt = "Build it. Code: {{steps.code.summary}} Tests: {{steps.tests.summary}}"
+
+[[route]]
+from = "plan"
+to = "code"
+when = "plan.completed && plan.artifact_valid"
+
+[[route]]
+from = "plan"
+to = "tests"
+when = "plan.artifact_valid"
+
+[[route]]
+from = "code"
+to = "build"
+
+[[route]]
+from = "tests"
+to = "build"
+
+[[route]]
+from = "build"
+to = "plan"
+when = "build.failed && !plan.failed"
+max_iterations = 2
+
+[limits]
+max_agent_runs = 12
+max_parallel = 2
+
+[approvals]
+required_for = ["shell", "repo_write"]

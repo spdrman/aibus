@@ -1,0 +1,18 @@
+# expect: step 3: `steps.search.summary` is a native subagent's; it reports to its parent, not to aibus
+[[step]]
+id = "lead"
+agent = "general"
+runtime = "cli.claude"
+prompt = "p {{input}}"
+
+[[step]]
+id = "search"
+agent = "explore"
+runtime = "cli.claude"
+parent = "lead"
+mode = "native"
+prompt = "Search"
+
+[[step]]
+agent = "plan"
+prompt = "Use {{steps.search.summary}}"

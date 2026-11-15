@@ -151,10 +151,10 @@ fn every_tool_schema_is_valid_2020_12_and_every_result_matches_its_output_schema
             if input.get("required").and_then(Value::as_array).is_some_and(|r| !r.is_empty()) {
                 continue;
             }
-            // `workflow_validate` takes `name` or `toml` and the schema cannot say "one of", so
-            // it gets a draft; every other tool here takes nothing.
+            // `workflow_validate` and `workflow_plan` take `name` or `toml` and the schema cannot
+            // say "one of", so they get a draft; every other tool here takes nothing.
             let args = match name {
-                "workflow_validate" => json!({ "toml": "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n" }),
+                "workflow_validate" | "workflow_plan" => json!({ "toml": "[[step]]\nagent = \"explore\"\nprompt = \"{{input}}\"\n" }),
                 _ => json!({}),
             };
             let result = c.call(name, args).unwrap_or_else(|e| panic!("{p:?}: {name}: {e:?}"));

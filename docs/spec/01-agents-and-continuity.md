@@ -97,7 +97,7 @@ aibus --agents '{"reviewer":{"description":"...","prompt":"...","tools":["read",
 | `audit` | worker | same, `isolation: worktree` | `read, grep, glob, bash(git *), bash(cargo *), bash(npm *)` | Runs checks in a worktree (third card). |
 | `workflow-author` | worker | `inherit` | `read, glob, grep, mcp:aibus:*` | Drafts a workflow for a goal over `aibus mcp` on stdio (read-only: validate and dry run, never a write), for `/workflow new`. Its `max_cost_usd` is a quarter of `limits.max_cost_usd`. |
 
-Built-ins can be overridden by a project or user definition with the same name. `aibus agent show explore` prints the built-in's effective definition so you can copy it.
+Built-ins can be overridden by a project or user definition with the same name, and the override is total: every session that reads that directory gets the file's definition for that name, as the lead, as a worker and in every workflow step. `aibus workflow install` refuses a bundle whose agent has a built-in's name unless `--force` is given, and says which built-in it replaces. `aibus agent show explore` prints the built-in's effective definition so you can copy it.
 
 ### 1.4 Validation
 
@@ -479,6 +479,28 @@ on_fail = "retry:2"          # re-run kraken then arbiter, twice max
 A workflow becomes a file and comes back later through the `/workflow` subcommands in the TUI. `/workflow list` and `/workflow show <name>` open a modal (the rows, or the file as text with the validator's summary under it). `/workflow save <name> [--user] [--force]` takes the latest drafted workflow (`model:workflow:draft`), runs the validator over it against the real roster, refuses on errors (and shows them), and writes `.aibus/workflows/<name>.toml` (or `~/.config/aibus/workflows/` with `--user`, mode 0600) atomically. The file starts with two comment lines, `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`, which `Workflow::parse` ignores like any TOML comment. The name has to match `^[a-z0-9][a-z0-9_-]{0,63}$` and is checked before the disk is touched; the path is the directory plus that name, never the argument. An existing file is refused unless `--force`. `/workflow run <name> <input>` is `/workflow <name> <input>` under a second name.
 
 `/workflow new <goal>` is how a draft comes to exist: the lead delegates the goal to the built-in `workflow-author` agent in the foreground, and the author works through this program's own `aibus mcp` (read-only: it lists the agents, validates a draft and dry-runs a saved workflow). Its report comes back as data like any child's, and the last fenced `toml` block in it that validates against the agents in the session becomes `model:workflow:draft`, which `/workflow save` writes. The author saves by itself only when the owner says so for that one command: `/workflow new --write <goal>` and `/workflow edit <name> <change>` start a second `aibus mcp --allow write` child (never `gates`, never `run`) and offer `workflow_create` and `workflow_update` to that author run. Each call asks in the permission modal with a one-line summary and has no "always". `edit` reads the file with `workflow_get` and updates with the revision it got, so a file changed in between is a conflict. A file the author writes starts with the marker line `# written through aibus mcp, <RFC 3339 time>` (an update keeps the line the file had), where a file `/workflow save` writes starts with `# schema: aibus://schema/workflow v1` and `# written through aibus, <RFC 3339 time>`.
+
+#### Routes, runtimes and the compiler (#283)
+
+The format is still v1. Every field below is optional, and a file that uses none of them is the chain it always was; `fixtures/workflows/compat/before-283.json` holds every older file to what it read as before. The spec's illustrative `[[steps]]`/`[[routes]]` example maps onto it as `[[step]]`/`[[route]]`, with `objective` as `description` and the first step as `entry`.
+
+| Field | Where | Meaning |
+|---|---|---|
+| `schema_version = "1"` | top | says which format this is; the same as leaving it out |
+| `revision` | top | the author's label for this version, shown in a plan |
+| `id` | step | a name for the step (its key) when its agent is not enough, such as the same agent twice; `{{steps.<key>.summary}}` reads it |
+| `runtime` | step | `aibus` (default) or `cli.claude`, the official Claude Code CLI, which plans and does not run until #285 rules on the spike (the id is provisional, #286 names extensions) |
+| `mode` | step | `aibus_managed` (default), `native` (a subagent inside its parent's process, on a runtime with native child lineage) or `native_or_managed` (Jev picks: native under a parent on the same runtime, else managed) |
+| `parent` | step | the key of an earlier step that launches this one; the plan records the lineage as native or aibus-managed |
+| `requires` | step | capabilities the agent must have tools for: `repo_read`, `repo_write`, `shell`, `network`, `delegate`, `network_write`, `git_merge`, `destructive_tool` |
+| `isolation` | step | `git_worktree` for an aibus-managed step that gets its own worktree |
+| `output` | step | `summary` (default) or `json`, which a route can test with `<step>.artifact_valid` |
+| `[[route]] from, to, when, max_iterations` | top | explicit edges; `when` is `<step>.completed|failed|artifact_valid` with `!`, `&&`, `||` (default `<from>.completed`); `max_iterations` (1 to 10) makes a route back to an earlier step a bounded loop, counted every time it is taken in a run |
+| `[limits] max_agent_runs, max_parallel, max_wall_seconds` | top | the envelope; a workflow whose worst case can start more runs than `max_agent_runs` is refused |
+| `[approvals] required_for` | top | capabilities held for a person's yes; the plan lists which steps can reach each |
+
+With any route the file order is no longer the run order: the first step starts, forward routes must make a DAG that reaches every scheduled step, a template or condition may only read a step that runs before it, and `{{prev.summary}}` needs exactly one route into the step. A native subagent has no gate, retry, template, worktree or route, and nothing reads its summary: it reports to its parent. All of this is checked when the file is read, so `workflow validate`, the MCP tools and a run all refuse the same files. The chain runner runs a workflow that adds only `id`, `revision`, `requires` or `output` (the chain runner does not check a `json` artifact; only a route reads `artifact_valid`); anything else (routes, limits, approvals, another runtime, a mode or parent, a worktree) plans with `aibus workflow plan --dry-run` and is refused before any step starts, until the scheduler (#288) runs it. A `gate` keeps its trust path whatever else the file says: a bundled or MCP-written workflow with one still needs the existing `--allow gates` or install trust.
+
 
 ## 9. Tools
 

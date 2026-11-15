@@ -1,0 +1,20 @@
+# expect: route 2: max_iterations 11: want 1 to 10
+[[step]]
+id = "a"
+agent = "plan"
+prompt = "p {{input}}"
+
+[[step]]
+id = "b"
+agent = "general"
+prompt = "q"
+
+[[route]]
+from = "a"
+to = "b"
+
+[[route]]
+from = "b"
+to = "a"
+when = "b.failed"
+max_iterations = 11

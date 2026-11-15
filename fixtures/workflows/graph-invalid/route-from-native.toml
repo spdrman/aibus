@@ -1,0 +1,27 @@
+# expect: route 1: `from` is a native subagent (search); aibus does not schedule those, its parent does
+[[step]]
+id = "lead"
+agent = "general"
+runtime = "cli.claude"
+prompt = "p {{input}}"
+
+[[step]]
+id = "search"
+agent = "explore"
+runtime = "cli.claude"
+parent = "lead"
+mode = "native"
+prompt = "q"
+
+[[step]]
+id = "after"
+agent = "plan"
+prompt = "r"
+
+[[route]]
+from = "search"
+to = "after"
+
+[[route]]
+from = "lead"
+to = "after"

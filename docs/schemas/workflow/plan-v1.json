@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spdrman/aibus/blob/main/docs/schemas/workflow/plan-v1.json",
+  "title": "aibus workflow plan v1",
+  "description": "What `aibus workflow plan --dry-run --json` prints and the MCP tool `workflow_plan` returns: the compiled plan of a workflow (#283). Every value comes from the workflow file and the agent definitions; nothing comes from the host, the clock or a run, so the same input compiles to the same bytes anywhere. plan_hash is the sha256 of the plan's canonical JSON (keys sorted, no whitespace) without the plan_hash key. Content hashes read CRLF as LF.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "manifest_version",
+    "compiler",
+    "workflow",
+    "entry",
+    "runnable_now",
+    "plan_only_because",
+    "steps",
+    "edges",
+    "fan_out",
+    "envelope",
+    "approvals",
+    "agents",
+    "prompts",
+    "runtimes",
+    "jev",
+    "notes",
+    "plan_hash"
+  ],
+  "properties": {
+    "kind": {
+      "const": "aibus.workflow.plan"
+    },
+    "manifest_version": {
+      "const": 1
+    },
+    "compiler": {
+      "type": "string"
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "revision",
+        "description",
+        "source_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runnable_now": {
+      "type": "boolean"
+    },
+    "plan_only_because": {
+      "description": "Why the chain runner refuses this workflow (the scheduler, #288, runs it), or null.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "n",
+          "agent",
+          "agent_sha256",
+          "runtime",
+          "mode",
+          "mode_requested",
+          "parent",
+          "requires",
+          "isolation",
+          "output",
+          "gate",
+          "retries",
+          "prompt",
+          "invocation"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "agent": {
+            "type": "string"
+          },
+          "agent_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "runtime": {
+            "enum": [
+              "aibus",
+              "cli.claude"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "aibus_managed",
+              "native"
+            ]
+          },
+          "mode_requested": {
+            "enum": [
+              "aibus_managed",
+              "native",
+              "native_or_managed"
+            ]
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isolation": {
+            "enum": [
+              "none",
+              "git_worktree"
+            ]
+          },
+          "output": {
+            "enum": [
+              "summary",
+              "json"
+            ]
+          },
+          "gate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "prompt": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sha256",
+              "reads",
+              "stable_prefix_bytes",
+              "volatile_at_end"
+            ],
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "reads": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "stable_prefix_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "volatile_at_end": {
+                "type": "boolean"
+              }
+            }
+          },
+          "invocation": {
+            "description": "aibus_run (a run the lead starts), process (an official CLI started with an argv vector, no shell, and native subagents inline in --agents) or native_subagent.",
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "aibus_run",
+                  "process",
+                  "native_subagent"
+                ]
+              },
+              "shell": {
+                "const": false
+              },
+              "writes_files": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "argv": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "sequence",
+              "route",
+              "loop",
+              "retry",
+              "data",
+              "delegation"
+            ]
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          },
+          "max_iterations": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "via": {
+            "type": "string"
+          },
+          "lineage": {
+            "enum": [
+              "native",
+              "aibus_managed"
+            ]
+          }
+        }
+      }
+    },
+    "fan_out": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "worst_case_agent_runs",
+        "max_agent_runs",
+        "max_parallel",
+        "max_wall_seconds"
+      ],
+      "properties": {
+        "worst_case_agent_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_agent_runs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_parallel": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_wall_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_for",
+        "steps"
+      ],
+      "properties": {
+        "required_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "steps": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "sha256",
+          "scope",
+          "role",
+          "model",
+          "permission_mode",
+          "tools"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "permission_mode": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "prompts": {
+      "description": "Every prompt template by its content hash.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "runtimes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "status",
+          "capabilities"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "available",
+              "experimental",
+              "unavailable"
+            ]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "jev": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_revision",
+        "decisions"
+      ],
+      "properties": {
+        "policy_revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "step",
+              "request",
+              "decision"
+            ],
+            "properties": {
+              "step": {
+                "type": "string"
+              },
+              "request": {
+                "$ref": "#/$defs/any"
+              },
+              "decision": {
+                "$ref": "#/$defs/any"
+              }
+            }
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "$defs": {
+    "any": {
+      "type": "object",
+      "description": "See docs/schemas/jev/."
+    }
+  }
+}

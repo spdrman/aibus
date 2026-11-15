@@ -1,0 +1,5 @@
+# expect: unknown variant
+[[step]]
+agent = "plan"
+runtime = "sh -c touch-pwned"
+prompt = "p"

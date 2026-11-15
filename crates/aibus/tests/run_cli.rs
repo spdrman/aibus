@@ -7,7 +7,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Stdio;
-use std::time::{Duration, Instant};
 
 use aibus_core::replay::replay_hash;
 use common::{aibus, command, ndjson, stderr};
@@ -374,17 +373,21 @@ fn signal(child: &std::process::Child, sig: &str) {
 #[test]
 fn sigint_cancels_the_run_and_exits_7() {
     let home = xdg_temp();
-    let began = Instant::now();
     let (mut child, mut out) = hanging_run(home.path());
     signal(&child, "-INT");
     let mut rest = String::new();
     std::io::Read::read_to_string(&mut out, &mut rest).unwrap();
     let status = child.wait().unwrap();
     assert_eq!(status.code(), Some(7), "{rest}");
-    let last: serde_json::Value = serde_json::from_str(rest.lines().last().unwrap()).unwrap();
+    let lines: Vec<serde_json::Value> = rest.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(lines.len() >= 2, "no RunFinished before the end: {rest}");
+    let last = &lines[lines.len() - 1];
     assert_eq!(last["type"], "SessionEnd");
     assert_eq!(last["exit_code"], 7);
-    assert!(began.elapsed() < Duration::from_secs(9), "took the whole grace period");
+    // The grace path aborts the run, so it can never produce a cancelled `RunFinished`.
+    let done = &lines[lines.len() - 2];
+    assert_eq!(done["type"], "RunFinished", "{rest}");
+    assert_eq!(done["status"], "cancelled", "{rest}");
 }
 
 #[test]

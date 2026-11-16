@@ -69,7 +69,10 @@
             "enum": [
               "aibus",
               "cli.claude",
-              "attached"
+              "attached",
+              "cli.codex",
+              "cli.gemini",
+              "openrouter"
             ]
           },
           "mode": {

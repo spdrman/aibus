@@ -332,6 +332,8 @@ pub enum AccountCmd {
     Remove { name: String },
     Enable { name: String },
     Disable { name: String },
+    /// Forget an OpenRouter key and disable the account (revoke it at OpenRouter too)
+    Revoke { name: String },
 }
 
 #[derive(Args, Debug)]
@@ -760,6 +762,7 @@ mod tests {
         "account show",
         "account test",
         "account remove",
+        "account revoke",
         "account enable",
         "account disable",
         "session list",

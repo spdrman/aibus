@@ -361,7 +361,7 @@ fn the_tap_text_is_the_runs_inspect_text_with_a_header_and_a_status_line() {
         "same renderer as `aibus runs inspect`:\n{text}"
     );
     assert!(
-        text.contains("refactor parser") && text.contains("2.1"),
+        text.contains("refactor parser") && text.contains("version: unavailable"),
         "{text}"
     );
     assert!(
@@ -377,7 +377,7 @@ fn the_tap_text_is_the_runs_inspect_text_with_a_header_and_a_status_line() {
 fn a_session_nobody_has_posted_for_says_unavailable_not_empty() {
     let tmp = tempfile::tempdir().unwrap();
     let e = env(tmp.path());
-    let text = show::tap(&e, &lister, "idle one").unwrap();
+    let text = show::tap(&e, &lister, "3333").unwrap();
     assert!(text.contains("unavailable"), "{text}");
     assert!(text.contains("hooks install"), "{text}");
 }

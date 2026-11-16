@@ -823,3 +823,29 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 **Alternatives.** A subreaper on Linux (`PR_SET_CHILD_SUBREAPER`): in the aibus process it is process-wide, makes every orphan of the TUI's other children ours and leaves zombies nobody collects; in the CLI it has to be set between fork and exec, which is `unsafe`, and the crate forbids that. A cgroup: needs a delegated v2 subtree, which not every Linux host gives (`systemd-run --user --scope` does where systemd runs). Marking the CLI's environment and sweeping for the mark: it would catch a fast double fork on Linux, but it means reading the environment of every process of the user, which breaks the rule that the supervisor reads no credentials, and macOS hides the environment of system programs anyway. Accepting the gap: no, for unattended runs.
 
 **Why.** It closes the cases the issue names with no `unsafe`, no file read and no Linux-only path, and it is honest about the rest. The kernel guarantee is the follow-up in #352, a small re-exec helper that sets the subreaper and runs the CLI under it; I left it out because it adds a second binary role.
+
+## D-355: Tap in to a running Claude Code session through its hooks, with a metadata-only tap store (#355, phase 1 of #348)
+
+**Context.** #348 asks to see and later steer the CLI sessions already open in other terminals. Phase 1 is Claude Code, read-only.
+
+**Decision.**
+
+1. The list is `claude agents --json` (documented), through a new crate `aibus-tap`. The files under `<config>/sessions/` are local and undocumented, so they only fill a field of a session the command listed (the pid, a version if a file has one), they never add a session, a `.key` file is never opened, and a file counts only when it is a regular file of this user naming a live pid that agrees with the command's. Names are cut and cleaned like #284's views.
+2. The live feed is six hook events (`SessionStart`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`) as `http` hooks to `127.0.0.1:<port>/aibus-tap/hook` with a per-install token (a free port and a random token, saved under `<state>/tap/endpoint.json`, mode 0600). I checked the field names against the hooks reference (`type`, `url`, `headers`, `timeout`): a failed or non-2xx hook is a non-blocking error unless `onFailure: "block"`, which these never set, so the hook fails open. The token sits in the settings file as a literal header value, because a session that is already open cannot be given an environment variable. The user's settings change only through `aibus sessions hooks install`, which prints the exact diff and asks (`--yes` skips the question, not the diff); `uninstall` takes out only the entries aibus wrote.
+3. The tap store is `<state>/taps/claude/<session>/`, an ordinary trace store opened with `PayloadPolicy::MetadataOnly`, fed by the supervisor's `Normalizer::hook_line`. Names, statuses, ids and sizes only. The tap text is `view::graph` plus `view::timeline` (what `aibus runs inspect` prints) under a header that says which sources are on and how good each is, with intent (task files, and the newest plan file written after the session started, labelled `inferred` because the CLI does not tie a plan to a session) and a status line: `watch only`.
+4. Phase 1 has no control path: no inbox socket send, no keystroke, no permission answer, and no hook that decides.
+5. The hook receiver runs only inside `aibus sessions tap <id> --follow` (one process, one tapped session; events for other sessions are answered 200 and dropped). `/tap` in the TUI shows what the store holds and does not listen.
+
+**Alternatives.** An environment-variable token (the vendor's advice; rejected because running sessions cannot receive one). A receiver inside the TUI (left for later: it needs a background task in the loop). Parsing `claude agents` text (rejected: `--json` is the contract). Storing the payloads (rejected: the issue asks for `MetadataOnly`).
+
+**Why.** Hooks are documented and reload into running sessions, so they reach sessions that never asked to be watched, and a metadata-only store keeps the one place that persists nothing a prompt or a file could leak into.
+
+## D-355b: Reading Claude Code transcripts, only on the user's explicit opt-in (proposed by the issue author, owner to ratify) (#355)
+
+**Status: proposed by the issue author, owner to ratify. It is not ratified.** It goes against what the A1.1 spike wrote down (`docs/spikes/A1.1-claude-code/evidence.md`: aibus "should treat those as vendor-owned and never read them as a matter of course"). The default is OFF, so nothing changes until the user runs a command.
+
+**Rule.** aibus may read a Claude Code transcript only when the user has run `aibus sessions allow-transcripts claude` (revoked by `--revoke`). When it does: read-only; a regular file of this user under `<config>/projects/`, not a link; the last megabyte and 200 lines at most; version gated (`aibus_tap::transcript::TESTED`, with the entries' own `version` field when the list gives none), and on any other version it shows what parses and counts what does not as `trace_warning unknown_variant`; shown only after redaction and terminal cleaning; never copied whole, never written to the store, never sent anywhere.
+
+**Open.** The fixture is synthetic and the entry shapes are what I expected from the docs, not what I saw: no real transcript was read for this PR. `TESTED` therefore names 2.1.304 (the CLI on the machine I checked the list against) as a claim to confirm with a live check.
+
+**Alternatives.** Hooks only (kept as the default and the base). Reading transcripts by default (rejected: they carry prompts, code and secrets). Counting unknown entries in the store as `trace_warning` events (left out: the count is shown on screen, and the store takes nothing from the transcript).

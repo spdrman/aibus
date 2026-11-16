@@ -190,3 +190,69 @@ fn allow_transcripts_is_a_per_client_switch_that_starts_off() {
     let o = sessions(home.path(), &["allow-transcripts", "codex"]);
     assert!(!o.status.success());
 }
+
+fn post(port: u16, host: &str, auth: &str, body: &[u8]) -> String {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = format!(
+        "POST /aibus-tap/hook HTTP/1.1\r\nHost: {host}\r\nAuthorization: {auth}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    s.write_all(head.as_bytes()).unwrap();
+    s.write_all(body).unwrap();
+    let mut r = String::new();
+    s.read_to_string(&mut r).unwrap();
+    r.lines().next().unwrap_or("").to_owned()
+}
+
+#[test]
+fn follow_takes_hook_posts_with_the_token_only_and_records_the_tapped_session() {
+    use std::io::{BufRead, BufReader};
+    let home = aibus_testkit::xdg_temp();
+    let bin = fake_claude(home.path());
+    let mut c = command(home.path());
+    c.env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("XDG_STATE_HOME", home.path().join("state"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join("cfg"))
+        .env("AIBUS_CONFIG", home.path().join("none.toml"));
+    let mut child = c
+        .args(["sessions", "tap", "refactor parser", "--follow"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut err = BufReader::new(child.stderr.take().unwrap());
+    let mut first = String::new();
+    err.read_line(&mut first).unwrap();
+    assert!(first.contains("listening on http://127.0.0.1:"), "{first}");
+    let ep: serde_json::Value = serde_json::from_slice(
+        &fs::read(home.path().join("state/aibus/tap/endpoint.json")).unwrap(),
+    )
+    .unwrap();
+    let port = ep["port"].as_u64().unwrap() as u16;
+    let token = ep["token"].as_str().unwrap();
+    let hooks = fs::read_to_string(fixture("hooks.jsonl")).unwrap();
+    let line = hooks.lines().nth(2).unwrap().as_bytes();
+    let h = format!("127.0.0.1:{port}");
+    assert!(post(port, &h, "Bearer nope", line).contains("401"));
+    assert!(post(port, "evil.example", &format!("Bearer {token}"), line).contains("404"));
+    assert!(post(port, &h, &format!("Bearer {token}"), line).contains("200"));
+    // Another session's event is answered and dropped.
+    let other = br#"{"session_id":"33333333-3333-4333-8333-333333333333","hook_event_name":"SessionStart"}"#;
+    assert!(post(port, &h, &format!("Bearer {token}"), other).contains("200"));
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let events = fs::read_to_string(
+        home.path()
+            .join(format!("state/aibus/taps/claude/{S}/events.jsonl")),
+    )
+    .unwrap();
+    assert!(
+        events.contains("tool_started") && !events.contains("SYNTHETIC-SECRET-PATH"),
+        "{events}"
+    );
+    assert!(!home
+        .path()
+        .join("state/aibus/taps/claude/33333333-3333-4333-8333-333333333333")
+        .exists());
+}

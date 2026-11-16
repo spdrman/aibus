@@ -18,7 +18,7 @@ aibus-supervisor = { path = "../aibus-supervisor" }
 aibus-trace = { path = "../aibus-trace" }
 serde_json = "1"
 subtle = "2"
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }

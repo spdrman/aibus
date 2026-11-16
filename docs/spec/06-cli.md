@@ -19,6 +19,7 @@ aibus workflow list | show <name> | validate [<name>|<path>|<file>.aibus] | run 
                install <file>.aibus [--user] [--force] [--allow gates]
                plan <target> --dry-run [--locked <plan.json>] | diff <a> <b> | manifest <target> [--input <text>|-] | export <target> [--dir <dir>] [--apply <hash>]
 aibus runs list | inspect <run> [--node ID | --event N] | replay <run> [--offline] [--events] | rerun <run>   recorded runs (15-recorded-runs.md)
+aibus sessions [list] | tap <session> [--follow] | hooks install|uninstall --client claude | allow-transcripts claude [--revoke]   Claude Code sessions open in other terminals, read-only (17-tap-in.md)
 aibus extensions search <query> | install <id>[@ver] | verify|update|disable|enable|pin|unpin|rollback|remove <id> | list | test <path-or-id> --fixtures | publish <dir>   extensions for official CLIs (16-extensions.md)
 aibus config path | show | init | validate | edit
 aibus mcp [--allow write|gates|run|session-*|permission]... [--session <id>] [--allow-tool <pattern>]... [--http <ip:port> [--origin <o>]...]   MCP server (section 8, docs/MCP.md)

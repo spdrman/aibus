@@ -31,6 +31,26 @@ pub struct Env {
 impl Env {
     /// The CLI's config directory from the process environment.
     pub fn claude_config_from_env() -> Option<PathBuf> {
-        None
+        std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .filter(|v| !v.is_empty())
+                    .map(|h| PathBuf::from(h).join(".claude"))
+            })
     }
+
+    /// `<state>/taps/claude`, where one directory per tapped session lives.
+    pub fn taps(&self) -> PathBuf {
+        self.state.join("taps").join("claude")
+    }
+}
+
+/// True when `path` is a regular file (not a link) owned by this user, no bigger than `max`.
+pub(crate) fn own_regular_file(path: &std::path::Path, max: u64) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::symlink_metadata(path).is_ok_and(|m| {
+        m.is_file() && m.len() <= max && m.uid() == rustix::process::getuid().as_raw()
+    })
 }

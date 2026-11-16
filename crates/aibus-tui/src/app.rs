@@ -637,6 +637,12 @@ fn step_user<G: Graph>(
             crate::workflows::apply(op, app, files, std::time::SystemTime::now())
         }
         (Msg::Command(Command::Runs(q)), _, Some(root)) => crate::runs::apply(q, root),
+        // The tap state sits next to the recorded runs; the CLI's config is where it keeps it.
+        (Msg::Command(Command::Sessions(q)), _, Some(root)) => {
+            let state = root.parent().unwrap_or(root);
+            let config = aibus_tap::Env::claude_config_from_env().unwrap_or_default();
+            crate::sessions::apply(q, state, &config, &aibus_tap::agents::run_agents_json)
+        }
         _ => Vec::new(),
     };
     step_written(app, writer, m)?;

@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use aibus_core::workflow::compile::content_hash;
-use aibus_core::workflow::handoff::{check_delivery, preview, record, Decision, Item, Transfer};
+use aibus_core::workflow::handoff::{
+    deliver, item, preview, preview_sha256, record, Context, Decision, Party, Transfer,
+};
+use aibus_core::workflow::Runtime;
 use aibus_core::Redactor;
 use aibus_extension::manifest::Manifest;
 use aibus_extension::sandbox::{engine, prepare, Grant, TypedValue};
@@ -108,20 +111,32 @@ async fn live_codex_to_claude_with_a_recorded_consent() {
     assert_eq!(status1, AttemptStatus::Completed);
     let text = fs::read_to_string(w1.join("last.txt")).unwrap();
 
-    // The handoff: what would cross, and the answer.
-    let transfer = Transfer {
-        from_step: "draft".into(),
-        from_runtime: "cli.codex".into(),
-        to_step: "review".into(),
-        to_runtime: "cli.claude".into(),
-        items: vec![Item {
-            name: "prev.summary".into(),
-            kind: "step_output".into(),
-            sha256: content_hash(&text),
-            bytes: text.len() as u64,
-        }],
+    // The handoff: what would cross, who receives it, and the answer. The accounts are the CLIs'
+    // own sign-ins, named by who bills them.
+    let context = Context {
+        run_id: Uuid::now_v7().to_string(),
+        plan_hash: content_hash(
+            &fs::read_to_string(repo().join("examples/workflows/cross-provider.toml")).unwrap(),
+        ),
+        from: Party {
+            step: "draft".into(),
+            runtime: Runtime::CodexCli,
+            provider: "openai".into(),
+            account: "codex-cli sign-in".into(),
+        },
+        to: Party {
+            step: "review".into(),
+            runtime: Runtime::ClaudeCli,
+            provider: "anthropic".into(),
+            account: "claude-code sign-in".into(),
+        },
     };
-    eprintln!("{}", preview(&transfer)["text"]);
+    let transfer = Transfer {
+        context: context.clone(),
+        items: vec![item("prev.summary", "step_output", text.as_bytes())],
+    };
+    let shown = preview(&transfer);
+    eprintln!("{}", shown["text"]);
     let granted = std::env::var("AIBUS_HANDOFF_CONSENT").is_ok_and(|v| v == "granted");
     let by = "test operator, AIBUS_HANDOFF_CONSENT in the environment";
     let decision = if granted {
@@ -133,13 +148,27 @@ async fn live_codex_to_claude_with_a_recorded_consent() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let artifact = record(transfer.clone(), decision, &Uuid::now_v7().to_string(), now).unwrap();
+    let artifact = record(
+        transfer,
+        decision,
+        &preview_sha256(&shown),
+        &Uuid::now_v7().to_string(),
+        now,
+    )
+    .unwrap();
 
-    // Step two, on Claude Code, only with the yes.
+    // Step two, on Claude Code, only with the yes, and only the bytes deliver checked and hands back.
     let mut second = Value::Null;
-    if check_delivery(&artifact, &transfer.items).is_ok() {
+    let mut spent = std::collections::BTreeSet::new();
+    if let Ok(delivered) = deliver(
+        &artifact,
+        &context,
+        vec![("prev.summary".into(), text.clone().into_bytes())],
+        &mut spent,
+    ) {
         let typed = BTreeMap::from([("--model".to_owned(), TypedValue::Model("haiku".into()))]);
-        let prompt = format!("React to this sentence in five words or fewer: {text}\n");
+        let sent = String::from_utf8(delivered[0].1.clone()).unwrap();
+        let prompt = format!("React to this sentence in five words or fewer: {sent}\n");
         let (id2, status2, events2) = run(
             &reference_dir(),
             &w2,

@@ -133,6 +133,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "uuid",
  "yaml-rust2",
  "zstd",
 ]

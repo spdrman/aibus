@@ -1,144 +1,359 @@
-//! #360 (A2.2d): a handoff between two runtimes is shown to the user before anything moves, moves
-//! only with their yes, and leaves a record of the answer. A plan marks every step-to-step
-//! transfer that crosses runtimes.
+//! #360 (A2.2d): a handoff between two parties is shown to the user before anything moves, moves
+//! only with their yes, and leaves a record of the answer that holds only for what was shown, to
+//! whom it was shown, in the run it was given in, once. The boundary is who receives and bills the
+//! data (provider and account), not the runtime. A plan marks every transfer that could cross it.
+
+use std::collections::BTreeSet;
 
 use aibus_core::agent::discover::discover;
 use aibus_core::workflow::compile::compile;
 use aibus_core::workflow::handoff::{
-    check_delivery, needs_consent, preview, record, Decision, HandoffError, Item, Transfer,
+    deliver, item, needs_consent, preview, preview_sha256, record, Artifact, Context, Decision,
+    HandoffError, Party, State, Transfer,
 };
-use aibus_core::workflow::Workflow;
+use aibus_core::workflow::{Runtime, Workflow};
 use aibus_core::Redactor;
 use serde_json::Value;
 
 const ID: &str = "01937a3e-5b2c-7d4e-8f10-0123456789ab";
+const OTHER: &str = "01937a3e-5b2c-7d4e-8f10-0123456789ac";
 
-fn item(name: &str, sha: &str, bytes: u64) -> Item {
-    Item {
-        name: name.into(),
-        kind: "step_output".into(),
-        sha256: format!("sha256:{sha}"),
-        bytes,
+fn party(step: &str, runtime: Runtime, provider: &str, account: &str) -> Party {
+    Party {
+        step: step.into(),
+        runtime,
+        provider: provider.into(),
+        account: account.into(),
     }
 }
 
-fn transfer(to: &str) -> Transfer {
+fn codex() -> Party {
+    party("draft", Runtime::CodexCli, "openai", "chatgpt-1")
+}
+fn claude() -> Party {
+    party("review", Runtime::ClaudeCli, "anthropic", "claude-1")
+}
+fn router() -> Party {
+    party("review", Runtime::OpenRouter, "openrouter", "or-1")
+}
+
+fn ctx(from: Party, to: Party) -> Context {
+    Context {
+        run_id: "run-1".into(),
+        plan_hash: "sha256:plan-1".into(),
+        from,
+        to,
+    }
+}
+
+const SUMMARY: &[u8] = b"a short draft";
+const NOTES: &[u8] = b"some notes";
+
+fn transfer(to: Party) -> Transfer {
     Transfer {
-        from_step: "draft".into(),
-        from_runtime: "cli.codex".into(),
-        to_step: "review".into(),
-        to_runtime: to.into(),
-        items: vec![item("prev.summary", "aa", 120), item("notes.md", "bb", 30)],
+        context: ctx(codex(), to),
+        items: vec![
+            item("prev.summary", "step_output", SUMMARY),
+            item("notes.md", "artifact", NOTES),
+        ],
     }
 }
 
-#[test]
-fn only_a_transfer_that_changes_runtime_needs_consent() {
-    assert!(needs_consent(&transfer("cli.claude")));
-    assert!(needs_consent(&transfer("openrouter")));
-    assert!(!needs_consent(&transfer("cli.codex")));
+fn contents() -> Vec<(String, Vec<u8>)> {
+    vec![
+        ("prev.summary".into(), SUMMARY.to_vec()),
+        ("notes.md".into(), NOTES.to_vec()),
+    ]
+}
+
+fn granted(t: &Transfer) -> Artifact {
+    let shown = preview_sha256(&preview(t));
+    record(
+        t.clone(),
+        Decision::Granted { by: "rom" },
+        &shown,
+        ID,
+        1_700_000_000,
+    )
+    .unwrap()
+}
+
+fn deliver_once(
+    a: &Artifact,
+    now: &Context,
+    c: Vec<(String, Vec<u8>)>,
+) -> Result<Vec<(String, Vec<u8>)>, HandoffError> {
+    deliver(a, now, c, &mut BTreeSet::new())
 }
 
 #[test]
-fn the_preview_names_where_it_goes_what_goes_and_whose_billing_and_holds_no_content() {
-    let p = preview(&transfer("cli.claude"));
-    assert_eq!(p["from"]["runtime"], "cli.codex");
-    assert_eq!(p["to"]["runtime"], "cli.claude");
-    assert_eq!(p["total_bytes"], 150);
+fn the_boundary_is_who_receives_and_bills_not_the_runtime() {
+    assert!(needs_consent(&ctx(codex(), claude())));
+    // Two aibus steps on an Anthropic and an OpenRouter account are a cross-provider move.
+    let a = party("a", Runtime::Aibus, "anthropic", "claude-1");
+    let b = party("b", Runtime::Aibus, "openrouter", "or-1");
+    assert!(needs_consent(&ctx(a.clone(), b)));
+    // The same provider under another account is another bill.
+    assert!(needs_consent(&ctx(
+        a.clone(),
+        party("b", Runtime::Aibus, "anthropic", "claude-2")
+    )));
+    // The Claude CLI to an aibus step on the same Anthropic account stays with one receiver.
+    assert!(!needs_consent(&ctx(
+        claude(),
+        party("b", Runtime::Aibus, "anthropic", "claude-1")
+    )));
+    // Same runtime, same everything: nothing to ask.
+    assert!(!needs_consent(&ctx(
+        a.clone(),
+        party("b", Runtime::Aibus, "anthropic", "claude-1")
+    )));
+}
+
+#[test]
+fn the_preview_names_the_receiver_the_run_the_items_and_holds_no_content() {
+    let t = transfer(claude());
+    let p = preview(&t);
+    assert_eq!(p["context"]["to"]["provider"], "anthropic");
+    assert_eq!(p["context"]["run_id"], "run-1");
+    assert_eq!(p["context"]["plan_hash"], "sha256:plan-1");
+    assert_eq!(p["total_bytes"], (SUMMARY.len() + NOTES.len()) as u64);
     let items = p["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["name"], "prev.summary");
-    assert_eq!(items[0]["sha256"], "sha256:aa");
-    assert_eq!(items[0]["bytes"], 120);
-    assert!(items[0].get("content").is_none() && items[0].get("text").is_none());
-    let text = p["text"].as_str().unwrap();
+    assert!(items[0]["sha256"].as_str().unwrap().starts_with("sha256:"));
     assert!(
-        text.contains("cli.claude") && text.contains("Anthropic"),
-        "{text}"
+        !p.to_string().contains("a short draft"),
+        "content is never in a preview"
     );
-    // OpenRouter is a different kind of destination and says so.
-    let or = preview(&transfer("openrouter"));
+    let text = p["text"].as_str().unwrap();
+    assert!(text.contains("Anthropic"), "{text}");
+    let or = preview(&transfer(router()));
     let text = or["text"].as_str().unwrap();
     assert!(
         text.contains("OpenRouter") && text.contains("separate"),
         "{text}"
     );
+    // Every runtime has its own words.
+    for rt in [
+        Runtime::Aibus,
+        Runtime::ClaudeCli,
+        Runtime::Attached,
+        Runtime::CodexCli,
+        Runtime::GeminiCli,
+        Runtime::OpenRouter,
+    ] {
+        let mut t = transfer(claude());
+        t.context.to.runtime = rt;
+        assert!(!preview(&t)["text"].as_str().unwrap().is_empty(), "{rt:?}");
+    }
 }
 
 #[test]
-fn a_granted_handoff_records_who_said_yes_and_which_preview_they_saw() {
-    let t = transfer("cli.claude");
-    let a = record(
-        t.clone(),
-        Decision::Granted { by: "rom" },
-        ID,
-        1_700_000_000,
-    )
-    .unwrap();
+fn a_granted_handoff_records_who_when_and_the_preview_and_delivers_exactly_the_bytes_it_checked() {
+    let t = transfer(claude());
+    let a = granted(&t);
     assert_eq!(a.kind, "aibus.workflow.handoff");
     assert_eq!(a.id, ID);
-    assert_eq!(a.consent.state, "granted");
-    assert_eq!(a.consent.by, "rom");
-    assert_eq!(a.consent.at_unix, 1_700_000_000);
-    let shown = aibus_core::workflow::compile::content_hash(
-        &aibus_core::workflow::compile::canonical_json(&preview(&t)),
+    assert_eq!(
+        (a.consent.state, a.consent.by.as_str(), a.consent.at_unix),
+        (State::Granted, "rom", 1_700_000_000)
     );
-    assert_eq!(a.preview_sha256, shown);
-    check_delivery(&a, &t.items).unwrap();
+    assert_eq!(a.preview_sha256, preview_sha256(&preview(&t)));
+    assert_eq!(
+        deliver_once(&a, &t.context, contents()).unwrap(),
+        contents()
+    );
 }
 
 #[test]
 fn a_declined_handoff_is_recorded_and_delivers_nothing() {
-    let t = transfer("cli.claude");
-    let a = record(t.clone(), Decision::Declined { by: "rom" }, ID, 1).unwrap();
-    assert_eq!(a.consent.state, "declined");
+    let t = transfer(claude());
+    let shown = preview_sha256(&preview(&t));
+    let a = record(t.clone(), Decision::Declined { by: "rom" }, &shown, ID, 1).unwrap();
+    assert_eq!(a.consent.state, State::Declined);
     assert_eq!(
-        check_delivery(&a, &t.items),
+        deliver_once(&a, &t.context, contents()),
         Err(HandoffError::NotConsented)
     );
 }
 
 #[test]
-fn consent_covers_exactly_what_was_shown() {
-    let t = transfer("cli.claude");
-    let a = record(t.clone(), Decision::Granted { by: "rom" }, ID, 1).unwrap();
-    let mut changed = t.items.clone();
-    changed[1] = item("notes.md", "cc", 30);
+fn consent_covers_exactly_the_items_shown_as_a_multiset() {
+    let t = transfer(claude());
+    let a = granted(&t);
+    let now = &t.context;
+    let mut changed = contents();
+    changed[1].1 = b"other notes".to_vec();
     assert_eq!(
-        check_delivery(&a, &changed),
+        deliver_once(&a, now, changed),
         Err(HandoffError::Changed("notes.md".into()))
     );
-    let mut extra = t.items.clone();
-    extra.push(item("secrets.txt", "dd", 5));
+    let mut extra = contents();
+    extra.push(("secrets.txt".into(), b"x".to_vec()));
     assert_eq!(
-        check_delivery(&a, &extra),
+        deliver_once(&a, now, extra),
         Err(HandoffError::Changed("secrets.txt".into()))
     );
     assert_eq!(
-        check_delivery(&a, &t.items[..1]),
-        Err(HandoffError::Changed("notes.md".into())),
-        "an item that was shown and is not there is not what was shown either"
+        deliver_once(&a, now, contents()[..1].to_vec()),
+        Err(HandoffError::Changed("notes.md".into()))
+    );
+    // Shown once, delivered twice.
+    let mut twice = contents();
+    twice.push(twice[0].clone());
+    assert_eq!(
+        deliver_once(&a, now, twice),
+        Err(HandoffError::Changed("prev.summary".into()))
+    );
+    // Shown twice, delivered once.
+    let mut shown_twice = t.clone();
+    shown_twice.items.push(shown_twice.items[0].clone());
+    let a2 = granted(&shown_twice);
+    assert_eq!(
+        deliver_once(&a2, now, contents()),
+        Err(HandoffError::Changed("prev.summary".into()))
     );
 }
 
 #[test]
-fn the_record_needs_a_uuid_v7_id_and_a_same_runtime_transfer_needs_no_consent() {
-    let t = transfer("cli.claude");
-    for bad in ["", "not-a-uuid", "01937a3e-5b2c-4d4e-8f10-0123456789ab"] {
+fn the_record_needs_a_real_uuid_v7_a_name_and_the_hash_of_the_preview_that_was_shown() {
+    let t = transfer(claude());
+    let shown = preview_sha256(&preview(&t));
+    for bad in [
+        "",
+        "not-a-uuid",
+        "01937a3e-5b2c-4d4e-8f10-0123456789ab",
+        // version 7 but not the RFC 4122 variant
+        "01937a3e-5b2c-7d4e-0f10-0123456789ab",
+        // not the canonical lower-case form
+        "01937A3E-5B2C-7D4E-8F10-0123456789AB",
+    ] {
         assert_eq!(
-            record(t.clone(), Decision::Granted { by: "rom" }, bad, 1).unwrap_err(),
+            record(t.clone(), Decision::Granted { by: "rom" }, &shown, bad, 1).unwrap_err(),
             HandoffError::BadId(bad.into())
         );
     }
-    let same = record(
-        transfer("cli.codex"),
-        Decision::Granted { by: "rom" },
-        ID,
-        1,
-    )
+    assert_eq!(
+        record(t.clone(), Decision::Granted { by: "" }, &shown, ID, 1).unwrap_err(),
+        HandoffError::NoOne
+    );
+    assert_eq!(
+        record(
+            t,
+            Decision::Granted { by: "rom" },
+            "sha256:what-they-actually-saw",
+            ID,
+            1
+        )
+        .unwrap_err(),
+        HandoffError::PreviewShown
+    );
+}
+
+fn tampered(a: &Artifact, edit: impl FnOnce(&mut Value)) -> Option<Artifact> {
+    let mut v = serde_json::to_value(a).unwrap();
+    edit(&mut v);
+    serde_json::from_value(v).ok()
+}
+
+#[test]
+fn an_edited_record_does_not_deliver() {
+    let t = transfer(claude());
+    let a = granted(&t);
+    let now = &t.context;
+    // A state that is not one of the three does not even read.
+    for s in ["pending", "", "GRANTED"] {
+        assert!(
+            tampered(&a, |v| v["consent"]["state"] = s.into()).is_none(),
+            "{s:?}"
+        );
+    }
+    // A declined one relabelled `not_needed` is a cross-provider move, so it still refuses.
+    let shown = preview_sha256(&preview(&t));
+    let declined = record(t.clone(), Decision::Declined { by: "rom" }, &shown, ID, 1).unwrap();
+    let relabelled = tampered(&declined, |v| v["consent"]["state"] = "not_needed".into()).unwrap();
+    assert_eq!(
+        deliver_once(&relabelled, now, contents()),
+        Err(HandoffError::NotConsented)
+    );
+    // A garbage hash, and a transfer edited to go somewhere else under the old hash.
+    let garbage = tampered(&a, |v| v["preview_sha256"] = "sha256:garbage".into()).unwrap();
+    assert_eq!(
+        deliver_once(&garbage, now, contents()),
+        Err(HandoffError::PreviewHash)
+    );
+    let rerouted = tampered(&a, |v| {
+        v["transfer"]["context"]["to"]["provider"] = "openrouter".into()
+    })
     .unwrap();
-    assert_eq!(same.consent.state, "not_needed");
-    check_delivery(&same, &same.transfer.items).unwrap();
+    assert_eq!(
+        deliver_once(&rerouted, &rerouted.transfer.context, contents()),
+        Err(HandoffError::PreviewHash)
+    );
+}
+
+#[test]
+fn a_consent_for_one_destination_run_or_plan_does_not_carry_to_another() {
+    let t = transfer(claude());
+    let a = granted(&t);
+    // Codex to Claude was agreed, Codex to OpenRouter is asked for.
+    let mut elsewhere = t.context.clone();
+    elsewhere.to = router();
+    assert_eq!(
+        deliver_once(&a, &elsewhere, contents()),
+        Err(HandoffError::WrongContext)
+    );
+    let mut later = t.context.clone();
+    later.run_id = "run-2".into();
+    assert_eq!(
+        deliver_once(&a, &later, contents()),
+        Err(HandoffError::WrongContext)
+    );
+    let mut edited = t.context.clone();
+    edited.plan_hash = "sha256:plan-2".into();
+    assert_eq!(
+        deliver_once(&a, &edited, contents()),
+        Err(HandoffError::WrongContext)
+    );
+}
+
+#[test]
+fn a_consent_is_used_once() {
+    let t = transfer(claude());
+    let a = granted(&t);
+    let mut spent = BTreeSet::new();
+    assert!(deliver(&a, &t.context, contents(), &mut spent).is_ok());
+    assert_eq!(
+        deliver(&a, &t.context, contents(), &mut spent),
+        Err(HandoffError::Spent)
+    );
+    // A refusal does not use it up.
+    let mut spent = BTreeSet::new();
+    let mut bad = contents();
+    bad[0].1 = b"x".to_vec();
+    assert!(deliver(&a, &t.context, bad, &mut spent).is_err());
+    assert!(deliver(&a, &t.context, contents(), &mut spent).is_ok());
+    // A second consent has its own id.
+    let shown = preview_sha256(&preview(&t));
+    let b = record(t.clone(), Decision::Granted { by: "rom" }, &shown, OTHER, 2).unwrap();
+    assert!(deliver(&b, &t.context, contents(), &mut spent).is_ok());
+}
+
+#[test]
+fn a_move_that_stays_with_one_receiver_needs_no_yes_and_cannot_borrow_one() {
+    let same = ctx(
+        claude(),
+        party("b", Runtime::Aibus, "anthropic", "claude-1"),
+    );
+    let t = Transfer {
+        context: same.clone(),
+        items: transfer(claude()).items,
+    };
+    let shown = preview_sha256(&preview(&t));
+    let a = record(t.clone(), Decision::Granted { by: "rom" }, &shown, ID, 1).unwrap();
+    assert_eq!(a.consent.state, State::NotNeeded);
+    assert_eq!(deliver_once(&a, &same, contents()).unwrap(), contents());
 }
 
 fn plan_of(text: &str) -> Value {
@@ -149,19 +364,25 @@ fn plan_of(text: &str) -> Value {
 }
 
 #[test]
-fn a_plan_lists_every_data_edge_that_crosses_runtimes_as_a_handoff_that_needs_consent() {
+fn a_plan_lists_every_data_edge_that_can_cross_the_boundary_as_a_handoff_that_needs_consent() {
     let plan = plan_of(
         "[[step]]\nid = \"draft\"\nagent = \"explore\"\nruntime = \"cli.codex\"\nprompt = \"p {{input}}\"\n\n\
          [[step]]\nid = \"review\"\nagent = \"explore\"\nruntime = \"cli.claude\"\nprompt = \"q {{prev.summary}}\"\n",
     );
     let h = plan["handoffs"].as_array().expect("handoffs");
     assert_eq!(h.len(), 1);
-    assert_eq!(h[0]["from"], "draft");
-    assert_eq!(h[0]["to"], "review");
-    assert_eq!(h[0]["from_runtime"], "cli.codex");
-    assert_eq!(h[0]["to_runtime"], "cli.claude");
+    assert_eq!(
+        (h[0]["from"].as_str(), h[0]["to"].as_str()),
+        (Some("draft"), Some("review"))
+    );
+    assert_eq!(
+        (h[0]["from_runtime"].as_str(), h[0]["to_runtime"].as_str()),
+        (Some("cli.codex"), Some("cli.claude"))
+    );
     assert_eq!(h[0]["via"], "prev.summary");
     assert_eq!(h[0]["needs_consent"], true);
+    // The accounts are not known until a run, so the plan says so and the run asks again.
+    assert_eq!(h[0]["accounts"], "resolved when the step runs");
 }
 
 #[test]

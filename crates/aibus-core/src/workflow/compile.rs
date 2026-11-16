@@ -575,6 +575,7 @@ pub fn compile(
             if let Some(j) = (read != "input").then(|| wf.source(i, &read)).flatten() {
                 let (a, b) = (wf.steps[j].runtime, s.runtime);
                 if a != b {
+                    // todo: the real boundary
                     handoffs.push(json!({
                         "from": wf.key(j), "to": wf.key(i), "via": read,
                         "from_runtime": a.as_str(), "to_runtime": b.as_str(),

@@ -1,11 +1,13 @@
 //! The consented handoff (#360, A2.2d, spec 10.2): what moves from a step on one runtime to a
 //! step on another, shown before it moves, and the record of the user's answer.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// One thing that would cross: a step's output or an artifact, by name, size and hash. The
-/// content itself is never in a preview or in the record.
+use super::Runtime;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
     pub name: String,
@@ -14,12 +16,27 @@ pub struct Item {
     pub bytes: u64,
 }
 
+/// One side of a transfer: the step, the runtime, and who receives and bills the data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Party {
+    pub step: String,
+    pub runtime: Runtime,
+    pub provider: String,
+    pub account: String,
+}
+
+/// Where and when a transfer happens: one run of one plan, from one party to another.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Context {
+    pub run_id: String,
+    pub plan_hash: String,
+    pub from: Party,
+    pub to: Party,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transfer {
-    pub from_step: String,
-    pub from_runtime: String,
-    pub to_step: String,
-    pub to_runtime: String,
+    pub context: Context,
     pub items: Vec<Item>,
 }
 
@@ -28,10 +45,17 @@ pub enum Decision<'a> {
     Declined { by: &'a str },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    Granted,
+    Declined,
+    NotNeeded,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Consent {
-    /// `granted`, `declined` or `not_needed` (both steps run on one runtime).
-    pub state: String,
+    pub state: State,
     pub by: String,
     pub at_unix: u64,
 }
@@ -49,96 +73,68 @@ pub struct Artifact {
 pub enum HandoffError {
     #[error("the handoff id is not a uuid v7: {0}")]
     BadId(String),
+    #[error("a consent needs the name of who gave it")]
+    NoOne,
+    #[error("the hash given is not the hash of the preview of this transfer")]
+    PreviewShown,
     #[error("the user did not consent to this transfer")]
     NotConsented,
+    #[error("the recorded preview hash does not match the recorded transfer")]
+    PreviewHash,
+    #[error("this consent was given for another run, plan, source or destination")]
+    WrongContext,
+    #[error("this consent was already used")]
+    Spent,
     #[error("{0} is not what the user was shown")]
     Changed(String),
 }
 
-/// A transfer needs the user's yes when it changes runtime: the next step is another program,
-/// another sign-in and another bill.
-pub fn needs_consent(t: &Transfer) -> bool {
-    t.from_runtime != t.to_runtime
+pub fn needs_consent(_c: &Context) -> bool {
+    false
 }
 
-/// Where a runtime's data goes and who bills it, in words for the person who is asked.
-fn destination(runtime: &str) -> &'static str {
-    match runtime {
-        "cli.claude" => "Anthropic, through the Claude Code CLI under your own sign-in and plan",
-        "cli.codex" => "OpenAI, through the Codex CLI under your own sign-in and plan",
-        "cli.gemini" => "Google, through the Gemini CLI under your own sign-in and plan",
-        "openrouter" => "OpenRouter and the model provider it routes to, billed to your OpenRouter key as separate credits, not to any subscription",
-        "attached" => "the agent session attached to this one, under its own permissions",
-        _ => "aibus's own run loop, with the account the step's agent uses",
+pub fn item(name: &str, kind: &str, _bytes: &[u8]) -> Item {
+    Item {
+        name: name.into(),
+        kind: kind.into(),
+        sha256: String::new(),
+        bytes: 0,
     }
 }
 
-/// What the user is shown before anything moves: from where to where, each item by name, size and
-/// hash (never its content), and who receives it. Its canonical hash goes into the record.
-pub fn preview(t: &Transfer) -> Value {
-    let total: u64 = t.items.iter().map(|i| i.bytes).sum();
-    let to = destination(&t.to_runtime);
-    json!({
-        "kind": "aibus.workflow.handoff.preview",
-        "from": { "step": t.from_step, "runtime": t.from_runtime },
-        "to": { "step": t.to_step, "runtime": t.to_runtime, "receives_as": to },
-        "items": t.items,
-        "total_bytes": total,
-        "text": format!(
-            "{} item(s), {total} bytes, move from step {} ({}) to step {} ({}). They go to {to}.",
-            t.items.len(), t.from_step, t.from_runtime, t.to_step, t.to_runtime
-        ),
-    })
+pub fn preview(_t: &Transfer) -> Value {
+    json!({})
 }
 
-fn is_uuid_v7(id: &str) -> bool {
-    let b = id.as_bytes();
-    b.len() == 36
-        && b.iter().enumerate().all(|(i, c)| match i {
-            8 | 13 | 18 | 23 => *c == b'-',
-            _ => c.is_ascii_hexdigit(),
-        })
-        && b[14] == b'7'
+pub fn preview_sha256(_preview: &Value) -> String {
+    String::new()
 }
 
-/// The record of the user's answer to the preview of `t`. `id` is a uuid v7 (D-319). A transfer
-/// that stays on one runtime is recorded as `not_needed` whatever the decision was.
-pub fn record(t: Transfer, d: Decision, id: &str, at_unix: u64) -> Result<Artifact, HandoffError> {
-    if !is_uuid_v7(id) {
-        return Err(HandoffError::BadId(id.to_owned()));
-    }
-    let (state, by) = match (needs_consent(&t), d) {
-        (false, Decision::Granted { by } | Decision::Declined { by }) => ("not_needed", by),
-        (true, Decision::Granted { by }) => ("granted", by),
-        (true, Decision::Declined { by }) => ("declined", by),
-    };
-    let shown = preview(&t);
+pub fn record(
+    t: Transfer,
+    _d: Decision,
+    _shown_sha256: &str,
+    id: &str,
+    at_unix: u64,
+) -> Result<Artifact, HandoffError> {
     Ok(Artifact {
-        kind: "aibus.workflow.handoff".into(),
+        kind: String::new(),
         id: id.to_owned(),
-        preview_sha256: super::compile::content_hash(&super::compile::canonical_json(&shown)),
+        transfer: t,
+        preview_sha256: String::new(),
         consent: Consent {
-            state: state.into(),
-            by: by.to_owned(),
+            state: State::NotNeeded,
+            by: String::new(),
             at_unix,
         },
-        transfer: t,
     })
 }
 
-/// Whether `items` may be delivered under `a`: the user said yes (or none was needed), and every
-/// item is exactly one that was shown, no more and no fewer. The name of the first mismatch is
-/// in the error.
-pub fn check_delivery(a: &Artifact, items: &[Item]) -> Result<(), HandoffError> {
-    if a.consent.state == "declined" {
-        return Err(HandoffError::NotConsented);
-    }
-    let shown = &a.transfer.items;
-    if let Some(i) = items.iter().find(|i| !shown.contains(i)) {
-        return Err(HandoffError::Changed(i.name.clone()));
-    }
-    match shown.iter().find(|i| !items.contains(i)) {
-        Some(i) => Err(HandoffError::Changed(i.name.clone())),
-        None => Ok(()),
-    }
+pub fn deliver(
+    _a: &Artifact,
+    _now: &Context,
+    contents: Vec<(String, Vec<u8>)>,
+    _spent: &mut BTreeSet<String>,
+) -> Result<Vec<(String, Vec<u8>)>, HandoffError> {
+    Ok(contents)
 }

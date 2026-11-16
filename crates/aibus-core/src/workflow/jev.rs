@@ -38,6 +38,10 @@ pub struct Request {
     /// Runtimes the user approved for this run (`openrouter`: a separately billed API run).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approved: Vec<String>,
+    /// The provider of the account the step will run under, when the scheduler knows it. An
+    /// `aibus` step on an OpenRouter account is OpenRouter for the approval rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_provider: Option<String>,
 }
 
 /// What Jev decided, and why. `selected_runtime` is `None` when no candidate fits, which is

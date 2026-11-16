@@ -710,7 +710,7 @@ pub(crate) fn path_forms(dir: &Path) -> Vec<String> {
 
 /// `text` with each occurrence of `dir` that starts a path (at the start or after a character
 /// that cannot be in a path) and ends it or is followed by `/` replaced by `with`. With `strip`
-/// the following `/` goes too, so `/proj/a` becomes `a`.
+/// the following `/` goes too, so `/proj/a` becomes `a` and `/proj` becomes `.`.
 fn replace_dir(text: &str, dir: &str, with: &str, strip: bool) -> String {
     let in_path = |c: char| c.is_alphanumeric() || "/._-~+@%".contains(c);
     let mut out = String::with_capacity(text.len());
@@ -723,7 +723,10 @@ fn replace_dir(text: &str, dir: &str, with: &str, strip: bool) -> String {
             continue;
         }
         out.push_str(&text[at..i]);
-        out.push_str(with);
+        // With `strip`, `/proj/a` is `a`, but the project itself (nothing after it, or only a
+        // closing `/`) is `.`, never an empty string.
+        let below = after == Some('/') && text[end + 1..].chars().next().is_some_and(in_path);
+        out.push_str(if strip && !below { "." } else { with });
         at = if strip && after == Some('/') { end + 1 } else { end };
     }
     out.push_str(&text[at..]);
@@ -760,6 +763,33 @@ mod tests {
     fn shorten_ignores_an_empty_or_root_home() {
         for home in ["", "/"] {
             assert_eq!(server(Some(home)).shorten("/etc/a: no /usr/b"), "/etc/a: no /usr/b", "home {home:?}");
+        }
+    }
+
+    /// #366: a path that is the project or the home itself is `.` or `~`, never an empty string.
+    #[test]
+    fn shorten_names_the_project_and_home_themselves() {
+        let s = server(Some("/home/ab"));
+        assert_eq!(s.shorten("cannot read /w/proj"), "cannot read .");
+        assert_eq!(s.shorten("cannot read /w/proj/"), "cannot read .");
+        assert_eq!(s.shorten("'/w/proj': gone"), "'.': gone");
+        assert_eq!(s.shorten("cannot read /home/ab"), "cannot read ~");
+        assert_eq!(s.shorten("cannot read /home/ab/"), "cannot read ~/");
+    }
+
+    /// #366: the same for the project's resolved form, reached through a symlink.
+    #[cfg(unix)]
+    #[test]
+    fn shorten_names_the_project_by_its_resolved_form() {
+        let xdg = aibus_testkit::xdg_temp();
+        let real = xdg.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = xdg.path().join("via");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let s = Server::new(Caps::default(), link.clone(), &xdg.paths, None, Redactor::new()).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap();
+        for dir in [resolved.display().to_string(), format!("{}/", resolved.display()), link.display().to_string()] {
+            assert_eq!(s.shorten(&format!("cannot read {dir}")), "cannot read .", "{dir}");
         }
     }
 }

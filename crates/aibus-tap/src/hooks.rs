@@ -49,6 +49,8 @@ d=${0%/*}
 [ -r "$d/hook.target" ] && [ -r "$d/hook.url" ] && [ -r "$d/hook.header" ] || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 read -r sock < "$d/hook.target"
+# Never post to a socket, or into a directory, that is not ours.
+[ -O "${sock%/*}" ] && [ -O "$sock" ] && [ -S "$sock" ] || exit 0
 read -r url < "$d/hook.url"
 curl -s -m 1 --connect-timeout 1 -o /dev/null --unix-socket "$sock" -H @"$d/hook.header"   -H 'Content-Type: application/json' --data-binary @- "$url" >/dev/null 2>&1
 exit 0
@@ -185,8 +187,15 @@ fn uid() -> u32 {
 
 /// The directory the short fallback socket goes under: `$XDG_RUNTIME_DIR` (Linux), then `$TMPDIR`
 /// (macOS), each only when it is absolute and the socket fits under it, else `/tmp`.
-pub fn short_from(_xdg: Option<&std::ffi::OsStr>, _tmpdir: Option<&std::ffi::OsStr>) -> PathBuf {
-    PathBuf::from("/tmp")
+pub fn short_from(xdg: Option<&std::ffi::OsStr>, tmpdir: Option<&std::ffi::OsStr>) -> PathBuf {
+    // The longest name a socket has under it: `aibus-<uid>/tap-<12 hex>.sock`.
+    let tail = format!("aibus-{}/tap-000000000000.sock", uid()).len();
+    [xdg, tmpdir]
+        .into_iter()
+        .flatten()
+        .map(PathBuf::from)
+        .find(|p| p.is_absolute() && p.as_os_str().len() + 1 + tail <= SOCKET_PATH_MAX)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 /// `short_from` of this process's environment.

@@ -181,7 +181,10 @@ impl Engine for Declarative {
         let rule = self
             .rules
             .iter()
-            .find(|r| v.pointer(&r.pointer).and_then(Value::as_str) == Some(r.equals.as_str()))
+            .find(|r| {
+                let says = |p: &str, want: &str| v.pointer(p).and_then(Value::as_str) == Some(want);
+                says(&r.pointer, &r.equals) && r.when.iter().all(|c| says(&c.pointer, &c.equals))
+            })
             .cloned();
         let Some(rule) = rule else {
             self.unknown += 1;
@@ -219,7 +222,17 @@ impl Engine for Declarative {
             Visibility::Observed,
             at,
         );
-        e.native.native_type = Some(rule.equals.chars().take(128).collect());
+        // The line's own words, in order: `item.completed/command_execution/failed`.
+        let words = std::iter::once(&rule.equals).chain(rule.when.iter().map(|c| &c.equals));
+        e.native.native_type = Some(
+            words
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join("/")
+                .chars()
+                .take(128)
+                .collect(),
+        );
         match rule.kind {
             RuleKind::MessageChunk => e.data = json!({ "bytes": line.len() }),
             RuleKind::ToolStarted | RuleKind::ToolCompleted | RuleKind::ToolFailed => {

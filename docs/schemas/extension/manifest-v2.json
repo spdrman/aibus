@@ -353,6 +353,30 @@
                   "usage_reported"
                 ]
               },
+              "when": {
+                "type": "array",
+                "maxItems": 3,
+                "description": "Schema 2 only. More conditions the same line has to meet (a second pointer and the string it equals), for a CLI that says what a line is in two places, such as `type` and `item.type`. The first rule whose pointer and every condition match wins.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "pointer",
+                    "equals"
+                  ],
+                  "properties": {
+                    "pointer": {
+                      "type": "string",
+                      "pattern": "^(/[A-Za-z0-9_-]{1,32}){1,6}$"
+                    },
+                    "equals": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  }
+                }
+              },
               "id_pointer": {
                 "type": "string",
                 "pattern": "^(/[A-Za-z0-9_-]{1,32}){1,6}$"

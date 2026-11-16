@@ -213,7 +213,11 @@ async fn the_reference_extension_runs_a_recorded_delegation_through_the_sandbox_
 #[test]
 fn bless() {
     let bless = std::env::var_os("AIBUS_BLESS").is_some();
-    for dir in [template_dir(), reference_dir()] {
+    for dir in [
+        template_dir(),
+        reference_dir(),
+        repo().join("examples/extensions/codex"),
+    ] {
         let pkg = package::read(&dir).unwrap();
         for f in &pkg.manifest.fixtures.files {
             let expected = dir.join(f.replace(".jsonl", ".expected.json"));

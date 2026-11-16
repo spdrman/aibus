@@ -461,6 +461,16 @@ async fn live_codex_one_short_turn() {
         typed: Default::default(),
     };
     let mut p = prepare(&m, &grant, &[]).await.unwrap();
+    let p_version = cli::capture(
+        &p.launch.exe,
+        &["--version"],
+        &p.launch.env,
+        Duration::from_secs(10),
+        4096,
+    )
+    .await
+    .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
+    .unwrap();
     p.launch.stdin = b"Reply with the single word: ok\n".to_vec();
     let trace_dir = out_dir.join("trace");
     let (mut store, _) = TraceStore::open(
@@ -482,6 +492,31 @@ async fn live_codex_one_short_turn() {
         .unwrap();
     drop(store);
     let (events, _) = TraceStore::read(&trace_dir).unwrap();
+    // What happened, with no message text and no path: kinds, evidence levels, the CLI's version.
+    let count = |f: &dyn Fn(&aibus_trace::TraceEvent) -> String| {
+        let mut m = std::collections::BTreeMap::<String, u64>::new();
+        for e in &events {
+            *m.entry(f(e)).or_default() += 1;
+        }
+        m
+    };
+    let report = serde_json::json!({
+        "cli": "codex",
+        "cli_version": p_version,
+        "extension": m.id,
+        "ending": format!("{:?}", out.ending),
+        "attempt_status": out.status,
+        "events": events.len(),
+        "kinds": count(&|e| serde_json::to_value(e.kind).unwrap().as_str().unwrap().to_owned()),
+        "evidence_levels": count(&|e| serde_json::to_value(e.visibility).unwrap().as_str().unwrap().to_owned()),
+        "parsers": count(&|e| e.source.parser.clone()),
+        "note": "One live turn, n=1, a one-word prompt. Not a benchmark.",
+    });
+    fs::write(
+        out_dir.join("report.json"),
+        serde_json::to_string_pretty(&report).unwrap() + "\n",
+    )
+    .unwrap();
     eprintln!("ending {:?}, {} events", out.ending, events.len());
     assert_eq!(out.status, AttemptStatus::Completed);
     assert!(events.iter().any(|e| e.kind == EventKind::MessageChunk));

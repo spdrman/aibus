@@ -710,7 +710,7 @@ pub(crate) fn path_forms(dir: &Path) -> Vec<String> {
 
 /// `text` with each occurrence of `dir` that starts a path (at the start or after a character
 /// that cannot be in a path) and ends it or is followed by `/` replaced by `with`. With `strip`
-/// the following `/` goes too, so `/proj/a` becomes `a`.
+/// the following `/` goes too, so `/proj/a` becomes `a` and `/proj` becomes `.`.
 fn replace_dir(text: &str, dir: &str, with: &str, strip: bool) -> String {
     let in_path = |c: char| c.is_alphanumeric() || "/._-~+@%".contains(c);
     let mut out = String::with_capacity(text.len());
@@ -723,7 +723,10 @@ fn replace_dir(text: &str, dir: &str, with: &str, strip: bool) -> String {
             continue;
         }
         out.push_str(&text[at..i]);
-        out.push_str(with);
+        // With `strip`, `/proj/a` is `a`, but the project itself (nothing after it, or only a
+        // closing `/`) is `.`, never an empty string.
+        let below = after == Some('/') && text[end + 1..].chars().next().is_some_and(in_path);
+        out.push_str(if strip && !below { "." } else { with });
         at = if strip && after == Some('/') { end + 1 } else { end };
     }
     out.push_str(&text[at..]);

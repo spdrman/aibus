@@ -704,3 +704,37 @@ fn explain(wf: &Workflow) -> Value {
     }
     json!({ "steps": steps, "edges": edges })
 }
+
+#[cfg(test)]
+mod tests {
+    use aibus_core::Redactor;
+
+    use crate::{Caps, Server};
+
+    fn server(home: Option<&str>) -> Server {
+        let xdg = aibus_testkit::xdg_temp();
+        let paths = &xdg.paths;
+        Server::new(Caps::default(), "/w/proj".into(), paths, home.map(Into::into), Redactor::new()).unwrap()
+    }
+
+    /// #349: a prefix only counts at a path boundary, never in the middle of a name or path.
+    #[test]
+    fn shorten_matches_only_at_path_boundaries() {
+        let s = server(Some("/home/ab"));
+        assert_eq!(s.shorten("/home/abc/f"), "/home/abc/f");
+        assert_eq!(s.shorten("/x/w/proj/a"), "/x/w/proj/a");
+        assert_eq!(s.shorten("/data/home/ab/x"), "/data/home/ab/x");
+        assert_eq!(s.shorten("/w/proj/a and /home/ab/f"), "a and ~/f");
+        assert_eq!(s.shorten("cannot read '/home/ab': gone"), "cannot read '~': gone");
+        // A home given with a trailing slash still shortens as `~/f`.
+        assert_eq!(server(Some("/home/ab/")).shorten("/home/ab/f"), "~/f");
+    }
+
+    /// #349: an empty or root home (`HOME=""`, `HOME=/`) shortens nothing.
+    #[test]
+    fn shorten_ignores_an_empty_or_root_home() {
+        for home in ["", "/"] {
+            assert_eq!(server(Some(home)).shorten("/etc/a: no /usr/b"), "/etc/a: no /usr/b", "home {home:?}");
+        }
+    }
+}

@@ -74,11 +74,21 @@ pub enum RuleKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Condition {
+    pub pointer: String,
+    pub equals: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     /// JSON pointer to a string in the line (`/type`).
     pub pointer: String,
     pub equals: String,
     pub kind: RuleKind,
+    /// More conditions the same line has to meet (schema 2).
+    #[serde(default)]
+    pub when: Vec<Condition>,
     /// Pointer to the tool use id, for the tool kinds.
     pub id_pointer: Option<String>,
     /// Pointers to token counts, for `usage_reported`. A missing number stays `unknown`.

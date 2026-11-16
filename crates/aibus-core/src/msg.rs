@@ -603,6 +603,20 @@ pub enum Command {
     /// `/runs ...`: read a recorded run (#284). The reducer does nothing with it: the terminal
     /// loop reads the trace store and answers with `Msg::RunsLoaded`.
     Runs(RunsQuery),
+    /// `/sessions` and `/tap <session>`: look at the Claude Code sessions open in other terminals
+    /// (#355). Read-only. The reducer does nothing with it; the terminal loop answers with
+    /// `Msg::RunsLoaded` and opens the runs screen, which shows the same text `aibus sessions`
+    /// prints.
+    Sessions(SessionsQuery),
+}
+
+/// What `/sessions` and `/tap` ask for.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum SessionsQuery {
+    /// The live sessions, one line each.
+    List,
+    /// One session's tap: header, graph, timeline, intent and what control is available.
+    Tap(String),
 }
 
 /// What `/runs` asks of the recorded runs.
@@ -1048,5 +1062,6 @@ pub fn command_name(c: &Command) -> &'static str {
         Command::WorkflowFile(_) => "workflow_file",
         Command::WorkflowAuthor { .. } => "workflow_author",
         Command::Runs(_) => "runs",
+        Command::Sessions(_) => "sessions",
     }
 }

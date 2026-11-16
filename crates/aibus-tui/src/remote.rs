@@ -88,7 +88,8 @@ fn effect(m: &Msg) -> Effect {
             }
             // The loop answers these with a screen.
             Command::WorkflowFile(WorkflowFile::List | WorkflowFile::Show(_))
-            | Command::Runs(_) => Effect::Keys,
+            | Command::Runs(_)
+            | Command::Sessions(_) => Effect::Keys,
             Command::CloseModal | Command::OpenHelp => Effect::Screen,
             Command::OpenTranscript(_)
             | Command::OpenPalette

@@ -28,6 +28,7 @@ mod plain;
 mod providers;
 mod extensions_cmd;
 mod runs_cmd;
+mod sessions_cmd;
 mod session_cmd;
 mod signals;
 mod startup;
@@ -97,6 +98,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         Some(Command::Handoff(c)) => continuity_cmd::handoff(&c, &cli.global),
         Some(Command::Memory(c)) => continuity_cmd::memory(&c, &cli.global, redactor),
         Some(Command::Runs(c)) => runs_cmd::runs(&c, &cli.global),
+        Some(Command::Sessions(c)) => sessions_cmd::sessions(&c, &cli.global, redactor),
         Some(Command::Extensions(c)) => extensions_cmd::extensions(&c, &cli.global),
         Some(Command::Workflow(WorkflowCmd::List { names })) => {
             commands::workflow_list(&cli.global, names)

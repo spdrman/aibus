@@ -11,6 +11,12 @@ publish.workspace = true
 # launches it with an argv vector and a bounded environment, reads its stream under limits, turns
 # each line into trace events and ends the attempt when the process ends. The reference CLI is
 # Claude Code. It never reads, copies or stores the CLI's credentials.
+[[bin]]
+# Stand-in for the `aibus` binary's hidden helper mode, so this crate's tests can run the helper.
+# The product runs the helper through `aibus` itself (D-352).
+name = "aibus-subreaper"
+path = "src/bin/aibus-subreaper.rs"
+
 [dependencies]
 aibus-core.workspace = true
 aibus-trace = { path = "../aibus-trace" }

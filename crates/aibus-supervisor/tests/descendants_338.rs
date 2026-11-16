@@ -64,6 +64,9 @@ async fn run(
         env: cli::bounded_env(Vec::<(OsString, OsString)>::new(), &[], &[]).unwrap(),
         stdin: b"the prompt".to_vec(),
         limits,
+        // On Linux every run here goes through the subreaper helper (#352), elsewhere the sweep.
+        helper: cfg!(target_os = "linux")
+            .then(|| PathBuf::from(env!("CARGO_BIN_EXE_aibus-subreaper"))),
     };
     let (mut store, _) = TraceStore::open(
         &root.join("trace"),
@@ -197,12 +200,15 @@ async fn issue_338_a_child_in_the_group_that_forks_a_setsid_grandchild_is_ended_
     );
 }
 
-/// The gap, written down: a standard daemon double fork, where the middle process exits at once
-/// (`setsid -f`, `daemon(3)`), is usually not seen by a 50 ms sampler, so the child is adopted by
-/// init before anything remembers it. The sweep is user-space, not containment; the kernel
-/// guarantee on Linux is the subreaper helper in #352. Run it with `--ignored` to see it fail.
+/// A standard daemon double fork, where the middle process exits at once (`setsid -f`,
+/// `daemon(3)`), is usually not seen by the 50 ms sampler, so the child is adopted by init before
+/// anything remembers it. On Linux the subreaper helper (#352) catches it in the kernel; on other
+/// systems the sweep is all there is, and this stays a documented gap (D-338, D-352).
 #[tokio::test]
-#[ignore = "known gap (#338, D-338): a double fork with no linger escapes the user-space sweep, see #352"]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "known gap off Linux (D-338): the sweep cannot see a double fork with no linger"
+)]
 async fn issue_338_a_daemon_double_fork_with_no_linger_does_not_outlive_the_deadline() {
     let body = format!(
         "{} PIDFILE &\nwhile :; do sleep 0.05; done",

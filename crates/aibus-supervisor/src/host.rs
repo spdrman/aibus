@@ -29,6 +29,10 @@ pub struct Launch {
     /// Written to stdin, which is then closed (the prompt).
     pub stdin: Vec<u8>,
     pub limits: Limits,
+    /// Linux only: a program that speaks the subreaper protocol (`reaper`), usually the `aibus`
+    /// binary itself. The CLI then runs under it, so the kernel hands every orphaned descendant to
+    /// it and it ends them all (D-352). `None`, and on other systems, keeps the #338 sweep only.
+    pub helper: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,7 +188,9 @@ pub async fn supervise(
         env,
         stdin,
         limits,
+        helper,
     } = launch;
+    let _ = &helper;
     if !exe.is_absolute() || !exe.is_file() {
         return Err(SupervisorError::Refused(format!(
             "{} is not an absolute path to a file",

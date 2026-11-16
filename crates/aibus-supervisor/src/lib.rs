@@ -12,6 +12,8 @@ pub mod cli;
 #[cfg(unix)]
 mod descendants;
 pub mod host;
+#[cfg(target_os = "linux")]
+pub mod reaper;
 
 pub use claude::{Channel, Normalizer};
 pub use host::{supervise, Launch, Outcome, SupervisorError};

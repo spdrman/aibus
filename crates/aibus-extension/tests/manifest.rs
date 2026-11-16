@@ -1034,6 +1034,7 @@ fn issue_339_the_launch_check_applies_the_list_too() {
         cwd: std::env::temp_dir(),
         stdin: Vec::new(),
         limits: Limits::default(),
+        helper: None,
     };
     let err = check_launch(&m, &launch, &[]).unwrap_err().to_string();
     assert!(

@@ -453,6 +453,8 @@ pub async fn prepare(
         env,
         stdin: Vec::new(),
         limits,
+        // The caller that runs it unattended sets the Linux helper (D-352), never a manifest.
+        helper: None,
     };
     check_launch(m, &launch, &grant.extra_programs)?;
     Ok(Prepared {

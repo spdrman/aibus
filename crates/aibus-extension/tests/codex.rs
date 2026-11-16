@@ -522,3 +522,19 @@ async fn live_codex_one_short_turn() {
     assert!(events.iter().any(|e| e.kind == EventKind::MessageChunk));
     assert!(events.iter().any(|e| e.kind == EventKind::UsageReported));
 }
+
+/// A flag with no short form is indented six columns in Codex's help (`      --json`), and the
+/// probe has to see it too, or a `probe_required` capability on it could never be offered.
+#[test]
+fn the_probe_sees_long_only_flags_in_the_real_help() {
+    let probe = cli::parse_help(&cli_text("version.txt"), &cli_text("exec-help.txt")).unwrap();
+    for f in [
+        "--json",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--output-last-message",
+        "--model",
+    ] {
+        assert!(probe.flags.contains(f), "{f}");
+    }
+}

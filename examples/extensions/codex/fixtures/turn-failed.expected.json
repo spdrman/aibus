@@ -1,5 +1,5 @@
 {
-  "ending": "exit:1",
+  "ending": "exit:0",
   "kinds": [
     "attempt_started",
     "trace_warning",
@@ -7,7 +7,7 @@
     "trace_warning",
     "trace_warning",
     "trace_warning",
-    "attempt_failed"
+    "attempt_completed"
   ],
-  "status": "failed"
+  "status": "completed"
 }

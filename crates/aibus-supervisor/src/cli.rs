@@ -126,7 +126,7 @@ pub fn probe(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
 pub fn parse_help(version_out: &str, help_out: &str) -> Result<Probe, ProbeError> {
     let version = parse_version(version_out)
         .ok_or_else(|| ProbeError::Version(version_out.chars().take(80).collect()))?;
-    let re = Regex::new(r"(?m)^ {2}(?:-\w, )?(--[A-Za-z][\w-]*)(?:, (--[A-Za-z][\w-]*))?")
+    let re = Regex::new(r"(?m)^ {2}(?:-\w, | {4})?(--[A-Za-z][\w-]*)(?:, (--[A-Za-z][\w-]*))?")
         .expect("valid regex");
     let flags: BTreeSet<String> = re
         .captures_iter(help_out)

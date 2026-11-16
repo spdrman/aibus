@@ -217,6 +217,7 @@ fn bless() {
         template_dir(),
         reference_dir(),
         repo().join("examples/extensions/codex"),
+        repo().join("examples/extensions/gemini"),
     ] {
         let pkg = package::read(&dir).unwrap();
         for f in &pkg.manifest.fixtures.files {

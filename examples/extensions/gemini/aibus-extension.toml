@@ -1,0 +1,128 @@
+# The Gemini CLI extension (#358, A2.2b): the official, unmodified Google Gemini CLI as an aibus
+# extension on the A2.1 contract. Local, opt-in use with the user's own installed CLI; the CLI owns
+# its sign-in and aibus never reads or stores the token.
+#
+# UNVERIFIED: no Gemini CLI was installed when this was written. The rules follow the stream-json
+# event types in the CLI's own source (fixtures/gemini/types-2026-11-15.ts.txt); no stream was
+# recorded and the CLI was never run.
+
+schema_version = "2"
+id = "org.devshell.aibus.gemini-cli"
+version = "0.1.0"
+name = "Gemini CLI"
+kind = "official_cli"
+provider = "Google"
+license = "MIT"
+source_url = "https://github.com/spdrman/aibus/tree/main/examples/extensions/gemini"
+
+[publisher]
+name = "devshell"
+url = "https://devshell.org"
+
+[compat]
+protocol = ">=1.1.0, <2.0.0"
+os = ["macos", "linux"]
+# No version has been run. Tighten this when someone records one.
+cli_versions = ">=0.1.0"
+
+[cli]
+executable_candidates = ["gemini"]
+vendor_urls = ["https://github.com/google-gemini/gemini-cli", "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md"]
+
+[auth]
+owner = "vendor_cli"
+credential_access = "forbidden"
+# The CLI signs in on its first interactive run and no login or status subcommand is documented,
+# so none is claimed.
+login_argv = []
+status_argv = []
+
+[execution]
+# Stream-json output, and the default approval mode, which asks before a tool runs (nothing can
+# answer in headless mode, so a tool that needs approval is refused by the CLI). The prompt goes on
+# stdin. UNVERIFIED: the stdin-only form without `-p`.
+argv = ["--output-format", "stream-json", "--approval-mode", "default"]
+prompt = "stdin"
+stdout = "jsonl"
+env_allow = []
+
+[[execution.typed]]
+flag = "--model"
+kind = "model_id"
+
+[limits]
+wall_time_secs = 1800
+
+[normalizer]
+engine = "declarative-jsonl"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "message"
+when = [{ pointer = "/role", equals = "assistant" }]
+kind = "message_chunk"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool_use"
+kind = "tool_started"
+id_pointer = "/tool_id"
+
+# A failed result before the plain one: the first rule that matches wins.
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool_result"
+when = [{ pointer = "/status", equals = "error" }]
+kind = "tool_failed"
+id_pointer = "/tool_id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool_result"
+kind = "tool_completed"
+id_pointer = "/tool_id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "result"
+kind = "usage_reported"
+tokens_in_pointer = "/stats/input_tokens"
+tokens_out_pointer = "/stats/output_tokens"
+
+[capabilities]
+login_status = "unsupported"
+one_shot = "supported"
+structured_events = "probe_required"
+native_child_lineage = "unsupported"
+tool_events = "supported"
+usage_report = "supported"
+session_resume = "unsupported"
+interactive_approval = "unsupported"
+cancel = "supported"
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "unsupported"
+
+[[probe]]
+capability = "structured_events"
+flags = ["--output-format"]
+
+[runtime]
+usage_quality = "reported"
+
+[permissions]
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "aibus maintainers"
+review_date = "2026-11-15"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/tool-run.jsonl", "fixtures/tool-failed.jsonl", "fixtures/result-error.jsonl"]
+
+[notes]
+upgrade = "Install the new version from the registry. A version that asks for more executables, environment names, flags or capabilities has to be accepted by name."
+rollback = "aibus extensions rollback org.devshell.aibus.gemini-cli returns to the previous installed version."

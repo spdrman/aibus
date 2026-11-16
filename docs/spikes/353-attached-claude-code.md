@@ -32,6 +32,10 @@ Claude Code on this Mac, run on 2026-11-15. Everything here is what I saw; what 
 
 ## What happened
 
+The two Stop hook inputs of the full-loop run, trimmed to the fields discussed here (paths, ids and the other fields
+dropped, the message cut at 80 characters), are in `docs/spikes/353-stop-hook-inputs.jsonl`: the first has
+`stop_hook_active:false`, the second, on the continuation, `true`. The run 1 inputs quoted below were not kept as a file.
+
 **The real Stop hook input has `stop_hook_active`.** Run 1 got two Stop events for one prompt. The first:
 
 ```json
@@ -78,6 +82,12 @@ I did not change the hook for this.
   through the same registry, `next_step` and `step_result`. The workflow tool path (the lead calling `workflow`, the
   step going to the session loop) is covered by the tests in #354 only, with a stand-in client. Driving it live needs a
   lead model in the aibus session; I did not set one up.
+* I ran with `--tools ""`, so Claude Code had no tool that needs permission and **no permission prompt could have
+  happened** in any run. Nothing here says anything about prompts staying with the user.
+* Code masking against the real client (that the code never reaches the agent and is masked in logs and exports) was
+  only checked by reading that the tool answer had no code; I did not inspect the client's transcript for it.
+* A second client and the one-controller rule were not tried: only one MCP client ever connected.
+* Redaction of a real secret, in either direction (prompt down, summary up), was not tried; no secret was in play.
 * Only `claude -p` (print mode) was run. An interactive Claude Code session, its permission prompts and how a Stop hook
   continuation looks there are untested.
 * Only version 2.1.311. The older 2.1.304 and any later one are untested.

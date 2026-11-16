@@ -243,6 +243,10 @@ impl Attachments {
                 let _ = reply.send(free);
                 None
             }
+            Dispatch::Step { reply, .. } if reply.is_closed() => {
+                // The workflow was cancelled while the step waited in the channel.
+                None
+            }
             Dispatch::Step {
                 name,
                 prompt,

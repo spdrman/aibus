@@ -153,7 +153,7 @@ Answering a permission prompt from a client is not the relay that E12 in `DECISI
 
 An agent session that is already open (Claude Code, say) can attach to a live aibus session. It is still
 experimental: the pull leg only. #353 adds `runtime = "attached"` to workflows (below) and a live check against Claude
-Code (`docs/spikes/A346-attached-claude-code.md`).
+Code (`docs/spikes/353-attached-claude-code.md`).
 
 **Attaching.** The agent calls `aibus_attach {label?, lineage?}`. The session needs `--control-attach`. The screen
 logs `<client> wants to attach (pid, cwd), code 7Q2K`; the tool's answer does not carry it, so the user reads it off the screen. Only a typed

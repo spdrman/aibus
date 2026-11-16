@@ -848,13 +848,13 @@ impl Step for EnterLoop {
         } else {
             None
         };
-        let mut run_workflow = RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone());
+        let mut to_attached = None;
         if ctx.interactive && ctx.global.control_attach {
             let (to, from) = mpsc::channel(8);
             ctx.attached_steps = Some(from);
-            run_workflow = run_workflow.with_attached(to);
+            to_attached = Some(to);
         }
-        registry.register(Arc::new(run_workflow));
+        registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone(), to_attached)));
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
         registry.register(Arc::new(ResumeRun::new(orch.clone())));

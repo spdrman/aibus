@@ -65,7 +65,7 @@
             "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
           },
           "runtime": {
-            "description": "Where the step runs: aibus (this binary, the default) cli.claude (the official Claude Code CLI, experimental: it plans and does not run yet) or attached (the agent session attached to this aibus session, experimental: it runs from a session started with --control-attach).",
+            "description": "Where the step runs: aibus (this binary, the default), cli.claude (the official Claude Code CLI, experimental: it plans and does not run yet) or attached (the agent session attached to this aibus session, experimental: it runs from a session started with --control-attach).",
             "enum": [
               "aibus",
               "cli.claude",

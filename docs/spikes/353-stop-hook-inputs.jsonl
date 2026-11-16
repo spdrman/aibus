@@ -1,0 +1,2 @@
+{"hook_event_name":"Stop","stop_hook_active":false,"permission_mode":"default","last_assistant_message":"attached"}
+{"hook_event_name":"Stop","stop_hook_active":true,"permission_mode":"default","last_assistant_message":"pong"}

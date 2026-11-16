@@ -1043,6 +1043,30 @@ fn issue_339_the_launch_check_applies_the_list_too() {
     );
 }
 
+/// D-352: the subreaper helper is the host's own binary, never a program a launch names.
+#[test]
+fn issue_352_a_launch_helper_is_this_program_or_nothing() {
+    use aibus_extension::sandbox::check_launch;
+    use aibus_supervisor::{Launch, Limits};
+    let m = Manifest::parse(&for_clis(&["codex"], r#"["exec", "--json"]"#)).unwrap();
+    let launch = |helper: Option<&str>| Launch {
+        exe: std::path::PathBuf::from("/usr/bin/codex"),
+        args: m.execution.argv.iter().map(Into::into).collect(),
+        env: vec![],
+        cwd: std::env::temp_dir(),
+        stdin: Vec::new(),
+        limits: Limits::default(),
+        helper: helper.map(Into::into),
+    };
+    let refused = check_launch(&m, &launch(Some("/bin/sh")), &[]).unwrap_err();
+    assert!(refused.to_string().contains("helper"), "{refused}");
+    let own = std::env::current_exe().unwrap();
+    for ok in [own.to_str().unwrap(), "/proc/self/exe"] {
+        let r = check_launch(&m, &launch(Some(ok)), &[]);
+        assert!(!r.is_err_and(|e| e.to_string().contains("helper")), "{ok}");
+    }
+}
+
 /// Review of #342: subcommands are on the list too, and a grouped short switch is not read.
 #[test]
 fn issue_339_a_subcommand_that_is_not_on_the_list_is_refused() {

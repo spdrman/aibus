@@ -30,8 +30,9 @@ pub struct Launch {
     pub stdin: Vec<u8>,
     pub limits: Limits,
     /// Linux only: a program that speaks the subreaper protocol (`reaper`), usually the `aibus`
-    /// binary itself. The CLI then runs under it, so the kernel hands every orphaned descendant to
-    /// it and it ends them all (D-352). `None`, and on other systems, keeps the #338 sweep only.
+    /// binary itself (`/proc/self/exe` survives an upgrade in place). The CLI then runs under it,
+    /// so the kernel hands every orphaned descendant to it and it ends them all (D-352). `None`,
+    /// and on other systems, keeps the #338 sweep only.
     pub helper: Option<PathBuf>,
 }
 
@@ -230,7 +231,9 @@ pub async fn supervise(
     let mut cmd = match &helper {
         Some(h) => {
             let mut c = tokio::process::Command::new(h);
-            c.arg(crate::reaper::MARKER).arg(&exe);
+            c.arg(crate::reaper::MARKER)
+                .arg(std::process::id().to_string())
+                .arg(&exe);
             c
         }
         None => tokio::process::Command::new(&exe),

@@ -79,11 +79,13 @@ fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     p
 }
 
-/// The helper as the supervisor starts it: marker first, then the program and its arguments, an
+/// The helper as the supervisor starts it: marker first, this process's pid as the supervisor's,
+/// then the program and its arguments, an
 /// empty environment, stdin from /dev/null (a terminal is refused).
 fn helper(program: &str, args: &[&str]) -> Command {
     let mut c = Command::new(HELPER);
     c.arg(MARKER)
+        .arg(std::process::id().to_string())
         .arg(program)
         .args(args)
         .env_clear()
@@ -111,7 +113,7 @@ fn issue_352_a_cli_killed_by_a_signal_makes_the_helper_end_by_the_same_signal() 
 #[test]
 fn issue_352_the_cli_gets_the_environment_the_helper_got_and_nothing_else() {
     let out = Command::new(HELPER)
-        .args([MARKER, "/usr/bin/env"])
+        .args([MARKER, &std::process::id().to_string(), "/usr/bin/env"])
         .env_clear()
         .env("ONLY", "this")
         .stdin(Stdio::null())
@@ -147,6 +149,7 @@ fn issue_352_a_program_that_is_not_absolute_is_refused_and_not_run() {
     assert!(!mark.exists());
     let status = Command::new(HELPER)
         .arg(MARKER)
+        .arg(std::process::id().to_string())
         .env_clear()
         .stdin(Stdio::null())
         .status()
@@ -222,7 +225,7 @@ fn issue_352_the_helper_and_the_whole_tree_end_when_the_supervisor_dies() {
         tmp.path(),
         "supervisor.sh",
         &format!(
-            "{HELPER} {MARKER} {cli} </dev/null &\necho $! > {hp}\nwait",
+            "{HELPER} {MARKER} $$ {cli} </dev/null &\necho $! > {hp}\nwait",
             cli = cli.display(),
             hp = helper_pid.display()
         ),

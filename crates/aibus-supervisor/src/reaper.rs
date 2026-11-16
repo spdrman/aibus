@@ -1,6 +1,6 @@
 //! The Linux subreaper helper (#352, D-352).
 //!
-//! `supervise` starts `<helper> MARKER <cli> <args...>` instead of the CLI. The helper marks itself
+//! `supervise` starts `<helper> MARKER <supervisor pid> <cli> <args...>` instead of the CLI. The helper marks itself
 //! a child subreaper (`PR_SET_CHILD_SUBREAPER`), so the kernel hands every process that loses its
 //! parent anywhere under the CLI (a `setsid -f` daemon whose middle process exits at once
 //! included) to the helper instead of init. That makes the tree complete at every moment: whatever
@@ -10,15 +10,22 @@
 //!
 //! Protocol, all in the process model (no file, no socket, no environment variable of its own):
 //!
+//! - The supervisor's pid is passed, not read: a helper whose parent is not that process (the
+//!   supervisor died before the helper got going, so it was handed to init) runs nothing and exits
+//!   with status 1.
 //! - The program is an absolute path; the helper adds nothing to the environment, the directory or
 //!   the three standard streams, which the CLI inherits as they are.
 //! - Stdin must not be a terminal. The mode is not a command: a terminal gets exit status 2.
 //! - SIGTERM (also SIGINT and SIGHUP): the helper sends SIGTERM to the CLI's process group, and
 //!   goes on running until the CLI exits.
 //! - SIGUSR1: the whole tree is ended now, no matter what the CLI is doing. The supervisor sends it
-//!   when the grace period is over, and the kernel sends it (`PR_SET_PDEATHSIG`) when the
-//!   supervisor dies. The helper also looks at its parent pid on every turn, in case the signal
-//!   was lost to the race at start-up.
+//!   when the grace period is over. The helper also looks at its parent pid on every turn and
+//!   ends the tree when the supervisor is gone. There is no parent-death signal: on Linux it is
+//!   sent when the *thread* that started the helper ends, which would end the tree under a caller
+//!   that starts it from a short-lived thread.
+//! - The CLI stays in the helper's process group (the supervisor makes the helper its leader), so
+//!   the supervisor's last-resort group kill reaches the CLI and what stayed in the group too. A
+//!   hung helper still leaves what left the group to the #338 sweep.
 //! - The CLI's exit status passes through: its exit code is the helper's, and a CLI that died of a
 //!   signal makes the helper die of the same signal. A tree ended by force dies of SIGKILL.
 //!
@@ -30,7 +37,6 @@
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
-use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -38,8 +44,8 @@ use std::time::{Duration, Instant};
 
 use rustix::io::Errno;
 use rustix::process::{
-    getpid, getppid, kill_process, kill_process_group, set_child_subreaper,
-    set_parent_process_death_signal, wait, Pid, Signal, WaitOptions,
+    getpgrp, getpid, getppid, kill_process, kill_process_group, set_child_subreaper, wait, Pid,
+    Signal, WaitOptions,
 };
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM, SIGUSR1};
 
@@ -48,17 +54,20 @@ use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM, SIGUSR1};
 /// CLIs the host launches, and the helper is started by the host itself).
 pub const MARKER: &str = "--aibus-internal-subreaper";
 
-/// How long the helper waits for the kernel to finish with what it killed.
-const REAP_LIMIT: Duration = Duration::from_secs(5);
-
-/// Runs the helper; `args` is what follows [`MARKER`]: the CLI's absolute path and its arguments.
+/// Runs the helper; `args` is what follows [`MARKER`]: the supervisor's pid, the CLI's absolute
+/// path and its arguments.
 /// Returns the exit code, or does not return when the CLI's signal has to be repeated.
 pub fn run(args: Vec<OsString>) -> u8 {
     let mut args = args.into_iter();
-    let Some(program) = args
+    let supervisor = args
         .next()
-        .filter(|p| std::path::Path::new(p).is_absolute())
-    else {
+        .and_then(|p| p.to_str().and_then(|p| p.parse::<i32>().ok()))
+        .and_then(Pid::from_raw);
+    let (Some(supervisor), Some(program)) = (
+        supervisor,
+        args.next()
+            .filter(|p| std::path::Path::new(p).is_absolute()),
+    ) else {
         eprintln!("aibus: internal mode, not a command");
         return 2;
     };
@@ -81,11 +90,12 @@ pub fn run(args: Vec<OsString>) -> u8 {
         eprintln!("aibus: cannot handle signals");
         return 70;
     }
-    // The supervisor's death ends the tree. The signal is sent to this process only, so it is
-    // handled like a request, not delivered as a kill; the parent check covers the start-up race.
-    let parent = getppid();
-    if set_parent_process_death_signal(Some(Signal::USR1)).is_err() || getppid() != parent {
-        hard.store(true, Ordering::Relaxed);
+    // The supervisor's death ends the tree, seen by the parent check on every turn. A parent that
+    // is not the supervisor already (it died first) means there is nothing to run for.
+    let parent = Some(supervisor);
+    if getppid() != parent {
+        eprintln!("aibus: the supervisor is gone");
+        return 1;
     }
     let me = getpid();
     if let Err(e) = set_child_subreaper(Some(me)) {
@@ -93,7 +103,7 @@ pub fn run(args: Vec<OsString>) -> u8 {
         return 70;
     }
 
-    let child = match Command::new(&program).args(args).process_group(0).spawn() {
+    let child = match Command::new(&program).args(args).spawn() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("aibus: cannot start {}: {e}", program.to_string_lossy());
@@ -111,8 +121,14 @@ pub fn run(args: Vec<OsString>) -> u8 {
     let mut status = None;
     loop {
         if term.swap(false, Ordering::Relaxed) {
-            if let Some(cli) = cli {
-                let _ = kill_process_group(cli, Signal::TERM);
+            // The group is this helper's own (the supervisor made it the leader); when it is not,
+            // only the CLI is asked, never a group that is someone else's.
+            if getpgrp() == me {
+                let _ = kill_process_group(me, Signal::TERM);
+                // The group holds this process too, so the TERM just came back as a flag.
+                term.store(false, Ordering::Relaxed);
+            } else if let Some(cli) = cli {
+                let _ = kill_process(cli, Signal::TERM);
             }
         }
         // Everything that ended: the CLI, and the orphans that were handed to this process.
@@ -129,8 +145,8 @@ pub fn run(args: Vec<OsString>) -> u8 {
 
     crate::descendants::kill_under(me.as_raw_pid() as u32);
     if let Some(cli) = cli {
-        // The group may hold what `ps` could not show (no `ps`), and does no harm otherwise.
-        let _ = kill_process_group(cli, Signal::KILL);
+        // What `ps` could not show (no `ps`) is at least the CLI itself.
+        let _ = kill_process(cli, Signal::KILL);
     }
     let start = Instant::now();
     loop {
@@ -141,7 +157,8 @@ pub fn run(args: Vec<OsString>) -> u8 {
                     status = Some(st);
                 }
             }
-            _ if start.elapsed() > REAP_LIMIT => break,
+            // How long the kernel gets to finish with what was killed.
+            _ if start.elapsed() > Duration::from_secs(5) => break,
             _ => std::thread::sleep(Duration::from_millis(5)),
         }
     }

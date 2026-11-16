@@ -48,6 +48,7 @@ async fn run(
     body: &str,
     limits: Limits,
     cancel_after: Option<Duration>,
+    helped: bool,
 ) -> (AttemptStatus, String) {
     let tmp = tempfile::tempdir().unwrap();
     let root: PathBuf = tmp.path().canonicalize().unwrap();
@@ -64,8 +65,9 @@ async fn run(
         env: cli::bounded_env(Vec::<(OsString, OsString)>::new(), &[], &[]).unwrap(),
         stdin: b"the prompt".to_vec(),
         limits,
-        // On Linux every run here goes through the subreaper helper (#352), elsewhere the sweep.
-        helper: cfg!(target_os = "linux")
+        // With the helper (Linux, #352) the kernel catches the orphans; without it, or off Linux,
+        // the #338 sweep does. Both are run on Linux, so neither loses its coverage.
+        helper: (helped && cfg!(target_os = "linux"))
             .then(|| PathBuf::from(env!("CARGO_BIN_EXE_aibus-subreaper"))),
     };
     let (mut store, _) = TraceStore::open(
@@ -117,106 +119,124 @@ fn quick() -> Limits {
     }
 }
 
-#[tokio::test]
-async fn issue_338_a_setsid_child_does_not_outlive_the_wall_deadline() {
-    let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(None));
-    let (status, pid) = run(&body, quick(), None).await;
-    assert_eq!(status, AttemptStatus::Interrupted);
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the setsid child {pid} outlived the deadline"
-    );
-}
+macro_rules! cases {
+    ($helped:expr, $(#[$nolinger:meta])*) => {
+    #[tokio::test]
+    async fn issue_338_a_setsid_child_does_not_outlive_the_wall_deadline() {
+        let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(None));
+        let (status, pid) = run(&body, quick(), None, $helped).await;
+        assert_eq!(status, AttemptStatus::Interrupted);
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the setsid child {pid} outlived the deadline"
+        );
+    }
 
-#[tokio::test]
-async fn issue_338_a_double_forked_setsid_child_does_not_outlive_the_wall_deadline() {
-    let body = format!(
-        "{} PIDFILE &\nwhile :; do sleep 0.05; done",
-        detach(Some(0.4))
-    );
-    let (_, pid) = run(&body, quick(), None).await;
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the double-forked child {pid} outlived the deadline"
-    );
-}
+    #[tokio::test]
+    async fn issue_338_a_double_forked_setsid_child_does_not_outlive_the_wall_deadline() {
+        let body = format!(
+            "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            detach(Some(0.4))
+        );
+        let (_, pid) = run(&body, quick(), None, $helped).await;
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the double-forked child {pid} outlived the deadline"
+        );
+    }
 
-#[tokio::test]
-async fn issue_338_a_deactivated_run_leaves_no_escaped_child() {
-    let body = format!(
-        "{} PIDFILE &\nwhile :; do sleep 0.05; done",
-        detach(Some(0.4))
-    );
-    let limits = Limits {
-        wall_time: Duration::from_secs(60),
-        ..quick()
+    #[tokio::test]
+    async fn issue_338_a_deactivated_run_leaves_no_escaped_child() {
+        let body = format!(
+            "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            detach(Some(0.4))
+        );
+        let limits = Limits {
+            wall_time: Duration::from_secs(60),
+            ..quick()
+        };
+        let (status, pid) = run(&body, limits, Some(Duration::from_millis(700)), $helped).await;
+        assert_eq!(status, AttemptStatus::Cancelled);
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the escaped child {pid} outlived the cancel"
+        );
+    }
+
+    #[tokio::test]
+    async fn issue_338_a_cli_that_ignores_term_still_loses_its_escaped_child() {
+        let body = format!(
+            "trap '' TERM\n{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            detach(Some(0.4))
+        );
+        let (_, pid) = run(&body, quick(), None, $helped).await;
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the escaped child {pid} outlived the kill"
+        );
+    }
+
+    #[tokio::test]
+    async fn issue_338_a_child_left_behind_by_a_cli_that_exits_by_itself_is_ended_with_the_attempt() {
+        // The CLI returns normally while its detached child is still running.
+        let body = format!("{} PIDFILE &\nsleep 0.5\necho '{{}}'", detach(Some(0.4)));
+        let limits = Limits {
+            wall_time: Duration::from_secs(20),
+            ..quick()
+        };
+        let (_, pid) = run(&body, limits, None, $helped).await;
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the child {pid} outlived the attempt that started it"
+        );
+    }
+
+    #[tokio::test]
+    async fn issue_338_a_child_in_the_group_that_forks_a_setsid_grandchild_is_ended_too() {
+        let body = format!(
+            "sh -c '{} PIDFILE &\nwhile :; do sleep 0.05; done' &\nwhile :; do sleep 0.05; done",
+            detach(Some(0.4)).replace('\'', "'\\''")
+        );
+        let (_, pid) = run(&body, quick(), None, $helped).await;
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the grandchild {pid} outlived the deadline"
+        );
+    }
+
+    /// A standard daemon double fork, where the middle process exits at once (`setsid -f`,
+    /// `daemon(3)`), is usually not seen by the 50 ms sampler, so the child is adopted by init before
+    /// anything remembers it. On Linux the subreaper helper (#352) catches it in the kernel; on other
+    /// systems the sweep is all there is, and this stays a documented gap (D-338, D-352).
+    #[tokio::test]
+    $(#[$nolinger])*
+    async fn issue_338_a_daemon_double_fork_with_no_linger_does_not_outlive_the_deadline() {
+        let body = format!(
+            "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            detach(Some(0.0))
+        );
+        let (_, pid) = run(&body, quick(), None, $helped).await;
+        assert!(
+            dead_within(&pid, Duration::from_secs(3)).await,
+            "the daemon {pid} outlived the deadline"
+        );
+    }
     };
-    let (status, pid) = run(&body, limits, Some(Duration::from_millis(700))).await;
-    assert_eq!(status, AttemptStatus::Cancelled);
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the escaped child {pid} outlived the cancel"
-    );
 }
 
-#[tokio::test]
-async fn issue_338_a_cli_that_ignores_term_still_loses_its_escaped_child() {
-    let body = format!(
-        "trap '' TERM\n{} PIDFILE &\nwhile :; do sleep 0.05; done",
-        detach(Some(0.4))
-    );
-    let (_, pid) = run(&body, quick(), None).await;
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the escaped child {pid} outlived the kill"
-    );
+/// The subreaper helper (Linux only, #352): every case, and the no-linger daemon too.
+#[cfg(target_os = "linux")]
+mod helped {
+    use super::*;
+    cases!(true,);
 }
 
-#[tokio::test]
-async fn issue_338_a_child_left_behind_by_a_cli_that_exits_by_itself_is_ended_with_the_attempt() {
-    // The CLI returns normally while its detached child is still running.
-    let body = format!("{} PIDFILE &\nsleep 0.5\necho '{{}}'", detach(Some(0.4)));
-    let limits = Limits {
-        wall_time: Duration::from_secs(20),
-        ..quick()
-    };
-    let (_, pid) = run(&body, limits, None).await;
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the child {pid} outlived the attempt that started it"
-    );
-}
-
-#[tokio::test]
-async fn issue_338_a_child_in_the_group_that_forks_a_setsid_grandchild_is_ended_too() {
-    let body = format!(
-        "sh -c '{} PIDFILE &\nwhile :; do sleep 0.05; done' &\nwhile :; do sleep 0.05; done",
-        detach(Some(0.4)).replace('\'', "'\\''")
-    );
-    let (_, pid) = run(&body, quick(), None).await;
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the grandchild {pid} outlived the deadline"
-    );
-}
-
-/// A standard daemon double fork, where the middle process exits at once (`setsid -f`,
-/// `daemon(3)`), is usually not seen by the 50 ms sampler, so the child is adopted by init before
-/// anything remembers it. On Linux the subreaper helper (#352) catches it in the kernel; on other
-/// systems the sweep is all there is, and this stays a documented gap (D-338, D-352).
-#[tokio::test]
-#[cfg_attr(
-    not(target_os = "linux"),
-    ignore = "known gap off Linux (D-338): the sweep cannot see a double fork with no linger"
-)]
-async fn issue_338_a_daemon_double_fork_with_no_linger_does_not_outlive_the_deadline() {
-    let body = format!(
-        "{} PIDFILE &\nwhile :; do sleep 0.05; done",
-        detach(Some(0.0))
-    );
-    let (_, pid) = run(&body, quick(), None).await;
-    assert!(
-        dead_within(&pid, Duration::from_secs(3)).await,
-        "the daemon {pid} outlived the deadline"
+/// The #338 sweep alone, which is all macOS has and what Linux does with no helper set. The
+/// no-linger daemon double fork is its documented gap (D-338, D-352).
+mod swept {
+    use super::*;
+    cases!(
+        false,
+        #[ignore = "known gap without the helper (D-338): the sweep cannot see a double fork with no linger"]
     );
 }

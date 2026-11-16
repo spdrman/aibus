@@ -119,9 +119,13 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
     }
     // The subreaper helper is the host's own binary (D-352), never a program a manifest names.
     if let Some(h) = &launch.helper {
-        if std::env::current_exe().ok().as_ref() != Some(h) {
+        // `/proc/self/exe` is this binary even after an upgrade in place replaced the file
+        // (`current_exe` then names a path that is gone).
+        let own = std::env::current_exe().ok().as_ref() == Some(h)
+            || h == std::path::Path::new("/proc/self/exe");
+        if !own {
             return Err(refused(format!(
-                "{} is not this program, the only helper a launch may use",
+                "{} is not this program (or /proc/self/exe), the only helper a launch may use",
                 h.display()
             )));
         }

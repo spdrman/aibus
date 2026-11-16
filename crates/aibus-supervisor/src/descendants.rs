@@ -31,7 +31,12 @@ struct Proc {
 /// that (missing, or a busybox `ps` without `-ax` and `-o lstart`).
 fn table() -> Vec<Proc> {
     static WARN: Once = Once::new();
-    let procs: Vec<Proc> = std::process::Command::new("ps")
+    // By absolute path, not through a PATH the CLI's tree may have written to.
+    let ps = ["/bin/ps", "/usr/bin/ps"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
+        .unwrap_or("ps");
+    let procs: Vec<Proc> = std::process::Command::new(ps)
         .args(["-ax", "-o", "pid=,ppid=,lstart="])
         .output()
         .ok()

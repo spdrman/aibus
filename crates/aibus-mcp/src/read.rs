@@ -762,4 +762,31 @@ mod tests {
             assert_eq!(server(Some(home)).shorten("/etc/a: no /usr/b"), "/etc/a: no /usr/b", "home {home:?}");
         }
     }
+
+    /// #366: a path that is the project or the home itself is `.` or `~`, never an empty string.
+    #[test]
+    fn shorten_names_the_project_and_home_themselves() {
+        let s = server(Some("/home/ab"));
+        assert_eq!(s.shorten("cannot read /w/proj"), "cannot read .");
+        assert_eq!(s.shorten("cannot read /w/proj/"), "cannot read .");
+        assert_eq!(s.shorten("'/w/proj': gone"), "'.': gone");
+        assert_eq!(s.shorten("cannot read /home/ab"), "cannot read ~");
+        assert_eq!(s.shorten("cannot read /home/ab/"), "cannot read ~/");
+    }
+
+    /// #366: the same for the project's resolved form, reached through a symlink.
+    #[cfg(unix)]
+    #[test]
+    fn shorten_names_the_project_by_its_resolved_form() {
+        let xdg = aibus_testkit::xdg_temp();
+        let real = xdg.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = xdg.path().join("via");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let s = Server::new(Caps::default(), link.clone(), &xdg.paths, None, Redactor::new()).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap();
+        for dir in [resolved.display().to_string(), format!("{}/", resolved.display()), link.display().to_string()] {
+            assert_eq!(s.shorten(&format!("cannot read {dir}")), "cannot read .", "{dir}");
+        }
+    }
 }

@@ -179,6 +179,9 @@ pub fn plan(
                     "      native subagent of {}, passed with --agents",
                     short(&inv["launched_by"])
                 ),
+                Some("attached_session") => println!(
+                    "      handed to the attached session, which pulls it with next_step (needs --control-attach and /attach accept)"
+                ),
                 _ => println!(
                     "      an aibus run of {} under the lead",
                     short(&s["agent"])

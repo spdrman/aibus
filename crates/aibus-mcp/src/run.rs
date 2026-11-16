@@ -839,6 +839,12 @@ impl Server {
         if let Some(why) = parsed.plan_only() {
             return Ok(self.fail(why));
         }
+        // The child this would start has no attached session to give the step to.
+        if parsed.uses_attached() {
+            return Ok(self.fail(format!(
+                "workflow {name} has an attached step, which runs only from the interactive aibus session started with --control-attach; no run was started"
+            )));
+        }
         let steps = parsed.steps.iter().map(|s| s.agent.to_string()).collect();
 
         // Only a start that would spawn a child costs a token: a typo in a name or a workflow

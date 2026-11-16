@@ -122,7 +122,7 @@
             "cli.claude"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -151,7 +151,7 @@
             "cli.claude"
           ],
           "parent_runtime": "cli.claude",
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "native_or_managed",
           "requires": [
             "headless",
@@ -180,7 +180,7 @@
             "aibus"
           ],
           "parent_runtime": "cli.claude",
-          "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6",
+          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -192,12 +192,12 @@
         "step": "audit"
       }
     ],
-    "policy_revision": "sha256:e530026c450d659258315f227e8491a1177a48f8ce41bad477de42204c5a64d6"
+    "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8"
   },
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:0b89c75d9877be262b7dc69a1cb86d0b9102eb5a6df1a1858633d1c393b9afcc",
+  "plan_hash": "sha256:94dfeb9ab2af76838b655495b217954ca685e7c776baaf64e293f9a5efff5e90",
   "plan_only_because": "workflow repo-review uses [[route]], [limits], [approvals], a runtime other than aibus, mode or parent, isolation, which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan repo-review --dry-run shows the plan)",
   "prompts": {
     "sha256:2bc4a1ec34bfe242b4deef1a6dd6853bf5036f41971b96c02f1b8c64d3635a7a": "Lead the review of a pull request. Ask the search subagent for the code the change touches, wait for it in the foreground, and hand back what changed and where.\nPull request: {{input}}",

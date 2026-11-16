@@ -489,7 +489,7 @@ The format is still v1. Every field below is optional, and a file that uses none
 | `schema_version = "1"` | top | says which format this is; the same as leaving it out |
 | `revision` | top | the author's label for this version, shown in a plan |
 | `id` | step | a name for the step (its key) when its agent is not enough, such as the same agent twice; `{{steps.<key>.summary}}` reads it |
-| `runtime` | step | `aibus` (default) or `cli.claude`, the official Claude Code CLI, which plans and does not run until #285 rules on the spike (the id is provisional, #286 names extensions) |
+| `runtime` | step | `aibus` (default), `cli.claude`, the official Claude Code CLI, which plans and does not run until #285 rules on the spike (the id is provisional, #286 names extensions), or `attached`, the agent session attached to this one (#322, #353), which runs from a session started with `--control-attach` and is refused when none is attached |
 | `mode` | step | `aibus_managed` (default), `native` (a subagent inside its parent's process, on a runtime with native child lineage) or `native_or_managed` (Jev picks: native under a parent on the same runtime, else managed) |
 | `parent` | step | the key of an earlier step that launches this one; the plan records the lineage as native or aibus-managed |
 | `requires` | step | capabilities the agent must have tools for: `repo_read`, `repo_write`, `shell`, `network`, `delegate`, `network_write`, `git_merge`, `destructive_tool` |

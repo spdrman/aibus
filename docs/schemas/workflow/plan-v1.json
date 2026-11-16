@@ -118,7 +118,8 @@
           "runtime": {
             "enum": [
               "aibus",
-              "cli.claude"
+              "cli.claude",
+              "attached"
             ]
           },
           "mode": {
@@ -198,7 +199,7 @@
             }
           },
           "invocation": {
-            "description": "aibus_run (a run the lead starts), process (an official CLI started with an argv vector, no shell, and native subagents inline in --agents) or native_subagent.",
+            "description": "aibus_run (a run the lead starts), process (an official CLI started with an argv vector, no shell, and native subagents inline in --agents), native_subagent, or attached_session (handed to the agent session attached to this one, which pulls it with next_step).",
             "type": "object",
             "required": [
               "kind"
@@ -208,7 +209,8 @@
                 "enum": [
                   "aibus_run",
                   "process",
-                  "native_subagent"
+                  "native_subagent",
+                  "attached_session"
                 ]
               },
               "shell": {

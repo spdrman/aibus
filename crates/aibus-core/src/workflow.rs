@@ -87,6 +87,10 @@ pub enum Runtime {
     Aibus,
     #[serde(rename = "cli.claude")]
     ClaudeCli,
+    /// The agent session attached to this aibus session (#322, #353): the step is handed to it
+    /// through `next_step` and comes back as a `step_result`.
+    #[serde(rename = "attached")]
+    Attached,
 }
 
 impl Runtime {
@@ -94,6 +98,7 @@ impl Runtime {
         match self {
             Runtime::Aibus => "aibus",
             Runtime::ClaudeCli => "cli.claude",
+            Runtime::Attached => "attached",
         }
     }
 }
@@ -432,6 +437,12 @@ impl Workflow {
         }
     }
 
+    /// Whether a step hands its work to the attached agent session (#353). Only the interactive
+    /// session started with `--control-attach` has one to give it to.
+    pub fn uses_attached(&self) -> bool {
+        self.steps.iter().any(|s| s.runtime == Runtime::Attached)
+    }
+
     /// Why this workflow can be planned but not run today, if it can't. The chain runner runs a
     /// chain of aibus runs; everything else (routes, envelopes, approvals, other runtimes, native
     /// or isolated steps) is the scheduler's (#288), and refusing here is what keeps a run from
@@ -447,7 +458,7 @@ impl Workflow {
         if !self.approvals.is_empty() {
             uses.push("[approvals]");
         }
-        if self.steps.iter().any(|s| s.runtime != Runtime::Aibus) {
+        if self.steps.iter().any(|s| s.runtime == Runtime::ClaudeCli) {
             uses.push("a runtime other than aibus");
         }
         if self.steps.iter().any(|s| s.mode != Mode::AibusManaged || s.parent.is_some()) {
@@ -533,7 +544,21 @@ pub fn validate(text: &str, stem: &str, roster: &[AgentName]) -> Validation {
             note(Some("gate"), format!("runs a shell command after this step: {gate}"));
         }
         let info = jev::runtime_info(raw.runtime);
-        if info.status != "available" {
+        if raw.runtime == Runtime::Attached {
+            if raw.isolation != StepIsolation::None {
+                out.errors.push(Problem {
+                    step: Some(n),
+                    field: Some("isolation".into()),
+                    message: "an attached step runs in the other session, which aibus does not put in a worktree, so isolation does not apply".into(),
+                });
+            }
+            note(
+                Some("runtime"),
+                "an attached step runs in the attached session under its own permissions, so the agent's tools and [approvals] do not bound it; \
+                 it needs a session started with --control-attach and the keyboard's /attach accept"
+                    .into(),
+            );
+        } else if info.status != "available" {
             note(
                 Some("runtime"),
                 format!(
@@ -1070,6 +1095,11 @@ pub struct GateCall<'a> {
 pub trait StepHost: Send + Sync {
     /// Runs `agent` in the foreground under the lead and waits for its result.
     async fn run(&self, agent: &AgentName, prompt: String) -> Result<StepOutcome, HostError>;
+    /// Hands a step with `runtime = "attached"` to the attached agent session and waits for how it
+    /// ends (#353). A host with no such session refuses.
+    async fn run_attached(&self, _agent: &AgentName, _prompt: String) -> Result<StepOutcome, HostError> {
+        Err(HostError::Failed("no attached session".into()))
+    }
     /// Runs the step's gate command with hook semantics.
     async fn gate(&self, command: &str, call: &GateCall<'_>) -> Result<GateVerdict, HostError>;
 }
@@ -1138,7 +1168,10 @@ pub async fn execute(wf: &Workflow, input: &str, host: &dyn StepHost) -> Report 
             wrapped: String::new(),
             failure: None,
         };
-        let ran = host.run(&step.agent, prompt).await;
+        let ran = match step.runtime {
+            Runtime::Attached => host.run_attached(&step.agent, prompt).await,
+            _ => host.run(&step.agent, prompt).await,
+        };
         let mut failure = match ran {
             Err(HostError::Cancelled) => {
                 attempt.failure = Some("cancelled".into());

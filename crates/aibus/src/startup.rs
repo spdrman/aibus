@@ -104,6 +104,9 @@ pub struct Ctx {
     pub interrupted: bool,
     /// The control channel on stdin (`--json` with the prompt on the command line).
     pub control: Option<mpsc::UnboundedReceiver<Line>>,
+    /// The other end of what the `workflow` tool sends the attached session (#353); only an
+    /// interactive session started with `--control-attach` has one.
+    pub attached_steps: Option<mpsc::Receiver<aibus_core::attach::Dispatch>>,
     /// The outcome for the handoff from `--outcome` or `AIBUS_OUTCOME`, canonical.
     pub outcome: Option<String>,
     /// The ledger, handoffs, memory and learnings of the session (01 section 8).
@@ -144,6 +147,7 @@ impl Ctx {
             finished: None,
             interrupted: false,
             control: None,
+            attached_steps: None,
             outcome: None,
             continuity: None,
             trace_guard: None,
@@ -688,7 +692,13 @@ impl Step for EnterLoop {
         // opens with a `workflow` call and then goes on with the report in hand.
         let workflow_dirs = aibus_core::workflow::dirs(&ctx.cwd, Some(&paths.config));
         if let (Some(name), None) = (ctx.run.workflow.clone(), &resume) {
-            aibus_core::workflow::load(&workflow_dirs, &name).map_err(AibusError::Usage)?;
+            let wf = aibus_core::workflow::load(&workflow_dirs, &name).map_err(AibusError::Usage)?;
+            // A headless run has no attached session to hand the step to, so nothing starts.
+            if wf.uses_attached() {
+                return Err(AibusError::Usage(format!(
+                    "workflow {name} has an attached step, which runs from the interactive session started with --control-attach (/workflow run {name}); nothing was started"
+                )));
+            }
             forced = Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": prompt})));
             prompt = format!("/workflow {name} {prompt}");
         }
@@ -838,7 +848,13 @@ impl Step for EnterLoop {
         } else {
             None
         };
-        registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone())));
+        let mut to_attached = None;
+        if ctx.interactive && ctx.global.control_attach {
+            let (to, from) = mpsc::channel(8);
+            ctx.attached_steps = Some(from);
+            to_attached = Some(to);
+        }
+        registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone(), to_attached)));
         registry.register(Arc::new(Delegate::new(orch.clone())));
         registry.register(Arc::new(Fork::new(orch.clone())));
         registry.register(Arc::new(ResumeRun::new(orch.clone())));

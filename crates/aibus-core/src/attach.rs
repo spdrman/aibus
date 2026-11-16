@@ -27,6 +27,9 @@ const MESSAGE_MAX: usize = 4096;
 const ROWS_MAX: usize = 30;
 const COLS_MAX: usize = 8;
 const CELL_MAX: usize = 80;
+/// How long a step has to be answered when nobody says otherwise (the keyboard's `/attach step`
+/// and a workflow's attached step).
+pub const STEP_WITHIN: Duration = Duration::from_secs(10 * 60);
 /// The most a step's summary keeps.
 const SUMMARY_MAX: usize = 16 * 1024;
 
@@ -150,6 +153,27 @@ struct Attachment {
     client: String,
 }
 
+/// What a workflow run asks the session's loop, which owns the registry (#353).
+pub enum Dispatch {
+    /// Is a session attached and free? Asked before a workflow with an attached step starts.
+    Check(tokio::sync::oneshot::Sender<Result<(), String>>),
+    /// One step for the attached session. The reply comes when the step ends, whichever way.
+    Step {
+        name: String,
+        prompt: String,
+        within: Duration,
+        reply: tokio::sync::oneshot::Sender<Result<StepEnd, String>>,
+    },
+}
+
+/// How a step the workflow handed to the attached session ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StepEnd {
+    pub token: String,
+    pub state: StepState,
+    pub summary: String,
+}
+
 pub struct Attachments {
     attach_on: bool,
     present_on: bool,
@@ -159,6 +183,11 @@ pub struct Attachments {
     /// The client whose first panel the keyboard allowed.
     presenter: Option<String>,
     steps: Vec<Step>,
+    /// Workflow steps waiting for their end, by step token.
+    waiting: Vec<(
+        String,
+        tokio::sync::oneshot::Sender<Result<StepEnd, String>>,
+    )>,
 }
 
 /// Printable text only: no control character (an escape sequence cannot be drawn), no bidi or
@@ -189,7 +218,87 @@ impl Attachments {
             attachment: None,
             presenter: None,
             steps: Vec::new(),
+            waiting: Vec::new(),
         }
+    }
+
+    /// A workflow run asks for a check or hands over a step. The returned line is for the log.
+    pub fn handle(&mut self, ask: Dispatch, now: Instant) -> Option<String> {
+        match ask {
+            Dispatch::Check(reply) => {
+                self.expire(now);
+                let free = match (&self.attachment, self.steps.iter().find(|s| s.state.open())) {
+                    _ if !self.attach_on => {
+                        Err("this session was not started with --control-attach".to_owned())
+                    }
+                    (None, _) => Err(
+                        "no attached session: a session attaches with aibus_attach and the keyboard accepts it"
+                            .to_owned(),
+                    ),
+                    (_, Some(s)) => {
+                        Err(format!("busy: step {} is in flight on the attached session", s.token))
+                    }
+                    _ => Ok(()),
+                };
+                let _ = reply.send(free);
+                None
+            }
+            Dispatch::Step { reply, .. } if reply.is_closed() => {
+                // The workflow was cancelled while the step waited in the channel.
+                None
+            }
+            Dispatch::Step {
+                name,
+                prompt,
+                within,
+                reply,
+            } => match self.dispatch(&name, &prompt, within, now) {
+                Ok(token) => {
+                    self.waiting.push((token.clone(), reply));
+                    Some(format!(
+                        "workflow step {token} ({}) queued for the attached session",
+                        clean(&name, 40, false)
+                    ))
+                }
+                Err(why) => {
+                    let _ = reply.send(Err(why));
+                    None
+                }
+            },
+        }
+    }
+
+    /// Ends what ran out of time, then answers every workflow step that has ended. A step whose
+    /// workflow stopped waiting (it was cancelled) is cancelled here, and says it cannot interrupt
+    /// the other session. The lines are for the log.
+    pub fn settle(&mut self, now: Instant) -> Vec<String> {
+        let mut notes = self.expire(now);
+        let mut i = 0;
+        while i < self.waiting.len() {
+            let Some(step) = self.steps.iter_mut().find(|s| s.token == self.waiting[i].0) else {
+                self.waiting.remove(i);
+                continue;
+            };
+            if step.state.open() && self.waiting[i].1.is_closed() {
+                step.state = StepState::Cancelled;
+                step.ended = Some(now);
+                notes.push(format!(
+                    "step {} cancelled with its workflow; cancel requested, session not interruptible (a late result is refused)",
+                    step.token
+                ));
+            }
+            if step.state.open() {
+                i += 1;
+                continue;
+            }
+            let end = StepEnd {
+                token: step.token.clone(),
+                state: step.state,
+                summary: step.summary.clone(),
+            };
+            let _ = self.waiting.remove(i).1.send(Ok(end));
+        }
+        notes
     }
 
     /// This session's token in the chain of sessions that drive each other.
@@ -265,15 +374,22 @@ impl Attachments {
     pub fn banner(&self) -> Option<String> {
         let p = self.pending.as_ref()?;
         Some(match &p.wants {
-            Wants::Attach { label, pid, cwd } => format!(
-                "{} wants to attach{}{}{}, code {}: type /attach accept {} to allow, /attach deny to refuse",
-                p.client,
-                if label.is_empty() { String::new() } else { format!(" as {label}") },
-                pid.map_or(String::new(), |p| format!(" (pid {p}")),
-                if pid.is_some() { format!(", {cwd})") } else { String::new() },
-                p.code,
-                p.code
-            ),
+            // The code comes first: a long directory would push it off a log row otherwise.
+            Wants::Attach { label, pid, cwd } => {
+                let mut who = Vec::new();
+                if !label.is_empty() {
+                    who.push(format!("as {label}"));
+                }
+                if let Some(pid) = pid {
+                    who.push(format!("pid {pid}"));
+                    who.push(cwd.clone());
+                }
+                let who = if who.is_empty() { String::new() } else { format!(" ({})", who.join(", ")) };
+                format!(
+                    "{} wants to attach, code {}: type /attach accept {} to allow, /attach deny to refuse{who}",
+                    p.client, p.code, p.code
+                )
+            }
             Wants::Present(_) => format!(
                 "{} wants to show a panel, code {}: type /attach accept {} to allow it and later ones, /attach deny to refuse",
                 p.client, p.code, p.code

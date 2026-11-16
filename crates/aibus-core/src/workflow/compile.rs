@@ -389,6 +389,12 @@ pub fn compile(
             ));
         }
 
+        if s.runtime == Runtime::Attached {
+            notes.push(format!(
+                "step {key}: runs in the attached session under its own permissions, which stay with the user there; the agent's tools do not bound it"
+            ));
+        }
+
         // The approval boundary: what this step's agent can do (and a gate, which runs a shell
         // command) that the workflow holds for a person's yes.
         let mut can = granted[i].clone();
@@ -405,15 +411,18 @@ pub fn compile(
         }
 
         let parent = s.parent.as_deref().and_then(|p| wf.index(p));
-        let risk = if granted[i].iter().any(|c| {
-            matches!(
-                c,
-                Capability::Shell
-                    | Capability::Network
-                    | Capability::NetworkWrite
-                    | Capability::GitMerge
-            )
-        }) {
+        // The attached session works under its own permissions, so what the agent definition
+        // grants says nothing about what the step can do.
+        let risk = if s.runtime == Runtime::Attached
+            || granted[i].iter().any(|c| {
+                matches!(
+                    c,
+                    Capability::Shell
+                        | Capability::Network
+                        | Capability::NetworkWrite
+                        | Capability::GitMerge
+                )
+            }) {
             "side_effects"
         } else if granted[i].contains(&Capability::RepoWrite) {
             "writes"
@@ -454,6 +463,12 @@ pub fn compile(
                     "isolation": s.isolation,
                 }),
                 Runtime::ClaudeCli => claude_invocation(wf, agents, i, &prompt_sha),
+                Runtime::Attached => json!({
+                    "kind": "attached_session",
+                    "agent": s.agent.as_str(),
+                    "via": "next_step and step_result",
+                    "needs": "--control-attach and an accepted /attach",
+                }),
             }
         };
         steps.push(json!({

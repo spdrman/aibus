@@ -156,6 +156,7 @@ impl Rig {
             orch.clone(),
             hooks.clone(),
             aibus_core::workflow::dirs(dir.path(), None),
+            None,
         )));
         let tools = Arc::new(ToolExecutor::with_gate(registry, Gate::default()).unwrap());
         let defs = defs();

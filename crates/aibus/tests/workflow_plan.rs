@@ -432,3 +432,63 @@ fn plan_and_diff_print_no_escape_sequences_and_a_bundled_name_plans() {
     assert_eq!(plan.status.code(), Some(0), "{}", stderr(&plan));
     assert_eq!(json_of(&plan)["workflow"]["name"], "fix");
 }
+
+// #353: an attached step is in the plan like any other, and a run that has no attached session to
+// give it to starts nothing.
+#[test]
+fn an_attached_step_plans_and_a_headless_run_refuses_it_before_anything_starts() {
+    let home = xdg_temp();
+    let h = home.path();
+    install(
+        h,
+        "fixtures/workflows/attached/review-attached.toml",
+        "review-attached",
+    );
+    let text = aibus(h, &["workflow", "plan", "review-attached", "--dry-run"]);
+    assert_eq!(text.status.code(), Some(0), "{}", stderr(&text));
+    let shown = stdout(&text);
+    for want in [
+        "attached",
+        "the attached session",
+        "next_step",
+        "runs now: yes",
+    ] {
+        assert!(shown.contains(want), "{want} missing from:\n{shown}");
+    }
+    let plan = json_of(&aibus(
+        h,
+        &["--json", "workflow", "plan", "review-attached", "--dry-run"],
+    ));
+    assert_eq!(plan["steps"][1]["runtime"], "attached");
+    assert_eq!(plan["steps"][1]["invocation"]["kind"], "attached_session");
+    assert_eq!(
+        plan["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"] == "data")
+            .count(),
+        2
+    );
+
+    let script = h.join("s.ron");
+    fs::write(&script, "[Text(\"should not be asked\"), Stop(EndTurn)]").unwrap();
+    let out = command(h)
+        .args([
+            "--json",
+            "workflow",
+            "run",
+            "review-attached",
+            "check it",
+            "--script",
+        ])
+        .arg(&script)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("--control-attach"),
+        "{}",
+        stderr(&out)
+    );
+}

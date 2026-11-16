@@ -174,7 +174,7 @@ fn every_fixture_meets_the_event_contract() {
 fn the_package_and_the_live_report_say_nothing_was_recorded() {
     let readme = fs::read_to_string(gemini_dir().join("README.md")).unwrap();
     assert!(readme.to_lowercase().contains("unverified"));
-    assert!(readme.contains("not recorded"));
+    assert!(readme.contains("no stream was recorded"));
     let report: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(repo().join("fixtures/gemini/live-report-2026-11-15.json")).unwrap(),
     )

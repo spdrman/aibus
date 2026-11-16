@@ -22,8 +22,8 @@ url = "https://devshell.org"
 [compat]
 protocol = ">=1.1.0, <2.0.0"
 os = ["macos", "linux"]
-# No version has been run. Tighten this when someone records one.
-cli_versions = ">=0.1.0"
+# A placeholder: no version has been run. Tighten it when someone records one.
+cli_versions = ">=0.1.0, <1.0.0"
 
 [cli]
 executable_candidates = ["gemini"]
@@ -38,9 +38,10 @@ login_argv = []
 status_argv = []
 
 [execution]
-# Stream-json output, and the default approval mode, which asks before a tool runs (nothing can
-# answer in headless mode, so a tool that needs approval is refused by the CLI). The prompt goes on
-# stdin. UNVERIFIED: the stdin-only form without `-p`.
+# Stream-json output and the default approval mode. The prompt goes on stdin. UNVERIFIED, all of
+# it: the stdin-only form without `-p`, what the default approval mode does with a tool that needs
+# approval when nothing can answer, and whether tools that need none (web fetch or search) run in
+# headless mode, which would send data out with no sandbox flag to stop it.
 argv = ["--output-format", "stream-json", "--approval-mode", "default"]
 prompt = "stdin"
 stdout = "jsonl"

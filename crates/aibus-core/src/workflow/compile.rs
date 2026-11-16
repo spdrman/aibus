@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::graph::{self, Dag};
 use super::jev::{self, Request};
-use super::{reads, Capability, Mode, Problem, Runtime, Workflow};
+use super::{handoff, reads, Capability, Mode, Problem, Runtime, Workflow};
 use crate::agent::def::{model_str, to_json};
 use crate::agent::{AgentDef, Scope};
 use crate::ids::AgentName;
@@ -559,6 +559,7 @@ pub fn compile(
             }
         }
     }
+    let mut handoffs = Vec::new();
     for (i, s) in wf.steps.iter().enumerate() {
         for read in reads(&s.prompt) {
             let from = if read == "input" {
@@ -568,6 +569,36 @@ pub fn compile(
             };
             if let Some(from) = from {
                 edges.push(json!({ "kind": "data", "from": from, "to": wf.key(i), "via": read }));
+            }
+            // A step's output read by a step on another runtime is a handoff: the user is shown it
+            // and says yes before it moves (#360, spec 10.2).
+            if let Some(j) = (read != "input").then(|| wf.source(i, &read)).flatten() {
+                let party = |step: usize| {
+                    let rt = wf.steps[step].runtime;
+                    handoff::Party {
+                        step: wf.key(step).to_owned(),
+                        runtime: rt,
+                        provider: handoff::provider_of(rt).unwrap_or(rt.as_str()).to_owned(),
+                        account: "unresolved".to_owned(),
+                    }
+                };
+                let context = handoff::Context {
+                    run_id: String::new(),
+                    plan_hash: String::new(),
+                    from: party(j),
+                    to: party(i),
+                };
+                // The plan can only tell the receivers apart by the provider a runtime implies; the
+                // accounts come later, and then `needs_consent` asks about the real ones.
+                if context.from.provider != context.to.provider {
+                    handoffs.push(json!({
+                        "from": wf.key(j), "to": wf.key(i), "via": read,
+                        "from_runtime": context.from.runtime.as_str(),
+                        "to_runtime": context.to.runtime.as_str(),
+                        "needs_consent": true,
+                        "accounts": "resolved when the step runs",
+                    }));
+                }
             }
         }
     }
@@ -616,6 +647,9 @@ pub fn compile(
         "jev": { "policy_revision": jev::policy_revision(), "decisions": decisions },
         "notes": notes,
     });
+    if !handoffs.is_empty() {
+        plan["handoffs"] = json!(handoffs);
+    }
     let hash = plan_hash(&plan);
     plan["plan_hash"] = json!(hash);
     Ok(plan)

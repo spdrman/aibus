@@ -133,3 +133,29 @@ fn issue_334_the_docs_describe_schema_2_and_the_typed_flags() {
     assert!(spec.contains("manifest-v2.json"), "spec 16 does not name the schema 2 file");
     assert!(spec.contains("never an argument string"), "spec 16 does not say a manifest cannot inject one");
 }
+
+/// A merge once left conflict markers in `docs/DECISIONS.md` and nothing noticed. No text file under
+/// the docs, the fixtures or the examples may hold one.
+#[test]
+fn no_doc_or_fixture_holds_a_merge_conflict_marker() {
+    fn walk(dir: &Path, found: &mut Vec<String>) {
+        for e in fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, found);
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&p) else { continue };
+            for (n, l) in text.lines().enumerate() {
+                if l.starts_with("<<<<<<< ") || l.starts_with(">>>>>>> ") || l == "=======" {
+                    found.push(format!("{}:{}", p.display(), n + 1));
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    for d in ["docs", "fixtures", "examples"] {
+        walk(&root().join(d), &mut found);
+    }
+    assert_eq!(found, Vec::<String>::new());
+}

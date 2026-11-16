@@ -29,6 +29,10 @@ uuid = { version = "1", features = ["v7"] }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 
+# Flags set from signal handlers (safe API): the helper (#352) must outlive a TERM to clean up.
+[target.'cfg(target_os = "linux")'.dependencies]
+signal-hook = "0.3"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }

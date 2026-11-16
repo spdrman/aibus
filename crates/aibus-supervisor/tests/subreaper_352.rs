@@ -321,9 +321,9 @@ async fn issue_352_the_deadline_ends_the_whole_tree_even_for_a_cli_that_ignores_
     // A daemon with no linger, a setsid grandchild of a child, and a CLI that ignores TERM.
     let body = format!(
         "trap '' TERM\n{DAEMON} DIR/daemon.pid\n\
-         sh -c '{DAEMON} DIR/grandchild.pid; while :; do sleep 0.05; done' &\n\
+         sh -c '{NESTED} DIR/grandchild.pid; while :; do sleep 0.05; done' &\n\
          echo $$ > DIR/cli.pid\nwhile :; do sleep 0.05; done",
-        DAEMON = DAEMON.replace('\'', "'\\''")
+        NESTED = DAEMON.replace('\'', "'\\''")
     );
     let started = Instant::now();
     let (out, root) = supervised(&body, quick(), None).await;

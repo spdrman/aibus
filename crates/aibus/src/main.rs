@@ -45,6 +45,16 @@ use clap::{CommandFactory, FromArgMatches};
 use cli::{Cli, Command, RunArgs, WorkflowCmd};
 
 fn main() -> std::process::ExitCode {
+    // The supervisor's subreaper helper (D-352): this binary started again by the host with the
+    // internal marker first. Before clap, so it is no subcommand, no completion, no help line, and
+    // not reachable through a flag of any CLI.
+    #[cfg(target_os = "linux")]
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args.next().is_some_and(|a| a == aibus_supervisor::reaper::MARKER) {
+            return std::process::ExitCode::from(aibus_supervisor::reaper::run(args.collect()));
+        }
+    }
     let redactor = Redactor::new();
     // A panic is an unexpected error: exit 1 (06 section 3), not Rust's 101.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| real_main(&redactor)));

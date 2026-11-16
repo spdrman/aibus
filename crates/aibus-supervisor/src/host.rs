@@ -156,6 +156,28 @@ fn signal_group(pid: Option<u32>, sig: rustix::process::Signal) {
     }
 }
 
+/// Sends `sig` to the one process `pid`: the helper (D-352), which acts on it for the whole tree.
+#[cfg(unix)]
+fn signal_pid(pid: Option<u32>, sig: rustix::process::Signal) {
+    if let Some(pid) = pid
+        .and_then(|p| i32::try_from(p).ok())
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process(pid, sig);
+    }
+}
+
+/// Asks the CLI to stop with SIGTERM: to its whole group, or, when the helper runs it, to the
+/// helper, which sends it on to the group and stays up to catch what is left (D-352).
+#[cfg(unix)]
+fn ask_to_stop(pid: Option<u32>, helped: bool) {
+    if helped {
+        signal_pid(pid, rustix::process::Signal::TERM);
+    } else {
+        signal_group(pid, rustix::process::Signal::TERM);
+    }
+}
+
 /// Appends `batch` and tells `norm` the last id the store holds, so the store's own events (its
 /// gaps) never tie with the normaliser's next id. A refusal ends the run with the store error;
 /// the store restores its state first, so nothing is dropped without a gap.
@@ -190,7 +212,6 @@ pub async fn supervise(
         limits,
         helper,
     } = launch;
-    let _ = &helper;
     if !exe.is_absolute() || !exe.is_file() {
         return Err(SupervisorError::Refused(format!(
             "{} is not an absolute path to a file",
@@ -203,6 +224,18 @@ pub async fn supervise(
             cwd.display()
         )));
     }
+    // On Linux with a helper the CLI runs under it (D-352); the helper leads the group instead.
+    let helped = cfg!(target_os = "linux") && helper.is_some();
+    #[cfg(target_os = "linux")]
+    let mut cmd = match &helper {
+        Some(h) => {
+            let mut c = tokio::process::Command::new(h);
+            c.arg(crate::reaper::MARKER).arg(&exe);
+            c
+        }
+        None => tokio::process::Command::new(&exe),
+    };
+    #[cfg(not(target_os = "linux"))]
     let mut cmd = tokio::process::Command::new(&exe);
     cmd.args(&args)
         .current_dir(&cwd)
@@ -211,7 +244,8 @@ pub async fn supervise(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        // The helper is not killed from outside: it would leave its orphans behind.
+        .kill_on_drop(!helped);
     #[cfg(unix)]
     cmd.process_group(0);
     let started = Instant::now();
@@ -219,13 +253,18 @@ pub async fn supervise(
     let pid = child.id();
     /// Ends the CLI's whole group when `supervise` returns early (a store error), so the CLI's
     /// tool processes are not orphaned. `kill_on_drop` only reaches the leader.
-    struct GroupGuard(Option<u32>, #[cfg(unix)] Option<Tracker>);
+    struct GroupGuard(Option<u32>, bool, #[cfg(unix)] Option<Tracker>);
     impl Drop for GroupGuard {
         fn drop(&mut self) {
             #[cfg(unix)]
             {
-                signal_group(self.0, rustix::process::Signal::KILL);
-                if let Some(t) = &self.1 {
+                if self.1 {
+                    // The helper ends the whole tree and itself (D-352).
+                    signal_pid(self.0, rustix::process::Signal::USR1);
+                } else {
+                    signal_group(self.0, rustix::process::Signal::KILL);
+                }
+                if let Some(t) = &self.2 {
                     t.kill_all();
                 }
             }
@@ -233,6 +272,7 @@ pub async fn supervise(
     }
     let mut guard = GroupGuard(
         pid,
+        helped,
         #[cfg(unix)]
         pid.map(Tracker::start),
     );
@@ -284,6 +324,8 @@ pub async fn supervise(
     let deadline = tokio::time::Instant::now() + limits.wall_time;
     let mut stopped: Option<Ending> = None;
     let mut kill_at: Option<tokio::time::Instant> = None;
+    #[cfg(unix)]
+    let mut hard_sent = false;
     let mut exit: Option<std::process::ExitStatus> = None;
     // After exit: the drain ends when nothing has been read for `drain_stall`, or `drain_max` after
     // the exit whatever keeps arriving. Both are deadlines, so the drain always ends.
@@ -345,7 +387,7 @@ pub async fn supervise(
                             stopped = Some(Ending::OutputLimit);
                             kill_at = Some(tokio::time::Instant::now() + limits.grace);
                             #[cfg(unix)]
-                            signal_group(pid, rustix::process::Signal::TERM);
+                            ask_to_stop(pid, helped);
                         }
                     }
                 }
@@ -377,19 +419,27 @@ pub async fn supervise(
                 stopped = Some(Ending::Cancelled);
                 kill_at = Some(tokio::time::Instant::now() + limits.grace);
                 #[cfg(unix)]
-                signal_group(pid, rustix::process::Signal::TERM);
+                ask_to_stop(pid, helped);
             }
             _ = tokio::time::sleep_until(deadline), if stopped.is_none() && exit.is_none() => {
                 stopped = Some(Ending::WallTime);
                 kill_at = Some(tokio::time::Instant::now() + limits.grace);
                 #[cfg(unix)]
-                signal_group(pid, rustix::process::Signal::TERM);
+                ask_to_stop(pid, helped);
             }
             _ = tokio::time::sleep_until(kill_at.unwrap_or(deadline)), if kill_at.is_some() && exit.is_none() => {
                 kill_at = None;
-                // The documented last resort: the whole group, by force.
+                // The documented last resort: the whole group, by force. A helper is told to end
+                // the tree first (SIGUSR1) and gets a longer grace to do it; only a helper that
+                // does not answer is killed with the group.
                 #[cfg(unix)]
-                signal_group(pid, rustix::process::Signal::KILL);
+                if helped && !hard_sent {
+                    hard_sent = true;
+                    signal_pid(pid, rustix::process::Signal::USR1);
+                    kill_at = Some(tokio::time::Instant::now() + limits.grace.max(Duration::from_secs(2)));
+                } else {
+                    signal_group(pid, rustix::process::Signal::KILL);
+                }
                 #[cfg(not(unix))]
                 let _ = child.start_kill();
             }
@@ -424,7 +474,7 @@ pub async fn supervise(
     #[cfg(unix)]
     {
         signal_group(pid, rustix::process::Signal::KILL);
-        if let Some(t) = &guard.1 {
+        if let Some(t) = &guard.2 {
             t.kill_all();
         }
     }

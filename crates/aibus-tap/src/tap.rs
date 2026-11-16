@@ -47,7 +47,7 @@ fn uuid_of(label: &str, session_id: &str) -> Uuid {
 }
 
 impl Tap {
-    pub fn open(root: &Path, session_id: &str) -> Result<Self, String> {
+    pub fn open(root: &Path, session_id: &str, _redactor: &Redactor) -> Result<Self, String> {
         let dir = run_dir(root, session_id)?;
         let (store, _) = TraceStore::open(
             &dir,

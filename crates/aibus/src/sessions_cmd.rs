@@ -49,7 +49,6 @@ fn claude_only(client: &str) -> Result<(), AibusError> {
 }
 
 pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<u8, AibusError> {
-    let _ = redactor;
     let mut out = std::io::stdout().lock();
     match args.cmd.as_ref().unwrap_or(&SessionsCmd::List) {
         SessionsCmd::List => {
@@ -70,7 +69,7 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
                     .collect();
                 writeln!(out, "{}", serde_json::Value::Array(rows))?;
             } else {
-                let text = show::list(&e, &agents::run_agents_json).map_err(usage)?;
+                let text = show::list(&e, &agents::run_agents_json, redactor).map_err(usage)?;
                 out.write_all(text.as_bytes())?;
             }
         }
@@ -80,12 +79,12 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
             config_dir,
         } => {
             let e = env(g, config_dir)?;
-            let text = show::tap(&e, &agents::run_agents_json, session).map_err(usage)?;
+            let text = show::tap(&e, &agents::run_agents_json, redactor, session).map_err(usage)?;
             out.write_all(text.as_bytes())?;
             if *follow {
                 out.flush()?;
                 drop(out);
-                return follow_session(&e, session).map(|()| 0);
+                return follow_session(&e, session, redactor).map(|()| 0);
             }
         }
         SessionsCmd::Hooks(h) => {
@@ -104,8 +103,13 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
             claude_only(client)?;
             let e = env(g, config_dir)?;
             let path = e.config.join("settings.json");
-            let ep = if cmd {
-                Some(hooks::Endpoint::load_or_create(&e.state).map_err(usage)?)
+            let ep = hooks::Endpoint::load_or_create(&e.state).map_err(usage)?;
+            // The script holds no secret, so it is written before the diff names it; the
+            // settings change only after the yes.
+            let command = if cmd {
+                Some(hooks::command_for(
+                    &hooks::install_files(&e.state, &ep).map_err(usage)?,
+                ))
             } else {
                 None
             };
@@ -120,12 +124,16 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
                 std::io::stdin().lock().read_line(&mut line).is_ok()
                     && matches!(line.trim(), "y" | "Y" | "yes")
             };
-            match hooks::apply(&path, ep.as_ref(), &mut confirm).map_err(usage)? {
+            match hooks::apply(&path, command.as_deref(), &mut confirm).map_err(usage)? {
                 hooks::Outcome::Changed if cmd => writeln!(
                     out,
-                    "hooks installed. Claude Code reloads hook edits into sessions that are already open, so they start posting to aibus; if aibus is not listening, the hook fails open and the session is not slowed. `aibus sessions hooks uninstall --client claude` takes them out."
+                    "hooks installed (command hooks running a script in aibus's state directory; the token is in a 0600 file next to it, not in your settings). Claude Code reloads hook edits into sessions that are already open, so they start posting to aibus; if aibus is not listening, the script gives up at once (one second at most) and prints nothing. `aibus sessions hooks uninstall --client claude` takes them out."
                 )?,
-                hooks::Outcome::Changed => writeln!(out, "hooks removed.")?,
+                hooks::Outcome::Changed => {
+                    // Whoever still holds the old token can post nothing more.
+                    ep.rotate(&e.state).map_err(usage)?;
+                    writeln!(out, "hooks removed, and the receiver's token rotated.")?
+                }
                 hooks::Outcome::Declined => writeln!(out, "nothing written.")?,
                 hooks::Outcome::Unchanged => writeln!(out, "nothing to change.")?,
             }
@@ -150,13 +158,15 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
 
 /// Listens for the hook events of every session on the install's loopback endpoint, records the
 /// tapped one's, and prints the tap text again (at most twice a second) when it changed.
-fn follow_session(e: &Env, arg: &str) -> Result<(), AibusError> {
+fn follow_session(e: &Env, arg: &str, redactor: &Redactor) -> Result<(), AibusError> {
     let list = agents::parse_agents(&agents::run_agents_json().map_err(usage)?).map_err(usage)?;
     let id = agents::resolve(&list, arg)
         .map(|s| s.session_id.clone())
         .unwrap_or_else(|_| arg.to_owned());
     let ep = hooks::Endpoint::load_or_create(&e.state).map_err(usage)?;
-    let tapper = Arc::new(Mutex::new(tap::Tap::open(&e.taps(), &id).map_err(usage)?));
+    let tapper = Arc::new(Mutex::new(
+        tap::Tap::open(&e.taps(), &id, redactor).map_err(usage)?,
+    ));
     let dirty = Arc::new(AtomicBool::new(false));
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -173,7 +183,7 @@ fn follow_session(e: &Env, arg: &str) -> Result<(), AibusError> {
                 _ = tick.tick() => {
                     if dirty.swap(false, Ordering::Relaxed) {
                         let cached = serde_json::to_vec(&list_json(&list)).unwrap_or_default();
-                        match show::tap(e, &|| Ok(cached.clone()), &id) {
+                        match show::tap(e, &|| Ok(cached.clone()), redactor, &id) {
                             Ok(t) => println!("\n--- {} ---\n{t}", aibus_core::persist::time::rfc3339(SystemTime::now())),
                             Err(err) => eprintln!("{err}"),
                         }

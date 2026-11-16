@@ -25,7 +25,11 @@ fn has_tap(env: &Env, id: &str) -> bool {
     tap::valid_id(id) && env.taps().join(id).join("events.jsonl").is_file()
 }
 
-pub fn list(env: &Env, lister: &dyn Fn() -> Result<Vec<u8>, String>) -> Result<String, String> {
+pub fn list(
+    env: &Env,
+    lister: &dyn Fn() -> Result<Vec<u8>, String>,
+    _redactor: &Redactor,
+) -> Result<String, String> {
     let sessions = live(env, lister)?;
     let tapped: Vec<String> = sessions
         .iter()
@@ -40,6 +44,7 @@ pub fn list(env: &Env, lister: &dyn Fn() -> Result<Vec<u8>, String>) -> Result<S
 pub fn tap(
     env: &Env,
     lister: &dyn Fn() -> Result<Vec<u8>, String>,
+    _redactor: &Redactor,
     arg: &str,
 ) -> Result<String, String> {
     let sessions = live(env, lister)?;

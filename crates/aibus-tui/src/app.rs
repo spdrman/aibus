@@ -641,7 +641,7 @@ fn step_user<G: Graph>(
         (Msg::Command(Command::Sessions(q)), _, Some(root)) => {
             let state = root.parent().unwrap_or(root);
             let config = aibus_tap::Env::claude_config_from_env().unwrap_or_default();
-            crate::sessions::apply(q, state, &config, &aibus_tap::agents::run_agents_json)
+            crate::sessions::apply(q, state, &config, &aibus_tap::agents::run_agents_json, &aibus_core::Redactor::new())
         }
         _ => Vec::new(),
     };

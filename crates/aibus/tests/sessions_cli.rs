@@ -191,6 +191,13 @@ fn allow_transcripts_is_a_per_client_switch_that_starts_off() {
     assert!(!o.status.success());
 }
 
+fn endpoint_token(home: &Path) -> String {
+    let v: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("state/aibus/tap/endpoint.json")).unwrap())
+            .unwrap();
+    v["token"].as_str().unwrap().to_owned()
+}
+
 fn post(port: u16, host: &str, auth: &str, body: &[u8]) -> String {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -255,4 +262,64 @@ fn follow_takes_hook_posts_with_the_token_only_and_records_the_tapped_session() 
         .path()
         .join("state/aibus/taps/claude/33333333-3333-4333-8333-333333333333")
         .exists());
+}
+
+#[test]
+fn a_slow_client_does_not_hold_the_receiver() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let home = aibus_testkit::xdg_temp();
+    let bin = fake_claude(home.path());
+    let mut c = command(home.path());
+    c.env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("XDG_STATE_HOME", home.path().join("state"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join("cfg"))
+        .env("AIBUS_CONFIG", home.path().join("none.toml"));
+    let mut child = c
+        .args(["sessions", "tap", "refactor parser", "--follow"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut first = String::new();
+    BufReader::new(child.stderr.take().unwrap())
+        .read_line(&mut first)
+        .unwrap();
+    let ep: serde_json::Value = serde_json::from_slice(
+        &fs::read(home.path().join("state/aibus/tap/endpoint.json")).unwrap(),
+    )
+    .unwrap();
+    let port = ep["port"].as_u64().unwrap() as u16;
+    let token = ep["token"].as_str().unwrap().to_owned();
+    // Forty clients that connect and say nothing, then half a request line.
+    let mut slow: Vec<std::net::TcpStream> = (0..40)
+        .map(|_| std::net::TcpStream::connect(("127.0.0.1", port)).unwrap())
+        .collect();
+    for s in slow.iter_mut().take(10) {
+        s.write_all(b"POST /aibus-tap/hook HTTP/1.1\r\nHost: ")
+            .unwrap();
+    }
+    // They are cut off by the header timeout, and a real post then goes through.
+    let t = std::time::Instant::now();
+    for s in &mut slow {
+        s.set_read_timeout(Some(std::time::Duration::from_secs(8)))
+            .unwrap();
+        let mut b = [0u8; 16];
+        let _ = s.read(&mut b);
+    }
+    assert!(
+        t.elapsed() < std::time::Duration::from_secs(6),
+        "{:?}",
+        t.elapsed()
+    );
+    let hooks = fs::read_to_string(fixture("hooks.jsonl")).unwrap();
+    let h = format!("127.0.0.1:{port}");
+    assert!(post(
+        port,
+        &h,
+        &format!("Bearer {token}"),
+        hooks.lines().nth(2).unwrap().as_bytes()
+    )
+    .contains("200"));
+    child.kill().unwrap();
+    child.wait().unwrap();
 }

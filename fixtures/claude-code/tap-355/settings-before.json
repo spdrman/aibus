@@ -1,15 +1,8 @@
 {
+  "model": "synthetic",
   "hooks": {
     "Stop": [
-      {
-        "hooks": [
-          {
-            "command": "/usr/local/bin/synthetic-stop.sh",
-            "type": "command"
-          }
-        ]
-      }
+      {"hooks": [{"type": "command", "command": "/usr/local/bin/synthetic-stop.sh"}]}
     ]
-  },
-  "model": "synthetic"
+  }
 }

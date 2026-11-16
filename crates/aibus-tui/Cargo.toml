@@ -11,6 +11,7 @@ publish.workspace = true
 aibus-core.workspace = true
 aibus-graph.workspace = true
 aibus-trace = { path = "../aibus-trace" }
+aibus-tap = { path = "../aibus-tap" }
 aibus-provider.workspace = true
 arboard = { version = "3", default-features = false }
 crossterm = "0.29"

@@ -46,6 +46,7 @@ dependencies = [
  "aibus-provider-http",
  "aibus-provider-openai",
  "aibus-supervisor",
+ "aibus-tap",
  "aibus-testkit",
  "aibus-trace",
  "aibus-tui",
@@ -301,6 +302,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-tap"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-supervisor",
+ "aibus-trace",
+ "indexmap",
+ "rustix 1.1.6",
+ "serde_json",
+ "subtle",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "aibus-testkit"
 version = "0.2.1"
 dependencies = [
@@ -346,6 +362,7 @@ dependencies = [
  "aibus-core",
  "aibus-graph",
  "aibus-provider",
+ "aibus-tap",
  "aibus-testkit",
  "aibus-trace",
  "arboard",

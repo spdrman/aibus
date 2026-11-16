@@ -6,7 +6,7 @@
 //! menu item are three ways into one function and cannot drift apart.
 
 use aibus_core::workflow::{valid_name, SaveError};
-use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, RunsQuery, Screen, UiIntent, WorkflowFile};
+use aibus_core::{AccountName, AgentName, Command, Isolation, ModelTarget, Msg, Pane, RunId, RunStatus, RunsQuery, Screen, SessionsQuery, UiIntent, WorkflowFile};
 
 use crate::input::{Clip, Out};
 use crate::prompt::Sent;
@@ -336,6 +336,30 @@ pub const REGISTRY: &[Spec] = &[
         needs: 0,
         surfaces: at(31, 0, 0),
         run: recorded,
+    },
+    Spec {
+        name: "sessions",
+        args: "",
+        help: "the Claude Code sessions open in other terminals (read-only)",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(32, 0, 0),
+        run: sessions,
+    },
+    Spec {
+        name: "tap",
+        args: "<session>",
+        help: "watch one open Claude Code session: its graph, timeline and plan; no control in this phase",
+        asks: "",
+        label: "",
+        hint: "",
+        scope: Scope::Global,
+        needs: 0,
+        surfaces: at(33, 0, 0),
+        run: tap_in,
     },
     Spec {
         name: "agents",
@@ -807,6 +831,23 @@ fn recorded(c: &Call, out: &mut Out) -> Result<(), String> {
         _ => return Err(format!("/{} takes no argument, inspect <run> [<node>] or replay <run>", c.name)),
     };
     command(out, Command::Runs(query))
+}
+
+/// `/sessions`: the live Claude Code sessions. The terminal loop runs `claude agents --json`.
+fn sessions(c: &Call, out: &mut Out) -> Result<(), String> {
+    if !c.args.is_empty() {
+        return Err(format!("/{} takes no argument", c.name));
+    }
+    command(out, Command::Sessions(SessionsQuery::List))
+}
+
+/// `/tap <session>`: one session's tap, read-only.
+fn tap_in(c: &Call, out: &mut Out) -> Result<(), String> {
+    let id = c.args.trim();
+    if id.is_empty() {
+        return Err(format!("/{} needs a session: an id, a prefix of one, a job id or a name", c.name));
+    }
+    command(out, Command::Sessions(SessionsQuery::Tap(id.to_owned())))
 }
 
 /// `/quit`, `/exit` and `/q` share this: the same messages as the palette row, and no arguments.
@@ -1317,7 +1358,7 @@ mod tests {
         let wf = ["fix".to_owned()];
         assert!(slash_offered(&Env::bare(&[], &wf)).iter().all(|(n, _)| n != "/fix"), "a workflow command needs a lead as well");
         assert!(slash_offered(&Env { lead: Some(lead_run()), ..Env::bare(&[], &wf) }).iter().any(|(n, _)| n == "/fix"));
-        assert_eq!(slash_offered(&env).len(), 19);
+        assert_eq!(slash_offered(&env).len(), 21);
         let spec = find("open").unwrap();
         assert_eq!(env.unmet(spec, None).as_deref(), Some("no run yet"));
     }

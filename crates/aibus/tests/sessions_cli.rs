@@ -333,8 +333,7 @@ fn a_slow_client_does_not_hold_the_receiver() {
     // They are cut off by the header timeout, and a real post then goes through.
     let t = std::time::Instant::now();
     for s in &mut slow {
-        s.set_read_timeout(Some(std::time::Duration::from_secs(8)))
-            .unwrap();
+        let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(8)));
         let mut b = [0u8; 16];
         let _ = s.read(&mut b);
     }

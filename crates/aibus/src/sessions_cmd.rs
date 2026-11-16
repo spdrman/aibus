@@ -4,7 +4,7 @@
 //! inspect` prints for the graph and timeline. Nothing here sends anything to a session.
 
 use std::io::{BufRead, Write};
-use std::net::SocketAddr;
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -156,10 +156,62 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
     Ok(0)
 }
 
-/// Listens for the hook events of every session on the install's loopback endpoint, records the
+/// Listens for the hook events of every session on the install's owner-only unix socket, records the
 /// tapped one's, and prints the tap text again (at most twice a second) when it changed.
-fn follow_session(_e: &Env, _arg: &str, _redactor: &Redactor) -> Result<(), AibusError> {
-    Err(usage("not implemented"))
+fn follow_session(e: &Env, arg: &str, redactor: &Redactor) -> Result<(), AibusError> {
+    let list = agents::parse_agents(&agents::run_agents_json().map_err(usage)?).map_err(usage)?;
+    let id = agents::resolve(&list, arg)
+        .map(|s| s.session_id.clone())
+        .unwrap_or_else(|_| arg.to_owned());
+    let ep = hooks::Endpoint::load_or_create(&e.state).map_err(usage)?;
+    let sock = hooks::socket_path(&e.state, std::path::Path::new("/tmp")).map_err(usage)?;
+    let bound = hooks::bind_socket(&sock).map_err(usage)?;
+    bound.set_nonblocking(true)?;
+    let ours = std::fs::metadata(&sock)?.uid();
+    let tapper = Arc::new(Mutex::new(
+        tap::Tap::open(&e.taps(), &id, redactor).map_err(usage)?,
+    ));
+    let dirty = Arc::new(AtomicBool::new(false));
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        let listener = tokio::net::UnixListener::from_std(bound)?;
+        eprintln!("listening on {} (owner-only unix socket) for hook events of session {}; Ctrl-C stops", sock.display(), aibus_trace::view::clean(&id, 64));
+        let mut tick = tokio::time::interval(Duration::from_millis(500));
+        // At most 16 connections at once; a client that is slow to send its headers, its body or
+        // anything at all is cut off, so one local process cannot hold the receiver.
+        let slots = Arc::new(tokio::sync::Semaphore::new(16));
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {
+                    if dirty.swap(false, Ordering::Relaxed) {
+                        let cached = serde_json::to_vec(&list_json(&list)).unwrap_or_default();
+                        match show::tap(e, &|| Ok(cached.clone()), redactor, &id) {
+                            Ok(t) => println!("\n--- {} ---\n{t}", aibus_core::persist::time::rfc3339(SystemTime::now())),
+                            Err(err) => eprintln!("{err}"),
+                        }
+                    }
+                }
+                conn = listener.accept() => {
+                    let Ok((stream, _)) = conn else { continue };
+                    // Same user only: the socket is 0600 in a 0700 directory, and the peer is checked too.
+                    if stream.peer_cred().map_or(true, |c| c.uid() != ours) { continue; }
+                    let Ok(slot) = slots.clone().try_acquire_owned() else { continue };
+                    let (ep, tapper, dirty) = (ep.clone(), tapper.clone(), dirty.clone());
+                    tokio::spawn(async move {
+                        let svc = service_fn(move |req| receive(req, ep.clone(), tapper.clone(), dirty.clone()));
+                        let conn = hyper::server::conn::http1::Builder::new()
+                            .timer(TokioTimer::new())
+                            .header_read_timeout(Duration::from_secs(2))
+                            .serve_connection(TokioIo::new(stream), svc);
+                        let _ = tokio::time::timeout(Duration::from_secs(10), conn).await;
+                        drop(slot);
+                    });
+                }
+            }
+        }
+    })
 }
 
 /// The list as `claude agents --json` printed it, for re-rendering without asking again.

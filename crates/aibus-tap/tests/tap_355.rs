@@ -319,7 +319,7 @@ fn install_files_write_a_0700_script_and_0600_files_and_keep_the_token_out_of_th
     assert!(fs::read_to_string(dir.join("hook.url"))
         .unwrap()
         .contains("http://localhost/aibus-tap/hook"));
-    assert!(fs::read_to_string(dir.join("hook.sock"))
+    assert!(fs::read_to_string(dir.join("hook.target"))
         .unwrap()
         .trim()
         .ends_with(".sock"));
@@ -377,7 +377,7 @@ fn script_for() -> (tempfile::TempDir, PathBuf, PathBuf) {
     };
     let script = hooks::install_files(tmp.path(), &ep).unwrap();
     let sock = PathBuf::from(
-        fs::read_to_string(script.parent().unwrap().join("hook.sock"))
+        fs::read_to_string(script.parent().unwrap().join("hook.target"))
             .unwrap()
             .trim(),
     );

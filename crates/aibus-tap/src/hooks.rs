@@ -1,9 +1,9 @@
 //! The hook entries in the user's settings.
 //!
 //! Six `command` hooks, one per event, each running a small script that aibus keeps in its own
-//! state directory (0700). The script reads the receiver's url and the token from 0600 files next
-//! to it, posts the event to the loopback receiver with a one second limit, prints nothing and
-//! always exits 0: whatever the receiver answers (or whoever holds the port) is thrown away, so
+//! state directory (0700). The script reads the receiver's socket and the token from 0600 files next
+//! to it, posts the event to the receiver's owner-only unix socket with a one second limit, prints nothing and
+//! always exits 0: whatever the receiver answers (or whatever is on the other end) is thrown away, so
 //! no reply can decide a permission prompt or add text to the session, and a receiver that is not
 //! there, or never answers, costs the session one second at most. The token is never in settings.
 //! Nothing is written to the settings without `confirm` having seen the exact diff.
@@ -41,14 +41,16 @@ pub const HOOK_PATH: &str = "/aibus-tap/hook";
 pub const SCRIPT_NAME: &str = "aibus-tap-hook.sh";
 
 const SCRIPT: &str = r#"#!/bin/sh
-# aibus tap hook (#355). Posts the hook event on stdin to the loopback receiver of
+# aibus tap hook (#355). Posts the hook event on stdin to the owner-only unix socket of
 # `aibus sessions tap --follow`. It never prints, never reads the reply and always exits 0, so it
 # cannot allow, deny or add anything to the session, and it gives up after one second.
-d=$(dirname "$0")
-[ -r "$d/hook.url" ] && [ -r "$d/hook.header" ] || exit 0
+exec 2>/dev/null
+d=${0%/*}
+[ -r "$d/hook.target" ] && [ -r "$d/hook.url" ] && [ -r "$d/hook.header" ] || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
-curl -s -m 1 --connect-timeout 1 -o /dev/null -H @"$d/hook.header" \
-  -H 'Content-Type: application/json' --data-binary @- "$(cat "$d/hook.url")" >/dev/null 2>&1
+read -r sock < "$d/hook.target"
+read -r url < "$d/hook.url"
+curl -s -m 1 --connect-timeout 1 -o /dev/null --unix-socket "$sock" -H @"$d/hook.header"   -H 'Content-Type: application/json' --data-binary @- "$url" >/dev/null 2>&1
 exit 0
 "#;
 
@@ -165,7 +167,7 @@ pub fn install_files(state: &Path, ep: &Endpoint) -> Result<PathBuf, String> {
     let sock = socket_path(state, Path::new("/tmp"))?;
     write_private(
         &dir,
-        &dir.join("hook.sock"),
+        &dir.join("hook.target"),
         format!("{}\n", sock.display()).as_bytes(),
         0o600,
     )?;
@@ -174,16 +176,111 @@ pub fn install_files(state: &Path, ep: &Endpoint) -> Result<PathBuf, String> {
     Ok(std::fs::canonicalize(&script).unwrap_or(script))
 }
 
-/// Where the receiver's socket is: `<state>/tap/hook.sock`, or, when that path is too long for
-/// `sun_path` (104 bytes on macOS), `<short>/aibus-<uid>/tap-<hash>.sock`. Never TCP.
-pub fn socket_path(state: &Path, _short: &Path) -> Result<PathBuf, String> {
-    Ok(state.join("tap").join("hook.sock"))
+/// The most bytes a socket path may have: `sun_path` takes 104 on macOS and 108 on Linux.
+const SOCKET_PATH_MAX: usize = 100;
+
+fn uid() -> u32 {
+    rustix::process::getuid().as_raw()
 }
 
-/// Binds the receiver's socket: the directory must be this user's and closed to others, a stale
-/// socket of ours is replaced, anything else in the way is refused, and the socket is 0600.
-pub fn bind_socket(_path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
-    Err("not implemented".into())
+/// Where the receiver's socket is: `<state>/tap/hook.sock`, or, when that path is too long for
+/// `sun_path` (macOS allows 104 bytes), `<short>/aibus-<uid>/tap-<hash of state>.sock`, the way the
+/// control sockets do it. It is never a TCP port: too long everywhere is an error.
+pub fn socket_path(state: &Path, short: &Path) -> Result<PathBuf, String> {
+    let own = state.join("tap").join("hook.sock");
+    if own.as_os_str().len() <= SOCKET_PATH_MAX {
+        return Ok(own);
+    }
+    let hash = aibus_trace::sha256_hex(state.as_os_str().as_encoded_bytes());
+    let p = short
+        .join(format!("aibus-{}", uid()))
+        .join(format!("tap-{}.sock", &hash[..12]));
+    if p.as_os_str().len() > SOCKET_PATH_MAX {
+        return Err(format!(
+            "the socket path {} is too long for a unix socket (over {SOCKET_PATH_MAX} bytes) and so is the short one; set a shorter XDG_STATE_HOME",
+            own.display()
+        ));
+    }
+    Ok(p)
+}
+
+/// Binds the receiver's socket: its directory must be this user's, not a link and closed to
+/// others (made 0700 when missing); something that is not a socket of ours in the way is refused
+/// and left alone; a stale socket of ours (nothing answers on it) is replaced and a live one is
+/// not; the new socket is 0600.
+pub fn bind_socket(path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+    let dir = path.parent().ok_or("the socket has no directory")?;
+    if std::fs::symlink_metadata(dir).is_err() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let m = std::fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if !m.is_dir() || m.uid() != uid() || m.permissions().mode() & 0o077 != 0 {
+        return Err(format!(
+            "{} has to be a private directory of yours (0700, not a link)",
+            dir.display()
+        ));
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_socket() && m.uid() == uid() => {
+            if std::os::unix::net::UnixStream::connect(path).is_ok() {
+                return Err(format!(
+                    "another aibus is already listening on {}",
+                    path.display()
+                ));
+            }
+            std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        Ok(_) => {
+            return Err(format!(
+                "{} is in the way and is not a socket of yours; aibus leaves it alone",
+                path.display()
+            ))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    }
+    let l = std::os::unix::net::UnixListener::bind(path)
+        .map_err(|e| format!("cannot listen on {}: {e}", path.display()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(l)
+}
+
+/// Writes `file` in `dir` through a temporary file of this process's own name, then renames it
+/// over: a reader sees the old file or the new one, never an empty one, and two writers do not
+/// share a temporary file.
+fn write_atomic(dir: &Path, file: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let name = file
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let tmp = dir.join(format!(
+        ".{name}.aibus-tmp.{}.{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(mode))?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, file)
+    };
+    write().map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{}: {e}", file.display())
+    })
 }
 
 /// The settings `command` string for a script path, quoted for a shell when it needs it.
@@ -429,11 +526,9 @@ pub fn apply(
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     if !old_text.is_empty() {
         let backup = dir.join(format!("{name}.aibus-before"));
-        write_private(dir, &backup, old_text.as_bytes(), mode)?;
+        write_atomic(dir, &backup, old_text.as_bytes(), mode)?;
     }
-    let tmp = dir.join(format!("{name}.aibus-tmp"));
-    write_private(dir, &tmp, new_text.as_bytes(), mode)?;
-    std::fs::rename(&tmp, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+    write_atomic(dir, &target, new_text.as_bytes(), mode)?;
     Ok(Outcome::Changed)
 }
 

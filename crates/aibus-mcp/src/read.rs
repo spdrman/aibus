@@ -3,7 +3,8 @@
 //! share with them. Nothing here writes, runs a model or reads anything but a workflow file and
 //! the agent definitions; every value that leaves goes through the redactor.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use aibus_core::agent::{self, def::model_str, def::to_json, Scope};
@@ -356,11 +357,24 @@ fn text_of<'a>(map: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 }
 
 impl Server {
-    /// Paths and error text with the project directory and the home directory made short.
+    /// Paths and error text with the project directory and the home directory made short. Each is
+    /// matched by its real path first (a Mac's `/var/...` is `/private/var/...` once resolved, and
+    /// the paths the tools report are resolved), then as given.
     pub(crate) fn shorten(&self, text: &str) -> String {
-        let mut out = text.replace(&format!("{}/", self.project.display()), "");
+        let forms = |dir: &Path| {
+            let mut forms: Vec<String> = fs::canonicalize(dir).into_iter().map(|d| d.display().to_string()).collect();
+            forms.push(dir.display().to_string());
+            forms.dedup();
+            forms
+        };
+        let mut out = text.to_owned();
+        for project in forms(&self.project) {
+            out = out.replace(&format!("{}/", project.trim_end_matches('/')), "");
+        }
         if let Some(home) = &self.home {
-            out = out.replace(&home.display().to_string(), "~");
+            for home in forms(home) {
+                out = out.replace(&home, "~");
+            }
         }
         out
     }

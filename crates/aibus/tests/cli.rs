@@ -54,9 +54,13 @@ fn config_path_shows_both_files_and_honours_the_overrides() {
     let home = xdg_temp();
     let out = aibus(home.path(), &["config", "path"]);
     let h = home.path().display();
+    // The project line comes from the process's working directory, which is the resolved path
+    // (`/private/var/...` where the temp dir is `/var/...`); the user line comes from `HOME` as set.
+    let real = fs::canonicalize(home.path()).unwrap();
+    let r = real.display();
     assert_eq!(
         stdout(&out),
-        format!("user\t{h}/.config/aibus/config.toml\nproject\t{h}/proj/.aibus/settings.toml\n")
+        format!("user\t{h}/.config/aibus/config.toml\nproject\t{r}/proj/.aibus/settings.toml\n")
     );
     let out = command(home.path())
         .env("XDG_CONFIG_HOME", "/xdg/c")

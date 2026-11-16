@@ -3,7 +3,8 @@
 //! share with them. Nothing here writes, runs a model or reads anything but a workflow file and
 //! the agent definitions; every value that leaves goes through the redactor.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use aibus_core::agent::{self, def::model_str, def::to_json, Scope};
@@ -356,11 +357,17 @@ fn text_of<'a>(map: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 }
 
 impl Server {
-    /// Paths and error text with the project directory and the home directory made short.
+    /// Paths and error text with the project directory and the home directory made short. Each is
+    /// matched by its real path first (a Mac's `/var/...` is `/private/var/...` once resolved, and
+    /// the paths the tools report are resolved), then as given, and only as a whole path
+    /// component run: `/home/abc` is not under `/home/ab`.
     pub(crate) fn shorten(&self, text: &str) -> String {
-        let mut out = text.replace(&format!("{}/", self.project.display()), "");
-        if let Some(home) = &self.home {
-            out = out.replace(&home.display().to_string(), "~");
+        let mut out = text.to_owned();
+        for dir in &self.project_forms {
+            out = replace_dir(&out, dir, "", true);
+        }
+        for dir in &self.home_forms {
+            out = replace_dir(&out, dir, "~", false);
         }
         out
     }
@@ -689,4 +696,100 @@ fn explain(wf: &Workflow) -> Value {
         steps.push(row);
     }
     json!({ "steps": steps, "edges": edges })
+}
+
+/// `dir` as its resolved form (when it exists) and as given, without a trailing slash. A root or
+/// empty `dir` has no forms: shortening by it would garble every path.
+pub(crate) fn path_forms(dir: &Path) -> Vec<String> {
+    let mut forms: Vec<String> = fs::canonicalize(dir).into_iter().chain([dir.to_path_buf()]).map(|d| d.display().to_string()).collect();
+    forms.iter_mut().for_each(|f| *f = f.trim_end_matches('/').to_owned());
+    forms.retain(|f| !f.is_empty());
+    forms.dedup();
+    forms
+}
+
+/// `text` with each occurrence of `dir` that starts a path (at the start or after a character
+/// that cannot be in a path) and ends it or is followed by `/` replaced by `with`. With `strip`
+/// the following `/` goes too, so `/proj/a` becomes `a` and `/proj` becomes `.`.
+fn replace_dir(text: &str, dir: &str, with: &str, strip: bool) -> String {
+    let in_path = |c: char| c.is_alphanumeric() || "/._-~+@%".contains(c);
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (i, _) in text.match_indices(dir) {
+        let end = i + dir.len();
+        let before = text[..i].chars().next_back();
+        let after = text[end..].chars().next();
+        if i < at || before.is_some_and(in_path) || after.is_some_and(|c| c != '/' && in_path(c)) {
+            continue;
+        }
+        out.push_str(&text[at..i]);
+        // With `strip`, `/proj/a` is `a`, but the project itself (nothing after it, or only a
+        // closing `/`) is `.`, never an empty string.
+        let below = after == Some('/') && text[end + 1..].chars().next().is_some_and(in_path);
+        out.push_str(if strip && !below { "." } else { with });
+        at = if strip && after == Some('/') { end + 1 } else { end };
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use aibus_core::Redactor;
+
+    use crate::{Caps, Server};
+
+    fn server(home: Option<&str>) -> Server {
+        let xdg = aibus_testkit::xdg_temp();
+        let paths = &xdg.paths;
+        Server::new(Caps::default(), "/w/proj".into(), paths, home.map(Into::into), Redactor::new()).unwrap()
+    }
+
+    /// #349: a prefix only counts at a path boundary, never in the middle of a name or path.
+    #[test]
+    fn shorten_matches_only_at_path_boundaries() {
+        let s = server(Some("/home/ab"));
+        assert_eq!(s.shorten("/home/abc/f"), "/home/abc/f");
+        assert_eq!(s.shorten("/x/w/proj/a"), "/x/w/proj/a");
+        assert_eq!(s.shorten("/data/home/ab/x"), "/data/home/ab/x");
+        assert_eq!(s.shorten("/w/proj/a and /home/ab/f"), "a and ~/f");
+        assert_eq!(s.shorten("cannot read '/home/ab': gone"), "cannot read '~': gone");
+        // A home given with a trailing slash still shortens as `~/f`.
+        assert_eq!(server(Some("/home/ab/")).shorten("/home/ab/f"), "~/f");
+    }
+
+    /// #349: an empty or root home (`HOME=""`, `HOME=/`) shortens nothing.
+    #[test]
+    fn shorten_ignores_an_empty_or_root_home() {
+        for home in ["", "/"] {
+            assert_eq!(server(Some(home)).shorten("/etc/a: no /usr/b"), "/etc/a: no /usr/b", "home {home:?}");
+        }
+    }
+
+    /// #366: a path that is the project or the home itself is `.` or `~`, never an empty string.
+    #[test]
+    fn shorten_names_the_project_and_home_themselves() {
+        let s = server(Some("/home/ab"));
+        assert_eq!(s.shorten("cannot read /w/proj"), "cannot read .");
+        assert_eq!(s.shorten("cannot read /w/proj/"), "cannot read .");
+        assert_eq!(s.shorten("'/w/proj': gone"), "'.': gone");
+        assert_eq!(s.shorten("cannot read /home/ab"), "cannot read ~");
+        assert_eq!(s.shorten("cannot read /home/ab/"), "cannot read ~/");
+    }
+
+    /// #366: the same for the project's resolved form, reached through a symlink.
+    #[cfg(unix)]
+    #[test]
+    fn shorten_names_the_project_by_its_resolved_form() {
+        let xdg = aibus_testkit::xdg_temp();
+        let real = xdg.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = xdg.path().join("via");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let s = Server::new(Caps::default(), link.clone(), &xdg.paths, None, Redactor::new()).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap();
+        for dir in [resolved.display().to_string(), format!("{}/", resolved.display()), link.display().to_string()] {
+            assert_eq!(s.shorten(&format!("cannot read {dir}")), "cannot read .", "{dir}");
+        }
+    }
 }

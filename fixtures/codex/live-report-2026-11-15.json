@@ -1,0 +1,22 @@
+{
+  "attempt_status": "completed",
+  "cli": "codex",
+  "cli_version": "codex-cli 0.167.0",
+  "ending": "Exited(0)",
+  "events": 7,
+  "evidence_levels": {
+    "observed": 7
+  },
+  "extension": "org.devshell.aibus.codex-cli",
+  "kinds": {
+    "attempt_completed": 1,
+    "attempt_started": 1,
+    "message_chunk": 1,
+    "trace_warning": 3,
+    "usage_reported": 1
+  },
+  "note": "One live turn, n=1, a one-word prompt. Not a benchmark.",
+  "parsers": {
+    "declarative-jsonl/1": 7
+  }
+}

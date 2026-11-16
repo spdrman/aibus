@@ -74,11 +74,21 @@ pub enum RuleKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Condition {
+    pub pointer: String,
+    pub equals: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     /// JSON pointer to a string in the line (`/type`).
     pub pointer: String,
     pub equals: String,
     pub kind: RuleKind,
+    /// More conditions the same line has to meet (schema 2).
+    #[serde(default)]
+    pub when: Vec<Condition>,
     /// Pointer to the tool use id, for the tool kinds.
     pub id_pointer: Option<String>,
     /// Pointers to token counts, for `usage_reported`. A missing number stays `unknown`.
@@ -914,6 +924,16 @@ impl Manifest {
             ));
         }
         for r in &n.rule {
+            // Conditions are schema 2: a host that reads only schema 1 never sees a rule with one.
+            if r.when.len() > 3 || (!r.when.is_empty() && !schema_2) {
+                return Err(bad(
+                    "normalizer.rule",
+                    "when is for schema 2 and takes at most three conditions",
+                ));
+            }
+            for c in &r.when {
+                text("normalizer.rule", &c.equals, 128)?;
+            }
             for p in [
                 Some(&r.pointer),
                 r.id_pointer.as_ref(),
@@ -921,6 +941,7 @@ impl Manifest {
                 r.tokens_out_pointer.as_ref(),
             ]
             .into_iter()
+            .chain(r.when.iter().map(|c| Some(&c.pointer)))
             .flatten()
             {
                 matches_re(

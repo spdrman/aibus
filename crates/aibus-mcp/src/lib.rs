@@ -156,7 +156,9 @@ pub struct Server {
     caps: Caps,
     project: PathBuf,
     config: PathBuf,
-    home: Option<PathBuf>,
+    /// What `shorten` strips and puts `~` for, worked out once: the real and as-given forms.
+    project_forms: Vec<String>,
+    home_forms: Vec<String>,
     audit: AuditLog,
     limiter: Mutex<RateLimiter>,
     write_limiter: Mutex<RateLimiter>,
@@ -213,9 +215,10 @@ impl Server {
         );
         Ok(Self {
             caps,
-            project,
             config: paths.config.clone(),
-            home,
+            project_forms: read::path_forms(&project),
+            home_forms: home.as_deref().map(read::path_forms).unwrap_or_default(),
+            project,
             audit,
             limiter: Mutex::new(RateLimiter::new(CALLS_PER_MINUTE, Instant::now())),
             write_limiter: Mutex::new(RateLimiter::new(WRITES_PER_MINUTE, Instant::now())),

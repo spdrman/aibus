@@ -156,6 +156,22 @@ fn create_writes_atomically_and_the_file_parses() {
     assert_eq!(fs::read(&file).unwrap(), bytes);
 }
 
+/// #349: the project reached through a symlink (on a Mac, `/var` is one into `/private/var`)
+/// still gets its written path shortened, with the separator kept.
+#[cfg(unix)]
+#[test]
+fn the_shortened_path_survives_a_project_reached_through_a_symlink() {
+    let home = aibus_testkit::xdg_temp();
+    let real = home.path().join("real");
+    fs::create_dir_all(real.join("proj/.aibus")).unwrap();
+    let link = home.path().join("via");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let server = aibus_mcp::Server::new(caps(false), link.join("proj"), &home.paths, None, Redactor::new()).unwrap();
+    let r = create(&server, "ship", "project", FLOW);
+    assert!(!is_error(&r), "{r}");
+    assert_eq!(r["structuredContent"]["path"], ".aibus/workflows/ship.toml");
+}
+
 #[test]
 fn the_user_scope_makes_its_directory_and_the_project_scope_needs_aibus() {
     let (server, home) = common::server(caps(false), Redactor::new());

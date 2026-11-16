@@ -467,9 +467,11 @@ fn remove(name: &str, file: &Path, io: &mut Io) -> Result<(), AibusError> {
     Ok(())
 }
 
-/// Forgets an OpenRouter key and disables the account (#359). aibus holds the key and nothing
-/// else: ending it at OpenRouter is the user's step, so the output says the key is still valid
-/// there until they do. Another provider's sign-in is its own CLI's, and is not touched.
+/// Forgets an OpenRouter key and disables the account (#359), and says what it really did. aibus
+/// holds a key only in the keychain: a key in an environment variable or a file is the user's to
+/// remove, and with no keychain nothing was removed, which fails (and leaves the account as it
+/// was). Ending the key at OpenRouter is the user's step in every case, so the output says it is
+/// still valid there. Another provider's sign-in is its own CLI's, and is not touched.
 fn revoke(name: &str, file: &Path, io: &mut Io) -> Result<(), AibusError> {
     let a = find(file, name)?;
     if !crate::oauth::is_openrouter(&a.provider, a.base_url.as_deref()) {
@@ -477,15 +479,16 @@ fn revoke(name: &str, file: &Path, io: &mut Io) -> Result<(), AibusError> {
             "{name} is not an OpenRouter account; revoke is only for OpenRouter keys (a vendor CLI's sign-in belongs to that CLI)"
         )));
     }
-    if matches!(a.key_ref(), Some(KeyRef::Keyring { .. })) {
-        match store(io).remove(&a.account_name()) {
-            Ok(()) => {}
-            Err(CredentialError::NoKeychain(why)) => {
-                eprintln!("aibus: warning: no keychain ({why}), nothing was removed from it");
-            }
-            Err(e) => return Err(e.into()),
+    let local = match a.key_ref() {
+        Some(KeyRef::Keyring { .. }) => {
+            store(io).remove(&a.account_name())?;
+            "removed from the keychain".to_owned()
         }
-    }
+        Some(other) => format!(
+            "not removed: it lives in {other}, which aibus does not edit, so remove it there yourself"
+        ),
+        None => "there was no key reference to remove".to_owned(),
+    };
     edit(file, |accounts| {
         if let Some(t) = accounts.iter_mut().find(|t| name_of(t) == Some(name)) {
             t.insert("enabled", value(false));
@@ -494,7 +497,7 @@ fn revoke(name: &str, file: &Path, io: &mut Io) -> Result<(), AibusError> {
     })?;
     writeln!(
         io.out,
-        "revoked {name}: the key is out of the keychain and the account is disabled.\n\
+        "revoked {name} locally: the key is {local}, and the account is disabled.\n\
          The key is still valid at OpenRouter, so it is not revoked there: delete it at https://openrouter.ai/settings/keys.\n\
          `aibus account add {name} --provider openrouter --oauth` signs in again."
     )?;

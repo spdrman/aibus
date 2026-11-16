@@ -464,9 +464,25 @@ pub fn compile(
                     "isolation": s.isolation,
                 }),
                 Runtime::ClaudeCli => claude_invocation(wf, agents, i, &prompt_sha),
-                Runtime::CodexCli | Runtime::GeminiCli | Runtime::OpenRouter => {
-                    json!({ "kind": "todo" })
-                }
+                Runtime::CodexCli | Runtime::GeminiCli => json!({
+                    "kind": "cli_run",
+                    "extension": if s.runtime == Runtime::CodexCli {
+                        "org.devshell.aibus.codex-cli"
+                    } else {
+                        "org.devshell.aibus.gemini-cli"
+                    },
+                    "agent": s.agent.as_str(),
+                    "prompt_via": "stdin",
+                    "parent": parent.map(|p| wf.key(p)),
+                }),
+                Runtime::OpenRouter => json!({
+                    "kind": "openrouter_run",
+                    "agent": s.agent.as_str(),
+                    "billing": "separate_openrouter_credits",
+                    "credential": "the openrouter account's own key only",
+                    "needs": "the user's approval for this run",
+                    "parent": parent.map(|p| wf.key(p)),
+                }),
                 Runtime::Attached => json!({
                     "kind": "attached_session",
                     "agent": s.agent.as_str(),

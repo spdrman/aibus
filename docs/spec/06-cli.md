@@ -9,7 +9,7 @@ aibus [OPTIONS] [PROMPT]                 open the TUI (optionally with a first p
 aibus run [OPTIONS] <PROMPT>             headless session, NDJSON events on stdout
 aibus agent  list | show <name> | new <name> | validate [path] | import <dir> | where
 aibus account add <name> --provider <id> [--key-stdin|--env VAR|--file PATH] [--base-url URL] [--label TEXT]
-             list | show <name> | test <name> | remove <name> | enable|disable <name>
+             list | show <name> | test <name> | remove <name> | enable|disable <name> | revoke <name>   (revoke: OpenRouter keys only)
 aibus session list | show <id> | resume <id> [--run <run-id>] [MESSAGE] | export <id> [--format md|jsonl] | log <id> | replay <id> | prune [--older-than 30d]
 aibus handoff create [--topic T] [--outcome O] | list | show [PATH]
 aibus ledger show | new <topic> | update <section> <text>

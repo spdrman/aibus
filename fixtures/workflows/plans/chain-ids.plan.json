@@ -85,7 +85,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -114,7 +114,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -126,12 +126,12 @@
         "step": "check"
       }
     ],
-    "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8"
+    "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4"
   },
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:e14cfbe5cfdb16727c9c3270063a025ff57b0cfa778b0e94e60abace79f2402b",
+  "plan_hash": "sha256:9ebd6f704ba7222c67a4ec3381e2147452fc449d27d3d3c205e9a1da1a892488",
   "plan_only_because": null,
   "prompts": {
     "sha256:1df96bee67e80df75cc3a55dbdee0dcd01fb22f7a8eb72b3630b9c67d1e0e546": "Draft a fix for: {{input}}",

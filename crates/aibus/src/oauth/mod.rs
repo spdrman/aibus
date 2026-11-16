@@ -67,14 +67,18 @@ pub struct Def {
     pub result: Outcome,
 }
 
+/// Whether an account is OpenRouter's: the `openrouter` id, or `openai-compatible` pointed at
+/// openrouter.ai. The login and the revoke and billing commands share this one answer.
+pub fn is_openrouter(provider: &str, base_url: Option<&str>) -> bool {
+    let host = base_url.and_then(|u| Url::parse(u).ok()).and_then(|u| u.host_str().map(str::to_owned));
+    provider == "openrouter" || (provider == "openai-compatible" && host.as_deref() == Some("openrouter.ai"))
+}
+
 /// The login a provider offers, if any. OpenRouter's PKCE flow needs no client registration
 /// and returns a durable key. It matches the `openrouter` id, and `openai-compatible` pointed
 /// at openrouter.ai until the provider list carries its own entry.
 pub fn definition(provider: &str, base_url: Option<&str>) -> Option<Def> {
-    let host = base_url.and_then(|u| Url::parse(u).ok()).and_then(|u| u.host_str().map(str::to_owned));
-    let openrouter = provider == "openrouter"
-        || (provider == "openai-compatible" && host.as_deref() == Some("openrouter.ai"));
-    openrouter.then(|| Def {
+    is_openrouter(provider, base_url).then(|| Def {
         kind: Kind::PkceLoopback,
         authorize_url: "https://openrouter.ai/auth".into(),
         token_url: "https://openrouter.ai/api/v1/auth/keys".into(),

@@ -56,7 +56,7 @@ pub fn run(cmd: &AccountCmd, json: bool, io: &mut Io) -> Result<u8, AibusError> 
         AccountCmd::Remove { name } => remove(name, &file, io)?,
         AccountCmd::Enable { name } => set_enabled(name, true, &file, io)?,
         AccountCmd::Disable { name } => set_enabled(name, false, &file, io)?,
-        AccountCmd::Revoke { .. } => {}
+        AccountCmd::Revoke { name } => revoke(name, &file, io)?,
     }
     Ok(0)
 }
@@ -312,7 +312,7 @@ fn status(a: &Account, store: &CredentialStore) -> &'static str {
 
 /// What `list --json` and `show --json` print: where the key lives, never the key.
 fn view(a: &Account, status: &str) -> Value {
-    json!({
+    let mut v = json!({
         "name": a.name,
         "provider": a.provider,
         "label": a.label.as_deref().unwrap_or(&a.name),
@@ -325,7 +325,18 @@ fn view(a: &Account, status: &str) -> Value {
         "tags": a.tags,
         "aliases": a.aliases,
         "status": status,
-    })
+    });
+    // OpenRouter is the one direct API runtime, so its account says what is different about it.
+    if crate::oauth::is_openrouter(&a.provider, a.base_url.as_deref()) {
+        v["runtime"] = json!({
+            "billing": "separate_openrouter_credits",
+            "uses_subscription_allowance": false,
+            "models": "downstream, chosen per request",
+            "data_transfer": "prompts go to OpenRouter and to the model provider it routes to",
+            "fallback": "only after you approve it for a run",
+        });
+    }
+    v
 }
 
 fn list(file: &Path, json: bool, names: bool, io: &mut Io) -> Result<(), AibusError> {
@@ -453,6 +464,40 @@ fn remove(name: &str, file: &Path, io: &mut Io) -> Result<(), AibusError> {
         Ok(())
     })?;
     writeln!(io.out, "removed {name}")?;
+    Ok(())
+}
+
+/// Forgets an OpenRouter key and disables the account (#359). aibus holds the key and nothing
+/// else: ending it at OpenRouter is the user's step, so the output says the key is still valid
+/// there until they do. Another provider's sign-in is its own CLI's, and is not touched.
+fn revoke(name: &str, file: &Path, io: &mut Io) -> Result<(), AibusError> {
+    let a = find(file, name)?;
+    if !crate::oauth::is_openrouter(&a.provider, a.base_url.as_deref()) {
+        return Err(AibusError::Usage(format!(
+            "{name} is not an OpenRouter account; revoke is only for OpenRouter keys (a vendor CLI's sign-in belongs to that CLI)"
+        )));
+    }
+    if matches!(a.key_ref(), Some(KeyRef::Keyring { .. })) {
+        match store(io).remove(&a.account_name()) {
+            Ok(()) => {}
+            Err(CredentialError::NoKeychain(why)) => {
+                eprintln!("aibus: warning: no keychain ({why}), nothing was removed from it");
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    edit(file, |accounts| {
+        if let Some(t) = accounts.iter_mut().find(|t| name_of(t) == Some(name)) {
+            t.insert("enabled", value(false));
+        }
+        Ok(())
+    })?;
+    writeln!(
+        io.out,
+        "revoked {name}: the key is out of the keychain and the account is disabled.\n\
+         The key is still valid at OpenRouter, so it is not revoked there: delete it at https://openrouter.ai/settings/keys.\n\
+         `aibus account add {name} --provider openrouter --oauth` signs in again."
+    )?;
     Ok(())
 }
 

@@ -471,7 +471,7 @@ impl Workflow {
         if !self.approvals.is_empty() {
             uses.push("[approvals]");
         }
-        if self.steps.iter().any(|s| s.runtime == Runtime::ClaudeCli) {
+        if self.steps.iter().any(|s| !matches!(s.runtime, Runtime::Aibus | Runtime::Attached)) {
             uses.push("a runtime other than aibus");
         }
         if self.steps.iter().any(|s| s.mode != Mode::AibusManaged || s.parent.is_some()) {

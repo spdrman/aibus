@@ -133,7 +133,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -162,7 +162,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -191,7 +191,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -220,7 +220,7 @@
             "aibus"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8",
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -232,12 +232,12 @@
         "step": "general#4"
       }
     ],
-    "policy_revision": "sha256:eed4f3748ea9e9cf3403340a607a7dddc6c5c7b154fed968b42681d5ef070aa8"
+    "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4"
   },
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:1eaf2cd04888e67c86043fbb7bf37bd7898270d656d284f61de17dabf655362c",
+  "plan_hash": "sha256:dcbccf93197a3fd3e95d45dbb1284bd46ea2cfa041af8ab1ea59308cfb04e734",
   "plan_only_because": null,
   "prompts": {
     "sha256:3458bae05aa0b647229604f9ef2633ce10f2840dc62c610658491449d1be7062": "Verify the fix: run the project's tests and report what passed and what failed. Problem: {{input}}",

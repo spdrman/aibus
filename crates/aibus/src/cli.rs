@@ -700,6 +700,7 @@ mod tests {
         "account show",
         "account test",
         "account remove",
+        "account revoke",
         "account enable",
         "account disable",
         "session list",

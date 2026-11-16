@@ -54,6 +54,13 @@
         "string",
         "null"
       ]
+    },
+    "approved": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Runtimes the user approved for this run. Only openrouter needs it: it is separately billed and sends the prompt to a third party, so it is never picked without it. Omitted when empty."
     }
   }
 }

@@ -216,9 +216,14 @@ fn endpoint_token(home: &Path) -> String {
     v["token"].as_str().unwrap().to_owned()
 }
 
-fn post(port: u16, host: &str, auth: &str, body: &[u8]) -> String {
+/// The socket `--follow` listens on, where aibus puts it for this state directory.
+fn sock_path(home: &Path) -> PathBuf {
+    aibus_tap::hooks::socket_path(&home.join("state/aibus"), Path::new("/tmp")).unwrap()
+}
+
+fn post(sock: &Path, host: &str, auth: &str, body: &[u8]) -> String {
     use std::io::{Read, Write};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = std::os::unix::net::UnixStream::connect(sock).unwrap();
     let head = format!(
         "POST /aibus-tap/hook HTTP/1.1\r\nHost: {host}\r\nAuthorization: {auth}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
@@ -249,22 +254,31 @@ fn follow_takes_hook_posts_with_the_token_only_and_records_the_tapped_session() 
     let mut err = BufReader::new(child.stderr.take().unwrap());
     let mut first = String::new();
     err.read_line(&mut first).unwrap();
-    assert!(first.contains("listening on http://127.0.0.1:"), "{first}");
+    assert!(
+        first.contains("listening on") && first.contains("hook.sock"),
+        "{first}"
+    );
     let ep: serde_json::Value = serde_json::from_slice(
         &fs::read(home.path().join("state/aibus/tap/endpoint.json")).unwrap(),
     )
     .unwrap();
-    let port = ep["port"].as_u64().unwrap() as u16;
+    let sock = sock_path(home.path());
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let m = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m(&sock), 0o600, "the socket is the user's alone");
+        assert_eq!(m(sock.parent().unwrap()), 0o700);
+    }
     let token = ep["token"].as_str().unwrap();
     let hooks = fs::read_to_string(fixture("hooks.jsonl")).unwrap();
     let line = hooks.lines().nth(2).unwrap().as_bytes();
-    let h = format!("127.0.0.1:{port}");
-    assert!(post(port, &h, "Bearer nope", line).contains("401"));
-    assert!(post(port, "evil.example", &format!("Bearer {token}"), line).contains("404"));
-    assert!(post(port, &h, &format!("Bearer {token}"), line).contains("200"));
+    let h = "localhost".to_owned();
+    assert!(post(&sock, &h, "Bearer nope", line).contains("401"));
+    assert!(post(&sock, "evil.example", &format!("Bearer {token}"), line).contains("404"));
+    assert!(post(&sock, &h, &format!("Bearer {token}"), line).contains("200"));
     // Another session's event is answered and dropped.
     let other = br#"{"session_id":"33333333-3333-4333-8333-333333333333","hook_event_name":"SessionStart"}"#;
-    assert!(post(port, &h, &format!("Bearer {token}"), other).contains("200"));
+    assert!(post(&sock, &h, &format!("Bearer {token}"), other).contains("200"));
     child.kill().unwrap();
     child.wait().unwrap();
     let events = fs::read_to_string(
@@ -306,11 +320,11 @@ fn a_slow_client_does_not_hold_the_receiver() {
         &fs::read(home.path().join("state/aibus/tap/endpoint.json")).unwrap(),
     )
     .unwrap();
-    let port = ep["port"].as_u64().unwrap() as u16;
+    let sock = sock_path(home.path());
     let token = ep["token"].as_str().unwrap().to_owned();
     // Forty clients that connect and say nothing, then half a request line.
-    let mut slow: Vec<std::net::TcpStream> = (0..40)
-        .map(|_| std::net::TcpStream::connect(("127.0.0.1", port)).unwrap())
+    let mut slow: Vec<std::os::unix::net::UnixStream> = (0..40)
+        .map(|_| std::os::unix::net::UnixStream::connect(&sock).unwrap())
         .collect();
     for s in slow.iter_mut().take(10) {
         s.write_all(b"POST /aibus-tap/hook HTTP/1.1\r\nHost: ")
@@ -330,9 +344,9 @@ fn a_slow_client_does_not_hold_the_receiver() {
         t.elapsed()
     );
     let hooks = fs::read_to_string(fixture("hooks.jsonl")).unwrap();
-    let h = format!("127.0.0.1:{port}");
+    let h = "localhost".to_owned();
     assert!(post(
-        port,
+        &sock,
         &h,
         &format!("Bearer {token}"),
         hooks.lines().nth(2).unwrap().as_bytes()

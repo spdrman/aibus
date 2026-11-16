@@ -19,7 +19,6 @@ type Raw = Box<RawValue>;
 /// The loopback endpoint and the per-install token.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoint {
-    pub port: u16,
     pub token: String,
 }
 
@@ -63,7 +62,7 @@ pub enum Outcome {
 
 impl Endpoint {
     pub fn url(&self) -> String {
-        format!("http://127.0.0.1:{}{HOOK_PATH}", self.port)
+        format!("http://localhost{HOOK_PATH}")
     }
 
     fn save(&self, state: &Path) -> Result<(), String> {
@@ -71,9 +70,7 @@ impl Endpoint {
         write_private(
             &dir,
             &dir.join("endpoint.json"),
-            json!({"port": self.port, "token": self.token})
-                .to_string()
-                .as_bytes(),
+            json!({"token": self.token}).to_string().as_bytes(),
             0o600,
         )?;
         // The script's header file follows the token once the script has been installed.
@@ -89,41 +86,27 @@ impl Endpoint {
     }
 
     /// The endpoint saved by an earlier install under `<state>/tap/endpoint.json`, or a new one
-    /// (a free loopback port and a random token), saved with mode 0600.
+    /// (a random token), saved with mode 0600.
     pub fn load_or_create(state: &Path) -> Result<Self, String> {
         let file = state.join("tap").join("endpoint.json");
         if let Some(v) = std::fs::read(&file)
             .ok()
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         {
-            if let (Some(port), Some(token)) = (
-                v["port"].as_u64().and_then(|p| u16::try_from(p).ok()),
-                v["token"].as_str().filter(|t| t.len() >= 32),
-            ) {
+            if let Some(token) = v["token"].as_str().filter(|t| t.len() >= 32) {
                 return Ok(Self {
-                    port,
                     token: token.to_owned(),
                 });
             }
         }
-        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
-            .and_then(|l| l.local_addr())
-            .map_err(|e| format!("no free loopback port: {e}"))?
-            .port();
-        let ep = Self {
-            port,
-            token: new_token(),
-        };
+        let ep = Self { token: new_token() };
         ep.save(state)?;
         Ok(ep)
     }
 
-    /// A new token for the same port, saved; the old one stops working.
+    /// A new token, saved; the old one stops working.
     pub fn rotate(&self, state: &Path) -> Result<Self, String> {
-        let next = Self {
-            port: self.port,
-            token: new_token(),
-        };
+        let next = Self { token: new_token() };
         next.save(state)?;
         Ok(next)
     }
@@ -179,9 +162,28 @@ pub fn install_files(state: &Path, ep: &Endpoint) -> Result<PathBuf, String> {
         format!("Authorization: Bearer {}\n", ep.token).as_bytes(),
         0o600,
     )?;
+    let sock = socket_path(state, Path::new("/tmp"))?;
+    write_private(
+        &dir,
+        &dir.join("hook.sock"),
+        format!("{}\n", sock.display()).as_bytes(),
+        0o600,
+    )?;
     let script = dir.join(SCRIPT_NAME);
     write_private(&dir, &script, SCRIPT.as_bytes(), 0o700)?;
     Ok(std::fs::canonicalize(&script).unwrap_or(script))
+}
+
+/// Where the receiver's socket is: `<state>/tap/hook.sock`, or, when that path is too long for
+/// `sun_path` (104 bytes on macOS), `<short>/aibus-<uid>/tap-<hash>.sock`. Never TCP.
+pub fn socket_path(state: &Path, _short: &Path) -> Result<PathBuf, String> {
+    Ok(state.join("tap").join("hook.sock"))
+}
+
+/// Binds the receiver's socket: the directory must be this user's and closed to others, a stale
+/// socket of ours is replaced, anything else in the way is refused, and the socket is 0600.
+pub fn bind_socket(_path: &Path) -> Result<std::os::unix::net::UnixListener, String> {
+    Err("not implemented".into())
 }
 
 /// The settings `command` string for a script path, quoted for a shell when it needs it.

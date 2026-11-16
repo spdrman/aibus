@@ -47,7 +47,6 @@ fn ingest_all(root: &Path) -> tap::Tap {
 
 fn endpoint() -> hooks::Endpoint {
     hooks::Endpoint {
-        port: 47831,
         token: "synthetic-token-0123456789".into(),
     }
 }
@@ -319,7 +318,11 @@ fn install_files_write_a_0700_script_and_0600_files_and_keep_the_token_out_of_th
     assert!(!fs::read_to_string(&script).unwrap().contains(&ep.token));
     assert!(fs::read_to_string(dir.join("hook.url"))
         .unwrap()
-        .contains("127.0.0.1:47831"));
+        .contains("http://localhost/aibus-tap/hook"));
+    assert!(fs::read_to_string(dir.join("hook.sock"))
+        .unwrap()
+        .trim()
+        .ends_with(".sock"));
 }
 
 #[test]
@@ -328,18 +331,22 @@ fn uninstall_rotates_the_token() {
     let ep = hooks::Endpoint::load_or_create(tmp.path()).unwrap();
     let script = hooks::install_files(tmp.path(), &ep).unwrap();
     let next = ep.rotate(tmp.path()).unwrap();
-    assert_eq!(next.port, ep.port);
     assert_ne!(next.token, ep.token);
     assert_eq!(hooks::Endpoint::load_or_create(tmp.path()).unwrap(), next);
     let header = fs::read_to_string(script.parent().unwrap().join("hook.header")).unwrap();
     assert!(header.contains(&next.token) && !header.contains(&ep.token));
 }
 
-/// Runs the hook script with `input` on stdin; returns (stdout, exit ok, seconds).
-fn run_script(script: &Path, input: &[u8]) -> (String, bool, f64) {
+/// Runs the hook script with `input` on stdin and `path` as its PATH; returns (stdout and stderr
+/// together, exit ok, seconds).
+fn run_script_with(script: &Path, input: &[u8], path: Option<&str>) -> (String, bool, f64) {
     use std::io::Write;
     let t = std::time::Instant::now();
-    let mut c = std::process::Command::new(script)
+    let mut cmd = std::process::Command::new(script);
+    if let Some(p) = path {
+        cmd.env("PATH", p);
+    }
+    let mut c = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -358,39 +365,53 @@ fn run_script(script: &Path, input: &[u8]) -> (String, bool, f64) {
     )
 }
 
-fn script_for(port: u16) -> (tempfile::TempDir, PathBuf) {
+fn run_script(script: &Path, input: &[u8]) -> (String, bool, f64) {
+    run_script_with(script, input, None)
+}
+
+/// A state directory with the script installed, and the socket path the script posts to.
+fn script_for() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let ep = hooks::Endpoint {
-        port,
         token: "synthetic-token-0123456789".into(),
     };
     let script = hooks::install_files(tmp.path(), &ep).unwrap();
-    (tmp, script)
+    let sock = PathBuf::from(
+        fs::read_to_string(script.parent().unwrap().join("hook.sock"))
+            .unwrap()
+            .trim(),
+    );
+    (tmp, script, sock)
 }
 
 #[test]
 fn the_script_fails_open_at_once_when_nothing_listens() {
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let (_t, script) = script_for(port);
+    let (_t, script, sock) = script_for();
+    // No socket at all, then a stale one nobody listens on.
     let (out, ok, secs) = run_script(&script, br#"{"session_id":"x"}"#);
     assert!(ok && out.is_empty(), "{out:?}");
     assert!(secs < 1.0, "{secs}");
+    drop(std::os::unix::net::UnixListener::bind(&sock).unwrap());
+    let (out, ok, secs) = run_script(&script, br#"{"session_id":"x"}"#);
+    assert!(ok && out.is_empty() && secs < 1.0, "{out:?} {secs}");
+}
+
+#[test]
+fn the_script_prints_nothing_even_with_an_empty_path() {
+    let (_t, script, _) = script_for();
+    let (out, ok, _) = run_script_with(&script, br#"{"session_id":"x"}"#, Some(""));
+    assert!(ok && out.is_empty(), "{out:?}");
 }
 
 #[test]
 fn a_listener_that_accepts_and_never_answers_delays_the_session_by_the_scripts_timeout_only() {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
+    let (_t, script, sock) = script_for();
+    let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
     let keep = std::thread::spawn(move || {
         let (s, _) = l.accept().unwrap();
         std::thread::sleep(std::time::Duration::from_secs(5));
         drop(s);
     });
-    let (_t, script) = script_for(port);
     let (out, ok, secs) = run_script(&script, br#"{"session_id":"x"}"#);
     assert!(ok && out.is_empty(), "{out:?}");
     assert!(
@@ -403,8 +424,8 @@ fn a_listener_that_accepts_and_never_answers_delays_the_session_by_the_scripts_t
 #[test]
 fn a_reply_that_tries_to_decide_something_is_never_printed() {
     use std::io::{Read, Write};
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
+    let (_t, script, sock) = script_for();
+    let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
     let t = std::thread::spawn(move || {
         let (mut s, _) = l.accept().unwrap();
         let mut buf = [0u8; 4096];
@@ -413,13 +434,143 @@ fn a_reply_that_tries_to_decide_something_is_never_printed() {
             r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}"#;
         let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     });
-    let (_t, script) = script_for(port);
     let (out, ok, _) = run_script(&script, br#"{"session_id":"x"}"#);
     assert!(
         ok && out.is_empty(),
         "the reply must not reach Claude Code: {out:?}"
     );
     t.join().unwrap();
+}
+
+#[test]
+fn the_script_reaches_a_unix_socket_listener_with_the_token_and_localhost() {
+    use std::io::Read;
+    let (_t, script, sock) = script_for();
+    let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let t = std::thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        let mut buf = vec![0u8; 8192];
+        let n = s.read(&mut buf).unwrap();
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    });
+    run_script(&script, br#"{"session_id":"x"}"#);
+    let got = t.join().unwrap();
+    assert!(got.starts_with("POST /aibus-tap/hook HTTP/1.1"), "{got}");
+    assert!(
+        got.contains("Host: localhost") && got.contains("Bearer synthetic-token-0123456789"),
+        "{got}"
+    );
+}
+
+// ---- the socket ----
+
+#[test]
+fn the_socket_is_refused_in_an_open_directory_and_over_something_that_is_not_ours() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("tap");
+    fs::create_dir(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    let e = hooks::bind_socket(&dir.join("hook.sock")).unwrap_err();
+    assert!(e.contains("0700") || e.contains("private"), "{e}");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    // A regular file where the socket goes is not removed.
+    fs::write(dir.join("hook.sock"), "mine").unwrap();
+    assert!(hooks::bind_socket(&dir.join("hook.sock")).is_err());
+    assert_eq!(fs::read_to_string(dir.join("hook.sock")).unwrap(), "mine");
+    // A link is refused too.
+    fs::remove_file(dir.join("hook.sock")).unwrap();
+    std::os::unix::fs::symlink(tmp.path(), dir.join("hook.sock")).unwrap();
+    assert!(hooks::bind_socket(&dir.join("hook.sock")).is_err());
+}
+
+#[test]
+fn a_stale_socket_is_replaced_and_a_live_one_is_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("tap");
+    fs::create_dir(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = dir.join("hook.sock");
+    drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
+    assert!(path.exists(), "the dead listener left its file");
+    let live = hooks::bind_socket(&path).unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let e = hooks::bind_socket(&path).unwrap_err();
+    assert!(e.contains("listening"), "{e}");
+    drop(live);
+}
+
+#[test]
+fn a_long_state_path_falls_back_to_a_short_directory_and_never_to_tcp() {
+    let tmp = tempfile::tempdir().unwrap();
+    let long = tmp.path().join("x".repeat(90)).join("state");
+    let short = tmp.path().join("s");
+    let p = hooks::socket_path(&long, &short).unwrap();
+    assert!(p.starts_with(&short), "{p:?}");
+    assert!(p.as_os_str().len() <= 100, "{p:?}");
+    assert!(p.extension().is_some_and(|e| e == "sock"));
+    // The same state gives the same socket; another state gives another one.
+    assert_eq!(p, hooks::socket_path(&long, &short).unwrap());
+    assert_ne!(
+        p,
+        hooks::socket_path(&tmp.path().join("y".repeat(95)), &short).unwrap()
+    );
+    // Short enough: it stays in the state directory.
+    let ok = hooks::socket_path(Path::new("/a"), &short).unwrap();
+    assert_eq!(ok, Path::new("/a/tap/hook.sock"));
+    // Nowhere short enough to hold it: refused with a message, not a longer path.
+    let silly = tmp.path().join("z".repeat(120));
+    let e = hooks::socket_path(&long, &silly).unwrap_err();
+    assert!(e.contains("too long"), "{e}");
+}
+
+#[test]
+fn concurrent_installs_never_fail_and_never_show_an_empty_settings_file() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("settings.json");
+    fs::write(&path, read("settings-before.json")).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let watcher = {
+        let (path, stop) = (path.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut bad = 0;
+            while !stop.load(Ordering::Relaxed) {
+                match fs::read_to_string(&path) {
+                    Ok(t) if serde_json::from_str::<Value>(&t).is_ok() => {}
+                    _ => bad += 1,
+                }
+            }
+            bad
+        })
+    };
+    let workers: Vec<_> = (0..8)
+        .map(|_| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                for i in 0..25 {
+                    let cmd = if i % 2 == 0 { Some(CMD) } else { None };
+                    hooks::apply(&path, cmd, &mut |_| true).map(|_| ())?;
+                }
+                Ok::<(), String>(())
+            })
+        })
+        .collect();
+    for w in workers {
+        w.join().unwrap().unwrap();
+    }
+    stop.store(true, Ordering::Relaxed);
+    assert_eq!(
+        watcher.join().unwrap(),
+        0,
+        "a reader saw an empty or broken settings file"
+    );
+    serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap();
 }
 
 #[test]

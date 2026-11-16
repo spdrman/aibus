@@ -334,10 +334,56 @@ fn a_consent_is_used_once() {
     bad[0].1 = b"x".to_vec();
     assert!(deliver(&a, &t.context, bad, &mut spent).is_err());
     assert!(deliver(&a, &t.context, contents(), &mut spent).is_ok());
-    // A second consent has its own id.
+    // The same transfer recorded again under a new id is the same consent, so it is spent too.
     let shown = preview_sha256(&preview(&t));
     let b = record(t.clone(), Decision::Granted { by: "rom" }, &shown, OTHER, 2).unwrap();
-    assert!(deliver(&b, &t.context, contents(), &mut spent).is_ok());
+    assert_eq!(
+        deliver(&b, &t.context, contents(), &mut spent),
+        Err(HandoffError::Spent)
+    );
+    // And so is a copy of the record with only its id changed.
+    let copy = tampered(&a, |v| v["id"] = OTHER.into()).unwrap();
+    assert_eq!(
+        deliver(&copy, &t.context, contents(), &mut spent),
+        Err(HandoffError::Spent)
+    );
+}
+
+#[test]
+fn an_empty_or_placeholder_party_always_needs_consent_and_is_never_not_needed() {
+    for account in ["", "unresolved", "resolved when the step runs", "unknown"] {
+        let from = party("a", Runtime::Aibus, "anthropic", account);
+        let to = party("b", Runtime::Aibus, "anthropic", account);
+        let c = ctx(from, to);
+        assert!(needs_consent(&c), "account {account:?}");
+        let t = Transfer {
+            context: c.clone(),
+            items: transfer(claude()).items,
+        };
+        let shown = preview_sha256(&preview(&t));
+        let a = record(t.clone(), Decision::Declined { by: "rom" }, &shown, ID, 1).unwrap();
+        assert_eq!(a.consent.state, State::Declined, "{account:?}");
+        assert_eq!(
+            deliver_once(&a, &c, contents()),
+            Err(HandoffError::NotConsented),
+            "{account:?}"
+        );
+    }
+    let empty = ctx(
+        party("a", Runtime::Aibus, "", "x"),
+        party("b", Runtime::Aibus, "", "x"),
+    );
+    assert!(needs_consent(&empty));
+}
+
+#[test]
+fn the_provider_of_a_cli_or_openrouter_step_comes_from_its_runtime_not_from_the_caller() {
+    // Codex is OpenAI's, whatever the caller writes; an OpenRouter step claiming `openai` and the
+    // same account is still another receiver.
+    let liar = party("b", Runtime::OpenRouter, "openai", "chatgpt-1");
+    assert!(needs_consent(&ctx(codex(), liar)));
+    let liar_from = party("a", Runtime::CodexCli, "anthropic", "claude-1");
+    assert!(needs_consent(&ctx(liar_from, claude())));
 }
 
 #[test]

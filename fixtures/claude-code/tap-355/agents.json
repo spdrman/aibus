@@ -1,0 +1,6 @@
+[
+  {"id":"bg-0001","cwd":"/work/synthetic-a","kind":"background","startedAt":1700000000000,"sessionId":"11111111-1111-4111-8111-111111111111","name":"background job","state":"blocked"},
+  {"cwd":"/work/synthetic-b","kind":"interactive","startedAt":1700000100000,"sessionId":"22222222-2222-4222-8222-222222222222","name":"refactor parser","pid":4242,"status":"busy"},
+  {"cwd":"/work/synthetic-c","kind":"interactive","startedAt":1700000200000,"sessionId":"33333333-3333-4333-8333-333333333333","name":"idle one\u001b[31m","pid":4343,"status":"idle"},
+  {"id":"bg-0002","cwd":"/work/synthetic-d","kind":"background","startedAt":1700000300000,"sessionId":"44444444-4444-4444-8444-444444444444","name":"finished job","pid":4444,"state":"done","status":"busy","futureField":{"x":1}}
+]

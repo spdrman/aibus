@@ -1,0 +1,27 @@
+[package]
+name = "aibus-tap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Tap in (#348, phase 1, #355): find the Claude Code sessions that are already open in other
+# terminals and watch them, read-only. The one process this crate may start is the documented
+# `claude agents --json`; it sends nothing to a session, injects no keystroke and answers no
+# permission prompt. Hook events go through the supervisor's `Normalizer` into a tap run
+# directory with `PayloadPolicy::MetadataOnly`. It never reads a `.key` file or a token.
+[dependencies]
+aibus-core.workspace = true
+aibus-supervisor = { path = "../aibus-supervisor" }
+aibus-trace = { path = "../aibus-trace" }
+serde_json = "1"
+subtle = "2"
+uuid = { version = "1", features = ["v7"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,192 @@
+//! #355 (phase 1 of #348): `aibus sessions`. A stand-in `claude` on PATH prints the synthetic
+//! `agents.json` and records its arguments, so a test sees the one call aibus makes and never
+//! needs the real CLI. Every settings file here is in a throwaway directory.
+
+mod common;
+
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Output, Stdio};
+
+use common::*;
+
+const S: &str = "22222222-2222-4222-8222-222222222222";
+
+fn fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/claude-code/tap-355")
+        .join(name)
+}
+
+/// A `bin/claude` that answers `agents --json` and logs every call.
+fn fake_claude(dir: &Path) -> PathBuf {
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let log = dir.join("claude-calls.log");
+    let script = format!(
+        "#!/bin/sh\necho \"$@\" >> '{}'\nif [ \"$1 $2\" = 'agents --json' ]; then cat '{}'; exit 0; fi\nexit 99\n",
+        log.display(),
+        fixture("agents.json").display()
+    );
+    let p = bin.join("claude");
+    fs::write(&p, script).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+fn sessions(home: &Path, args: &[&str]) -> Output {
+    let bin = fake_claude(home);
+    let mut c = command(home);
+    c.env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("XDG_STATE_HOME", home.join("state"))
+        .env("CLAUDE_CONFIG_DIR", home.join("cfg"))
+        .env("AIBUS_CONFIG", home.join("none.toml"));
+    c.arg("sessions").args(args);
+    c.output().unwrap()
+}
+
+fn out(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn sessions_lists_what_claude_agents_json_printed_and_calls_nothing_else() {
+    let home = aibus_testkit::xdg_temp();
+    let o = sessions(home.path(), &[]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let text = out(&o);
+    assert!(
+        text.contains("refactor parser") && text.contains("watch"),
+        "{text}"
+    );
+    assert!(!text.contains('\u{1b}'));
+    let calls = fs::read_to_string(home.path().join("claude-calls.log")).unwrap();
+    assert_eq!(calls.trim(), "agents --json", "the one call aibus makes");
+}
+
+#[test]
+fn sessions_without_the_cli_says_so_and_fails() {
+    let home = aibus_testkit::xdg_temp();
+    let mut c = command(home.path());
+    c.env("PATH", "")
+        .env("AIBUS_CONFIG", home.path().join("none.toml"));
+    let o = c.args(["sessions"]).output().unwrap();
+    assert!(!o.status.success());
+    assert!(stderr(&o).contains("claude"), "{}", stderr(&o));
+}
+
+#[test]
+fn tap_of_a_session_nobody_posted_for_says_unavailable_and_how_to_turn_it_on() {
+    let home = aibus_testkit::xdg_temp();
+    let o = sessions(home.path(), &["tap", "refactor parser"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let text = out(&o);
+    assert!(
+        text.contains("unavailable") && text.contains("hooks install"),
+        "{text}"
+    );
+    assert!(text.contains("watch only"), "{text}");
+}
+
+#[test]
+fn hooks_install_prints_the_diff_and_without_a_yes_writes_nothing() {
+    let home = aibus_testkit::xdg_temp();
+    let cfg = home.path().join("cfg");
+    fs::create_dir_all(&cfg).unwrap();
+    fs::copy(fixture("settings-before.json"), cfg.join("settings.json")).unwrap();
+    let mut c = command(home.path());
+    c.env("XDG_STATE_HOME", home.path().join("state"))
+        .env("AIBUS_CONFIG", home.path().join("none.toml"))
+        .stdin(Stdio::piped());
+    let mut child = c
+        .args([
+            "sessions",
+            "hooks",
+            "install",
+            "--client",
+            "claude",
+            "--config-dir",
+        ])
+        .arg(&cfg)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(b"n\n").unwrap();
+    }
+    let o = child.wait_with_output().unwrap();
+    let text = out(&o);
+    assert!(
+        text.contains("127.0.0.1") && text.contains("+"),
+        "the diff is shown: {text}"
+    );
+    assert_eq!(
+        fs::read(cfg.join("settings.json")).unwrap(),
+        fs::read(fixture("settings-before.json")).unwrap()
+    );
+}
+
+#[test]
+fn hooks_install_yes_then_uninstall_yes_round_trips_and_keeps_the_token_out_of_the_output_of_list()
+{
+    let home = aibus_testkit::xdg_temp();
+    let cfg = home.path().join("cfg");
+    fs::create_dir_all(&cfg).unwrap();
+    fs::copy(fixture("settings-before.json"), cfg.join("settings.json")).unwrap();
+    let run = |args: &[&str]| {
+        let mut c = command(home.path());
+        c.env("XDG_STATE_HOME", home.path().join("state"))
+            .env("AIBUS_CONFIG", home.path().join("none.toml"));
+        c.args(["sessions", "hooks"])
+            .args(args)
+            .arg("--client")
+            .arg("claude");
+        c.arg("--config-dir").arg(&cfg).arg("--yes");
+        c.output().unwrap()
+    };
+    let o = run(&["install"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let now = fs::read_to_string(cfg.join("settings.json")).unwrap();
+    assert!(
+        now.contains("\"type\": \"http\"") && now.contains("127.0.0.1"),
+        "{now}"
+    );
+    let o = run(&["uninstall"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let back: serde_json::Value =
+        serde_json::from_slice(&fs::read(cfg.join("settings.json")).unwrap()).unwrap();
+    let before: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture("settings-before.json")).unwrap()).unwrap();
+    assert_eq!(back, before);
+}
+
+#[test]
+fn hooks_install_refuses_a_client_other_than_claude() {
+    let home = aibus_testkit::xdg_temp();
+    let o = aibus(
+        home.path(),
+        &["sessions", "hooks", "install", "--client", "codex", "--yes"],
+    );
+    assert!(!o.status.success());
+    assert!(stderr(&o).contains("claude"), "{}", stderr(&o));
+}
+
+#[test]
+fn allow_transcripts_is_a_per_client_switch_that_starts_off() {
+    let home = aibus_testkit::xdg_temp();
+    let o = sessions(home.path(), &["tap", "refactor parser"]);
+    assert!(out(&o).contains("transcripts: off"), "{}", out(&o));
+    let o = sessions(home.path(), &["allow-transcripts", "claude"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let o = sessions(home.path(), &["tap", "refactor parser"]);
+    assert!(!out(&o).contains("transcripts: off"), "{}", out(&o));
+    let o = sessions(home.path(), &["allow-transcripts", "claude", "--revoke"]);
+    assert!(o.status.success());
+    let o = sessions(home.path(), &["tap", "refactor parser"]);
+    assert!(out(&o).contains("transcripts: off"));
+    let o = sessions(home.path(), &["allow-transcripts", "codex"]);
+    assert!(!o.status.success());
+}

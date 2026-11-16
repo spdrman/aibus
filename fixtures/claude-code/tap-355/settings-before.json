@@ -1,0 +1,8 @@
+{
+  "model": "synthetic",
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "/usr/local/bin/synthetic-stop.sh"}]}
+    ]
+  }
+}

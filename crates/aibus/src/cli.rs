@@ -183,6 +183,8 @@ pub enum Command {
     /// Recorded runs of an external CLI: list, inspect, replay offline
     #[command(subcommand)]
     Runs(RunsCmd),
+    /// Claude Code sessions already open in other terminals: list them and tap in, read-only (#355)
+    Sessions(SessionsArgs),
     /// Extensions for official CLIs: search, install, verify, update, test
     Extensions(ExtensionsArgs),
     /// The config file
@@ -418,6 +420,66 @@ pub enum ExtensionsCmd {
     },
     /// Add a package directory to the registry, with its content hash
     Publish { dir: PathBuf },
+}
+
+/// `aibus sessions` (#355, phase 1 of #348): the list comes from `claude agents --json`; a tap
+/// is built from hook events the session posts to a loopback endpoint of aibus. Nothing here
+/// sends anything to a session.
+#[derive(Args, Debug)]
+pub struct SessionsArgs {
+    #[command(subcommand)]
+    pub cmd: Option<SessionsCmd>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SessionsCmd {
+    /// The live sessions, one line each (the default)
+    List,
+    /// What one session is doing: header, graph, timeline, intent and what control is available
+    Tap {
+        /// A session id or a unique prefix of one, a background job id or a unique name
+        session: String,
+        /// Listen for the session's hook events and print the text again after each one
+        #[arg(long)]
+        follow: bool,
+        /// The Claude Code config directory (default: CLAUDE_CONFIG_DIR, else ~/.claude)
+        #[arg(long, value_name = "DIR")]
+        config_dir: Option<PathBuf>,
+    },
+    /// Put aibus's hooks in your Claude Code settings, or take them out again
+    #[command(subcommand)]
+    Hooks(SessionsHooksCmd),
+    /// Let `aibus sessions tap` read the end of a session's transcript (off by default)
+    AllowTranscripts {
+        /// The client; only `claude` exists in phase 1
+        client: String,
+        /// Switch it off again
+        #[arg(long)]
+        revoke: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SessionsHooksCmd {
+    /// Show the exact change to `<config>/settings.json` and ask before writing it
+    Install {
+        #[arg(long, value_name = "CLIENT")]
+        client: String,
+        #[arg(long, value_name = "DIR")]
+        config_dir: Option<PathBuf>,
+        /// Answer the question with yes (the diff is still printed)
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Show the change that removes them and ask before writing it
+    Uninstall {
+        #[arg(long, value_name = "CLIENT")]
+        client: String,
+        #[arg(long, value_name = "DIR")]
+        config_dir: Option<PathBuf>,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 /// `aibus runs` (#284): recorded runs read from `<state>/traces/<run>/`, or from `--root`. All of it

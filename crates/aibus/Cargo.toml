@@ -22,6 +22,7 @@ aibus-provider-gemini.workspace = true
 aibus-provider-http.workspace = true
 aibus-provider-openai.workspace = true
 aibus-trace = { path = "../aibus-trace" }
+aibus-tap = { path = "../aibus-tap" }
 aibus-tui.workspace = true
 aibus-control.workspace = true
 async-trait = "0.1"

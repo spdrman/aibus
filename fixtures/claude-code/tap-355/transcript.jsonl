@@ -1,0 +1,5 @@
+{"type":"user","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"SYNTHETIC-USER-TEXT please read the file"}}
+{"type":"assistant","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"assistant","content":[{"type":"text","text":"SYNTHETIC-ASSISTANT-TEXT reading it now, key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA"},{"type":"tool_use","id":"toolu_synth_1","name":"Read","input":{}}]}}
+{"type":"user","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_synth_1","content":"x"}]}}
+{"type":"quantum-entangled-entry","sessionId":"22222222-2222-4222-8222-222222222222","payload":"SYNTHETIC-UNKNOWN-PAYLOAD"}
+{"type":"assistant","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"assistant","content":[{"type":"hologram","text":"?"}]}}

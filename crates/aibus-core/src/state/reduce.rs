@@ -897,7 +897,10 @@ impl R<'_> {
                 self.log("info", "queued request");
             }
             // The loop reads the files and answers with `Msg::WorkflowsLoaded`.
-            Command::WorkflowFile(_) | Command::WorkflowAuthor { .. } | Command::Runs(_) => {}
+            Command::WorkflowFile(_)
+            | Command::WorkflowAuthor { .. }
+            | Command::Runs(_)
+            | Command::Sessions(_) => {}
         }
     }
 }

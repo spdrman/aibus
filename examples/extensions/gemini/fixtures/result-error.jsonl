@@ -1,0 +1,3 @@
+{"type":"init","timestamp":"2026-01-01T00:00:00.000Z","session_id":"00000000-0000-7000-8000-000000000001","model":"gemini-model-x"}
+{"type":"error","timestamp":"2026-01-01T00:00:00.400Z","severity":"error","message":"synthetic API failure"}
+{"type":"result","timestamp":"2026-01-01T00:00:00.500Z","status":"error","error":{"type":"api_error","message":"synthetic API failure"}}

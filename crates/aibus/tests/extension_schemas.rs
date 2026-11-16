@@ -366,3 +366,26 @@ fn issue_357_the_codex_manifest_validates_and_schema_1_has_no_rule_conditions() 
         );
     }
 }
+
+/// #358: the Gemini manifest (empty auth argv, a probed capability) validates against schema 2.
+#[test]
+fn issue_358_the_gemini_manifest_and_its_expected_files_validate() {
+    assert_eq!(
+        check_against(
+            &schema("manifest-v2"),
+            &manifest_json("examples/extensions/gemini")
+        ),
+        Vec::<String>::new()
+    );
+    for f in ["basic", "tool-run", "tool-failed", "result-error"] {
+        let p = repo().join(format!(
+            "examples/extensions/gemini/fixtures/{f}.expected.json"
+        ));
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        assert_eq!(
+            check_against(&schema("fixture-expected-v1"), &v),
+            Vec::<String>::new(),
+            "{f}"
+        );
+    }
+}

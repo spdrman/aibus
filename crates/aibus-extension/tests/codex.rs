@@ -522,3 +522,30 @@ async fn live_codex_one_short_turn() {
     assert!(events.iter().any(|e| e.kind == EventKind::MessageChunk));
     assert!(events.iter().any(|e| e.kind == EventKind::UsageReported));
 }
+
+/// A flag with no short form is indented six columns in Codex's help (`      --json`), and the
+/// probe has to see it too, or a `probe_required` capability on it could never be offered.
+#[test]
+fn the_probe_sees_long_only_flags_in_the_real_help() {
+    let probe = cli::parse_help(&cli_text("version.txt"), &cli_text("exec-help.txt")).unwrap();
+    for f in [
+        "--json",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--output-last-message",
+        "--model",
+    ] {
+        assert!(probe.flags.contains(f), "{f}");
+    }
+}
+
+/// Only a known program word may stand in front of the version: an error line with a number in it
+/// is not a version.
+#[test]
+fn the_probe_takes_a_version_only_after_a_known_program_word() {
+    use aibus_supervisor::cli::{parse_version, Version};
+    assert_eq!(parse_version("gemini 0.1.0"), Some(Version(0, 1, 0)));
+    assert_eq!(parse_version("codex 0.167.0"), Some(Version(0, 167, 0)));
+    assert_eq!(parse_version("Error 1.2.3"), None);
+    assert_eq!(parse_version("node 20.1.0"), None);
+}

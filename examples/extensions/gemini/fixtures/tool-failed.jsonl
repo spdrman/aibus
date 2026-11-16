@@ -1,0 +1,5 @@
+{"type":"init","timestamp":"2026-01-01T00:00:00.000Z","session_id":"00000000-0000-7000-8000-000000000001","model":"gemini-model-x"}
+{"type":"tool_use","timestamp":"2026-01-01T00:00:00.500Z","tool_name":"read_file","tool_id":"tool-0001","parameters":{"absolute_path":"/work/missing.txt"}}
+{"type":"tool_result","timestamp":"2026-01-01T00:00:00.700Z","tool_id":"tool-0001","status":"error","error":{"type":"file_not_found","message":"synthetic message"}}
+{"type":"message","timestamp":"2026-01-01T00:00:01.000Z","role":"assistant","content":"The file is missing.","delta":true}
+{"type":"result","timestamp":"2026-01-01T00:00:01.200Z","status":"success","stats":{"total_tokens":1500,"input_tokens":1400,"output_tokens":100,"cached":0,"input":1400,"duration_ms":900,"tool_calls":1,"models":{}}}

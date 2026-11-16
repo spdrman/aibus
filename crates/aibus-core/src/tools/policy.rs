@@ -122,3 +122,19 @@ pub(crate) fn confine(cwd: &Path, p: &str) -> Result<PathBuf, ToolError> {
         })
     }
 }
+
+#[cfg(test)]
+mod symlinked_rule_tests {
+    use super::spec_matches;
+
+    /// A merged-/usr layout (`bin -> usr/bin`): a rule written with the `bin` form keeps matching
+    /// the text it names, so a deny on `/bin/rm` cannot stop matching `/bin/rm`.
+    #[test]
+    fn a_rule_as_written_matches_the_text_it_names_through_a_directory_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("usr/bin")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("usr/bin"), root.path().join("bin")).unwrap();
+        let rule = format!("{}/bin/rm *", root.path().display());
+        assert!(spec_matches(&rule, &format!("{}/bin/rm -rf x", root.path().display())));
+    }
+}

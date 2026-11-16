@@ -388,9 +388,14 @@ fn issue_352_a_thread_that_started_the_helper_and_ended_does_not_end_the_tree() 
         ),
     );
     let program = cli.to_str().unwrap().to_string();
-    let mut child = std::thread::spawn(move || helper(&program, &[]).spawn().unwrap())
-        .join()
-        .unwrap();
+    let mut child = std::thread::spawn(move || {
+        let child = helper(&program, &[]).spawn().unwrap();
+        // Long enough for the helper to have armed whatever it arms, then the thread ends.
+        std::thread::sleep(Duration::from_millis(500));
+        child
+    })
+    .join()
+    .unwrap();
     let pid = pid_from(&pidfile);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(

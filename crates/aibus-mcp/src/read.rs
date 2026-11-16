@@ -359,22 +359,15 @@ fn text_of<'a>(map: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 impl Server {
     /// Paths and error text with the project directory and the home directory made short. Each is
     /// matched by its real path first (a Mac's `/var/...` is `/private/var/...` once resolved, and
-    /// the paths the tools report are resolved), then as given.
+    /// the paths the tools report are resolved), then as given, and only as a whole path
+    /// component run: `/home/abc` is not under `/home/ab`.
     pub(crate) fn shorten(&self, text: &str) -> String {
-        let forms = |dir: &Path| {
-            let mut forms: Vec<String> = fs::canonicalize(dir).into_iter().map(|d| d.display().to_string()).collect();
-            forms.push(dir.display().to_string());
-            forms.dedup();
-            forms
-        };
         let mut out = text.to_owned();
-        for project in forms(&self.project) {
-            out = out.replace(&format!("{}/", project.trim_end_matches('/')), "");
+        for dir in &self.project_forms {
+            out = replace_dir(&out, dir, "", true);
         }
-        if let Some(home) = &self.home {
-            for home in forms(home) {
-                out = out.replace(&home, "~");
-            }
+        for dir in &self.home_forms {
+            out = replace_dir(&out, dir, "~", false);
         }
         out
     }
@@ -703,6 +696,38 @@ fn explain(wf: &Workflow) -> Value {
         steps.push(row);
     }
     json!({ "steps": steps, "edges": edges })
+}
+
+/// `dir` as its resolved form (when it exists) and as given, without a trailing slash. A root or
+/// empty `dir` has no forms: shortening by it would garble every path.
+pub(crate) fn path_forms(dir: &Path) -> Vec<String> {
+    let mut forms: Vec<String> = fs::canonicalize(dir).into_iter().chain([dir.to_path_buf()]).map(|d| d.display().to_string()).collect();
+    forms.iter_mut().for_each(|f| *f = f.trim_end_matches('/').to_owned());
+    forms.retain(|f| !f.is_empty());
+    forms.dedup();
+    forms
+}
+
+/// `text` with each occurrence of `dir` that starts a path (at the start or after a character
+/// that cannot be in a path) and ends it or is followed by `/` replaced by `with`. With `strip`
+/// the following `/` goes too, so `/proj/a` becomes `a`.
+fn replace_dir(text: &str, dir: &str, with: &str, strip: bool) -> String {
+    let in_path = |c: char| c.is_alphanumeric() || "/._-~+@%".contains(c);
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (i, _) in text.match_indices(dir) {
+        let end = i + dir.len();
+        let before = text[..i].chars().next_back();
+        let after = text[end..].chars().next();
+        if i < at || before.is_some_and(in_path) || after.is_some_and(|c| c != '/' && in_path(c)) {
+            continue;
+        }
+        out.push_str(&text[at..i]);
+        out.push_str(with);
+        at = if strip && after == Some('/') { end + 1 } else { end };
+    }
+    out.push_str(&text[at..]);
+    out
 }
 
 #[cfg(test)]

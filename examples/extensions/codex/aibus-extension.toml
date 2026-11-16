@@ -1,0 +1,140 @@
+# The Codex CLI extension (#357, A2.2a): the official, unmodified OpenAI Codex CLI as an aibus
+# extension on the A2.1 contract. Use is local and opt-in, with the user's own installed CLI. The
+# user signs in with `codex login`; aibus never reads, copies or stores the token, and aibus has no
+# OpenAI OAuth client of its own.
+#
+# Rules use `when` conditions (schema 2): Codex puts the kind of a line in two places, `type`
+# (`item.started`) and `item.type` (`command_execution`), and one pointer cannot say both.
+
+schema_version = "2"
+id = "org.devshell.aibus.codex-cli"
+version = "0.1.0"
+name = "Codex CLI"
+kind = "official_cli"
+provider = "OpenAI"
+license = "MIT"
+source_url = "https://github.com/spdrman/aibus/tree/main/examples/extensions/codex"
+
+[publisher]
+name = "devshell"
+url = "https://devshell.org"
+
+[compat]
+protocol = ">=1.1.0, <2.0.0"
+os = ["macos", "linux"]
+# 0.167.0 is the only version recorded and tested (#357); the flag allowlist is written against its
+# `codex exec --help`. A newer minor is not claimed until someone reads its help and streams.
+cli_versions = ">=0.167.0, <0.168.0"
+
+[cli]
+executable_candidates = ["codex"]
+vendor_urls = ["https://developers.openai.com/codex/cli", "https://developers.openai.com/codex/noninteractive"]
+
+[auth]
+owner = "vendor_cli"
+credential_access = "forbidden"
+login_argv = ["login"]
+status_argv = ["login", "status"]
+
+[execution]
+# `exec` is Codex's headless mode. The prompt goes on stdin (the CLI reads stdin when no prompt
+# argument is given). `--ephemeral` keeps the CLI from writing session files, the sandbox is
+# read-only, and `--skip-git-repo-check` is there because the host's working directory is not
+# always a repository.
+argv = ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--color", "never", "--sandbox", "read-only"]
+prompt = "stdin"
+stdout = "jsonl"
+# Where the CLI finds its own sign-in when the user moved it. Not a credential.
+env_allow = ["CODEX_HOME"]
+
+# The model and the file for the last message are the plan's, filled by the host (schema 2, #334).
+[[execution.typed]]
+flag = "--model"
+kind = "model_id"
+
+[[execution.typed]]
+flag = "--output-last-message"
+kind = "workdir_path"
+
+[limits]
+wall_time_secs = 1800
+
+[normalizer]
+engine = "declarative-jsonl"
+
+# A shell command starts: `item.started` with an `item` of type `command_execution`.
+[[normalizer.rule]]
+pointer = "/type"
+equals = "item.started"
+when = [{ pointer = "/item/type", equals = "command_execution" }]
+kind = "tool_started"
+id_pointer = "/item/id"
+
+# It ends non-zero: the CLI says `status = "failed"` on the completed item. Before the plain
+# completion, because the first rule that matches wins.
+[[normalizer.rule]]
+pointer = "/type"
+equals = "item.completed"
+when = [{ pointer = "/item/type", equals = "command_execution" }, { pointer = "/item/status", equals = "failed" }]
+kind = "tool_failed"
+id_pointer = "/item/id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "item.completed"
+when = [{ pointer = "/item/type", equals = "command_execution" }]
+kind = "tool_completed"
+id_pointer = "/item/id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "item.completed"
+when = [{ pointer = "/item/type", equals = "agent_message" }]
+kind = "message_chunk"
+
+# The turn's usage. Codex counts cached tokens inside `input_tokens`.
+[[normalizer.rule]]
+pointer = "/type"
+equals = "turn.completed"
+kind = "usage_reported"
+tokens_in_pointer = "/usage/input_tokens"
+tokens_out_pointer = "/usage/output_tokens"
+
+[capabilities]
+login_status = "supported"
+one_shot = "supported"
+structured_events = "supported"
+# No subagent item appears in 0.167.0's `--json` stream, so no lineage is claimed (and a native
+# child dies with its lead, so session_resume stays unsupported with it).
+native_child_lineage = "unsupported"
+tool_events = "supported"
+usage_report = "supported"
+session_resume = "unsupported"
+# `codex exec` has no approval prompt in headless mode; nothing goes through aibus.
+interactive_approval = "unsupported"
+cancel = "supported"
+# The host's working directory is the CLI's: `--cd` is not offered.
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "unsupported"
+
+[runtime]
+# Token counts are the CLI's own. It reports no cost, so billed cost stays unknown.
+usage_quality = "reported"
+
+[permissions]
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "aibus maintainers"
+review_date = "2026-11-15"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/tool-run.jsonl", "fixtures/tool-failed.jsonl", "fixtures/turn-failed.jsonl"]
+
+[notes]
+upgrade = "Install the new version from the registry. A version that asks for more executables, environment names, flags or capabilities has to be accepted by name."
+rollback = "aibus extensions rollback org.devshell.aibus.codex-cli returns to the previous installed version."

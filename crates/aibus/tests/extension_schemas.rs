@@ -332,3 +332,37 @@ fn issue_334_manifest_v2_names_the_wasm_module_engine_and_its_module() {
         .unwrap()
         .starts_with("^wasm/"));
 }
+
+/// #357: the Codex extension is a schema 2 manifest whose rules carry `when` conditions, so the
+/// schema 2 file has to say them, and the schema 1 file has to keep refusing them.
+#[test]
+fn issue_357_the_codex_manifest_validates_and_schema_1_has_no_rule_conditions() {
+    let codex = manifest_json("examples/extensions/codex");
+    assert!(codex["normalizer"]["rule"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r.get("when").is_some()));
+    assert_eq!(
+        check_against(&schema("manifest-v2"), &codex),
+        Vec::<String>::new()
+    );
+    let mut four = codex.clone();
+    let cond = json!({ "pointer": "/a", "equals": "1" });
+    four["normalizer"]["rule"][0]["when"] = json!(vec![cond; 4]);
+    assert!(!check_against(&schema("manifest-v2"), &four).is_empty());
+    let mut v1 = manifest_json(EXAMPLES[0]);
+    v1["normalizer"]["rule"][0]["when"] = json!([{ "pointer": "/a", "equals": "1" }]);
+    assert!(!check_against(&schema("manifest-v1"), &v1).is_empty());
+    for f in ["basic", "tool-run", "tool-failed", "turn-failed"] {
+        let o = repo()
+            .join("examples/extensions/codex/fixtures")
+            .join(format!("{f}.expected.json"));
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(o).unwrap()).unwrap();
+        assert_eq!(
+            check_against(&schema("fixture-expected-v1"), &v),
+            Vec::<String>::new(),
+            "{f}"
+        );
+    }
+}

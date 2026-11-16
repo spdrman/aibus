@@ -50,6 +50,10 @@ Which flags can be typed is the host's list per CLI (`flags::typed`): `--model` 
 
 **How an older host says no (it fails closed, with its own error).** A schema 2 manifest has to ask for `compat.protocol` 1.1.0 or later (a range that contains 1.0.0 is refused), and this host speaks protocol 1.1.0 (`negotiate::PROTOCOL`). A host from before schema 2 does not read the typed block at all: its strict parser refuses the manifest with an unknown-field error (`unknown field typed`), which still fails closed, and the protocol range is what tells a host that does read the manifest (and any later one) that this extension needs 1.1.0. A host that reads schema 2 reads `schema_version` before any other key, so a manifest of a schema it does not read (a future 3) is refused by name, with the schemas it does read, and not by whichever new key it meets first. Install lists every typed flag with its kind, and a typed flag a new version adds is an escalation the user accepts by name (`typed:--agents`).
 
+## Schema 2: rule conditions (#357)
+
+A declarative rule has one pointer and one string. A CLI that says what a line is in two places (Codex: `type = "item.completed"` and `item.type = "command_execution"`) needs more, so a schema 2 rule may carry `when`, up to three `{pointer, equals}` conditions the same line has to meet. The first rule whose pointer and every condition match wins, so list the narrow rule before the wide one. The event's native type is the line's words in order (`item.completed/command_execution/failed`). A schema 1 manifest with `when` is refused (`normalizer.rule`), and a host from before this key refuses it as an unknown field, which fails closed.
+
 ## The event contract
 
 An engine hands the host events in the trace envelope (`aibus-trace`, schema 2; `docs/schemas/extension/event-v1.json`):
@@ -137,6 +141,10 @@ Nothing in the core source changes for any of it; `crates/aibus/tests/extensions
 ## The reference extension
 
 `examples/extensions/reference-cli/` is the official Claude Code CLI as an extension, built on the supervisor: id `org.devshell.aibus.reference-cli` (the owner's reverse-DNS, replacing the spec's `org.aibus.claude-code`), engine `builtin:claude-stream-json`, schema 2 with `--model` and `--agents` typed (the host fills them from the plan), argv equal to what `cli::argv` builds for a default request, and two recorded streams from the spike (`basic`, `native-subagent`). Local, opt-in use of the user's own installed CLI only: the user signs in with the CLI itself (an API key, a Console sign-in or, for local use, a subscription sign-in) and aibus never reads or stores the token. Bundled, preinstalled, hosted and commercial use stay blocked (#280, #281). The suite runs the real manifest through the sandbox and the supervisor against a stand-in `claude` that answers `--version` and `--help` with the real 2.1.311 text and replays a recorded delegation (`aibus-extension/tests/reference.rs`).
+
+## The Codex extension (#357)
+
+`examples/extensions/codex/` is the official OpenAI Codex CLI as an extension: id `org.devshell.aibus.codex-cli`, schema 2, the declarative engine with `when` rules, `codex exec --json` with the prompt on stdin, `login` and `login status` for sign-in (the CLI owns it; aibus has no OpenAI OAuth client and never reads the token), `--model` and `--output-last-message` typed, and `CODEX_HOME` as its one environment name. It is pinned to codex-cli 0.167.0, the version its four recorded streams and its flag allowlist come from (`fixtures/codex/cli-0.167.0/` has the version and help text). It maps messages, shell commands (started, completed, failed) and token usage; anything else is a `trace_warning`. Capability negotiation against the real help text gives: login status, one shot, structured events, tool events, usage report, cancel and headless supported; native child lineage, session resume, interactive approval, workspace control and hook channel unsupported, each with its reason. `fixtures/codex/live-report-2026-11-15.json` is one live turn through the sandbox and the supervisor (n=1, no text, no path). The decision is D-357.
 
 ## WASM guests (#333)
 

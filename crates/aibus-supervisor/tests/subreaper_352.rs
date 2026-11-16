@@ -373,3 +373,64 @@ async fn issue_352_a_run_that_ends_by_itself_leaves_no_daemon() {
         "the daemon {pid} outlived the attempt"
     );
 }
+
+#[test]
+fn issue_352_a_thread_that_started_the_helper_and_ended_does_not_end_the_tree() {
+    // The parent-death signal is per thread on Linux: it must not be what ends the tree.
+    let tmp = tempfile::tempdir().unwrap();
+    let pidfile = tmp.path().join("cli.pid");
+    let cli = script(
+        tmp.path(),
+        "cli.sh",
+        &format!(
+            "echo $$ > {}\nwhile :; do sleep 0.05; done",
+            pidfile.display()
+        ),
+    );
+    let program = cli.to_str().unwrap().to_string();
+    let mut child = std::thread::spawn(move || helper(&program, &[]).spawn().unwrap())
+        .join()
+        .unwrap();
+    let pid = pid_from(&pidfile);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        child.try_wait().unwrap().is_none() && alive(&pid),
+        "the tree ended when the thread that started the helper did"
+    );
+    Command::new("kill")
+        .args(["-USR1", &child.id().to_string()])
+        .status()
+        .unwrap();
+    child.wait().unwrap();
+    assert!(wait_for(Duration::from_secs(3), || gone(&pid)));
+}
+
+#[tokio::test]
+async fn issue_352_the_cli_stays_in_the_helpers_group_so_the_last_resort_group_kill_reaches_it() {
+    let body = "echo \"$(ps -o pgid= -p $$ | tr -d ' ') $(ps -o pgid= -p $PPID | tr -d ' ')\" > DIR/pg\necho '{}'";
+    let (_, root) = supervised(body, quick(), None).await;
+    let text = fs::read_to_string(root.join("pg")).unwrap();
+    let mut groups = text.split_whitespace();
+    let (cli, helper) = (groups.next().unwrap(), groups.next().unwrap());
+    assert_eq!(cli, helper, "the CLI's group is not the helper's");
+}
+
+#[test]
+fn issue_352_a_helper_whose_supervisor_is_already_gone_runs_nothing() {
+    // The supervisor's pid is the first argument after the marker; a parent that is not that
+    // process (it died before the helper started, so it was handed to init) ends the start.
+    let tmp = tempfile::tempdir().unwrap();
+    let mark = tmp.path().join("ran");
+    let mut dead = Command::new("true").spawn().unwrap();
+    dead.wait().unwrap();
+    let status = Command::new(HELPER)
+        .arg(MARKER)
+        .arg(dead.id().to_string())
+        .args(["/bin/sh", "-c", &format!("touch {}", mark.display())])
+        .env_clear()
+        .stdin(Stdio::null())
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(1));
+    assert!(!mark.exists());
+}

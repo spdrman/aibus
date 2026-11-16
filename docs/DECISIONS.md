@@ -834,7 +834,7 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 
 **Why.** One small, additive schema 2 key does the job for Codex, and for every other CLI that nests its line kind. What it leaves out is said in the manifest, the README and the PR.
 
-**Known limits.** The probe reads the top-level `--help`, which does not list `exec`'s own flags (`--json`, `--ephemeral`), so those are checked by the version range and by a test against the recorded `codex exec --help`, not at run time. The lifecycle lines (`thread.started`, `turn.started`) and Codex's "Reading prompt from stdin..." on stderr are `trace_warning` events on every run, because the engine has no "known and uninteresting" kind. The id has the product word `codex` in it, which A1.5's E6 forbids only for Claude Code; the owner may want it changed.
+**Known limits.** The probe reads the top-level `--help`, which does not list `exec`'s own flags (`--json`, `--ephemeral`), so those are checked by the version range and by a test against the recorded `codex exec --help`, not at run time. The lifecycle lines (`thread.started`, `turn.started`) and Codex's "Reading prompt from stdin..." on stderr are `trace_warning` events on every run, because the engine has no "known and uninteresting" kind. `--skip-git-repo-check` switches off one of Codex's own safety checks, which is acceptable only because the sandbox is read-only. The id has the product word `codex` in it, which A1.5's E6 forbids only for Claude Code; the owner may want it changed.
 
 ## D-358: The Gemini extension ships unverified, built from the CLI's source, with no login claim (#358, A2.2b)
 

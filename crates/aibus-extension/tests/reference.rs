@@ -223,7 +223,13 @@ fn bless() {
         for f in &pkg.manifest.fixtures.files {
             let expected = dir.join(f.replace(".jsonl", ".expected.json"));
             if bless {
-                let obs = aibus_extension::conformance::observe(&pkg, f, "exit:0").unwrap();
+                // Keep the ending a file already has: a failed turn is blessed as the failed turn it is.
+                let ending = fs::read_to_string(&expected)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .and_then(|v| v["ending"].as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "exit:0".into());
+                let obs = aibus_extension::conformance::observe(&pkg, f, &ending).unwrap();
                 fs::write(&expected, expected_json(&obs)).unwrap();
             }
             assert!(

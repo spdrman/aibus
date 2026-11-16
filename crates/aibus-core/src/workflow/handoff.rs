@@ -90,13 +90,46 @@ pub enum HandoffError {
     Changed(String),
 }
 
+/// The provider a runtime means, for the runtimes that have exactly one: a vendor CLI is its
+/// vendor's, and OpenRouter is OpenRouter's, whatever a caller writes. `aibus` and an attached
+/// session run under whatever account they are given, so they have none.
+pub fn provider_of(rt: Runtime) -> Option<&'static str> {
+    match rt {
+        Runtime::ClaudeCli => Some("anthropic"),
+        Runtime::CodexCli => Some("openai"),
+        Runtime::GeminiCli => Some("google"),
+        Runtime::OpenRouter => Some("openrouter"),
+        Runtime::Aibus | Runtime::Attached => None,
+    }
+}
+
 /// A transfer needs the user's yes unless the same party receives and bills it: the provider and
-/// the account both have to match. The runtime is not the boundary (two `aibus` steps on an
-/// Anthropic and an OpenRouter account are a cross-provider move; the Claude CLI to an `aibus`
-/// step on the same Anthropic account is not). Over-asking is safe, under-asking is the bug, so
-/// anything the caller could not resolve should differ.
+/// the account both have to match, and both have to be known. The runtime is not the boundary (two
+/// `aibus` steps on an Anthropic and an OpenRouter account are a cross-provider move; the Claude
+/// CLI to an `aibus` step on the same Anthropic account is not). Over-asking is safe, under-asking
+/// is the bug: an empty or placeholder provider or account on either side (`unresolved`, `unknown`,
+/// "resolved when the step runs") always asks, and a vendor CLI's or OpenRouter's provider comes
+/// from the runtime, not from the caller.
 pub fn needs_consent(c: &Context) -> bool {
-    c.from.provider != c.to.provider || c.from.account != c.to.account
+    let known = |s: &str| {
+        let s = s.trim();
+        !(s.is_empty()
+            || s.contains("unresolved")
+            || s.contains("unknown")
+            || s.contains("resolved when"))
+    };
+    let provider = |p: &Party| provider_of(p.runtime).unwrap_or(&p.provider).to_owned();
+    let (from, to) = (&c.from, &c.to);
+    ![
+        provider(from),
+        provider(to),
+        from.account.clone(),
+        to.account.clone(),
+    ]
+    .iter()
+    .all(|v| known(v))
+        || provider(from) != provider(to)
+        || from.account != to.account
 }
 
 fn raw_sha256(bytes: &[u8]) -> String {
@@ -216,7 +249,9 @@ pub fn deliver(
     if a.transfer.context != *now {
         return Err(HandoffError::WrongContext);
     }
-    if spent.contains(&a.id) {
+    // Keyed on the preview hash, which covers run, plan, both parties and items, so a copy of the
+    // record under a new id is the same consent.
+    if spent.contains(&a.preview_sha256) {
         return Err(HandoffError::Spent);
     }
     let mut shown = a.transfer.items.clone();
@@ -236,6 +271,6 @@ pub fn deliver(
     if let Some(left) = shown.first() {
         return Err(HandoffError::Changed(left.name.clone()));
     }
-    spent.insert(a.id.clone());
+    spent.insert(a.preview_sha256.clone());
     Ok(contents)
 }

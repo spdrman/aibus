@@ -279,3 +279,23 @@ fn issue_334_the_reference_extension_is_schema_2_with_a_typed_model_and_agents()
         .iter()
         .any(|a| a == "--model" || a == "--agents"));
 }
+
+/// A fixture of a turn that failed ends `failed`: re-blessing once rewrote the Codex one as
+/// `exit:0` and `completed`, and nothing noticed.
+#[test]
+fn the_expected_files_of_failed_turns_say_failed() {
+    for f in [
+        "examples/extensions/codex/fixtures/turn-failed.expected.json",
+        "examples/extensions/gemini/fixtures/result-error.expected.json",
+    ] {
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(repo().join(f)).unwrap()).unwrap();
+        assert_eq!(v["ending"], "exit:1", "{f}");
+        assert_eq!(v["status"], "failed", "{f}");
+        assert_eq!(
+            v["kinds"].as_array().unwrap().last().unwrap(),
+            "attempt_failed",
+            "{f}"
+        );
+    }
+}

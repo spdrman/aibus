@@ -443,6 +443,7 @@ pub fn compile(
             risk_class: risk.into(),
             requested_mode: s.mode,
             parent_runtime: parent.map(|p| wf.steps[p].runtime.as_str().to_owned()),
+            approved: Vec::new(),
         };
         let decision = jev::decide(&request);
         decisions.push(json!({ "step": key, "request": request, "decision": decision }));
@@ -463,6 +464,9 @@ pub fn compile(
                     "isolation": s.isolation,
                 }),
                 Runtime::ClaudeCli => claude_invocation(wf, agents, i, &prompt_sha),
+                Runtime::CodexCli | Runtime::GeminiCli | Runtime::OpenRouter => {
+                    json!({ "kind": "todo" })
+                }
                 Runtime::Attached => json!({
                     "kind": "attached_session",
                     "agent": s.agent.as_str(),

@@ -633,3 +633,62 @@ async fn add_oauth_for_openrouter_runs_the_real_login_against_a_fake_authorizati
     assert_eq!(rig.secret_in_files(OR_KEY), Vec::<PathBuf>::new());
     assert!(!ran.out.contains(OR_KEY));
 }
+
+// ---------------------------------------------------------------- #359: revoke and the billing view
+
+fn or_add() -> AccountCmd {
+    add_cmd(|a| {
+        a.provider = "openrouter".into();
+        a.key_stdin = true;
+    })
+}
+
+fn revoke() -> AccountCmd {
+    name_cmd(|name| AccountCmd::Revoke { name })
+}
+
+#[test]
+fn issue_359_revoke_forgets_the_openrouter_key_disables_the_account_and_names_where_to_revoke_it() {
+    let rig = Rig { openrouter: true, ..Rig::new() };
+    assert_eq!(exit(&rig.run(&or_add(), &format!("{OR_KEY}\n"), None).result), 0);
+    assert!(rig.keychain.get("aibus", "account:work").unwrap().is_some());
+
+    let ran = rig.run(&revoke(), "", None);
+    assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
+    assert!(rig.keychain.get("aibus", "account:work").unwrap().is_none(), "the key is gone from the keychain");
+    let cfg = std::fs::read_to_string(rig.config()).unwrap();
+    assert!(cfg.contains("enabled = false"), "{cfg}");
+    assert!(cfg.contains("name = \"work\""), "the account stays, so a new login can reuse it");
+    // aibus can forget the key; revoking it at OpenRouter is the user's step, and the output says so.
+    assert!(ran.out.contains("https://openrouter.ai/settings/keys"), "{}", ran.out);
+    assert!(ran.out.contains("still valid") || ran.out.contains("not revoked"), "{}", ran.out);
+    assert!(!ran.out.contains(OR_KEY));
+    // A second revoke is not an error.
+    assert_eq!(exit(&rig.run(&revoke(), "", None).result), 0);
+}
+
+#[test]
+fn issue_359_revoke_is_only_for_openrouter_and_leaves_another_providers_key_alone() {
+    let rig = Rig::new();
+    assert_eq!(exit(&rig.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    let ran = rig.run(&revoke(), "", None);
+    assert!(matches!(ran.result, Err(AibusError::Usage(_))), "{:?}", ran.result);
+    assert!(rig.keychain.get("aibus", "account:work").unwrap().is_some(), "another provider's key is untouched");
+}
+
+#[test]
+fn issue_359_show_gives_an_openrouter_account_its_own_billing_models_and_data_view() {
+    let rig = Rig { openrouter: true, ..Rig::new() };
+    assert_eq!(exit(&rig.run(&or_add(), &format!("{OR_KEY}\n"), None).result), 0);
+    let v = rig.json(&name_cmd(|name| AccountCmd::Show { name }));
+    let b = &v["runtime"];
+    assert_eq!(b["billing"], "separate_openrouter_credits");
+    assert_eq!(b["uses_subscription_allowance"], false);
+    assert_eq!(b["models"], "downstream, chosen per request");
+    assert_eq!(b["data_transfer"], "prompts go to OpenRouter and to the model provider it routes to");
+    assert_eq!(b["fallback"], "only after you approve it for a run");
+    // Another provider's account carries no such block.
+    let other = Rig::new();
+    assert_eq!(exit(&other.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
+    assert!(other.json(&name_cmd(|name| AccountCmd::Show { name })).get("runtime").is_none());
+}

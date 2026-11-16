@@ -35,6 +35,9 @@ pub struct Request {
     /// The runtime of the step that launches this one, for a step with a parent.
     #[serde(default)]
     pub parent_runtime: Option<String>,
+    /// Runtimes the user approved for this run (`openrouter`: a separately billed API run).
+    #[serde(default)]
+    pub approved: Vec<String>,
 }
 
 /// What Jev decided, and why. `selected_runtime` is `None` when no candidate fits, which is
@@ -94,6 +97,11 @@ pub fn runtime_info(rt: Runtime) -> RuntimeInfo {
             id: "attached",
             status: "experimental",
             capabilities: &["headless", "one_shot", "pull_delivery"],
+        },
+        Runtime::CodexCli | Runtime::GeminiCli | Runtime::OpenRouter => RuntimeInfo {
+            id: rt.as_str(),
+            status: "unavailable",
+            capabilities: &[],
         },
     }
 }

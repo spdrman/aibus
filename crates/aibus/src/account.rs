@@ -56,6 +56,7 @@ pub fn run(cmd: &AccountCmd, json: bool, io: &mut Io) -> Result<u8, AibusError> 
         AccountCmd::Remove { name } => remove(name, &file, io)?,
         AccountCmd::Enable { name } => set_enabled(name, true, &file, io)?,
         AccountCmd::Disable { name } => set_enabled(name, false, &file, io)?,
+        AccountCmd::Revoke { .. } => {}
     }
     Ok(0)
 }

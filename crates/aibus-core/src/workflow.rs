@@ -91,6 +91,16 @@ pub enum Runtime {
     /// through `next_step` and comes back as a `step_result`.
     #[serde(rename = "attached")]
     Attached,
+    /// The official Codex CLI (#357). Plans, and does not run until the scheduler (#288).
+    #[serde(rename = "cli.codex")]
+    CodexCli,
+    /// The official Gemini CLI (#358). Plans, and does not run until the scheduler (#288).
+    #[serde(rename = "cli.gemini")]
+    GeminiCli,
+    /// OpenRouter, the one direct API runtime (#359): its own key, its own billing, and never a
+    /// silent fallback for a CLI that is missing.
+    #[serde(rename = "openrouter")]
+    OpenRouter,
 }
 
 impl Runtime {
@@ -99,6 +109,9 @@ impl Runtime {
             Runtime::Aibus => "aibus",
             Runtime::ClaudeCli => "cli.claude",
             Runtime::Attached => "attached",
+            Runtime::CodexCli => "cli.codex",
+            Runtime::GeminiCli => "cli.gemini",
+            Runtime::OpenRouter => "openrouter",
         }
     }
 }

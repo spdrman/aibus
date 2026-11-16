@@ -79,6 +79,8 @@ pub struct Options {
     pub workflows: Option<crate::workflows::WorkflowFiles>,
     /// Where `/runs` reads recorded runs (`<state>/traces`). Without it `/runs` does nothing.
     pub recorded: Option<PathBuf>,
+    /// Where `/sessions` and `/tap` look (#355). Without it they do nothing.
+    pub sessions: Option<crate::sessions::Setup>,
     /// What a client of `aibus mcp` sends through the session's control socket (#274). Its
     /// messages take the same `step` as the keyboard's.
     pub remote: Option<mpsc::Receiver<Remote>>,
@@ -439,6 +441,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
     let (mut validate, mut account) = (opts.validate.take(), opts.account.take());
     let workflows = opts.workflows.take();
     let recorded = opts.recorded.take();
+    let sessions = opts.sessions.take().map(|s| (s, tx.clone()));
     let mut input = Input::default();
     input.oauth_providers = std::mem::take(&mut opts.oauth_providers);
     let mut ctrl_c = CtrlC::default();
@@ -520,15 +523,15 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                 step_written(&mut app, &mut writer, m)?;
             }
             Some(r) = next_remote => {
-                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), sessions.as_ref(), &mut writer);
                 crate::remote::handle(&mut app, &mut ui, r, opts.remote_permission, &mut step)?;
             }
             Some(ask) = next_step => {
-                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), sessions.as_ref(), &mut writer);
                 crate::remote::workflow_step(&mut app, &mut ui, ask, &mut step)?;
             }
             () = attach_tick => {
-                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), sessions.as_ref(), &mut writer);
                 crate::remote::settle(&mut app, &mut ui, &mut step)?;
             }
             Some(first) = ev_rx.recv() => {
@@ -538,7 +541,7 @@ pub async fn run<G: Graph>(mut app: App<G>, mut opts: Options) -> Result<(), Aib
                     let Ok(e) = ev_rx.try_recv() else { break };
                     batch.push(e);
                 }
-                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), &mut writer);
+                let mut step = |app: &mut App<G>, m: Msg| step_user(app, m, &mut user, workflows.as_ref(), recorded.as_deref(), sessions.as_ref(), &mut writer);
                 done = terminal_events(
                     batch, &mut app, &mut ui, &mut input, &mut ctrl_c, opts.mouse, Instant::now(), &mut step,
                 )?;
@@ -629,6 +632,7 @@ fn step_user<G: Graph>(
     user: &mut dyn FnMut(&Msg),
     workflows: Option<&crate::workflows::WorkflowFiles>,
     recorded: Option<&std::path::Path>,
+    sessions: Option<&(crate::sessions::Setup, mpsc::Sender<Msg>)>,
     writer: &mut Option<SessionWriter>,
 ) -> Result<(), AibusError> {
     user(m.inner());
@@ -637,11 +641,12 @@ fn step_user<G: Graph>(
             crate::workflows::apply(op, app, files, std::time::SystemTime::now())
         }
         (Msg::Command(Command::Runs(q)), _, Some(root)) => crate::runs::apply(q, root),
-        // The tap state sits next to the recorded runs; the CLI's config is where it keeps it.
-        (Msg::Command(Command::Sessions(q)), _, Some(root)) => {
-            let state = root.parent().unwrap_or(root);
-            let config = aibus_tap::Env::claude_config_from_env().unwrap_or_default();
-            crate::sessions::apply(q, state, &config, &aibus_tap::agents::run_agents_json, &aibus_core::Redactor::new())
+        // The CLI call runs on a thread of its own; its text comes back as messages.
+        (Msg::Command(Command::Sessions(q)), _, _) => {
+            if let Some((setup, tx)) = sessions {
+                crate::sessions::spawn(q, setup, std::sync::Arc::new(aibus_tap::agents::run_agents_json), tx.clone());
+            }
+            Vec::new()
         }
         _ => Vec::new(),
     };

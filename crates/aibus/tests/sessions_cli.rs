@@ -120,8 +120,13 @@ fn hooks_install_prints_the_diff_and_without_a_yes_writes_nothing() {
     let o = child.wait_with_output().unwrap();
     let text = out(&o);
     assert!(
-        text.contains("127.0.0.1") && text.contains("+"),
+        text.contains("aibus-tap-hook.sh") && text.contains("+"),
         "the diff is shown: {text}"
+    );
+    let token = endpoint_token(home.path());
+    assert!(
+        !text.contains(&token),
+        "the diff never prints the token: {text}"
     );
     assert_eq!(
         fs::read(cfg.join("settings.json")).unwrap(),
@@ -151,16 +156,29 @@ fn hooks_install_yes_then_uninstall_yes_round_trips_and_keeps_the_token_out_of_t
     assert!(o.status.success(), "{}", stderr(&o));
     let now = fs::read_to_string(cfg.join("settings.json")).unwrap();
     assert!(
-        now.contains("\"type\": \"http\"") && now.contains("127.0.0.1"),
+        now.contains("\"type\": \"command\"") && now.contains("aibus-tap-hook.sh"),
         "{now}"
     );
+    let token = endpoint_token(home.path());
+    assert!(
+        !now.contains(&token) && !out(&o).contains(&token),
+        "no token in settings or output"
+    );
+    assert!(home
+        .path()
+        .join("state/aibus/tap/aibus-tap-hook.sh")
+        .is_file());
     let o = run(&["uninstall"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let back: serde_json::Value =
-        serde_json::from_slice(&fs::read(cfg.join("settings.json")).unwrap()).unwrap();
-    let before: serde_json::Value =
-        serde_json::from_slice(&fs::read(fixture("settings-before.json")).unwrap()).unwrap();
-    assert_eq!(back, before);
+    assert_eq!(
+        fs::read(cfg.join("settings.json")).unwrap(),
+        fs::read(fixture("settings-before.json")).unwrap()
+    );
+    assert_ne!(
+        endpoint_token(home.path()),
+        token,
+        "uninstall rotates the token"
+    );
 }
 
 #[test]

@@ -34,11 +34,7 @@ pub fn read(
             .collect();
         files.sort();
         for p in files.into_iter().take(MAX_TASKS) {
-            if !crate::own_regular_file(&p, MAX_FILE) {
-                continue;
-            }
-            let Some(v) = std::fs::read(&p)
-                .ok()
+            let Some(v) = crate::read_own(&p, MAX_FILE)
                 .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             else {
                 continue;
@@ -63,21 +59,22 @@ pub fn read(
             .flatten()
             .filter_map(Result::ok)
             .map(|e| e.path())
-            .filter(|p| {
-                p.extension().is_some_and(|x| x == "md") && crate::own_regular_file(p, MAX_FILE)
-            })
+            .filter(|p| p.extension().is_some_and(|x| x == "md"))
             .filter_map(|p| {
-                let ms = std::fs::metadata(&p)
+                let f = crate::open_own(&p, MAX_FILE)?;
+                let ms = f
+                    .metadata()
                     .and_then(|m| m.modified())
                     .ok()?
                     .duration_since(std::time::UNIX_EPOCH)
                     .ok()?
                     .as_millis() as i64;
-                (ms >= start).then_some((ms, p))
+                (ms >= start).then_some((ms, p, f))
             })
-            .max();
-        if let Some((_, p)) = newest {
-            if let Ok(text) = std::fs::read_to_string(&p) {
+            .max_by_key(|(ms, p, _)| (*ms, p.clone()));
+        if let Some((_, p, mut f)) = newest {
+            let mut text = String::new();
+            if std::io::Read::read_to_string(&mut f, &mut text).is_ok() {
                 out.push(format!(
                     "plan {} (inferred: the newest plan file written after the session started; the CLI does not tie a plan to a session)",
                     shown(&p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()), 80),

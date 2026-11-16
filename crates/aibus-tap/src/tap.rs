@@ -47,11 +47,11 @@ fn uuid_of(label: &str, session_id: &str) -> Uuid {
 }
 
 impl Tap {
-    pub fn open(root: &Path, session_id: &str, _redactor: &Redactor) -> Result<Self, String> {
+    pub fn open(root: &Path, session_id: &str, redactor: &Redactor) -> Result<Self, String> {
         let dir = run_dir(root, session_id)?;
         let (store, _) = TraceStore::open(
             &dir,
-            Redactor::new(),
+            redactor.clone(),
             PayloadPolicy::MetadataOnly,
             StoreLimits::default(),
         )
@@ -98,11 +98,24 @@ impl Tap {
         if let Some(id) = self.store.last_id() {
             self.norm.observe(id);
         }
-        let meta = json!({
-            "transcript_path": v.get("transcript_path").and_then(Value::as_str),
-            "cwd": v.get("cwd").and_then(Value::as_str),
-        });
-        let _ = std::fs::write(self.dir.join(META), meta.to_string());
+        // The path is trusted only when it names this session's own file: a forged payload cannot
+        // point the transcript tail at another session's transcript.
+        let own = format!("{}.jsonl", self.session_id);
+        let path = v
+            .get("transcript_path")
+            .and_then(Value::as_str)
+            .filter(|p| {
+                Path::new(p)
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy() == own)
+            });
+        let meta = json!({"transcript_path": path, "cwd": v.get("cwd").and_then(Value::as_str)});
+        let _ = crate::hooks::write_private(
+            &self.dir,
+            &self.dir.join(META),
+            meta.to_string().as_bytes(),
+            0o600,
+        );
         Ok(n)
     }
 }

@@ -80,11 +80,7 @@ pub fn merge_local(list: &mut [Session], sessions_dir: &Path) {
         .collect();
     paths.sort();
     for p in paths.into_iter().take(500) {
-        if !crate::own_regular_file(&p, MAX_LOCAL_FILE) {
-            continue;
-        }
-        let Some(v) = std::fs::read(&p)
-            .ok()
+        let Some(v) = crate::read_own(&p, MAX_LOCAL_FILE)
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         else {
             continue;

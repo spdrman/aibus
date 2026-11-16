@@ -17,7 +17,7 @@ use http::{header, Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use serde_json::json;
 
 use crate::cli::{Global, SessionsArgs, SessionsCmd, SessionsHooksCmd};
@@ -178,6 +178,9 @@ fn follow_session(e: &Env, arg: &str, redactor: &Redactor) -> Result<(), AibusEr
         })?;
         eprintln!("listening on http://{addr}{} for hook events of session {}; Ctrl-C stops", hooks::HOOK_PATH, aibus_trace::view::clean(&id, 64));
         let mut tick = tokio::time::interval(Duration::from_millis(500));
+        // At most 16 connections at once; a client that is slow to send its headers, its body or
+        // anything at all is cut off, so one local process cannot hold the receiver.
+        let slots = Arc::new(tokio::sync::Semaphore::new(16));
         loop {
             tokio::select! {
                 _ = tick.tick() => {
@@ -192,12 +195,16 @@ fn follow_session(e: &Env, arg: &str, redactor: &Redactor) -> Result<(), AibusEr
                 conn = listener.accept() => {
                     let Ok((stream, peer)) = conn else { continue };
                     if !peer.ip().is_loopback() { continue; }
+                    let Ok(slot) = slots.clone().try_acquire_owned() else { continue };
                     let (ep, tapper, dirty) = (ep.clone(), tapper.clone(), dirty.clone());
                     tokio::spawn(async move {
                         let svc = service_fn(move |req| receive(req, ep.clone(), tapper.clone(), dirty.clone()));
-                        let _ = hyper::server::conn::http1::Builder::new()
-                            .serve_connection(TokioIo::new(stream), svc)
-                            .await;
+                        let conn = hyper::server::conn::http1::Builder::new()
+                            .timer(TokioTimer::new())
+                            .header_read_timeout(Duration::from_secs(2))
+                            .serve_connection(TokioIo::new(stream), svc);
+                        let _ = tokio::time::timeout(Duration::from_secs(10), conn).await;
+                        drop(slot);
                     });
                 }
             }
@@ -234,19 +241,28 @@ async fn receive(
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
         .is_some_and(|h| h == format!("127.0.0.1:{}", ep.port));
-    if req.method() != Method::POST || req.uri().path() != hooks::HOOK_PATH || !host_ok {
-        return reply(StatusCode::NOT_FOUND);
-    }
+    let routed = req.method() == Method::POST && req.uri().path() == hooks::HOOK_PATH && host_ok;
     let auth = req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .map(str::to_owned);
-    if !hooks::accepts(&ep, auth.as_deref()) {
+    let authorised = hooks::accepts(&ep, auth.as_deref());
+    // The body is read (1 MiB, two seconds at most) even when the request is refused, so the
+    // client gets the answer instead of a reset; only a routed, authorised body is used.
+    let body = tokio::time::timeout(
+        Duration::from_secs(2),
+        Limited::new(req.into_body(), 1 << 20).collect(),
+    )
+    .await;
+    if !routed {
+        return reply(StatusCode::NOT_FOUND);
+    }
+    if !authorised {
         return reply(StatusCode::UNAUTHORIZED);
     }
-    let Ok(body) = Limited::new(req.into_body(), 1 << 20).collect().await else {
-        return reply(StatusCode::PAYLOAD_TOO_LARGE);
+    let Ok(Ok(body)) = body else {
+        return reply(StatusCode::REQUEST_TIMEOUT);
     };
     let body = body.to_bytes();
     if let Ok(mut t) = tapper.lock() {

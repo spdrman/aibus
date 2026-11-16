@@ -308,6 +308,7 @@ dependencies = [
  "aibus-core",
  "aibus-supervisor",
  "aibus-trace",
+ "indexmap",
  "rustix 1.1.6",
  "serde_json",
  "subtle",

@@ -696,6 +696,13 @@ fn the_screen_does_not_claim_a_version_was_tested_without_a_real_transcript() {
         .join(format!("{S}.jsonl"));
     fs::create_dir_all(t.parent().unwrap()).unwrap();
     fs::write(&t, read("transcript.jsonl")).unwrap();
+    let mut w = tap::Tap::open(&e.taps(), S, &Redactor::new()).unwrap();
+    let hook = format!(
+        r#"{{"session_id":"{S}","transcript_path":"{}","hook_event_name":"SessionStart"}}"#,
+        t.display()
+    );
+    w.ingest(hook.as_bytes(), SystemTime::now()).unwrap();
+    drop(w);
     let text = show::tap(&e, &lister, &Redactor::new(), "refactor parser").unwrap();
     assert!(!text.contains("version tested"), "{text}");
     assert!(

@@ -1,6 +1,5 @@
 //! The two texts: the list and one tapped session. The CLI and the TUI both print these.
 
-use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aibus_core::Redactor;
@@ -15,9 +14,18 @@ fn now_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-fn live(env: &Env, lister: &dyn Fn() -> Result<Vec<u8>, String>) -> Result<Vec<Session>, String> {
+fn live(
+    env: &Env,
+    lister: &dyn Fn() -> Result<Vec<u8>, String>,
+    redactor: &Redactor,
+) -> Result<Vec<Session>, String> {
     let mut list = agents::parse_agents(&lister()?)?;
     agents::merge_local(&mut list, &env.config.join("sessions"));
+    // Registered secrets go before anything is laid out; the ids stay as they are.
+    for s in &mut list {
+        s.name = redactor.redact(&s.name).into_owned();
+        s.cwd = redactor.redact(&s.cwd).into_owned();
+    }
     Ok(list)
 }
 
@@ -28,9 +36,9 @@ fn has_tap(env: &Env, id: &str) -> bool {
 pub fn list(
     env: &Env,
     lister: &dyn Fn() -> Result<Vec<u8>, String>,
-    _redactor: &Redactor,
+    redactor: &Redactor,
 ) -> Result<String, String> {
-    let sessions = live(env, lister)?;
+    let sessions = live(env, lister, redactor)?;
     let tapped: Vec<String> = sessions
         .iter()
         .filter(|s| has_tap(env, &s.session_id))
@@ -44,10 +52,10 @@ pub fn list(
 pub fn tap(
     env: &Env,
     lister: &dyn Fn() -> Result<Vec<u8>, String>,
-    _redactor: &Redactor,
+    redactor: &Redactor,
     arg: &str,
 ) -> Result<String, String> {
-    let sessions = live(env, lister)?;
+    let sessions = live(env, lister, redactor)?;
     let gone;
     let s = match agents::resolve(&sessions, arg) {
         Ok(s) => s,
@@ -68,7 +76,6 @@ pub fn tap(
         }
         Err(e) => return Err(e),
     };
-    let redactor = Redactor::new();
     let dir = env.taps().join(&s.session_id);
     let rec = has_tap(env, &s.session_id)
         .then(|| Recorded::load(&dir).ok())
@@ -97,8 +104,8 @@ pub fn tap(
             "  hooks: unavailable (no hook event received for this session; `aibus sessions hooks install --client claude`, then keep `aibus sessions tap <id> --follow` running)\n",
         ),
     }
-    let tail = path_of(&dir)
-        .map(|p| transcript::tail(&env.state, &env.config, &p, s.version.as_deref(), &redactor));
+    let tail = tap::transcript_path(&dir)
+        .map(|p| transcript::tail(&env.state, &env.config, &p, s.version.as_deref(), redactor));
     let on = transcript::allowed(&env.state);
     match (&tail, on) {
         (_, false) => out.push_str(
@@ -108,9 +115,11 @@ pub fn tap(
             "  transcripts: on, no transcript path known yet (the first hook event brings it)\n",
         ),
         (Some(t), true) => match &t.status {
-            transcript::Status::Tested => out.push_str("  transcripts: on, unstable-format, version tested\n"),
+            transcript::Status::Tested => out.push_str(
+                "  transcripts: on, unstable-format, parsed against a real transcript of this version\n",
+            ),
             transcript::Status::UntestedVersion => out.push_str(
-                "  transcripts: on, unstable-format, version not tested: shown best effort\n",
+                "  transcripts: on, unstable-format, format not verified against a real transcript: shown best effort\n",
             ),
             transcript::Status::Unreadable(why) => {
                 out.push_str(&format!("  transcripts: on, refused: {}\n", clean(why, 120)));
@@ -134,7 +143,7 @@ pub fn tap(
         None => out.push_str("graph and timeline: unavailable (no events yet)\n"),
     }
 
-    let lines = intent::read(&env.config, &s.session_id, s.started_ms, &redactor);
+    let lines = intent::read(&env.config, &s.session_id, s.started_ms, redactor);
     out.push_str("\nintent (what the session wrote down; not proof of execution):\n");
     if lines.is_empty() {
         out.push_str("  unavailable (no plan or task file found for this session)\n");
@@ -160,8 +169,4 @@ pub fn tap(
         }
     }
     Ok(out)
-}
-
-fn path_of(dir: &Path) -> Option<std::path::PathBuf> {
-    tap::transcript_path(dir)
 }

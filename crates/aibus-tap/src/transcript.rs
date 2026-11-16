@@ -14,10 +14,11 @@ use aibus_core::Redactor;
 use aibus_trace::view::clean;
 use serde_json::Value;
 
-/// Claude Code versions the parser was checked against. The fixtures are synthetic: no real
-/// transcript was read, so this list is the claim "the shapes below were what I expected on
-/// these", and a live check is open.
-pub const TESTED: &[&str] = &["2.1.304"];
+/// Claude Code versions whose real transcripts the parser was checked against. Empty: the
+/// fixtures are synthetic and no real transcript was ever parsed (D-355b). `claude` on PATH here
+/// is 2.1.311 and the shell alias 2.1.304; neither was read. A version goes in only after a live
+/// check says what was parsed.
+pub const TESTED: &[&str] = &[];
 
 const TAIL_BYTES: u64 = 1 << 20;
 const TAIL_LINES: usize = 200;
@@ -62,6 +63,7 @@ pub fn set_allowed(state: &Path, on: bool) -> Result<(), String> {
             &state.join("tap"),
             &f,
             b"transcript tail allowed for claude (read-only, never copied, never sent)\n",
+            0o600,
         )
     } else {
         match std::fs::remove_file(&f) {
@@ -105,21 +107,15 @@ pub fn tail(
     ) else {
         return refuse("the transcript is not under the config directory's projects folder");
     };
-    if !real.starts_with(&projects) || !crate::own_regular_file(&real, u64::MAX) {
+    let opened = if real.starts_with(&projects) {
+        crate::open_own(&real, u64::MAX)
+    } else {
+        None
+    };
+    let Some(mut file) = opened else {
         return refuse(
             "the transcript is not a file of yours under the config directory's projects folder",
         );
-    }
-    let mut file = {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut o = std::fs::OpenOptions::new();
-        o.read(true).custom_flags(
-            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
-        );
-        match o.open(&real) {
-            Ok(f) => f,
-            Err(e) => return refuse(&e.to_string()),
-        }
     };
     let len = file.metadata().map_or(0, |m| m.len());
     let start = len.saturating_sub(TAIL_BYTES);

@@ -23,6 +23,12 @@ pub fn apply(
     lister: &dyn Fn() -> Result<Vec<u8>, String>,
     redactor: &Redactor,
 ) -> Vec<Msg> {
+    if config.as_os_str().is_empty() {
+        return vec![Msg::IoError {
+            context: "/sessions: cannot tell where Claude Code keeps its config: set CLAUDE_CONFIG_DIR or HOME".into(),
+            error: String::new(),
+        }];
+    }
     let env = Env {
         state: state.to_owned(),
         config: config.to_owned(),
@@ -56,15 +62,20 @@ pub struct Setup {
 }
 
 /// Runs `apply` on a thread of its own and sends what it made to `tx`, so `claude agents --json`
-/// never holds the screen.
+/// never holds the screen. Returns at once.
 pub fn spawn(
     query: &SessionsQuery,
     setup: &Setup,
     lister: Arc<dyn Fn() -> Result<Vec<u8>, String> + Send + Sync>,
     tx: mpsc::Sender<Msg>,
 ) {
-    let config = setup.config.clone().unwrap_or_default();
-    for m in apply(query, &setup.state, &config, &*lister, &setup.redactor) {
-        let _ = tx.blocking_send(m);
-    }
+    let (query, setup) = (query.clone(), setup.clone());
+    std::thread::spawn(move || {
+        let config = setup.config.clone().unwrap_or_default();
+        for m in apply(&query, &setup.state, &config, &*lister, &setup.redactor) {
+            if tx.blocking_send(m).is_err() {
+                return;
+            }
+        }
+    });
 }

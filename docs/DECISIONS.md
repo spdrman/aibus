@@ -834,7 +834,7 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 
 **Why.** One small, additive schema 2 key does the job for Codex, and for every other CLI that nests its line kind. What it leaves out is said in the manifest, the README and the PR.
 
-**Known limits.** The probe reads the top-level `--help`, which does not list `exec`'s own flags (`--json`, `--ephemeral`), so those are checked by the version range and by a test against the recorded `codex exec --help`, not at run time. The lifecycle lines (`thread.started`, `turn.started`) and Codex's "Reading prompt from stdin..." on stderr are `trace_warning` events on every run, because the engine has no "known and uninteresting" kind. The id has the product word `codex` in it, which A1.5's E6 forbids only for Claude Code; the owner may want it changed.
+**Known limits.** The probe reads the top-level `--help`, which does not list `exec`'s own flags (`--json`, `--ephemeral`), so those are checked by the version range and by a test against the recorded `codex exec --help`, not at run time. The lifecycle lines (`thread.started`, `turn.started`) and Codex's "Reading prompt from stdin..." on stderr are `trace_warning` events on every run, because the engine has no "known and uninteresting" kind. `--skip-git-repo-check` switches off one of Codex's own safety checks, which is acceptable only because the sandbox is read-only. The id has the product word `codex` in it, which A1.5's E6 forbids only for Claude Code; the owner may want it changed.
 
 ## D-358: The Gemini extension ships unverified, built from the CLI's source, with no login claim (#358, A2.2b)
 
@@ -856,6 +856,7 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 
 **Unverified.** No live OpenRouter call was made for this change: nothing in it sends a request (revoke and the view are local, Jev is a pure function), and the keychain was not opened on this machine. How the scheduler (#288) collects `approved`, and whether OpenRouter allows self-revocation of a user key by API, are open.
 
+<<<<<<< HEAD
 ## D-360: A handoff between runtimes is previewed, answered and recorded, and consent covers exactly what was shown (#360, A2.2d)
 
 **Context.** Spec 10.2 says a cross-provider handoff must preview what moves and to which provider, and invariant 10 puts cross-provider data movement under the user's policy. A2.2 wants a workflow with two distinct providers and a consent record on the handoff. The scheduler (#288) does not exist yet, so nothing at run time can ask.
@@ -865,3 +866,6 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 **Alternatives.** Asking in the TUI or the CLI now: the TUI is another agent's area (#348) and a prompt with no scheduler to wait on would be a UI with nothing behind it. Consent by workflow file: the author's file is not the user's answer at run time. Hashing the content into the preview: it would make the preview itself sensitive.
 
 **Unverified.** That the TUI or `aibus workflow run` can show the preview and take the answer (not built). Gemini is not in the live pair (not installed).
+=======
+**Review changes (D-359).** (6) `cli.gemini` has its own Jev status, `unverified`, and claims no `structured_events` (its manifest leaves that to a probe), so it is not read as live-tested like Codex. (7) The approval rule is about the receiving party, not the runtime id: `Request.account_provider` carries the provider of the account an `aibus` step runs under, and `openrouter` there needs the same approval as the `openrouter` runtime. The compiler cannot know the account, so it sends none; **the scheduler (#288) has to pass the resolved provider, or an `aibus` step on an OpenRouter account is unguarded until it does**. This follows the owner's boundary, provider plus account. (8) `revoke` says what it did per storage: removed from the keychain; not removed because the key lives in an environment variable or file (it names which); and with no keychain it fails and leaves the account alone, since nothing was revoked.
+>>>>>>> feat/359-openrouter-runtime

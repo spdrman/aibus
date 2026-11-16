@@ -444,6 +444,7 @@ pub fn compile(
             requested_mode: s.mode,
             parent_runtime: parent.map(|p| wf.steps[p].runtime.as_str().to_owned()),
             approved: Vec::new(),
+            account_provider: None,
         };
         let decision = jev::decide(&request);
         decisions.push(json!({ "step": key, "request": request, "decision": decision }));

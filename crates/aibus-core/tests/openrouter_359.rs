@@ -19,6 +19,7 @@ fn request(candidates: &[&str], approved: &[&str]) -> Request {
         requested_mode: Default::default(),
         parent_runtime: None,
         approved: approved.iter().map(|c| (*c).to_owned()).collect(),
+        account_provider: None,
     }
 }
 
@@ -47,7 +48,10 @@ fn the_codex_and_gemini_clis_are_runtimes_with_the_capabilities_their_extensions
     }
     // Gemini: no login status (no documented subcommand), and still unverified.
     let gemini = jev::runtime_info(Runtime::GeminiCli);
-    assert_eq!((gemini.id, gemini.status), ("cli.gemini", "experimental"));
+    // Never run: its own status, so it is not read as live-tested like Codex, and it claims no
+    // capability its manifest leaves to a probe.
+    assert_eq!((gemini.id, gemini.status), ("cli.gemini", "unverified"));
+    assert!(!gemini.capabilities.contains(&"structured_events"));
     assert!(
         gemini.capabilities.contains(&"one_shot") && gemini.capabilities.contains(&"usage_report")
     );
@@ -167,4 +171,25 @@ fn a_cli_step_plans_as_a_cli_run_naming_its_extension() {
             rt
         );
     }
+}
+
+#[test]
+fn an_aibus_step_on_an_openrouter_account_needs_the_same_approval() {
+    let mut r = request(&["aibus"], &[]);
+    r.account_provider = Some("openrouter".into());
+    let d = decide(&r);
+    assert_eq!(d.selected_runtime, None);
+    assert_eq!(d.reason_code, "openrouter_needs_approval");
+    assert!(d
+        .policy_evidence
+        .iter()
+        .any(|e| e.starts_with("proposal:billing")));
+    r.approved = vec!["openrouter".into()];
+    let d = decide(&r);
+    assert_eq!(d.selected_runtime.as_deref(), Some("aibus"));
+    assert!(d.policy_evidence.iter().any(|e| e == "approved:openrouter"));
+    // Another provider's account is not the rule's business.
+    let mut other = request(&["aibus"], &[]);
+    other.account_provider = Some("anthropic".into());
+    assert_eq!(decide(&other).selected_runtime.as_deref(), Some("aibus"));
 }

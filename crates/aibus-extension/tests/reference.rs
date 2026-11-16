@@ -223,7 +223,13 @@ fn bless() {
         for f in &pkg.manifest.fixtures.files {
             let expected = dir.join(f.replace(".jsonl", ".expected.json"));
             if bless {
-                let obs = aibus_extension::conformance::observe(&pkg, f, "exit:0").unwrap();
+                // Keep the ending a file already has: a failed turn is blessed as the failed turn it is.
+                let ending = fs::read_to_string(&expected)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .and_then(|v| v["ending"].as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "exit:0".into());
+                let obs = aibus_extension::conformance::observe(&pkg, f, &ending).unwrap();
                 fs::write(&expected, expected_json(&obs)).unwrap();
             }
             assert!(
@@ -278,4 +284,24 @@ fn issue_334_the_reference_extension_is_schema_2_with_a_typed_model_and_agents()
         .argv
         .iter()
         .any(|a| a == "--model" || a == "--agents"));
+}
+
+/// A fixture of a turn that failed ends `failed`: re-blessing once rewrote the Codex one as
+/// `exit:0` and `completed`, and nothing noticed.
+#[test]
+fn the_expected_files_of_failed_turns_say_failed() {
+    for f in [
+        "examples/extensions/codex/fixtures/turn-failed.expected.json",
+        "examples/extensions/gemini/fixtures/result-error.expected.json",
+    ] {
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(repo().join(f)).unwrap()).unwrap();
+        assert_eq!(v["ending"], "exit:1", "{f}");
+        assert_eq!(v["status"], "failed", "{f}");
+        assert_eq!(
+            v["kinds"].as_array().unwrap().last().unwrap(),
+            "attempt_failed",
+            "{f}"
+        );
+    }
 }

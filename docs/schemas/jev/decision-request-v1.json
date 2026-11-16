@@ -55,6 +55,10 @@
         "null"
       ]
     },
+    "account_provider": {
+      "type": "string",
+      "description": "The provider of the account the step will run under, when the scheduler knows it. An aibus step on an openrouter account needs the same approval as the openrouter runtime. Omitted when unknown."
+    },
     "approved": {
       "type": "array",
       "items": {

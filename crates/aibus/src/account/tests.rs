@@ -692,3 +692,44 @@ fn issue_359_show_gives_an_openrouter_account_its_own_billing_models_and_data_vi
     assert_eq!(exit(&other.run(&stdin_cmd(), &format!("{KEY}\n"), None).result), 0);
     assert!(other.json(&name_cmd(|name| AccountCmd::Show { name })).get("runtime").is_none());
 }
+
+/// An OpenRouter account whose key is in the keychain of `rig`, written straight to the config.
+fn or_config(rig: &Rig, auth: &str) {
+    std::fs::write(
+        rig.config(),
+        format!("[[account]]\nname = \"work\"\nprovider = \"openrouter\"\nauth = {auth}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn issue_359_revoke_says_the_key_is_in_the_keychain_only_when_it_took_it_out_of_there() {
+    let rig = Rig { openrouter: true, ..Rig::new() };
+    assert_eq!(exit(&rig.run(&or_add(), &format!("{OR_KEY}\n"), None).result), 0);
+    let ran = rig.run(&revoke(), "", None);
+    assert!(ran.out.contains("removed from the keychain"), "{}", ran.out);
+}
+
+#[test]
+fn issue_359_revoke_of_an_env_or_file_key_removes_nothing_and_says_where_the_user_must() {
+    let rig = Rig { openrouter: true, ..Rig::new() };
+    or_config(&rig, "{ env = \"OR_VAR\" }");
+    let ran = rig.run(&revoke(), "", None);
+    assert_eq!(exit(&ran.result), 0, "{:?}", ran.result.err());
+    assert!(ran.out.contains("OR_VAR") && ran.out.contains("not removed"), "{}", ran.out);
+    assert!(!ran.out.contains("keychain"), "it never touched a keychain: {}", ran.out);
+    assert!(std::fs::read_to_string(rig.config()).unwrap().contains("enabled = false"));
+}
+
+#[test]
+fn issue_359_revoke_with_no_keychain_claims_nothing_fails_and_leaves_the_account_alone() {
+    let rig = Rig {
+        openrouter: true,
+        ..Rig::with_keychain(MemoryKeychain::unavailable("no secret service"))
+    };
+    or_config(&rig, "{ keyring = true }");
+    let ran = rig.run(&revoke(), "", None);
+    assert_ne!(exit(&ran.result), 0, "nothing was revoked locally");
+    assert!(!ran.out.contains("removed"), "{}", ran.out);
+    assert!(!std::fs::read_to_string(rig.config()).unwrap().contains("enabled = false"));
+}

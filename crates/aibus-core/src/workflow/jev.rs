@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Mode, Runtime};
 
-/// What a runtime is known to offer. `status` is `available`, `experimental` (plans compile,
+/// What a runtime is known to offer. `status` is `available`, `unverified` (an extension exists and the CLI was never run, so nothing is claimed that its manifest leaves to a probe), `experimental` (plans compile,
 /// nothing runs) or `unavailable`. `capabilities` are the spec's capability vector.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 pub struct RuntimeInfo {
@@ -38,6 +38,10 @@ pub struct Request {
     /// Runtimes the user approved for this run (`openrouter`: a separately billed API run).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approved: Vec<String>,
+    /// The provider of the account the step will run under, when the scheduler knows it. An
+    /// `aibus` step on an OpenRouter account is OpenRouter for the approval rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_provider: Option<String>,
 }
 
 /// What Jev decided, and why. `selected_runtime` is `None` when no candidate fits, which is
@@ -117,12 +121,11 @@ pub fn runtime_info(rt: Runtime) -> RuntimeInfo {
         // or status subcommand, so no `login_status`.
         Runtime::GeminiCli => RuntimeInfo {
             id: "cli.gemini",
-            status: "experimental",
+            status: "unverified",
             capabilities: &[
                 "cancel",
                 "headless",
                 "one_shot",
-                "structured_events",
                 "tool_events",
                 "usage_report",
             ],
@@ -163,7 +166,7 @@ const RULES: &str = "jev-deterministic/1
 2 policy: policy_revision is this one, else stop (stale_policy)
 3 availability: skip a candidate this aibus does not know or that is unavailable
 4 capabilities: skip a candidate missing a required capability (native mode requires native_child_lineage)
-4b approval: skip openrouter unless the user approved it for this run (it is separately billed and sends the prompt to a third party); the skip carries the proposal a person is shown
+4b approval: skip openrouter, or an aibus step whose account is OpenRouter's, unless the user approved it for this run (it is separately billed and sends the prompt to a third party); the skip carries the proposal a person is shown
 5 preference: the first candidate left wins (pinned_runtime when it was the only one, else capability_match)
 6 mode: native_or_managed is native under a parent on the same runtime with native_child_lineage, else aibus_managed
 none left: no_candidate, and a person decides";
@@ -239,8 +242,11 @@ pub fn decide(req: &Request) -> Decision {
             evidence.push(format!("missing:{missing}@{id}"));
             continue;
         }
-        if rt == Runtime::OpenRouter {
-            if !req.approved.iter().any(|a| a == id) {
+        // OpenRouter is the receiving party whether it is the runtime or the account under `aibus`.
+        let via_openrouter = rt == Runtime::OpenRouter
+            || (rt == Runtime::Aibus && req.account_provider.as_deref() == Some("openrouter"));
+        if via_openrouter {
+            if !req.approved.iter().any(|a| a == "openrouter") {
                 // No silent fallback: what the person would be agreeing to, each part its own line.
                 needs_approval = true;
                 evidence.extend([

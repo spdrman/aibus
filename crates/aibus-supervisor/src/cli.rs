@@ -63,10 +63,12 @@ impl std::fmt::Display for ProbeError {
 impl std::error::Error for ProbeError {}
 
 /// `2.1.311 (Claude Code)` to `Version(2, 1, 311)`, and `codex-cli 0.167.0` to `Version(0, 167, 0)`:
-/// the version may follow one program word.
+/// the version may follow the name of one of the host's official CLIs, and nothing else.
 pub fn parse_version(out: &str) -> Option<Version> {
-    let re = Regex::new(r"^\s*(?:[A-Za-z][\w-]{0,31}\s+)?(\d{1,6})\.(\d{1,6})\.(\d{1,6})\b")
-        .expect("valid regex");
+    let re = Regex::new(
+        r"^\s*(?:(?:claude|codex|gemini|kimi)(?:-cli)?\s+)?(\d{1,6})\.(\d{1,6})\.(\d{1,6})\b",
+    )
+    .expect("valid regex");
     let c = re.captures(out)?;
     Some(Version(
         c[1].parse().ok()?,

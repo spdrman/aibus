@@ -76,7 +76,7 @@
             "cli.codex"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
+          "policy_revision": "sha256:cdc75a0bbd0f6a8ee4ccce2c244245f23352db63ff86a414245bf557fd4f9ab3",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -105,7 +105,7 @@
             "cli.claude"
           ],
           "parent_runtime": null,
-          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
+          "policy_revision": "sha256:cdc75a0bbd0f6a8ee4ccce2c244245f23352db63ff86a414245bf557fd4f9ab3",
           "requested_mode": "aibus_managed",
           "requires": [
             "headless",
@@ -117,12 +117,12 @@
         "step": "review"
       }
     ],
-    "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4"
+    "policy_revision": "sha256:cdc75a0bbd0f6a8ee4ccce2c244245f23352db63ff86a414245bf557fd4f9ab3"
   },
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:88d1d8325527b551651673fbe2d4c2c914a1c14a047a7b3da3dc0190a0b7f2bf",
+  "plan_hash": "sha256:97b21c5fc3baa1c26fbc92916da033d48b8ab50c059803941058580afb043b74",
   "plan_only_because": "workflow cross-provider uses a runtime other than aibus, which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan cross-provider --dry-run shows the plan)",
   "prompts": {
     "sha256:29481936eba613c559b20f31ef9513e70cd677ce6c7c7ac7da3563b86c0a5a8a": "Draft a short answer to this: {{input}}",

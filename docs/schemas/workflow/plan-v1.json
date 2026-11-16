@@ -456,6 +456,7 @@
             "enum": [
               "available",
               "experimental",
+              "unverified",
               "unavailable"
             ]
           },

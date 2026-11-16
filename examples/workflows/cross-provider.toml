@@ -1,0 +1,17 @@
+name = "cross-provider"
+description = "Draft on one provider's CLI, review on another's; the handoff needs your yes"
+
+# The two steps run on different official CLIs, so the first step's summary is a handoff: aibus
+# shows what would move and to whom, and it moves only after you say yes (#360). Both CLIs use
+# their own sign-in; nothing is shared between them.
+[[step]]
+id = "draft"
+agent = "explore"
+runtime = "cli.codex"
+prompt = "Draft a short answer to this: {{input}}"
+
+[[step]]
+id = "review"
+agent = "explore"
+runtime = "cli.claude"
+prompt = "Review this draft and say what is wrong with it: {{prev.summary}}"

@@ -1,0 +1,252 @@
+{
+  "agents": {
+    "explore": {
+      "model": "inherit",
+      "permission_mode": "default",
+      "role": "worker",
+      "scope": "builtin",
+      "sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "tools": [
+        "read",
+        "grep",
+        "glob",
+        "ls"
+      ]
+    }
+  },
+  "approvals": {
+    "required_for": [],
+    "steps": {}
+  },
+  "compiler": "aibus-workflow-compiler/1",
+  "edges": [
+    {
+      "from": "draft",
+      "kind": "sequence",
+      "to": "review"
+    },
+    {
+      "from": "input",
+      "kind": "data",
+      "to": "draft",
+      "via": "input"
+    },
+    {
+      "from": "draft",
+      "kind": "data",
+      "to": "review",
+      "via": "prev.summary"
+    }
+  ],
+  "entry": "draft",
+  "envelope": {
+    "max_agent_runs": null,
+    "max_parallel": null,
+    "max_wall_seconds": null,
+    "worst_case_agent_runs": 2
+  },
+  "fan_out": [],
+  "handoffs": [
+    {
+      "from": "draft",
+      "from_runtime": "cli.codex",
+      "needs_consent": true,
+      "to": "review",
+      "to_runtime": "cli.claude",
+      "via": "prev.summary"
+    }
+  ],
+  "jev": {
+    "decisions": [
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:cli.codex=experimental",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "cli.codex"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "cli.codex"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "draft"
+        },
+        "step": "draft"
+      },
+      {
+        "decision": {
+          "decision_source": "jev_deterministic",
+          "execution_mode": "aibus_managed",
+          "policy_evidence": [
+            "risk:read_only",
+            "status:cli.claude=experimental",
+            "mode:as_requested"
+          ],
+          "reason_code": "pinned_runtime",
+          "selected_runtime": "cli.claude"
+        },
+        "request": {
+          "budget_class": "unbounded",
+          "candidates": [
+            "cli.claude"
+          ],
+          "parent_runtime": null,
+          "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4",
+          "requested_mode": "aibus_managed",
+          "requires": [
+            "headless",
+            "one_shot"
+          ],
+          "risk_class": "read_only",
+          "task_id": "review"
+        },
+        "step": "review"
+      }
+    ],
+    "policy_revision": "sha256:649c09a361667b87aa83611f5c1ff494dc9f550b6f07e92ef3988fc3fc85fdb4"
+  },
+  "kind": "aibus.workflow.plan",
+  "manifest_version": 1,
+  "notes": [],
+  "plan_hash": "sha256:88d1d8325527b551651673fbe2d4c2c914a1c14a047a7b3da3dc0190a0b7f2bf",
+  "plan_only_because": "workflow cross-provider uses a runtime other than aibus, which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan cross-provider --dry-run shows the plan)",
+  "prompts": {
+    "sha256:29481936eba613c559b20f31ef9513e70cd677ce6c7c7ac7da3563b86c0a5a8a": "Draft a short answer to this: {{input}}",
+    "sha256:3e72e0cc0dcebd84e63f9c22fe16ac17b3acee7bd85faf3b77e47c1bd50f2e71": "Review this draft and say what is wrong with it: {{prev.summary}}"
+  },
+  "runnable_now": false,
+  "runtimes": {
+    "cli.claude": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "login_status",
+        "native_child_lineage",
+        "one_shot",
+        "structured_events",
+        "tool_events",
+        "usage_report"
+      ],
+      "status": "experimental"
+    },
+    "cli.codex": {
+      "capabilities": [
+        "cancel",
+        "headless",
+        "login_status",
+        "one_shot",
+        "structured_events",
+        "tool_events",
+        "usage_report"
+      ],
+      "status": "experimental"
+    }
+  },
+  "steps": [
+    {
+      "agent": "explore",
+      "agent_sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "gate": null,
+      "invocation": {
+        "agent": "explore",
+        "extension": "org.devshell.aibus.codex-cli",
+        "kind": "cli_run",
+        "parent": null,
+        "prompt_via": "stdin"
+      },
+      "isolation": "none",
+      "key": "draft",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 1,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "input"
+        ],
+        "sha256": "sha256:29481936eba613c559b20f31ef9513e70cd677ce6c7c7ac7da3563b86c0a5a8a",
+        "stable_prefix_bytes": 30,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "cli.codex"
+    },
+    {
+      "agent": "explore",
+      "agent_sha256": "sha256:be52df02660e85184b3762c72b278333b067aee3cc911117818aaae447c92219",
+      "gate": null,
+      "invocation": {
+        "argv": [
+          "-p",
+          "<prompt of step review, template sha256:3e72e0cc0dcebd84e63f9c22fe16ac17b3acee7bd85faf3b77e47c1bd50f2e71, rendered at run time>",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--no-session-persistence",
+          "--setting-sources",
+          "project",
+          "--strict-mcp-config",
+          "--permission-prompts",
+          "none",
+          "--tools",
+          "Glob,Grep,Read",
+          "--allowedTools",
+          "Glob,Grep,Read"
+        ],
+        "denied_until_approved": [],
+        "env_allowlist": [
+          "CLAUDE_CONFIG_DIR",
+          "HOME",
+          "LANG",
+          "PATH",
+          "USER"
+        ],
+        "kind": "process",
+        "program": "claude",
+        "shell": false,
+        "stdin": "null",
+        "writes_files": []
+      },
+      "isolation": "none",
+      "key": "review",
+      "mode": "aibus_managed",
+      "mode_requested": "aibus_managed",
+      "n": 2,
+      "output": "summary",
+      "parent": null,
+      "prompt": {
+        "reads": [
+          "prev.summary"
+        ],
+        "sha256": "sha256:3e72e0cc0dcebd84e63f9c22fe16ac17b3acee7bd85faf3b77e47c1bd50f2e71",
+        "stable_prefix_bytes": 49,
+        "volatile_at_end": true
+      },
+      "requires": [],
+      "retries": 0,
+      "runtime": "cli.claude"
+    }
+  ],
+  "workflow": {
+    "description": "Draft on one provider's CLI, review on another's; the handoff needs your yes",
+    "name": "cross-provider",
+    "revision": null,
+    "source_sha256": "sha256:77c6adf5a325bb038db8ff7f4c5b56f5128544034ad9edc4f332fbd36093ca5c"
+  }
+}

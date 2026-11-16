@@ -855,3 +855,13 @@ The open questions on #282: restart in A1.2 means a restart never corrupts the t
 **Alternatives.** Revoking through OpenRouter's API: deleting a key there takes a management key aibus does not hold and must not ask for, and I could not confirm the endpoint, so I did not write it. A new `Runtime` per direct provider: the spec makes OpenRouter the only one. An `approved` flag on the workflow file: approval belongs to the person at run time, not to the author's file.
 
 **Unverified.** No live OpenRouter call was made for this change: nothing in it sends a request (revoke and the view are local, Jev is a pure function), and the keychain was not opened on this machine. How the scheduler (#288) collects `approved`, and whether OpenRouter allows self-revocation of a user key by API, are open.
+
+## D-360: A handoff between runtimes is previewed, answered and recorded, and consent covers exactly what was shown (#360, A2.2d)
+
+**Context.** Spec 10.2 says a cross-provider handoff must preview what moves and to which provider, and invariant 10 puts cross-provider data movement under the user's policy. A2.2 wants a workflow with two distinct providers and a consent record on the handoff. The scheduler (#288) does not exist yet, so nothing at run time can ask.
+
+**Decision.** (1) The plan marks each data edge between steps on different runtimes as a handoff (`needs_consent: true`); a one-runtime chain has no key, so existing plans keep their bytes (only `repo-review`, whose Claude lead feeds an aibus step, gained one). (2) `workflow::handoff` holds the parts a scheduler needs: `needs_consent` (the runtime changes), `preview` (items by name, size and hash, destination and billing, no content), `record` (the artifact: uuid v7 id, decision, who, when, the preview's hash), `check_delivery` (no decline, and the items equal the shown ones in both directions). (3) The runtime is the boundary, not the account: two steps on `aibus` with different accounts are one runtime here and need no consent, which is coarse. (4) The live pair (Codex then Claude Code, one short turn each, the handoff text carried in a file named by the typed `--output-last-message`) is an ignored test, and its consent is an environment variable standing in for a person.
+
+**Alternatives.** Asking in the TUI or the CLI now: the TUI is another agent's area (#348) and a prompt with no scheduler to wait on would be a UI with nothing behind it. Consent by workflow file: the author's file is not the user's answer at run time. Hashing the content into the preview: it would make the preview itself sensitive.
+
+**Unverified.** That the TUI or `aibus workflow run` can show the preview and take the answer (not built). Gemini is not in the live pair (not installed).

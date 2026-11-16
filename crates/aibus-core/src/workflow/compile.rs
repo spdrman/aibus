@@ -558,6 +558,7 @@ pub fn compile(
             }
         }
     }
+    let mut handoffs = Vec::new();
     for (i, s) in wf.steps.iter().enumerate() {
         for read in reads(&s.prompt) {
             let from = if read == "input" {
@@ -567,6 +568,18 @@ pub fn compile(
             };
             if let Some(from) = from {
                 edges.push(json!({ "kind": "data", "from": from, "to": wf.key(i), "via": read }));
+            }
+            // A step's output read by a step on another runtime is a handoff: the user is shown it
+            // and says yes before it moves (#360, spec 10.2).
+            if let Some(j) = (read != "input").then(|| wf.source(i, &read)).flatten() {
+                let (a, b) = (wf.steps[j].runtime, s.runtime);
+                if a != b {
+                    handoffs.push(json!({
+                        "from": wf.key(j), "to": wf.key(i), "via": read,
+                        "from_runtime": a.as_str(), "to_runtime": b.as_str(),
+                        "needs_consent": true,
+                    }));
+                }
             }
         }
     }
@@ -615,6 +628,9 @@ pub fn compile(
         "jev": { "policy_revision": jev::policy_revision(), "decisions": decisions },
         "notes": notes,
     });
+    if !handoffs.is_empty() {
+        plan["handoffs"] = json!(handoffs);
+    }
     let hash = plan_hash(&plan);
     plan["plan_hash"] = json!(hash);
     Ok(plan)

@@ -102,6 +102,16 @@
     "worst_case_agent_runs": 2
   },
   "fan_out": [],
+  "handoffs": [
+    {
+      "from": "lead",
+      "from_runtime": "cli.claude",
+      "needs_consent": true,
+      "to": "audit",
+      "to_runtime": "aibus",
+      "via": "steps.lead.summary"
+    }
+  ],
   "jev": {
     "decisions": [
       {
@@ -197,7 +207,7 @@
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:cba4e1d058ef60802b940bf6d8503840202b4295df67635207ef3095dd1b27da",
+  "plan_hash": "sha256:5a6a33750b644bcdebd628be2493e34746bee32e3154959ed4f47d566c1a6812",
   "plan_only_because": "workflow repo-review uses [[route]], [limits], [approvals], a runtime other than aibus, mode or parent, isolation, which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan repo-review --dry-run shows the plan)",
   "prompts": {
     "sha256:2bc4a1ec34bfe242b4deef1a6dd6853bf5036f41971b96c02f1b8c64d3635a7a": "Lead the review of a pull request. Ask the search subagent for the code the change touches, wait for it in the foreground, and hand back what changed and where.\nPull request: {{input}}",

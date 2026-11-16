@@ -164,7 +164,7 @@ pub fn install_files(state: &Path, ep: &Endpoint) -> Result<PathBuf, String> {
         format!("Authorization: Bearer {}\n", ep.token).as_bytes(),
         0o600,
     )?;
-    let sock = socket_path(state, Path::new("/tmp"))?;
+    let sock = socket_path(state, &default_short())?;
     write_private(
         &dir,
         &dir.join("hook.target"),
@@ -181,6 +181,20 @@ const SOCKET_PATH_MAX: usize = 100;
 
 fn uid() -> u32 {
     rustix::process::getuid().as_raw()
+}
+
+/// The directory the short fallback socket goes under: `$XDG_RUNTIME_DIR` (Linux), then `$TMPDIR`
+/// (macOS), each only when it is absolute and the socket fits under it, else `/tmp`.
+pub fn short_from(_xdg: Option<&std::ffi::OsStr>, _tmpdir: Option<&std::ffi::OsStr>) -> PathBuf {
+    PathBuf::from("/tmp")
+}
+
+/// `short_from` of this process's environment.
+pub fn default_short() -> PathBuf {
+    short_from(
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        std::env::var_os("TMPDIR").as_deref(),
+    )
 }
 
 /// Where the receiver's socket is: `<state>/tap/hook.sock`, or, when that path is too long for

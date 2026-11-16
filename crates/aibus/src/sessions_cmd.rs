@@ -164,7 +164,7 @@ fn follow_session(e: &Env, arg: &str, redactor: &Redactor) -> Result<(), AibusEr
         .map(|s| s.session_id.clone())
         .unwrap_or_else(|_| arg.to_owned());
     let ep = hooks::Endpoint::load_or_create(&e.state).map_err(usage)?;
-    let sock = hooks::socket_path(&e.state, std::path::Path::new("/tmp")).map_err(usage)?;
+    let sock = hooks::socket_path(&e.state, &hooks::default_short()).map_err(usage)?;
     let bound = hooks::bind_socket(&sock).map_err(usage)?;
     bound.set_nonblocking(true)?;
     let ours = std::fs::metadata(&sock)?.uid();

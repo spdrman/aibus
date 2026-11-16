@@ -961,3 +961,48 @@ fn a_task_file_that_is_a_link_is_not_read() {
     std::os::unix::fs::symlink(&real, cfg.join("tasks").join(S).join("1.json")).unwrap();
     assert!(intent::read(&cfg, S, None, &Redactor::new()).is_empty());
 }
+
+#[test]
+fn the_script_never_posts_to_a_socket_in_a_directory_that_is_not_ours() {
+    use std::os::unix::net::UnixListener;
+    let (_t, script, _) = script_for();
+    // /tmp belongs to root and anyone may create a socket in it: the shape of a squatter at a
+    // guessable fallback name. The script must not connect.
+    let squat = PathBuf::from(format!("/tmp/aibus-tap-test-{}.sock", std::process::id()));
+    let _ = fs::remove_file(&squat);
+    let l = UnixListener::bind(&squat).unwrap();
+    l.set_nonblocking(true).unwrap();
+    fs::write(
+        script.parent().unwrap().join("hook.target"),
+        format!("{}\n", squat.display()),
+    )
+    .unwrap();
+    let (out, ok, _) = run_script(&script, br#"{"session_id":"x"}"#);
+    let got = l.accept();
+    let _ = fs::remove_file(&squat);
+    assert!(ok && out.is_empty(), "{out:?}");
+    assert!(
+        got.is_err(),
+        "the script connected to a socket in a directory that is not ours"
+    );
+}
+
+#[test]
+fn the_short_fallback_prefers_the_runtime_dir_then_tmpdir_then_tmp() {
+    use std::ffi::OsStr;
+    let o = |s: &'static str| Some(OsStr::new(s));
+    assert_eq!(
+        hooks::short_from(o("/run/user/501"), o("/var/t")),
+        Path::new("/run/user/501")
+    );
+    assert_eq!(
+        hooks::short_from(None, o("/var/folders/ab/T")),
+        Path::new("/var/folders/ab/T")
+    );
+    // Relative, missing or too long to hold the socket: /tmp.
+    assert_eq!(hooks::short_from(o("run"), o("t")), Path::new("/tmp"));
+    assert_eq!(hooks::short_from(None, None), Path::new("/tmp"));
+    let long: &'static str = Box::leak(format!("/{}", "x".repeat(90)).into_boxed_str());
+    assert_eq!(hooks::short_from(o(long), o("/var/t")), Path::new("/var/t"));
+    assert_eq!(hooks::short_from(o(long), o(long)), Path::new("/tmp"));
+}

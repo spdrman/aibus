@@ -218,7 +218,11 @@ fn endpoint_token(home: &Path) -> String {
 
 /// The socket `--follow` listens on, where aibus puts it for this state directory.
 fn sock_path(home: &Path) -> PathBuf {
-    aibus_tap::hooks::socket_path(&home.join("state/aibus"), Path::new("/tmp")).unwrap()
+    aibus_tap::hooks::socket_path(
+        &home.join("state/aibus"),
+        &aibus_tap::hooks::default_short(),
+    )
+    .unwrap()
 }
 
 fn post(sock: &Path, host: &str, auth: &str, body: &[u8]) -> String {

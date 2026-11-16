@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::graph::{self, Dag};
 use super::jev::{self, Request};
-use super::{reads, Capability, Mode, Problem, Runtime, Workflow};
+use super::{handoff, reads, Capability, Mode, Problem, Runtime, Workflow};
 use crate::agent::def::{model_str, to_json};
 use crate::agent::{AgentDef, Scope};
 use crate::ids::AgentName;
@@ -573,13 +573,38 @@ pub fn compile(
             // A step's output read by a step on another runtime is a handoff: the user is shown it
             // and says yes before it moves (#360, spec 10.2).
             if let Some(j) = (read != "input").then(|| wf.source(i, &read)).flatten() {
-                let (a, b) = (wf.steps[j].runtime, s.runtime);
-                if a != b {
-                    // todo: the real boundary
+                // What the plan can know of who receives: the provider a runtime implies. Accounts
+                // are resolved when a step runs, so two `aibus` steps look alike here and the run
+                // asks again with the real ones (handoff::needs_consent).
+                let party = |step: usize| {
+                    let rt = wf.steps[step].runtime;
+                    handoff::Party {
+                        step: wf.key(step).to_owned(),
+                        runtime: rt,
+                        provider: match rt {
+                            Runtime::ClaudeCli => "anthropic",
+                            Runtime::CodexCli => "openai",
+                            Runtime::GeminiCli => "google",
+                            Runtime::OpenRouter => "openrouter",
+                            Runtime::Aibus | Runtime::Attached => rt.as_str(),
+                        }
+                        .to_owned(),
+                        account: "unresolved".to_owned(),
+                    }
+                };
+                let context = handoff::Context {
+                    run_id: String::new(),
+                    plan_hash: String::new(),
+                    from: party(j),
+                    to: party(i),
+                };
+                if handoff::needs_consent(&context) {
                     handoffs.push(json!({
                         "from": wf.key(j), "to": wf.key(i), "via": read,
-                        "from_runtime": a.as_str(), "to_runtime": b.as_str(),
+                        "from_runtime": context.from.runtime.as_str(),
+                        "to_runtime": context.to.runtime.as_str(),
                         "needs_consent": true,
+                        "accounts": "resolved when the step runs",
                     }));
                 }
             }

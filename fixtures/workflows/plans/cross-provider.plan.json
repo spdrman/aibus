@@ -48,6 +48,7 @@
   "fan_out": [],
   "handoffs": [
     {
+      "accounts": "resolved when the step runs",
       "from": "draft",
       "from_runtime": "cli.codex",
       "needs_consent": true,
@@ -122,7 +123,7 @@
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:97b21c5fc3baa1c26fbc92916da033d48b8ab50c059803941058580afb043b74",
+  "plan_hash": "sha256:99f9fd4aca0ba41db9de14ceea0784e98947c2f7d4c3a7837a140bd4ece7a27d",
   "plan_only_because": "workflow cross-provider uses a runtime other than aibus, which the scheduler (#288) runs and the chain runner does not; nothing was started (aibus workflow plan cross-provider --dry-run shows the plan)",
   "prompts": {
     "sha256:29481936eba613c559b20f31ef9513e70cd677ce6c7c7ac7da3563b86c0a5a8a": "Draft a short answer to this: {{input}}",

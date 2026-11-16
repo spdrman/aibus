@@ -292,7 +292,8 @@
           "via",
           "from_runtime",
           "to_runtime",
-          "needs_consent"
+          "needs_consent",
+          "accounts"
         ],
         "properties": {
           "from": {
@@ -312,6 +313,9 @@
           },
           "needs_consent": {
             "const": true
+          },
+          "accounts": {
+            "const": "resolved when the step runs"
           }
         }
       }

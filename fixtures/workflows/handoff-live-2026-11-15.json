@@ -6,31 +6,43 @@
   },
   "handoff": {
     "consent": {
-      "at_unix": 1794791646,
+      "at_unix": 1794793941,
       "by": "test operator, AIBUS_HANDOFF_CONSENT in the environment",
       "state": "granted"
     },
-    "id": "01a1e1eb-234a-701e-98c6-6947dc252dab",
+    "id": "01a1e20e-28a6-7787-9240-d8b4622dafbb",
     "kind": "aibus.workflow.handoff",
-    "preview_sha256": "sha256:6b0f6b8979a654241647aecefe11911660df82d2808359a38e6a415486b242b1",
+    "preview_sha256": "sha256:b7b2f4770053073181a90a8477fcafd44b7fb0267f072cd5a73530a7a7ec2075",
     "transfer": {
-      "from_runtime": "cli.codex",
-      "from_step": "draft",
+      "context": {
+        "from": {
+          "account": "codex-cli sign-in",
+          "provider": "openai",
+          "runtime": "cli.codex",
+          "step": "draft"
+        },
+        "plan_hash": "sha256:77c6adf5a325bb038db8ff7f4c5b56f5128544034ad9edc4f332fbd36093ca5c",
+        "run_id": "01a1e20e-28a6-7787-9240-d8b322707743",
+        "to": {
+          "account": "claude-code sign-in",
+          "provider": "anthropic",
+          "runtime": "cli.claude",
+          "step": "review"
+        }
+      },
       "items": [
         {
-          "bytes": 48,
+          "bytes": 52,
           "kind": "step_output",
           "name": "prev.summary",
-          "sha256": "sha256:d1ae6c8de801568d36ec3f287099db44a5d24849637f4fdf4457a4672e00ecc2"
+          "sha256": "sha256:f2d4544b43f8bf7f59acb694d7ef72d1cd992e0cc3d2a9e5b401b09272f1b0f1"
         }
-      ],
-      "to_runtime": "cli.claude",
-      "to_step": "review"
+      ]
     }
   },
   "note": "One live pair, n=1. The consent is a test operator's environment variable, not a person answering a prompt. No text is recorded, only hashes and sizes.",
   "second": {
-    "events": 7,
+    "events": 6,
     "extension": "org.devshell.aibus.reference-cli",
     "status": "completed"
   }

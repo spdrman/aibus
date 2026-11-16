@@ -8,7 +8,8 @@
 #
 # Bounds: it does nothing without the marker, nothing when the turn is already a continuation
 # (`stop_hook_active`, documented in the Claude Code hooks reference: true when Claude Code is
-# already continuing because of a stop hook), and at most one continuation every 20 seconds.
+# already continuing because of a stop hook; seen live on Claude Code 2.1.311, false on the first Stop
+# and true on the continuation, see docs/spikes/353-attached-claude-code.md), and at most one continuation every 20 seconds.
 # Claude Code also caps consecutive stop-hook continuations at eight. The input is parsed as JSON
 # (jq, else python3); with neither it does nothing rather than guess.
 marker="${AIBUS_ATTACH_MARKER:-${XDG_STATE_HOME:-$HOME/.local/state}/aibus/attached}"

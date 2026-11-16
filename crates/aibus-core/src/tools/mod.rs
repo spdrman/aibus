@@ -260,8 +260,11 @@ struct Admitted {
 /// for the others one subject is enough.
 fn covers(pats: &[&ToolPattern], name: &str, subjects: &[String], outside: bool) -> bool {
     let of_tool = || pats.iter().filter(|p| names_tool(&p.tool, name));
+    let paths = is_path_tool(name);
     let matches = |p: &ToolPattern, s: &str| {
-        p.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s))
+        p.spec.as_deref().is_none_or(|spec| {
+            if paths { policy::path_spec_matches(spec, s, false) } else { policy::spec_matches(spec, s) }
+        })
     };
     if name == "bash" {
         !subjects.is_empty() && subjects.iter().all(|s| of_tool().any(|p| matches(p, s)))
@@ -271,6 +274,11 @@ fn covers(pats: &[&ToolPattern], name: &str, subjects: &[String], outside: bool)
             Some(_) => subjects.iter().any(|s| matches(p, s)),
         })
     }
+}
+
+/// The tools whose subjects are canonical paths; bash, glob and web_fetch match raw text.
+fn is_path_tool(name: &str) -> bool {
+    matches!(name, "read" | "ls" | "grep" | "write" | "edit")
 }
 
 fn denied(reason: &str) -> ToolError {
@@ -518,8 +526,8 @@ impl ToolExecutor {
                     } else if self.gate.home.as_deref().is_some_and(|h| {
                         // `canon` is resolved, so the protected root is too (`/var` is
                         // `/private/var` on a Mac).
-                        policy::resolve_for_write(h, ".config/aibus")
-                            .map_or_else(|_| canon.starts_with(h.join(".config/aibus")), |(dir, _)| canon.starts_with(dir))
+                        canon.starts_with(h.join(".config/aibus"))
+                            || policy::resolve_for_write(h, ".config/aibus").is_ok_and(|(dir, _)| canon.starts_with(dir))
                     }) {
                         Some("~/.config/aibus/**")
                     } else {
@@ -535,7 +543,7 @@ impl ToolExecutor {
                             .chain(session.iter())
                             .filter(|p| p.tool == name)
                             .filter_map(|p| p.spec.as_deref())
-                            .any(|spec| subjects.iter().any(|s| policy::spec_matches(spec, s)));
+                            .any(|spec| subjects.iter().any(|s| policy::path_spec_matches(spec, s, false)));
                         if !lifted {
                             return Err(denied(&format!("{entry} is protected")));
                         }
@@ -552,7 +560,11 @@ impl ToolExecutor {
                 && (subjects.is_empty() && d.spec.is_none()
                     || subjects
                         .iter()
-                        .any(|s| d.spec.as_deref().is_none_or(|spec| policy::spec_matches(spec, s))))
+                        .any(|s| {
+                            d.spec.as_deref().is_none_or(|spec| {
+                                if is_path_tool(name) { policy::path_spec_matches(spec, s, true) } else { policy::spec_matches(spec, s) }
+                            })
+                        }))
         }) {
             return Err(denied("denied by tool policy"));
         }

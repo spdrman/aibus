@@ -515,12 +515,12 @@ impl ToolExecutor {
                         Some(".git/**")
                     } else if inside && names == [".aibus", "settings.toml"] {
                         Some(".aibus/settings.toml")
-                    } else if self
-                        .gate
-                        .home
-                        .as_deref()
-                        .is_some_and(|h| canon.starts_with(h.join(".config/aibus")))
-                    {
+                    } else if self.gate.home.as_deref().is_some_and(|h| {
+                        // `canon` is resolved, so the protected root is too (`/var` is
+                        // `/private/var` on a Mac).
+                        policy::resolve_for_write(h, ".config/aibus")
+                            .map_or_else(|_| canon.starts_with(h.join(".config/aibus")), |(dir, _)| canon.starts_with(dir))
+                    }) {
                         Some("~/.config/aibus/**")
                     } else {
                         None

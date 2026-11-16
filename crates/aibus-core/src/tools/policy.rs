@@ -52,10 +52,26 @@ fn strip_assignment(s: &str) -> Option<&str> {
 /// Glob match for a specifier. `*` crosses `/`, so `read(/abs/**)` and `bash(git *)` behave
 /// the way the examples in 09 read. A spec that is not a valid glob matches nothing.
 pub fn spec_matches(spec: &str, subject: &str) -> bool {
-    GlobBuilder::new(spec)
+    let resolved = resolve_spec_prefix(spec);
+    GlobBuilder::new(resolved.as_deref().unwrap_or(spec))
         .literal_separator(false)
         .build()
         .is_ok_and(|g| g.compile_matcher().is_match(subject))
+}
+
+/// Path subjects are canonical, so the literal directory part of an absolute spec has to be too,
+/// or `write(/var/x/**)` never matches `/private/var/x/f` on a Mac. `None` when the spec is not
+/// an absolute path or its prefix does not resolve.
+fn resolve_spec_prefix(spec: &str) -> Option<String> {
+    if !spec.starts_with('/') {
+        return None;
+    }
+    let cut = spec.find(['*', '?', '[', '{']).unwrap_or(spec.len());
+    let literal = &spec[..cut];
+    let slash = literal.rfind('/')?;
+    let dir = Path::new(&literal[..slash.max(1)]).canonicalize().ok()?;
+    let dir = dir.to_str()?.trim_end_matches('/');
+    Some(format!("{dir}{}", &spec[slash..]))
 }
 
 /// Canonicalises `p` (relative to `cwd`), resolving symlinks, and says whether the result is

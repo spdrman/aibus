@@ -99,7 +99,8 @@ fn refused(why: impl Into<String>) -> SandboxError {
 
 /// The checks every launch has to pass whoever built it: an absolute executable whose file name is
 /// one the manifest declared, argv that is the manifest's tokens plus its optional flags only, an
-/// environment of allowed names only, and an existing absolute working directory.
+/// environment of allowed names only, an existing absolute working directory, and no helper but
+/// the host's own binary.
 pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(), SandboxError> {
     let name = launch
         .exe
@@ -115,6 +116,19 @@ pub fn check_launch(m: &Manifest, launch: &Launch, extra: &[String]) -> Result<(
     }
     if !OFFICIAL_CLIS.contains(&name) && !extra.iter().any(|e| e == name) {
         return Err(SandboxError::NotOfficial(name.to_owned()));
+    }
+    // The subreaper helper is the host's own binary (D-352), never a program a manifest names.
+    if let Some(h) = &launch.helper {
+        // `/proc/self/exe` is this binary even after an upgrade in place replaced the file
+        // (`current_exe` then names a path that is gone).
+        let own = std::env::current_exe().ok().as_ref() == Some(h)
+            || h == std::path::Path::new("/proc/self/exe");
+        if !own {
+            return Err(refused(format!(
+                "{} is not this program (or /proc/self/exe), the only helper a launch may use",
+                h.display()
+            )));
+        }
     }
     let fixed: Vec<OsString> = m.execution.argv.iter().map(OsString::from).collect();
     if launch.args.len() < fixed.len() || launch.args[..fixed.len()] != fixed[..] {
@@ -453,6 +467,8 @@ pub async fn prepare(
         env,
         stdin: Vec::new(),
         limits,
+        // The caller that runs it unattended sets the Linux helper (D-352), never a manifest.
+        helper: None,
     };
     check_launch(m, &launch, &grant.extra_programs)?;
     Ok(Prepared {

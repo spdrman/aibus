@@ -31,7 +31,12 @@ struct Proc {
 /// that (missing, or a busybox `ps` without `-ax` and `-o lstart`).
 fn table() -> Vec<Proc> {
     static WARN: Once = Once::new();
-    let procs: Vec<Proc> = std::process::Command::new("ps")
+    // By absolute path, not through a PATH the CLI's tree may have written to.
+    let ps = ["/bin/ps", "/usr/bin/ps"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
+        .unwrap_or("ps");
+    let procs: Vec<Proc> = std::process::Command::new(ps)
         .args(["-ax", "-o", "pid=,ppid=,lstart="])
         .output()
         .ok()
@@ -135,20 +140,38 @@ impl Tracker {
     /// current-thread runtime this holds everything else for the time it takes (tens of
     /// milliseconds, a few times over).
     pub fn kill_all(&self) {
-        let mut frozen = HashSet::new();
-        for _ in 0..10 {
-            let seen = self.seen.lock().unwrap().clone();
-            let fresh: Vec<u32> = ours(&table(), &seen)
-                .into_iter()
-                .filter(|p| frozen.insert(*p))
-                .collect();
-            if fresh.is_empty() {
-                break;
-            }
-            signal(fresh, Signal::STOP);
-        }
-        signal(frozen, Signal::KILL);
+        sweep(&self.seen.lock().unwrap().clone());
     }
+}
+
+/// Stops and then kills everything under the remembered processes, as [`Tracker::kill_all`]
+/// does. The helper calls it for itself (`kill_under`).
+fn sweep(seen: &HashMap<u32, String>) {
+    let mut frozen = HashSet::new();
+    for _ in 0..10 {
+        let fresh: Vec<u32> = ours(&table(), seen)
+            .into_iter()
+            .filter(|p| frozen.insert(*p))
+            .collect();
+        if fresh.is_empty() {
+            break;
+        }
+        signal(fresh, Signal::STOP);
+    }
+    signal(frozen, Signal::KILL);
+}
+
+/// Ends every process under `root` (not `root` itself when it is this process), stopping what it
+/// finds first. For the subreaper helper (#352): there every orphan is a child of `root`, so the
+/// table always reaches it, whatever session or group it is in.
+#[cfg(target_os = "linux")]
+pub fn kill_under(root: u32) {
+    let seen = table()
+        .into_iter()
+        .filter(|p| p.pid == root)
+        .map(|p| (p.pid, p.start))
+        .collect();
+    sweep(&seen);
 }
 
 impl Drop for Tracker {

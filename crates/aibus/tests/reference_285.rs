@@ -211,6 +211,7 @@ impl Rig {
             .unwrap(),
             stdin: b"review this pull request".to_vec(),
             limits,
+            helper: None,
         };
         let mut norm = Normalizer::new(who);
         // A regression that hangs the host fails here in seconds, not at the job timeout.
@@ -1563,6 +1564,7 @@ async fn live_reference() {
                 wall_time: Duration::from_secs(180),
                 ..Limits::default()
             },
+            helper: None,
         };
         let mut norm = Normalizer::new(attempt_ref(9));
         let started = Instant::now();

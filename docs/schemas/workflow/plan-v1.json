@@ -119,7 +119,10 @@
             "enum": [
               "aibus",
               "cli.claude",
-              "attached"
+              "attached",
+              "cli.codex",
+              "cli.gemini",
+              "openrouter"
             ]
           },
           "mode": {
@@ -277,6 +280,46 @@
         }
       }
     },
+    "handoffs": {
+      "description": "Only when a step reads the output of a step on another runtime. Each is shown to the user, and moves only after their yes (docs/spec/16-extensions.md, handoffs).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to",
+          "via",
+          "from_runtime",
+          "to_runtime",
+          "needs_consent",
+          "accounts"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string"
+          },
+          "from_runtime": {
+            "type": "string"
+          },
+          "to_runtime": {
+            "type": "string"
+          },
+          "needs_consent": {
+            "const": true
+          },
+          "accounts": {
+            "const": "resolved when the step runs"
+          }
+        }
+      }
+    },
     "fan_out": {
       "type": "array",
       "items": {
@@ -417,6 +460,7 @@
             "enum": [
               "available",
               "experimental",
+              "unverified",
               "unavailable"
             ]
           },

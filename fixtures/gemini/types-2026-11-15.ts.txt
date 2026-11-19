@@ -1,0 +1,17 @@
+Source of the field names the Gemini fixtures use. Fetched 2026-11-15 from
+https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/output/types.ts
+(the main branch, Apache-2.0, Copyright 2025 Google LLC), not from an installed release: no Gemini
+CLI was installed where this was written, so no stream was recorded. Only the stream-json parts:
+
+enum JsonStreamEventType { INIT='init', MESSAGE='message', TOOL_USE='tool_use', TOOL_RESULT='tool_result', ERROR='error', RESULT='result' }
+base event: type, timestamp (string)
+InitEvent:       session_id: string; model: string
+MessageEvent:    role: 'user' | 'assistant'; content: string; delta?: boolean
+ToolUseEvent:    tool_name: string; tool_id: string; parameters: Record<string, unknown>
+ToolResultEvent: tool_id: string; status: 'success' | 'error'; output?: string; error?: { type: string; message: string }
+ErrorEvent:      severity: 'warning' | 'error'; message: string
+ResultEvent:     status: 'success' | 'error'; error?: { type: string; message: string }; stats?: StreamStats
+StreamStats:     total_tokens, input_tokens, output_tokens, cached, input, duration_ms, tool_calls: number; models: Record<string, ModelStreamStats>
+
+Headless exit codes from docs/cli/headless.md: 0 success, 1 general error or API failure, 42 input
+error, 53 turn limit exceeded.

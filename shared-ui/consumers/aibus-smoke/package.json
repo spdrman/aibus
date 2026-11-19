@@ -1,0 +1,18 @@
+{
+  "name": "@sharedui/aibus-smoke",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "aibus consumer: imports the shared packages by name, the way the desktop app will, and doubles as the isolated component showcase.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && vite build"
+  },
+  "dependencies": {
+    "@sharedui/design-tokens": "0.1.0",
+    "@sharedui/react-primitives": "0.1.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  }
+}

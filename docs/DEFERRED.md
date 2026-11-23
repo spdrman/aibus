@@ -14,7 +14,7 @@ I cut these from the spike on 2026-11-22. B1.5 (#308) reviews them with the go/n
   slice of Phase 2, not a spike.
 - **macOS build and run.** Unverified; owner steps are in `docs/desktop/VERIFY-MACOS.md`.
 - **Timing benchmarks.** The Linux numbers in `docs/desktop/B1.1-go-no-go.md` are observations from
-  one Xvfb run on MARS, not benchmarks. A queued Mercury run (`bench-queue.sh`) can repeat them once
+  two Xvfb runs on the NAS, not benchmarks. A queued Mercury run (`bench-queue.sh`) can repeat them once
   Phase 2 has a workload worth timing.
 - **Shared UI components.** The spike styles its own few elements. #307 swaps them for the shared
   React primitives and tokens from #305 (PR #374) once that merges.

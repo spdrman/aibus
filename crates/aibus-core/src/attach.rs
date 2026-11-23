@@ -331,7 +331,7 @@ impl Attachments {
                 "attaching is off: this session was not started with --control-attach".into(),
             );
         }
-        if lineage.iter().any(|l| *l == self.lineage) {
+        if lineage.contains(&self.lineage) {
             return Err("would loop: that session is driven by this one".into());
         }
         if lineage.len() >= MAX_LINEAGE {

@@ -351,13 +351,13 @@ fn ask(v: &Value) -> Result<(Ask, bool), String> {
             },
             true,
         ),
-        "step_ack" => (Ask::StepAck { token: field("token")? }, true),
+        "step_ack" => (Ask::StepAck { token: field("token")? }, false),
         "step_tool_call" => (
             Ask::StepToolCall {
                 token: field("token")?,
                 name: field("name")?,
             },
-            true,
+            false,
         ),
         "present" => (
             Ask::Present {

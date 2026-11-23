@@ -651,7 +651,15 @@ fn attached<G: Graph>(
             match ui.attach.next_step(client, now) {
                 Ok(out) => {
                     if let Some(token) = out["interrupt"]["token"].as_str() {
-                        note_row(app, step, client, format!("attached ({client}): step {} interrupt shown to the session", short(token, 40)))?;
+                        note_row(
+                            app,
+                            step,
+                            client,
+                            format!(
+                                "attached ({client}): step {} interrupt shown to the session",
+                                short(token, 40)
+                            ),
+                        )?;
                     }
                     if let Some(token) = out["step"]["token"].as_str() {
                         note_row(app, step, client, format!("attached ({client}): step {token} delivered, waiting for its result"))?;
@@ -680,8 +688,17 @@ fn attached<G: Graph>(
         },
         Ask::StepAck { token } => match ui.attach.step_ack(client, token, now) {
             Ok(out) => {
-                let what = if out["interrupt"] == true { "interrupt shown to the session" } else { "started" };
-                note_row(app, step, client, format!("attached ({client}): step {} {what}", short(token, 40)))?;
+                let what = if out["interrupt"] == true {
+                    "interrupt shown to the session"
+                } else {
+                    "started"
+                };
+                note_row(
+                    app,
+                    step,
+                    client,
+                    format!("attached ({client}): step {} {what}", short(token, 40)),
+                )?;
                 Ok(out)
             }
             Err(why) => Err(why),
@@ -689,7 +706,15 @@ fn attached<G: Graph>(
         Ask::StepToolCall { token, name } => match ui.attach.tool_call(client, token, name, now) {
             Ok(out) => {
                 if out["interrupt"] == true {
-                    note_row(app, step, client, format!("attached ({client}): step {} interrupt shown to the session", short(token, 40)))?;
+                    note_row(
+                        app,
+                        step,
+                        client,
+                        format!(
+                            "attached ({client}): step {} interrupt shown to the session",
+                            short(token, 40)
+                        ),
+                    )?;
                 }
                 Ok(out)
             }

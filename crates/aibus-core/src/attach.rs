@@ -293,8 +293,8 @@ impl Attachments {
     }
 
     /// Ends what ran out of time, then answers every workflow step that has ended. A step whose
-    /// workflow stopped waiting (it was cancelled) is cancelled here, and says it cannot interrupt
-    /// the other session. The lines are for the log.
+    /// workflow stopped waiting (it was cancelled) is cancelled here, and queues an interrupt
+    /// for it. The lines are for the log.
     pub fn settle(&mut self, now: Instant) -> Vec<String> {
         let mut notes = self.expire(now);
         let mut i = 0;
@@ -507,9 +507,15 @@ impl Attachments {
         self.holds(client)?;
         self.expire(now);
         let lineage = self.lineage.clone();
-        if let Some(s) = self.steps.iter_mut().find(|s| s.interrupt == Interrupt::Pending) {
+        if let Some(s) = self
+            .steps
+            .iter_mut()
+            .find(|s| s.interrupt == Interrupt::Pending)
+        {
             s.interrupt = Interrupt::Seen;
-            return Ok(json!({"step": null, "interrupt": {"token": s.token, "why": "cancelled at the aibus keyboard or with its workflow"}}));
+            return Ok(
+                json!({"step": null, "interrupt": {"token": s.token, "why": "cancelled at the aibus keyboard or with its workflow"}}),
+            );
         }
         let Some(s) = self.steps.iter_mut().find(|s| s.state == StepState::Queued) else {
             return Ok(json!({"step": null}));
@@ -586,7 +592,10 @@ impl Attachments {
             s.interrupt = Interrupt::Pending;
             format!("step {} cancelled; interrupt queued, the session sees it on its next step_ack, step_tool_call or next_step (it cannot be pushed), and a late result is refused", s.token)
         } else {
-            format!("step {} cancelled before the session pulled it; a late result is refused", s.token)
+            format!(
+                "step {} cancelled before the session pulled it; a late result is refused",
+                s.token
+            )
         }
     }
 
@@ -600,10 +609,17 @@ impl Attachments {
             return Ok(seen);
         }
         if s.state != StepState::Delivered {
-            return Err(format!("refused: step {} is {}, pull it with next_step first", s.token, s.state.as_str()));
+            return Err(format!(
+                "refused: step {} is {}, only a step that was pulled and is open takes an ack",
+                s.token,
+                s.state.as_str()
+            ));
         }
         if s.started.is_some() {
-            return Err(format!("refused: step {} was already acknowledged", s.token));
+            return Err(format!(
+                "refused: step {} was already acknowledged",
+                s.token
+            ));
         }
         s.started = Some(now);
         Ok(json!({"token": s.token, "state": "started"}))
@@ -612,7 +628,13 @@ impl Attachments {
     /// The attached session reports one tool call it made for the step it holds, by name only (no
     /// arguments, no output). The name is cleaned and capped, the count is capped, and what comes
     /// back is labelled `correlated`: aibus matched it to the step by token, it did not see the call.
-    pub fn tool_call(&mut self, client: &str, token: &str, name: &str, now: Instant) -> Result<Value, String> {
+    pub fn tool_call(
+        &mut self,
+        client: &str,
+        token: &str,
+        name: &str,
+        now: Instant,
+    ) -> Result<Value, String> {
         /// Names a step keeps (the count goes on), a name's length, and the most calls counted.
         const KEPT: usize = 100;
         const NAME_MAX: usize = 40;
@@ -627,7 +649,10 @@ impl Attachments {
             return Err(format!("refused: step {} is {}", s.token, s.state.as_str()));
         }
         if s.call_count >= COUNT_MAX {
-            return Err(format!("refused: step {} already holds {COUNT_MAX} reported calls", s.token));
+            return Err(format!(
+                "refused: step {} already holds {COUNT_MAX} reported calls",
+                s.token
+            ));
         }
         s.call_count += 1;
         if s.calls.len() < KEPT {
@@ -648,7 +673,9 @@ impl Attachments {
         match s.interrupt {
             Interrupt::Pending => {
                 s.interrupt = Interrupt::Seen;
-                Some(json!({"token": s.token, "interrupt": true, "why": "cancelled at the aibus keyboard or with its workflow; stop work on this step"}))
+                Some(
+                    json!({"token": s.token, "interrupt": true, "why": "cancelled at the aibus keyboard or with its workflow; stop work on this step"}),
+                )
             }
             _ => None,
         }
@@ -692,6 +719,14 @@ impl Attachments {
         }
         if self.attachment.as_ref().is_some_and(|a| a.client == client) {
             self.attachment = None;
+            // An interrupt the client never saw dies with it: the next client must not get it.
+            for s in self
+                .steps
+                .iter_mut()
+                .filter(|s| s.interrupt == Interrupt::Pending)
+            {
+                s.interrupt = Interrupt::Seen;
+            }
             for s in self.steps.iter_mut().filter(|s| s.state.open()) {
                 s.state = StepState::Unavailable;
                 notes.push(format!(

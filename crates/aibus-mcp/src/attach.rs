@@ -39,7 +39,10 @@ fn input_schema(tool: &str) -> Value {
             vec!["token", "status", "summary"],
         ),
         "step_ack" => (json!({ "token": string }), vec!["token"]),
-        "step_tool_call" => (json!({ "token": string, "name": string }), vec!["token", "name"]),
+        "step_tool_call" => (
+            json!({ "token": string, "name": string }),
+            vec!["token", "name"],
+        ),
         "session_present" => (
             json!({ "title": string, "message": string, "columns": list, "rows": { "type": "array", "items": list } }),
             vec!["title"],

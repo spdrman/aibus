@@ -177,7 +177,7 @@ reports one tool call by name (no arguments, no output): aibus matches it to the
 `observed`, because it did not see the call. Names are redacted, cleaned and cut to 40 characters, 100 are kept and the count stops at
 10,000. A step with no reports says `unavailable`, not zero. `/attach cancel` on a step the agent already pulled is now an interrupt:
 nothing can push to the agent, so aibus keeps it and the agent sees `{"interrupt": true}` once, as the answer to its next `step_ack`
-or `step_tool_call` (or `next_step`), and the server drops its in-flight mark. A result after the cancel is still refused, and an agent
+or `step_tool_call`, and the server drops its in-flight mark. (`next_step` is refused while the step is in flight, so through `aibus mcp` the interrupt travels on those two; a client that talks to the session directly sees it on `next_step` too.) An interrupt the old client never saw is dropped when it detaches. A result after the cancel is still refused, and an agent
 that never calls again is not stopped. That is as far as the pull leg goes; a real push is in `DEFERRED.md`.
 
 **A workflow step can name the attached session (#353).** In a workflow file a step with `runtime = "attached"` is not

@@ -11,3 +11,9 @@ I did `runtime = "attached"` in #353, and `step_ack`, tool-call correlation and 
 * **A non-letter chord to accept an attach.** The typed `/attach accept <code>` stays. A chord only matters if the owner wants it instead of the code, and nobody asked for it yet.
 
 Also unverified here: the live behaviour of `step_ack` and `step_tool_call` against Claude Code. The tests use fixtures; a PostToolUse hook that calls `step_tool_call` is not shipped.
+
+Smaller leftovers from the #385 review, none of them a bug...
+
+* The 10,000 reported-call cap has no test of its own (the 100-name cap does).
+* Bidi and zero-width characters in a reported name rely on the shared `clean()`, which is tested elsewhere, not on a test of `tool_call`.
+* A workflow cancel of a step the session already pulled queues the same interrupt as the keyboard, through the same function, but only the keyboard path has a test that pulls first.

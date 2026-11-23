@@ -291,8 +291,20 @@ fn every_attach_call_leaves_an_audit_line_tagged_with_the_session() {
     let (s, home, _) = server(&["attach", "present"], Redactor::new());
     call(&s, "aibus_attach", json!({})).unwrap();
     call(&s, "session_present", json!({"title": "t", "message": "m"})).unwrap();
+    call(&s, "step_ack", json!({"token": "st-1"})).unwrap();
+    call(
+        &s,
+        "step_tool_call",
+        json!({"token": "st-1", "name": "Read"}),
+    )
+    .unwrap();
     let lines = common::audit_lines(&home);
-    for tool in ["aibus_attach", "session_present"] {
+    for tool in [
+        "aibus_attach",
+        "session_present",
+        "step_ack",
+        "step_tool_call",
+    ] {
         let line = lines
             .iter()
             .find(|l| l["tool"] == tool)
@@ -311,7 +323,12 @@ fn step_ack_and_step_tool_call_go_down_redacted_and_are_not_session_changes() {
     let (s, _home, fake) = server(&["attach"], keyed());
     assert!(names(&s).contains(&"step_ack".into()) && names(&s).contains(&"step_tool_call".into()));
     call(&s, "step_ack", json!({"token": "st-01A"})).unwrap();
-    call(&s, "step_tool_call", json!({"token": "st-01A", "name": format!("Bash {KEY}")})).unwrap();
+    call(
+        &s,
+        "step_tool_call",
+        json!({"token": "st-01A", "name": format!("Bash {KEY}")}),
+    )
+    .unwrap();
     let sent = fake.sent.lock().unwrap();
     assert_eq!(sent[0], json!({"op": "step_ack", "token": "st-01A"}));
     assert_eq!(sent[1]["op"], "step_tool_call");

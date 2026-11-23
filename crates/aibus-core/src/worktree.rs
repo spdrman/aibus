@@ -62,7 +62,12 @@ fn git_raw(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
-        .args(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"])
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ])
         .args(args)
         .output()
         .map_err(|e| format!("git: {e}"))?;
@@ -80,9 +85,15 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 /// The attempt's id: the last part of its path. It becomes a ref and a branch name, so it is
 /// held to a short, plain alphabet.
 fn id_of(at: &Path) -> Result<String, String> {
-    let id = at.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let plain = id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if id.is_empty() || id.len() > 100 || !plain || id.starts_with(['-', '.']) || id.contains("..") {
+    let id = at
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let plain = id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if id.is_empty() || id.len() > 100 || !plain || id.starts_with(['-', '.']) || id.contains("..")
+    {
         return Err(format!("{id:?} is not a usable attempt id"));
     }
     Ok(id)
@@ -92,14 +103,18 @@ fn id_of(at: &Path) -> Result<String, String> {
 /// call the `_held` functions instead: a second lock from the same process would wait forever.
 fn lock(repo: &Path) -> Result<std::fs::File, String> {
     use fs4::fs_std::FileExt;
-    let common = git(repo, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common = git(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(Path::new(&common).join("aibus-repo.lock"))
         .map_err(|e| format!("repository lock: {e}"))?;
-    file.lock_exclusive().map_err(|e| format!("repository lock: {e}"))?;
+    file.lock_exclusive()
+        .map_err(|e| format!("repository lock: {e}"))?;
     Ok(file)
 }
 
@@ -120,16 +135,22 @@ pub fn create(project: &Path, at: &Path) -> Result<WorktreeInfo, String> {
     let _lock = lock(&repo)?;
     if !at.exists() {
         // The remote's default branch, else `main` or `master`, else wherever HEAD is.
-        let branch = git(&repo, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-            .ok()
-            .or_else(|| {
-                ["main", "master"]
-                    .into_iter()
-                    .find(|b| git(&repo, &["rev-parse", "--verify", "--quiet", b]).is_ok())
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| "HEAD".to_owned());
-        let base = git(&repo, &["rev-parse", "--verify", &format!("{branch}^{{commit}}")])?;
+        let branch = git(
+            &repo,
+            &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        )
+        .ok()
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|b| git(&repo, &["rev-parse", "--verify", "--quiet", b]).is_ok())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "HEAD".to_owned());
+        let base = git(
+            &repo,
+            &["rev-parse", "--verify", &format!("{branch}^{{commit}}")],
+        )?;
         if let Some(parent) = at.parent() {
             create_private_dir(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
             let inside = parent.canonicalize().ok().zip(repo.canonicalize().ok());
@@ -142,16 +163,38 @@ pub fn create(project: &Path, at: &Path) -> Result<WorktreeInfo, String> {
         let base_ref = format!("refs/aibus/base/{id}");
         let _ = git(&repo, &["worktree", "prune"]);
         git(&repo, &["update-ref", &base_ref, &base])?;
-        if let Err(e) = git(&repo, &["worktree", "add", "--detach", "--", &at.to_string_lossy(), &base]) {
+        if let Err(e) = git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--",
+                &at.to_string_lossy(),
+                &base,
+            ],
+        ) {
             let _ = git(&repo, &["update-ref", "-d", &base_ref]);
             return Err(e);
         }
     } else {
-        let theirs = git(at, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-        let ours = git(&repo, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-        let top = git(at, &["rev-parse", "--show-toplevel"]).ok().and_then(|t| Path::new(&t).canonicalize().ok());
+        let theirs = git(
+            at,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        );
+        let ours = git(
+            &repo,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        );
+        let top = git(at, &["rev-parse", "--show-toplevel"])
+            .ok()
+            .and_then(|t| Path::new(&t).canonicalize().ok());
         if theirs.is_err() || theirs != ours || top != at.canonicalize().ok() {
-            return Err(format!("{} exists and is not a worktree of {}", at.display(), repo.display()));
+            return Err(format!(
+                "{} exists and is not a worktree of {}",
+                at.display(),
+                repo.display()
+            ));
         }
     }
     let inside = project
@@ -171,8 +214,11 @@ pub fn create(project: &Path, at: &Path) -> Result<WorktreeInfo, String> {
 /// commits no branch has.
 fn dirty(path: &Path) -> bool {
     let changed = git(path, &["status", "--porcelain"]).map_or(true, |s| !s.is_empty());
-    let unique = git(path, &["rev-list", "HEAD", "--not", "--branches", "--remotes"])
-        .map_or(true, |s| !s.is_empty());
+    let unique = git(
+        path,
+        &["rev-list", "HEAD", "--not", "--branches", "--remotes"],
+    )
+    .map_or(true, |s| !s.is_empty());
     changed || unique
 }
 
@@ -189,7 +235,10 @@ fn release_held(info: WorktreeInfo) -> Option<WorktreeInfo> {
     match git(&info.repo, &["worktree", "remove", "--", &path]) {
         Ok(_) => {
             if let Ok(id) = id_of(&info.path) {
-                let _ = git(&info.repo, &["update-ref", "-d", &format!("refs/aibus/base/{id}")]);
+                let _ = git(
+                    &info.repo,
+                    &["update-ref", "-d", &format!("refs/aibus/base/{id}")],
+                );
             }
             None
         }
@@ -210,12 +259,21 @@ pub fn release(info: WorktreeInfo) -> Option<WorktreeInfo> {
 /// got to) and returns the ones that stay.
 pub fn sweep(session_dir: &Path) -> Vec<WorktreeInfo> {
     let mut kept = Vec::new();
-    for entry in std::fs::read_dir(session_dir).into_iter().flatten().flatten() {
+    for entry in std::fs::read_dir(session_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let path = entry.path();
-        let Ok(common) = git(&path, &["rev-parse", "--path-format=absolute", "--git-common-dir"]) else {
+        let Ok(common) = git(
+            &path,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        ) else {
             continue;
         };
-        let repo = Path::new(&common).parent().map_or_else(|| path.clone(), Path::to_path_buf);
+        let repo = Path::new(&common)
+            .parent()
+            .map_or_else(|| path.clone(), Path::to_path_buf);
         let info = WorktreeInfo {
             cwd: path.clone(),
             path,
@@ -232,11 +290,24 @@ pub fn sweep(session_dir: &Path) -> Vec<WorktreeInfo> {
 /// worktree (never the project's) so new files show up, and leaves the commit to `approve`.
 pub fn review(info: &WorktreeInfo) -> Result<Review, String> {
     let id = id_of(&info.path)?;
-    let base = git(&info.repo, &["rev-parse", "--verify", &format!("refs/aibus/base/{id}^{{commit}}")])
-        .map_err(|_| format!("attempt {id} has no recorded base commit"))?;
+    let base = git(
+        &info.repo,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("refs/aibus/base/{id}^{{commit}}"),
+        ],
+    )
+    .map_err(|_| format!("attempt {id} has no recorded base commit"))?;
     git(&info.path, &["add", "-A"])?;
     let diff = |extra: &[&str]| {
-        let mut args = vec!["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color"];
+        let mut args = vec![
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+        ];
         args.extend_from_slice(extra);
         args.extend([base.as_str(), "--"]);
         git_raw(&info.path, &args)
@@ -250,16 +321,28 @@ pub fn review(info: &WorktreeInfo) -> Result<Review, String> {
     Ok(Review {
         patch_sha256: format!("{:x}", Sha256::digest(&patch)),
         patch,
-        stat: String::from_utf8_lossy(&diff(&["--stat"])?).trim().to_owned(),
+        stat: String::from_utf8_lossy(&diff(&["--stat"])?)
+            .trim()
+            .to_owned(),
         files,
         base,
     })
 }
 
 /// Writes the decision record `<git-dir>/aibus/attempts/<id>.json` (and `<id>.patch` when given).
-fn record(info: &WorktreeInfo, r: &Review, decision: &str, by: &str, merged: Option<&str>, patch: bool) -> Result<(), String> {
+fn record(
+    info: &WorktreeInfo,
+    r: &Review,
+    decision: &str,
+    by: &str,
+    merged: Option<&str>,
+    patch: bool,
+) -> Result<(), String> {
     let id = id_of(&info.path)?;
-    let common = git(&info.repo, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common = git(
+        &info.repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
     let dir = Path::new(&common).join("aibus/attempts");
     create_private_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let json = serde_json::json!({
@@ -297,7 +380,14 @@ pub fn approve(info: &WorktreeInfo, reviewed: &str, by: &str) -> Result<Merge, S
     let id = id_of(&info.path)?;
     let branch = format!("aibus/{id}");
     // No hook runs (see `git_raw`); `--no-verify` stays as a second layer for the three it covers.
-    let agent = ["-c", "user.name=aibus", "-c", "user.email=aibus@localhost", "-c", "commit.gpgsign=false"];
+    let agent = [
+        "-c",
+        "user.name=aibus",
+        "-c",
+        "user.email=aibus@localhost",
+        "-c",
+        "commit.gpgsign=false",
+    ];
     let mut commit = agent.to_vec();
     commit.extend(["commit", "-q", "--no-verify", "-m"]);
     let message = format!("{id}: attempt approved by {by}");
@@ -315,10 +405,15 @@ pub fn approve(info: &WorktreeInfo, reviewed: &str, by: &str) -> Result<Merge, S
     let message = format!("Merge attempt {id}, approved by {by}");
     merge.extend([message.as_str(), branch.as_str()]);
     if let Err(e) = git(&info.repo, &merge) {
-        let conflicts = git(&info.repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
+        let conflicts =
+            git(&info.repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
         let _ = git(&info.repo, &["merge", "--abort"]);
         let files: Vec<String> = conflicts.lines().map(str::to_owned).collect();
-        return if files.is_empty() { Err(format!("merge failed: {e}")) } else { Ok(Merge::Conflict(files)) };
+        return if files.is_empty() {
+            Err(format!("merge failed: {e}"))
+        } else {
+            Ok(Merge::Conflict(files))
+        };
     }
     let head = git(&info.repo, &["rev-parse", "HEAD"])?;
     record(info, &r, "approved", by, Some(&head), false)?;
@@ -336,9 +431,21 @@ pub fn reject(info: &WorktreeInfo, reviewed: &str, by: &str) -> Result<(), Strin
         return Err("the attempt changed since it was reviewed, review it again".to_owned());
     }
     record(info, &r, "rejected", by, None, true)?;
-    git(&info.repo, &["worktree", "remove", "--force", "--", &info.path.to_string_lossy()])?;
+    git(
+        &info.repo,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            "--",
+            &info.path.to_string_lossy(),
+        ],
+    )?;
     let id = id_of(&info.path)?;
-    let _ = git(&info.repo, &["update-ref", "-d", &format!("refs/aibus/base/{id}")]);
+    let _ = git(
+        &info.repo,
+        &["update-ref", "-d", &format!("refs/aibus/base/{id}")],
+    );
     Ok(())
 }
 
@@ -448,9 +555,18 @@ mod tests {
         assert_ne!(a.path, b.path);
         std::fs::write(a.cwd.join("a.txt"), "from a\n").unwrap();
         std::fs::write(b.cwd.join("a.txt"), "from b\n").unwrap();
-        assert_eq!(std::fs::read_to_string(a.cwd.join("a.txt")).unwrap(), "from a\n");
-        assert_eq!(std::fs::read_to_string(b.cwd.join("a.txt")).unwrap(), "from b\n");
-        assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "one\n");
+        assert_eq!(
+            std::fs::read_to_string(a.cwd.join("a.txt")).unwrap(),
+            "from a\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(b.cwd.join("a.txt")).unwrap(),
+            "from b\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("a.txt")).unwrap(),
+            "one\n"
+        );
         // Each has its own pinned base.
         for w in [&a, &b] {
             assert_eq!(review(w).unwrap().base, head(project.path()));
@@ -469,7 +585,10 @@ mod tests {
         let err = create(project.path(), &at).unwrap_err();
         assert!(err.contains("not a worktree"), "{err}");
         for bad in ["-rf", "..", "a b", ".hidden"] {
-            assert!(create(project.path(), &other.path().join(bad)).is_err(), "{bad}");
+            assert!(
+                create(project.path(), &other.path().join(bad)).is_err(),
+                "{bad}"
+            );
         }
     }
 
@@ -482,7 +601,12 @@ mod tests {
         std::fs::write(wt.cwd.join("new.txt"), "n\n").unwrap();
         let r = review(&wt).unwrap();
         assert_eq!(r.files, ["a.txt", "new.txt"]);
-        assert!(String::from_utf8_lossy(&r.patch).contains("+two") && r.stat.contains("2 files changed"), "{}", r.stat);
+        assert!(
+            String::from_utf8_lossy(&r.patch).contains("+two")
+                && r.stat.contains("2 files changed"),
+            "{}",
+            r.stat
+        );
         assert_eq!(r, review(&wt).unwrap());
         std::fs::write(wt.cwd.join("new.txt"), "changed\n").unwrap();
         assert_ne!(review(&wt).unwrap().patch_sha256, r.patch_sha256);
@@ -510,12 +634,20 @@ mod tests {
         };
         assert_eq!(head(project.path()), commit);
         assert!(project.path().join("b.txt").is_file());
-        assert_eq!(git(project.path(), &["rev-list", "--parents", "-n1", "HEAD"]).unwrap().split(' ').count(), 3);
+        assert_eq!(
+            git(project.path(), &["rev-list", "--parents", "-n1", "HEAD"])
+                .unwrap()
+                .split(' ')
+                .count(),
+            3
+        );
         // Checkout gone, record written.
         assert!(!wt.path.exists());
         let rec = git(project.path(), &["rev-parse", "--git-dir"]).unwrap();
         let rec = project.path().join(rec).join("aibus/attempts/r.json");
-        assert!(std::fs::read_to_string(rec).unwrap().contains("\"approved\""));
+        assert!(std::fs::read_to_string(rec)
+            .unwrap()
+            .contains("\"approved\""));
     }
 
     #[test]
@@ -531,10 +663,14 @@ mod tests {
         reject(&wt, &r.patch_sha256, "rom").unwrap();
         assert!(!wt.path.exists());
         assert_eq!(head(project.path()), before);
-        assert!(git(project.path(), &["status", "--porcelain"]).unwrap().is_empty());
+        assert!(git(project.path(), &["status", "--porcelain"])
+            .unwrap()
+            .is_empty());
         let dir = project.path().join(".git/aibus/attempts");
         assert_eq!(std::fs::read(dir.join("r.patch")).unwrap(), r.patch);
-        assert!(std::fs::read_to_string(dir.join("r.json")).unwrap().contains("\"rejected\""));
+        assert!(std::fs::read_to_string(dir.join("r.json"))
+            .unwrap()
+            .contains("\"rejected\""));
     }
 
     #[test]
@@ -550,8 +686,13 @@ mod tests {
         let out = approve(&wt, &r.patch_sha256, "rom").unwrap();
         assert_eq!(out, Merge::Conflict(vec!["a.txt".to_owned()]));
         assert_eq!(head(project.path()), tip);
-        assert!(git(project.path(), &["status", "--porcelain"]).unwrap().is_empty());
-        assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "someone else\n");
+        assert!(git(project.path(), &["status", "--porcelain"])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("a.txt")).unwrap(),
+            "someone else\n"
+        );
         // The attempt is kept, on its branch.
         assert!(wt.path.exists());
         git(project.path(), &["rev-parse", "--verify", "aibus/r"]).unwrap();
@@ -567,7 +708,10 @@ mod tests {
         std::fs::write(project.path().join("a.txt"), "my edit\n").unwrap();
         let err = approve(&wt, &r.patch_sha256, "rom").unwrap_err();
         assert!(err.contains("uncommitted"), "{err}");
-        assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "my edit\n");
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("a.txt")).unwrap(),
+            "my edit\n"
+        );
         assert!(!project.path().join("b.txt").exists());
     }
 
@@ -578,7 +722,10 @@ mod tests {
         let wt = create(project.path(), &cache.path().join("s/r")).unwrap();
         std::fs::write(wt.cwd.join("a.txt"), "half done\n").unwrap();
         assert!(release(wt.clone()).is_some());
-        assert_eq!(std::fs::read_to_string(wt.cwd.join("a.txt")).unwrap(), "half done\n");
+        assert_eq!(
+            std::fs::read_to_string(wt.cwd.join("a.txt")).unwrap(),
+            "half done\n"
+        );
     }
 
     #[test]
@@ -594,7 +741,10 @@ mod tests {
         std::fs::remove_dir_all(&lost.path).unwrap();
         let kept = sweep(&session);
         assert_eq!(kept.len(), 1);
-        assert_eq!(std::fs::read_to_string(killed.cwd.join("wip.txt")).unwrap(), "wip\n");
+        assert_eq!(
+            std::fs::read_to_string(killed.cwd.join("wip.txt")).unwrap(),
+            "wip\n"
+        );
         // The same name can be used again.
         let again = create(project.path(), &session.join("lost")).unwrap();
         assert!(again.cwd.join("a.txt").is_file());
@@ -604,7 +754,11 @@ mod tests {
     fn a_stale_base_ref_from_a_cut_off_attempt_is_replaced() {
         let project = repo();
         let cache = tempfile::tempdir().unwrap();
-        git(project.path(), &["update-ref", "refs/aibus/base/ghost", "HEAD"]).unwrap();
+        git(
+            project.path(),
+            &["update-ref", "refs/aibus/base/ghost", "HEAD"],
+        )
+        .unwrap();
         let wt = create(project.path(), &cache.path().join("s/ghost")).unwrap();
         assert_eq!(review(&wt).unwrap().base, head(project.path()));
     }
@@ -633,29 +787,61 @@ mod tests {
         std::fs::create_dir(&hooks).unwrap();
         // Every hook in githooks(5), plus the monitor.
         for name in [
-            "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit",
-            "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout",
-            "post-merge", "pre-push", "pre-receive", "update", "proc-receive", "post-receive",
-            "post-update", "reference-transaction", "push-to-checkout", "pre-auto-gc",
-            "post-rewrite", "sendemail-validate", "fsmonitor-watchman", "p4-changelist",
-            "p4-prepare-changelist", "p4-post-changelist", "p4-pre-submit", "post-index-change",
+            "applypatch-msg",
+            "pre-applypatch",
+            "post-applypatch",
+            "pre-commit",
+            "pre-merge-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-commit",
+            "pre-rebase",
+            "post-checkout",
+            "post-merge",
+            "pre-push",
+            "pre-receive",
+            "update",
+            "proc-receive",
+            "post-receive",
+            "post-update",
+            "reference-transaction",
+            "push-to-checkout",
+            "pre-auto-gc",
+            "post-rewrite",
+            "sendemail-validate",
+            "fsmonitor-watchman",
+            "p4-changelist",
+            "p4-prepare-changelist",
+            "p4-post-changelist",
+            "p4-pre-submit",
+            "post-index-change",
         ] {
             let at = hooks.join(name);
-            std::fs::write(&at, format!("#!/bin/sh\ntouch '{}/{name}'\n", marks.path().display())).unwrap();
+            std::fs::write(
+                &at,
+                format!("#!/bin/sh\ntouch '{}/{name}'\n", marks.path().display()),
+            )
+            .unwrap();
             std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         sh(project.path(), &["add", "."]);
         sh(project.path(), &["commit", "-q", "-m", "hooks"]);
         // A relative path: inside the attempt's checkout it names the attempt's own files.
         sh(project.path(), &["config", "core.hooksPath", ".githooks"]);
-        sh(project.path(), &["config", "core.fsmonitor", ".githooks/fsmonitor-watchman"]);
+        sh(
+            project.path(),
+            &["config", "core.fsmonitor", ".githooks/fsmonitor-watchman"],
+        );
         let cache = tempfile::tempdir().unwrap();
 
         // create, review, approve.
         let wt = create(project.path(), &cache.path().join("s/r")).unwrap();
         std::fs::write(wt.cwd.join("b.txt"), "b\n").unwrap();
         let r = review(&wt).unwrap();
-        assert!(matches!(approve(&wt, &r.patch_sha256, "rom").unwrap(), Merge::Merged(_)));
+        assert!(matches!(
+            approve(&wt, &r.patch_sha256, "rom").unwrap(),
+            Merge::Merged(_)
+        ));
         // reject.
         let wt = create(project.path(), &cache.path().join("s/x")).unwrap();
         std::fs::write(wt.cwd.join("x.txt"), "x\n").unwrap();
@@ -672,9 +858,28 @@ mod tests {
         std::fs::write(wt.cwd.join("a.txt"), "agent\n").unwrap();
         let r = review(&wt).unwrap();
         std::fs::write(project.path().join("a.txt"), "other\n").unwrap();
-        git(project.path(), &["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qam", "x"]).unwrap();
-        assert!(matches!(approve(&wt, &r.patch_sha256, "rom").unwrap(), Merge::Conflict(_)));
-        let ran: Vec<_> = std::fs::read_dir(marks.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        git(
+            project.path(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@e",
+                "commit",
+                "-qam",
+                "x",
+            ],
+        )
+        .unwrap();
+        assert!(matches!(
+            approve(&wt, &r.patch_sha256, "rom").unwrap(),
+            Merge::Conflict(_)
+        ));
+        let ran: Vec<_> = std::fs::read_dir(marks.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
         assert!(ran.is_empty(), "hooks ran: {ran:?}");
     }
 }

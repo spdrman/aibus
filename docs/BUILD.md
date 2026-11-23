@@ -102,3 +102,7 @@ Crates in that set that run code at build time:
 ## CI
 
 `.github/workflows/fuzz.yml` runs the fuzz targets nightly. `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.
+
+## OTLP export (A3.2)
+
+`aibus-otel` is the one crate outside the provider crates that opens a socket, and only when the user configures a destination (nothing is read from the environment). It uses `reqwest` 0.12 with the `blocking` feature and the same rustls setup as the provider crates, on its own thread with a hard timeout. The span mapping itself is pure and lives in `aibus-trace`, which still has no network code.

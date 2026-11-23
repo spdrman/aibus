@@ -225,6 +225,13 @@ pub async fn supervise(
             cwd.display()
         )));
     }
+    // The helper is held to the exe's rule: a bare name would be found through PATH.
+    if let Some(h) = helper.as_ref().filter(|h| !h.is_absolute() || !h.is_file()) {
+        return Err(SupervisorError::Refused(format!(
+            "helper {} is not an absolute path to a file",
+            h.display()
+        )));
+    }
     // On Linux with a helper the CLI runs under it (D-352); the helper leads the group instead.
     let helped = cfg!(target_os = "linux") && helper.is_some();
     #[cfg(target_os = "linux")]

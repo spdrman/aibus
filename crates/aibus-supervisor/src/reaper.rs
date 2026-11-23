@@ -144,8 +144,9 @@ pub fn run(args: Vec<OsString>) -> u8 {
     }
 
     crate::descendants::kill_under(me.as_raw_pid() as u32);
-    if let Some(cli) = cli {
-        // What `ps` could not show (no `ps`) is at least the CLI itself.
+    // What `ps` could not show (no `ps`) is at least the CLI itself, but only while it is still
+    // unreaped: once `wait` returned it, its pid is free and may already be someone else's.
+    if let Some(cli) = cli.filter(|_| status.is_none()) {
         let _ = kill_process(cli, Signal::KILL);
     }
     let start = Instant::now();

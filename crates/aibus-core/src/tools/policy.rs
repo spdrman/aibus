@@ -62,14 +62,18 @@ pub fn spec_matches(spec: &str, subject: &str) -> bool {
 /// counts. Its resolved form counts too, so `/var/x/**` meets `/private/var/x/f`, but a deny
 /// takes any symlink while an allow only takes links owned by root (`/var`, `/tmp`, `/etc`, a
 /// merged `/bin`), because a link the user can retarget would move where an allow points. When
-/// aibus itself runs as root every link it can make is root's, so an allow takes none.
+/// aibus itself runs as root every link it can make is root's, so an allow takes none. The rule's
+/// directory resolves the way a write's path does (`resolve_for_write`), so a deny on a directory
+/// that doesn't exist yet still meets the write that would create it. Off unix only the rule as
+/// written counts.
 pub(crate) fn path_spec_matches(spec: &str, subject: &str, deny: bool) -> bool {
-    use std::os::unix::fs::MetadataExt;
     if spec_matches(spec, subject) {
         return true;
     }
-    // The literal directory part of an absolute spec, canonicalised, with the rest re-attached.
+    // The literal directory part of an absolute spec, resolved, with the rest re-attached.
+    #[cfg(unix)]
     let resolved = || -> Option<String> {
+        use std::os::unix::fs::MetadataExt;
         if !spec.starts_with('/') {
             return None;
         }
@@ -82,9 +86,14 @@ pub(crate) fn path_spec_matches(spec: &str, subject: &str, deny: bool) -> bool {
         if !deny && dir.ancestors().any(|a| std::fs::symlink_metadata(a).is_ok_and(retargetable)) {
             return None;
         }
-        let dir = dir.canonicalize().ok()?;
+        let (dir, _) = resolve_for_write(Path::new("/"), dir.to_str()?).ok()?;
         let dir = dir.to_str()?.trim_end_matches('/');
         Some(format!("{dir}{}", &spec[slash..]))
+    };
+    #[cfg(not(unix))]
+    let resolved = || -> Option<String> {
+        let _ = deny;
+        None
     };
     resolved().is_some_and(|r| spec_matches(&r, subject))
 }
@@ -138,7 +147,7 @@ pub(crate) fn confine(cwd: &Path, p: &str) -> Result<PathBuf, ToolError> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::spec_matches;
 

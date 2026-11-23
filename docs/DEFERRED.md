@@ -54,3 +54,18 @@ I landed durable journaled transitions, `requires_reconciliation`, a new attempt
 - **Crash-safety edges the review found.** The new run directory's entry in `<root>` is not synced after it is created, so a power cut right after `create` could lose the whole run. `retry` returns an error if making the old journal read-only fails, although by then the run already is the new attempt. `open` does not check a retry's `previous` id or carried spent set against the earlier attempt's journal. And the failed-write cut-back (the `broken` latch) and the skip of an empty attempt in `open` have no tests, since both need fault injection.
 - **Upgrades.** A new Jev policy revision makes `Scheduler::new` refuse the pinned plan, so a run that was in flight across an upgrade cannot be reopened. It fails closed; carrying such a run over (or finishing it on the old revision) is not designed.
 - **Tamper resistance against someone who can write the run directory.** The hash chain catches an edit that changes a decision on replay, but someone with write access can rewrite the whole journal consistently. An HMAC keyed from the keychain would close that, same as the D-360 note.
+
+## #368 Protected-path rule misses /private/var on macOS
+
+I fixed the protected-path rule and the path-tool specifiers so they compare resolved paths. Two
+gaps came up in review that were already there before this change, and I left them alone:
+
+- **Case-insensitive filesystems.** The protected-home check (`starts_with`) and the glob match are
+  case-sensitive, so on APFS (or any case-insensitive volume) a write to `~/.CONFIG/AIBUS/x` that
+  creates new directories, or to `/tmp/OUT/x` against a deny on `/tmp/out/**`, isn't caught by the
+  rule. Fixing it means folding case per volume (or comparing against what the filesystem reports
+  for the existing part of the path), which is its own change.
+- **A rule that names a symlinked file.** A rule with no glob that names a symlink to a file, say
+  `write(/tmp/link)`, only resolves its directory, never its last component, so it can't meet the
+  canonical subject (the link's target). Resolving the last component too would let the link's
+  owner move where the rule points, so it needs the same owner check the allow side has.

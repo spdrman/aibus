@@ -26,3 +26,17 @@ dry run. These parts are not in it:
   `max_agent_runs` / `max_parallel` yet.
 - **Cost and latency preference** (spec 5.2 rule 6): nothing has evidence-backed numbers, so there is
   no ranking rather than a made-up one.
+
+## #290 A2.5 Git worktree attempts, artifacts, code review and fleet UX
+
+I cut this to the library layer in `aibus_core::worktree`: a worktree per write attempt with its base commit pinned under `refs/aibus/base/<id>`, one repository lock around every change to the repository, cleanup that keeps uncommitted work, and `review` / `approve` / `reject` with no automatic merge. These parts are not in it:
+
+- **No host calls approve or reject yet.** There is no `aibus attempts` command, TUI screen or MCP tool, so an operator cannot reach `review`, `approve` or `reject` from the product. That needs a decision on where the prompt lives, and it comes with the scheduler host wiring in #288's deferred list.
+- **The fleet view is `/runs` as it is (#284).** It does not list worktree attempts, and the issue's "pause" is not built: no documented CLI control capability pauses a run, so there is nothing honest to call. Stop and inspect are the ones `/runs` and `aibus runs` already have; routing the fleet's stop through #274's `session_cancel` stays open.
+- **Test reports and artifact hashes beyond the patch.** `review` hashes the patch (SHA-256). Running the project's tests in the attempt, storing their report, hashing other artifacts, and writing the task-run association and git status before and after into the run manifest (spec 4.3) are not done.
+- **Resuming a path is not exclusive.** `create` on a worktree that is already there hands it back, so two runs given the same run id share one tree. Distinct run ids never do. A claim on the attempt (a lock file that dies with its process) would close this.
+- **A second `approve` after a conflict.** The conflict is aborted and the attempt kept on `aibus/<id>`, but calling `approve` again fails on the existing branch. Resolving the conflict, by rebasing the attempt or merging by hand, is the operator's job for now.
+- **Ignored files** in a rejected or approved attempt are not captured in its patch, and `reject` removes them with the checkout.
+- **Windows** is untested: paths and the lock use `fs4`, but I only ran the tests on Linux.
+- **Two small things in `create`** (from review): the parent directory is made before the "inside the repository" check, so a refused path can leave an empty directory behind, and `git worktree prune` there clears every stale registration of the repository, not only this attempt's.
+- **A swapped `.git` file in the attempt's checkout.** The attempt's tree is the agent's, so it can replace the `.git` file (the `gitdir:` pointer) with one pointing elsewhere before `review` or `approve` run git inside it. Checking that the pointer still names this repository's `worktrees/<id>` directory before every call is the follow-up.

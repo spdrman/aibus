@@ -225,8 +225,12 @@ pub async fn supervise(
             cwd.display()
         )));
     }
-    // The helper is held to the exe's rule: a bare name would be found through PATH.
-    if let Some(h) = helper.as_ref().filter(|h| !h.is_absolute() || !h.is_file()) {
+    // The helper is held to the exe's rule: a bare name would be found through PATH. Linux only,
+    // like the helper itself (elsewhere it is ignored, and `/proc/self/exe` does not exist).
+    if let Some(h) = helper
+        .as_ref()
+        .filter(|h| cfg!(target_os = "linux") && (!h.is_absolute() || !h.is_file()))
+    {
         return Err(SupervisorError::Refused(format!(
             "helper {} is not an absolute path to a file",
             h.display()

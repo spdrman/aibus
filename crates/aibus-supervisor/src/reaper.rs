@@ -32,7 +32,7 @@
 //! Ending the tree is the #338 sweep's algorithm (stop what the table shows under the helper,
 //! look again until nothing new turns up, then kill), but started from the helper's own pid, so
 //! nothing has to be remembered. The table comes from `ps`, so the helper opens no file and reads
-//! no environment (`tests/credentials.rs`). Without a usable `ps` the helper can still reap and
+//! no environment (by reading the code; the pass-through is tested in `tests/subreaper_352.rs`). Without a usable `ps` the helper can still reap and
 //! forward signals but cannot enumerate, and it warns once.
 
 use std::ffi::OsString;

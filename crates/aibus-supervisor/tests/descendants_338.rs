@@ -182,7 +182,9 @@ macro_rules! cases {
     #[tokio::test]
     async fn issue_338_a_child_left_behind_by_a_cli_that_exits_by_itself_is_ended_with_the_attempt() {
         // The CLI returns normally while its detached child is still running.
-        let body = format!("{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\necho '{{}}'", detach(Some(0.4)));
+        // The sleep keeps the CLI up while the middle process lingers, so the 50 ms sampler of the
+        // swept case sees it with the CLI still its parent.
+        let body = format!("{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nsleep 0.5\necho '{{}}'", detach(Some(0.4)));
         let limits = Limits {
             wall_time: Duration::from_secs(20),
             ..quick()

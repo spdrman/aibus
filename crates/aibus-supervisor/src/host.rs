@@ -369,6 +369,11 @@ pub async fn supervise(
         if exit.is_none() {
             if let Some(status) = child.try_wait().map_err(SupervisorError::Spawn)? {
                 exit = Some(status);
+                // A reaped helper's pid is free, and the helper only exits once it has ended the
+                // tree, so nothing signals that one pid again (D-352).
+                if helped {
+                    guard.0 = None;
+                }
                 // The pipes may still hold output, or a descendant may hold them open. Keep reading
                 // while lines arrive; end the group when they stop or the bound is reached.
                 let now = tokio::time::Instant::now();
@@ -400,8 +405,9 @@ pub async fn supervise(
                         if stopped.is_none() {
                             stopped = Some(Ending::OutputLimit);
                             kill_at = Some(tokio::time::Instant::now() + limits.grace);
+                            // The limit can trip in the drain, after the helper was reaped.
                             #[cfg(unix)]
-                            ask_to_stop(pid, helped);
+                            ask_to_stop(pid.filter(|_| !helped || exit.is_none()), helped);
                         }
                     }
                 }

@@ -113,3 +113,14 @@ Cut from the reduced scope, still wanted:
 - Wiring the completeness diagnostics into the trace inspector.
 - Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
 - A bounded queue between the run and the exporter. `spawn` starts one thread per export; a slow collector under many exports would pile threads up, so a bounded queue with drop-on-full belongs here.
+
+# Deferred
+
+## A3.1 extensions (#291), cut on 2026-11-22
+
+- Install, login-state and launch tests against a real Kimi Code, Copilot CLI, Cursor Agent and
+  Qwen Code, then replacing the synthetic fixtures with recordings and tightening `cli_versions`.
+- Tool failure and error-result mappings, which need each CLI's real failure events.
+- A published community fixture pack. The fixtures sit under `examples/extensions/<name>/fixtures`
+  for now, and where to publish them (repo, the A2.1 catalog or a release asset) is still open.
+- Building anything for xAI/Grok or DeepSeek: the register says `unavailable`.

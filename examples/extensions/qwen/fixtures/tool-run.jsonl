@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"s-1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-0001","name":"read_file","input":{}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-0001","content":"synthetic"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+{"type":"result","subtype":"success","usage":{"input_tokens":1500,"output_tokens":100}}

@@ -1,0 +1,104 @@
+# The GitHub Copilot CLI extension (#291, A3.1): the official, unmodified GitHub Copilot CLI CLI as an aibus extension on the
+# A2.1 contract. Local, opt-in use with the user's own installed CLI; the CLI owns its sign-in and
+# aibus never reads or stores the token.
+#
+# UNVERIFIED: the CLI was never installed or run when this was written. The flags and the stream
+# shape below come from the vendor's public documentation as I read it, not from a recording, and
+# the fixtures are synthetic. Nothing here is enabled by default.
+
+schema_version = "2"
+id = "org.devshell.aibus.copilot-cli"
+version = "0.1.0"
+name = "GitHub Copilot CLI"
+kind = "official_cli"
+provider = "GitHub"
+license = "MIT"
+source_url = "https://github.com/spdrman/aibus/tree/main/examples/extensions/copilot"
+
+[publisher]
+name = "devshell"
+url = "https://devshell.org"
+
+[compat]
+protocol = ">=1.1.0, <2.0.0"
+os = ["macos", "linux"]
+# A placeholder: no version has been run. Tighten it when someone records one.
+cli_versions = ">=0.1.0, <1000.0.0"
+
+[cli]
+executable_candidates = ["copilot"]
+vendor_urls = ["https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference"]
+
+[auth]
+owner = "vendor_cli"
+credential_access = "forbidden"
+login_argv = []
+status_argv = []
+
+[execution]
+# UNVERIFIED: the argv, and that the prompt can go on stdin.
+argv = ["--output-format", "json"]
+prompt = "stdin"
+stdout = "jsonl"
+env_allow = []
+
+[limits]
+wall_time_secs = 1800
+
+[normalizer]
+engine = "declarative-jsonl"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "assistant.message"
+kind = "message_chunk"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool.execution_start"
+kind = "tool_started"
+id_pointer = "/data/toolCallId"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "tool.execution_complete"
+kind = "tool_completed"
+id_pointer = "/data/toolCallId"
+
+[capabilities]
+login_status = "unsupported"
+one_shot = "supported"
+structured_events = "probe_required"
+native_child_lineage = "unsupported"
+tool_events = "supported"
+usage_report = "unsupported"
+session_resume = "unsupported"
+interactive_approval = "unsupported"
+cancel = "supported"
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "unsupported"
+
+[[probe]]
+capability = "structured_events"
+flags = ["--output-format"]
+
+[runtime]
+usage_quality = "unknown"
+
+[permissions]
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "aibus maintainers"
+review_date = "2026-11-22"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/tool-run.jsonl", "fixtures/crash.jsonl"]
+
+[notes]
+upgrade = "Install the new version from the registry. A version that asks for more executables, environment names, flags or capabilities has to be accepted by name."
+rollback = "aibus extensions rollback org.devshell.aibus.copilot-cli returns to the previous installed version."

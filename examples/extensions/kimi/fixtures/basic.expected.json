@@ -1,0 +1,9 @@
+{
+  "ending": "exit:0",
+  "kinds": [
+    "attempt_started",
+    "message_chunk",
+    "attempt_completed"
+  ],
+  "status": "completed"
+}

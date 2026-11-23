@@ -28,7 +28,7 @@ Until one of those is done, the sign-off row stays open and the PR stays unmerge
 
 ## Dependencies installed in the workspace (tooling only, nothing shipped)
 
-Counts from the gate on 2026-11-18 (`npm run licences`, "everything installed"): MIT 101, Apache-2.0 4, ISC 4, BSD-2-Clause 2, BSD-3-Clause 2, MIT-0 1. Notable direct ones:
+Counts from the gate on 2026-11-22 (`npm run licences` in `node:22-bookworm-slim`, "everything installed"; the production closure of the shipped packages is empty): MIT 100, Apache-2.0 4, ISC 4, BSD-2-Clause 2, BSD-3-Clause 2, MIT-0 1. Notable direct ones:
 
 | Package | Licence | Role |
 | --- | --- | --- |

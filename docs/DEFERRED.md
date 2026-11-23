@@ -1,3 +1,46 @@
+# Deferred
+
+Work that was in scope for an issue once and got cut to fit. Nothing here has an issue of its own yet.
+
+## Attach phase 2 leftovers (#346)
+
+I did `runtime = "attached"` in #353, and `step_ack`, tool-call correlation and a cooperative interrupt in #346. These three are left...
+
+* **Channels as a push transport.** `--dangerously-load-development-channels` would let aibus push a step or an interrupt into a Claude Code session instead of waiting for it to pull. Not built, and not checked against a live client. Until it is, an interrupt reaches the agent only on its next `step_ack`, `step_tool_call` or `next_step`.
+* **Codex push.** Whether a second client can attach to the thread the terminal shows, to start, steer and interrupt through the app-server, is unanswered. It needs a live Codex install and a session of the owner's, so it is an owner step.
+* **A non-letter chord to accept an attach.** The typed `/attach accept <code>` stays. A chord only matters if the owner wants it instead of the code, and nobody asked for it yet.
+
+Also unverified here: the live behaviour of `step_ack` and `step_tool_call` against Claude Code. The tests use fixtures; a PostToolUse hook that calls `step_tool_call` is not shipped.
+
+Smaller leftovers from the #385 review, none of them a bug...
+
+* The 10,000 reported-call cap has no test of its own (the 100-name cap does).
+* Bidi and zero-width characters in a reported name rely on the shared `clean()`, which is tested elsewhere, not on a test of `tool_call`.
+* A workflow cancel of a step the session already pulled queues the same interrupt as the keyboard, through the same function, but only the keyboard path has a test that pulls first.
+
+# Deferred scope
+
+Work cut from an issue's reduced definition of done, kept here so it is not lost. Each section names
+the issue it came from and what picks it up.
+
+## B1.1 Tauri desktop spike (#304)
+
+I cut these from the spike on 2026-11-22. B1.5 (#308) reviews them with the go/no-go.
+
+- **Live Claude Code data in the desktop app.** The spike replays the A1.1 capture through the real
+  normaliser, labelled as a fixture. Following a live supervised run means tailing a `TraceStore`
+  from the host and streaming new snapshots over the same channel. That needs a launch command with a
+  bounded argument set (no command strings from the webview), so it belongs with the run workspace
+  slice of Phase 2, not a spike.
+- **macOS build and run.** Unverified; owner steps are in `docs/desktop/VERIFY-MACOS.md`.
+- **Timing benchmarks.** The Linux numbers in `docs/desktop/B1.1-go-no-go.md` are observations from
+  two Xvfb runs on the NAS, not benchmarks. A queued Mercury run (`bench-queue.sh`) can repeat them once
+  Phase 2 has a workload worth timing.
+- **Shared UI components.** The spike styles its own few elements. #307 swaps them for the shared
+  React primitives and tokens from #305 (PR #374) once that merges.
+- **Bundling and signing.** `bundle.active` is false. AppImage/deb, `.app`/`.dmg`, notarisation and
+  updater keys are release work, not spike work.
+
 # Deferred work
 
 Scope that was cut from an issue on its way to closing, with the reason and what picks it up. One
@@ -40,3 +83,30 @@ I cut this to the library layer in `aibus_core::worktree`: a worktree per write 
 - **Windows** is untested: paths and the lock use `fs4`, but I only ran the tests on Linux.
 - **Two small things in `create`** (from review): the parent directory is made before the "inside the repository" check, so a refused path can leave an empty directory behind, and `git worktree prune` there clears every stale registration of the repository, not only this attempt's.
 - **A swapped `.git` file in the attempt's checkout.** The attempt's tree is the agent's, so it can replace the `.git` file (the `gitdir:` pointer) with one pointing elsewhere before `review` or `approve` run git inside it. Checking that the pointer still names this repository's `worktrees/<id>` directory before every call is the follow-up.
+
+## #368 Protected-path rule misses /private/var on macOS
+
+I fixed the protected-path rule and the path-tool specifiers so they compare resolved paths. Two
+gaps came up in review that were already there before this change, and I left them alone:
+
+- **Case-insensitive filesystems.** The protected-home check (`starts_with`) and the glob match are
+  case-sensitive, so on APFS (or any case-insensitive volume) a write to `~/.CONFIG/AIBUS/x` that
+  creates new directories, or to `/tmp/OUT/x` against a deny on `/tmp/out/**`, isn't caught by the
+  rule. Fixing it means folding case per volume (or comparing against what the filesystem reports
+  for the existing part of the path), which is its own change.
+- **A rule that names a symlinked file.** A rule with no glob that names a symlink to a file, say
+  `write(/tmp/link)`, only resolves its directory, never its last component, so it can't meet the
+  canonical subject (the link's target). Resolving the last component too would let the link's
+  owner move where the rule points, so it needs the same owner check the allow side has.
+
+Scope I cut on purpose, with where it goes. I add a section per piece of work and I do not open issues for these.
+
+## B1.3 typed bridge (#306)
+
+I landed the Rust half in `crates/aibus-bridge`: versioned DTOs over the `aibus-trace` projections, the run cursor, gap detection and resubscribe, a bounded channel feed, and the generated TypeScript bindings with a contract test. What I left for the desktop shell (#307):
+
+- The Tauri commands and the `Channel` that carry a `Request` to `aibus_bridge::handle_json` and a batch to the UI. `ts/bridge.ts` takes an injected `invoke`, so wiring it is one function there.
+- Live tailing. `stream` and `handle` re-read the trace file per call, which is right for a recorded run and for catch-up, but a run still being written wants a watcher that pushes new batches. The cursor protocol does not change.
+- A second `RunRow` style summary for a run that is still open (the fleet row is built from the whole file today).
+- Running the generated TS through `tsc` and a React consumer in CI: the contract test checks the bindings against the Rust and that `bridge.ts` imports only generated types, and I type-checked `bridge.ts` by hand, but there is no TS toolchain in the workspace yet.
+- The "TUI and desktop share state" check from the issue: the bridge reads the same `aibus_trace::project` and `view::fleet` the TUI uses, so there is no second projection, but nothing yet drives both from one running session (that needs the control socket of #274 and the shell).

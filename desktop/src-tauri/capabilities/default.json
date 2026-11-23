@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window may call the two aibus commands and nothing else: no shell, fs, opener or http plugin, no core defaults.",
+  "windows": ["main"],
+  "permissions": ["allow-replay-fixture", "allow-stack-info"]
+}

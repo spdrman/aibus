@@ -26,6 +26,8 @@ fn roster() -> Vec<AgentName> {
 /// Every workflow file written before #283, keyed by its path in the repository.
 fn old_files() -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
+    // Written after #283 (cross-provider came with #360), so the code before it never saw them.
+    let newer = ["examples/workflows/cross-provider.toml"];
     let dirs = [
         "examples/workflows",
         "fixtures/workflows/valid",
@@ -39,10 +41,10 @@ fn old_files() -> BTreeMap<String, String> {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|x| x == "toml") {
                 let name = path.file_name().unwrap().to_string_lossy();
-                out.insert(
-                    format!("{dir}/{name}"),
-                    std::fs::read_to_string(&path).unwrap(),
-                );
+                let key = format!("{dir}/{name}");
+                if !newer.contains(&key.as_str()) {
+                    out.insert(key, std::fs::read_to_string(&path).unwrap());
+                }
             }
         }
     }

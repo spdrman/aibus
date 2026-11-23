@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use aibus_core::attach::{Accepted, Attachments, Shown, StepState, MAX_LINEAGE};
+use aibus_core::attach::{Accepted, Attachments, Interrupt, Shown, StepState, MAX_LINEAGE};
 
 fn pending_code(a: &mut Attachments, client: &str, now: Instant) -> String {
     let out = a
@@ -232,7 +232,7 @@ fn a_late_result_is_refused_even_when_nobody_ticked_the_clock() {
 }
 
 #[test]
-fn cancel_marks_the_step_and_refuses_the_result_and_says_it_cannot_interrupt() {
+fn cancel_marks_the_step_and_refuses_the_result_and_queues_an_interrupt() {
     let now = Instant::now();
     let mut a = attached(now);
     let token = a
@@ -240,7 +240,7 @@ fn cancel_marks_the_step_and_refuses_the_result_and_says_it_cannot_interrupt() {
         .unwrap();
     a.next_step("claude-code", now).unwrap();
     let said = a.cancel(now).unwrap();
-    assert!(said.contains("session not interruptible"), "{said}");
+    assert!(said.contains("interrupt queued"), "{said}");
     assert_eq!(a.steps()[0].state, StepState::Cancelled);
     assert!(a
         .step_result("claude-code", &token, "done", "x", now)
@@ -378,4 +378,189 @@ fn a_panel_is_plain_capped_text_with_no_control_characters() {
         .all(|c| !c.is_control()));
     assert!(p.title.chars().count() <= 80 && p.message.len() <= 4096 && p.rows.len() <= 30);
     assert!(p.rows[0][0].starts_with("ok") && p.rows[0][0].contains("done"));
+}
+
+// #346: step_ack, tool-call correlation and the interrupt, on the pull leg.
+
+fn pulled(now: Instant) -> (Attachments, String) {
+    let mut a = attached(now);
+    let token = a
+        .dispatch("review", "do it", Duration::from_secs(60), now)
+        .unwrap();
+    a.next_step("claude-code", now).unwrap();
+    (a, token)
+}
+
+#[test]
+fn a_step_ack_marks_the_step_started_once_and_shows_in_the_evidence() {
+    let now = Instant::now();
+    let (mut a, token) = pulled(now);
+    assert_eq!(
+        a.step_ack("claude-code", &token, now).unwrap()["state"],
+        "started"
+    );
+    assert!(a
+        .step_ack("claude-code", &token, now)
+        .unwrap_err()
+        .contains("already acknowledged"));
+    let out = a
+        .step_result(
+            "claude-code",
+            &token,
+            "done",
+            "ok",
+            now + Duration::from_secs(2),
+        )
+        .unwrap();
+    assert_eq!(out["evidence"]["started"]["visibility"], "observed");
+    assert_eq!(out["evidence"]["started"]["source"], "step_ack");
+}
+
+#[test]
+fn a_step_ack_needs_the_holder_a_known_token_and_a_pulled_step() {
+    let now = Instant::now();
+    let mut a = attached(now);
+    let token = a
+        .dispatch("review", "x", Duration::from_secs(60), now)
+        .unwrap();
+    assert!(a
+        .step_ack("claude-code", &token, now)
+        .unwrap_err()
+        .contains("was pulled"));
+    a.next_step("claude-code", now).unwrap();
+    assert!(a
+        .step_ack("someone-else", &token, now)
+        .unwrap_err()
+        .contains("refused"));
+    assert!(a
+        .step_ack("claude-code", "st-nope", now)
+        .unwrap_err()
+        .contains("no step"));
+    let mut off = Attachments::new(true, false);
+    assert!(off
+        .step_ack("claude-code", &token, now)
+        .unwrap_err()
+        .contains("not attached"));
+}
+
+#[test]
+fn reported_tool_calls_are_correlated_by_token_capped_and_cleaned() {
+    let now = Instant::now();
+    let (mut a, token) = pulled(now);
+    a.tool_call("claude-code", &token, "Read", now).unwrap();
+    a.tool_call("claude-code", &token, "Ba\u{1b}[31msh", now)
+        .unwrap();
+    for _ in 0..150 {
+        a.tool_call("claude-code", &token, "Grep", now).unwrap();
+    }
+    assert!(a
+        .tool_call("claude-code", "st-nope", "Read", now)
+        .unwrap_err()
+        .contains("no step"));
+    let out = a
+        .step_result("claude-code", &token, "done", "ok", now)
+        .unwrap();
+    let ev = &out["evidence"]["tool_calls"];
+    assert_eq!(ev["visibility"], "correlated", "{ev}");
+    assert_eq!(ev["count"], 152);
+    assert_eq!(
+        ev["names"].as_array().unwrap().len(),
+        100,
+        "names are capped, the count is not"
+    );
+    assert_eq!(ev["names"][1], "Ba[31msh", "control characters are dropped");
+    // A step that ended takes no more reports.
+    assert!(a
+        .tool_call("claude-code", &token, "Read", now)
+        .unwrap_err()
+        .contains("done"));
+}
+
+#[test]
+fn a_step_with_no_reported_calls_says_unavailable_not_zero() {
+    let now = Instant::now();
+    let (mut a, token) = pulled(now);
+    let out = a
+        .step_result("claude-code", &token, "done", "ok", now)
+        .unwrap();
+    assert_eq!(out["evidence"]["tool_calls"]["visibility"], "unavailable");
+    assert_eq!(out["evidence"]["started"]["visibility"], "unavailable");
+}
+
+#[test]
+fn a_cancel_after_the_pull_is_an_interrupt_the_session_sees_once() {
+    let now = Instant::now();
+    let (mut a, token) = pulled(now);
+    a.step_ack("claude-code", &token, now).unwrap();
+    assert_eq!(a.steps()[0].interrupt, Interrupt::None);
+    a.cancel(now).unwrap();
+    assert_eq!(a.steps()[0].interrupt, Interrupt::Pending);
+    let seen = a.tool_call("claude-code", &token, "Read", now).unwrap();
+    assert_eq!(seen["interrupt"], true, "{seen}");
+    assert_eq!(a.steps()[0].interrupt, Interrupt::Seen);
+    // Shown once; after that it is an ordinary refusal, and a result is still refused.
+    assert!(a
+        .tool_call("claude-code", &token, "Read", now)
+        .unwrap_err()
+        .contains("cancelled"));
+    assert!(a
+        .step_result("claude-code", &token, "done", "x", now)
+        .unwrap_err()
+        .contains("cancelled"));
+}
+
+#[test]
+fn an_interrupt_can_also_arrive_with_next_step() {
+    let now = Instant::now();
+    let (mut a, token) = pulled(now);
+    a.cancel(now).unwrap();
+    let out = a.next_step("claude-code", now).unwrap();
+    assert_eq!(out["interrupt"]["token"], token.as_str());
+    assert!(a.next_step("claude-code", now).unwrap()["interrupt"].is_null());
+}
+
+#[test]
+fn a_cancel_before_the_pull_has_nothing_to_interrupt() {
+    let now = Instant::now();
+    let mut a = attached(now);
+    a.dispatch("review", "x", Duration::from_secs(60), now)
+        .unwrap();
+    let said = a.cancel(now).unwrap();
+    assert!(said.contains("before the session pulled it"), "{said}");
+    assert_eq!(a.steps()[0].interrupt, Interrupt::None);
+    assert!(a.next_step("claude-code", now).unwrap()["step"].is_null());
+}
+
+#[test]
+fn an_interrupt_the_old_client_never_saw_is_not_handed_to_the_next_one() {
+    let now = Instant::now();
+    let (mut a, _token) = pulled(now);
+    a.cancel(now).unwrap();
+    assert_eq!(a.steps()[0].interrupt, Interrupt::Pending);
+    a.detach("claude-code");
+    assert_eq!(a.steps()[0].interrupt, Interrupt::Seen);
+    let code = pending_code(&mut a, "other-client", now);
+    a.accept(&code, now).unwrap();
+    assert!(
+        a.next_step("other-client", now).unwrap()["interrupt"].is_null(),
+        "the next client got the old client's interrupt"
+    );
+}
+
+#[test]
+fn a_reported_tool_name_is_cut_to_forty_characters() {
+    let now = Instant::now();
+    let (mut a, token) = pulled(now);
+    a.tool_call("claude-code", &token, &"x".repeat(100), now)
+        .unwrap();
+    let out = a
+        .step_result("claude-code", &token, "done", "ok", now)
+        .unwrap();
+    assert_eq!(
+        out["evidence"]["tool_calls"]["names"][0]
+            .as_str()
+            .unwrap()
+            .len(),
+        40
+    );
 }

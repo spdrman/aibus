@@ -350,6 +350,28 @@ fn past_the_rate_limit_a_change_is_answered_with_an_error() {
 }
 
 #[test]
+fn step_reports_are_not_session_changes_and_do_not_use_up_the_change_limit() {
+    let (_l, ep) = live("01JCSTEPS0000000000000000A");
+    let (mut s, mut r) = hello(&ep);
+    for i in 0..CHANGES_PER_MINUTE * 2 {
+        let op = if i % 2 == 0 {
+            json!({"id": i, "op": "step_ack", "token": "st-1"})
+        } else {
+            json!({"id": i, "op": "step_tool_call", "token": "st-1", "name": "Read"})
+        };
+        let v = ask_line(&mut s, &mut r, op);
+        assert_eq!(v["ok"], true, "report {i} was limited: {v}");
+    }
+    // The step's own result is a change and still has its full allowance.
+    let v = ask_line(
+        &mut s,
+        &mut r,
+        json!({"id": 99, "op": "step_result", "token": "st-1", "status": "done", "summary": "ok"}),
+    );
+    assert_eq!(v["ok"], true, "{v}");
+}
+
+#[test]
 fn the_link_round_trips_and_every_answer_is_redacted() {
     let (l, ep) = live("01JCLINK00000000000000000A");
     let link = Link::new(l.dir.clone(), None);

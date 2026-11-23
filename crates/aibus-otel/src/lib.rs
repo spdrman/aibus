@@ -46,23 +46,29 @@ pub fn export(dest: Option<&Destination>, body: &Value) -> Outcome {
     let Some(d) = dest else {
         return Outcome::Disabled;
     };
-    // reqwest's blocking timeout did not cut a hung collector off in time (a 300 ms timeout took
-    // about 30 s), so the deadline is enforced here: the request runs on its own thread and a
-    // missed deadline abandons it. The abandoned thread ends when reqwest gives up.
+    // The deadline is enforced here and not left to reqwest's blocking timeout (a 300 ms timeout
+    // was seen taking about 30 s on a loaded host): the request runs on its own thread and a missed
+    // deadline abandons it. The abandoned thread ends when reqwest gives up.
     let (tx, rx) = std::sync::mpsc::channel();
     let (d, body) = (d.clone(), body.to_string());
     let timeout = d.timeout;
     std::thread::spawn(move || {
-        let client = match reqwest::blocking::Client::builder()
-            .timeout(d.timeout)
-            .connect_timeout(d.timeout)
-            .build()
-        {
+        // One client for the process: building it loads and parses the system root certificates,
+        // which is slow in an unoptimised build (seconds under load), so it happens once, on the
+        // worker thread and inside the deadline, never on the caller's thread.
+        static CLIENT: std::sync::OnceLock<Result<reqwest::blocking::Client, String>> =
+            std::sync::OnceLock::new();
+        let client = match CLIENT.get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .build()
+                .map_err(|e| e.without_url().to_string())
+        }) {
             Ok(c) => c,
-            Err(e) => return drop(tx.send(Outcome::Failed(e.without_url().to_string()))),
+            Err(e) => return drop(tx.send(Outcome::Failed(e.clone()))),
         };
         let mut req = client
             .post(&d.endpoint)
+            .timeout(d.timeout)
             .header("content-type", "application/json")
             .body(body);
         for (k, v) in &d.headers {

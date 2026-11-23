@@ -99,7 +99,7 @@ fn a_collector_error_status_is_a_failed_outcome() {
         .unwrap();
     });
     let out = export(
-        Some(&dest(format!("http://127.0.0.1:{port}/v1/traces"), 2000)),
+        Some(&dest(format!("http://127.0.0.1:{port}/v1/traces"), 20_000)),
         &json!({}),
     );
     assert!(matches!(out, Outcome::Failed(m) if m.contains("503")));
@@ -127,7 +127,7 @@ fn a_configured_destination_receives_the_otlp_body_with_its_headers() {
     });
     let (body, _) = to_otlp(&[], &Revisions::default(), &Redactor::new());
     let out = export(
-        Some(&dest(format!("http://127.0.0.1:{port}/v1/traces"), 2000)),
+        Some(&dest(format!("http://127.0.0.1:{port}/v1/traces"), 20_000)),
         &body,
     );
     assert_eq!(out, Outcome::Sent);

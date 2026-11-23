@@ -243,62 +243,49 @@ pub fn send(
     }
     let lock_path = dir.join(format!("{}.lock", session.session_id));
     lock(&lock_path)?;
-    let result = deliver(
-        session, sock, text, redactor, setting, now_ms, confirm, &audit,
-    );
+    // The lock is released on every exit from this block.
+    let result = (|| -> Result<String, String> {
+        let clean = redactor.redact(text);
+        let message = format!(
+            "[aibus] guidance sent from aibus by the person at the keyboard, not a permission answer: {clean}"
+        );
+        let prompt = format!(
+            "send to {} ({}):\n{message}",
+            aibus_trace::view::clean(&session.name, 40),
+            aibus_trace::view::clean(&session.session_id, 8)
+        );
+        if !confirm(&prompt) {
+            return Err("not confirmed, nothing sent".into());
+        }
+        let row = |outcome: &str| {
+            json!({
+                "ts_ms": now_ms, "via": "tap", "client": "claude", "session": session.session_id,
+                "action": "guidance", "outcome": outcome,
+                "sha256": aibus_trace::sha256_hex(clean.as_bytes()),
+            })
+        };
+        let wrote = (|| -> std::io::Result<()> {
+            let mut c = UnixStream::connect(sock)?;
+            c.set_write_timeout(Some(Duration::from_secs(3)))?;
+            let line = format!("{}\n", json!({"text": message}));
+            c.write_all(line.as_bytes())?;
+            c.flush()
+        })();
+        if let Err(e) = wrote {
+            let _ = audit_append(audit, &row("failed"));
+            return Err(format!("could not write to the inbox socket: {e}"));
+        }
+        audit_append(audit, &row("sent"))?;
+        let mut out = String::from(
+            "sent; delivery unknown (the socket gives no receipt, and aibus shows it as delivered only if a later event proves it)",
+        );
+        if setting == Inbound::Hold {
+            out.push_str("\nheld by the session, approve it there");
+        }
+        Ok(out)
+    })();
     let _ = std::fs::remove_file(&lock_path);
     result
-}
-
-#[allow(clippy::too_many_arguments)]
-fn deliver(
-    session: &Session,
-    sock: &Path,
-    text: &str,
-    redactor: &Redactor,
-    setting: Inbound,
-    now_ms: i64,
-    confirm: &mut dyn FnMut(&str) -> bool,
-    audit: &Path,
-) -> Result<String, String> {
-    let clean = redactor.redact(text);
-    let message = format!(
-        "[aibus] guidance sent from aibus by the person at the keyboard, not a permission answer: {clean}"
-    );
-    let prompt = format!(
-        "send to {} ({}):\n{message}",
-        aibus_trace::view::clean(&session.name, 40),
-        aibus_trace::view::clean(&session.session_id, 8)
-    );
-    if !confirm(&prompt) {
-        return Err("not confirmed, nothing sent".into());
-    }
-    let row = |outcome: &str| {
-        json!({
-            "ts_ms": now_ms, "via": "tap", "client": "claude", "session": session.session_id,
-            "action": "guidance", "outcome": outcome,
-            "sha256": aibus_trace::sha256_hex(clean.as_bytes()),
-        })
-    };
-    let wrote = (|| -> std::io::Result<()> {
-        let mut c = UnixStream::connect(sock)?;
-        c.set_write_timeout(Some(Duration::from_secs(3)))?;
-        let line = format!("{}\n", json!({"text": message}));
-        c.write_all(line.as_bytes())?;
-        c.flush()
-    })();
-    if let Err(e) = wrote {
-        let _ = audit_append(audit, &row("failed"));
-        return Err(format!("could not write to the inbox socket: {e}"));
-    }
-    audit_append(audit, &row("sent"))?;
-    let mut out = String::from(
-        "sent; delivery unknown (the socket gives no receipt, and aibus shows it as delivered only if a later event proves it)",
-    );
-    if setting == Inbound::Hold {
-        out.push_str("\nheld by the session, approve it there");
-    }
-    Ok(out)
 }
 
 /// The control section of the tap view: what can be done to this session and what never can.

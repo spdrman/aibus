@@ -377,11 +377,9 @@ fn a_revoked_key_takes_only_its_own_ids_with_it() {
     s.install(&w.open(), &ok, A, None, &[]).unwrap();
     s.install(&w.open(), &ok, B, None, &[]).unwrap();
     let revoked = policy(&format!(
-        "require_signature = true\n{}{}",
-        format!(
-            "[trusted_keys.k1]\nkey = \"{}\"\nids = [\"{A}\"]\nrevoked = \"leaked\"\n",
-            public(1)
-        ),
+        "require_signature = true\n\
+         [trusted_keys.k1]\nkey = \"{}\"\nids = [\"{A}\"]\nrevoked = \"leaked\"\n{}",
+        public(1),
         key("k2", 2, &format!("ids = [\"{B}\"]")),
     ));
     // A fresh fetch of A, an installed A and the other key's B.

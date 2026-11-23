@@ -88,7 +88,7 @@ async fn the_openrouter_style_flow_trades_the_code_and_the_verifier_for_a_key() 
     let (out, url) = login_with(login, |_, cb| async move {
         let r = http().get(format!("{cb}?code=the-code")).send().await.unwrap();
         assert_eq!(r.status(), 200);
-        assert!(r.text().await.unwrap().contains("return to"));
+        assert!(r.text().await.unwrap().contains("Go back to the terminal"));
     })
     .await;
     let tokens = out.unwrap();

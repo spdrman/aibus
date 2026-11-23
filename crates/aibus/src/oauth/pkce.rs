@@ -23,14 +23,75 @@ const WAIT: Duration = Duration::from_secs(5 * 60);
 const HEAD_BYTES: usize = 8 * 1024;
 const HEAD_WAIT: Duration = Duration::from_secs(5);
 
-/// The page the browser lands on after the redirect: connected, or refused.
+/// The page the browser lands on after the redirect: connected, or refused. One self-contained
+/// document (inline CSS, inline SVG, no script, no request out); light and dark come from
+/// `prefers-color-scheme`. Only the provider name is dynamic, and it is escaped.
 pub(super) fn page(connected: bool, provider: &str) -> String {
-    let _ = provider;
-    if connected {
-        "<!doctype html><meta charset=utf-8><title>aibus</title><p>You are logged in. You can close this tab and return to the terminal.".into()
+    const CSS: &str = "\
+:root{--ground:#F4F3EE;--card:#FFFFFF;--border:#8C8A82;--text:#1B1B1A;--muted:#5A5955;--rule:#D9D7CF;\
+--chip:#EFEDE6;--chip-text:#3A3935;--ok:#1F6B45;--ok-bg:#E4F2EA;--no:#A12B1E;--no-bg:#FBE9E6}\
+@media (prefers-color-scheme: dark){:root{--ground:#121211;--card:#1C1C1A;--border:#6B6A64;--text:#F2F1EC;\
+--muted:#A9A8A1;--rule:#3A3A36;--chip:#2A2A27;--chip-text:#D9D8D1;--ok:#6FD69B;--ok-bg:#12301F;--no:#FF9A8C;--no-bg:#3A1713}}\
+*{box-sizing:border-box}\
+body{margin:0;background:var(--ground);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif}\
+main{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}\
+.card{width:100%;max-width:520px;background:var(--card);border:1px solid var(--border);border-radius:16px;\
+padding:40px 44px 36px;display:flex;flex-direction:column;gap:24px}\
+.top{display:flex;align-items:center;justify-content:space-between}\
+.mark{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:15px;font-weight:600;letter-spacing:.02em}\
+.top span:last-child{font-size:13px;color:var(--muted)}\
+.head{display:flex;flex-direction:column;gap:16px}\
+.icon{width:56px;height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;\
+background:var(--bg);color:var(--fg)}\
+.ok{--fg:var(--ok);--bg:var(--ok-bg)}.no{--fg:var(--no);--bg:var(--no-bg)}\
+svg{fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}\
+h1{margin:0;font-size:28px;line-height:1.2;font-weight:650;letter-spacing:-.01em}\
+p{margin:0;font-size:16px;line-height:1.55;color:var(--muted)}\
+ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px;font-size:15px;line-height:1.4}\
+li{display:flex;align-items:center;gap:12px}\
+.n{flex:none;width:24px;height:24px;border-radius:12px;background:var(--chip);color:var(--chip-text);\
+font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center}\
+code{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:14px;background:var(--chip);color:var(--chip-text);\
+padding:2px 6px;border-radius:6px}\
+.note{padding-top:20px;border-top:1px solid var(--rule);font-size:13px;line-height:1.5}\
+@media (max-width:520px){.card{padding:28px 24px 26px;gap:20px}h1{font-size:24px}}";
+    let name = provider
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;");
+    let (title, class, glyph, headline, body, step, note) = if connected {
+        (
+            "aibus: connected",
+            "ok",
+            "M5 12.5l4.5 4.5L19 7.5",
+            format!("You're connected to {name}"),
+            "aibus has what it needs, so there is nothing more to do in the browser.".to_owned(),
+            "Go back to the terminal. aibus carries on by itself.".to_owned(),
+            "Your credential is saved in the system keychain on this machine, never in a config file or in this tab.",
+        )
     } else {
-        "The login was refused. You can close this tab.".into()
-    }
+        (
+            "aibus: login refused",
+            "no",
+            "M7 7l10 10M17 7L7 17",
+            "The login was refused".to_owned(),
+            format!("{name} did not give aibus access, so you are not connected."),
+            "To try again, type <code>/login</code> in aibus.".to_owned(),
+            "Nothing was saved. aibus is still waiting in the terminal and gives up after five minutes.",
+        )
+    };
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<meta name=\"color-scheme\" content=\"light dark\"><title>{title}</title><style>{CSS}</style></head>\
+<body><main><div class=\"card\"><div class=\"top\"><span class=\"mark\">aibus</span><span>Login</span></div>\
+<div class=\"head\"><div class=\"icon {class}\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"{glyph}\"/></svg></div>\
+<h1>{headline}</h1><p>{body}</p></div>\
+<ol><li><span class=\"n\">1</span>Close this tab.</li><li><span class=\"n\">2</span><span>{step}</span></li></ol>\
+<p class=\"note\">{note}</p></div></main></body></html>"
+    )
 }
 
 fn random_b64() -> String {
@@ -260,7 +321,7 @@ fn check(query: &str, state: Option<&str>) -> Verdict {
 
 async fn respond(sock: &mut TcpStream, status: &str, body: &str) {
     let msg = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     let _ = sock.write_all(msg.as_bytes()).await;

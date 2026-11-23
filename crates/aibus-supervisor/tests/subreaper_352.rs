@@ -442,3 +442,36 @@ fn issue_352_a_helper_whose_supervisor_is_already_gone_runs_nothing() {
     assert_eq!(status.code(), Some(1));
     assert!(!mark.exists());
 }
+
+#[tokio::test]
+async fn issue_352_supervise_refuses_a_helper_that_is_not_an_absolute_path_to_a_file() {
+    // A bare name would be looked up through PATH; the helper is held to the CLI's own rule.
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("work")).unwrap();
+    let exe = script(&root, "fake-cli", "exit 0");
+    for helper in ["aibus-subreaper", "/nonexistent/aibus-subreaper"] {
+        let launch = Launch {
+            exe: exe.clone(),
+            args: vec![],
+            cwd: root.join("work"),
+            env: cli::bounded_env(Vec::<(OsString, OsString)>::new(), &[], &[]).unwrap(),
+            stdin: Vec::new(),
+            limits: quick(),
+            helper: Some(PathBuf::from(helper)),
+        };
+        let (mut store, _) = TraceStore::open(
+            &root.join(format!("trace-{}", helper.len())),
+            Redactor::new(),
+            PayloadPolicy::MetadataOnly,
+            StoreLimits::default(),
+        )
+        .unwrap();
+        let mut norm = Normalizer::new(common::attempt());
+        let res = supervise(launch, &mut norm, &mut store, CancellationToken::new()).await;
+        assert!(
+            matches!(res, Err(aibus_supervisor::SupervisorError::Refused(_))),
+            "{helper}: {res:?}"
+        );
+    }
+}

@@ -100,9 +100,9 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
             agents::merge_local(&mut list, &e.config.join("sessions"));
             let s = agents::resolve(&list, session).map_err(usage)?;
             // No terminal, no send: the confirmation is the consent, and there is no `--yes`.
-            if !std::io::stdin().is_terminal() {
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
                 return Err(usage(
-                    "sending needs a terminal to confirm at: there is no --yes, and no tty means no send",
+                    "sending needs a terminal for both input and output to confirm at: there is no --yes, and no tty means no send",
                 ));
             }
             let now = SystemTime::now()

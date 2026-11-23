@@ -22,8 +22,6 @@ use crate::Env;
 
 /// The most text one send may carry.
 pub const MAX_TEXT: usize = 8 << 10;
-const MAX_PER_MINUTE: usize = 10;
-const MAX_SETTINGS: u64 = 1 << 20;
 
 /// What a session's `crossSessionInbound` says about messages from another process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +46,7 @@ impl Inbound {
 /// The value one settings file holds, if it holds the key. An unrecognised value is not guessed
 /// at: `unknown` is what to use for it.
 fn read_value(path: &Path, own_only: bool, unknown: Inbound) -> Option<Inbound> {
+    const MAX_SETTINGS: u64 = 1 << 20;
     let buf = if own_only {
         crate::read_own(path, MAX_SETTINGS)?
     } else {
@@ -104,13 +103,6 @@ pub fn inbound(config: &Path, project: &Path, managed: Option<&Path>) -> Inbound
     now
 }
 
-fn pid_alive(pid: u32) -> bool {
-    i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
-}
-
 /// The inbox socket, only when it is a socket (not a link to one) of this user that nobody else
 /// can write to.
 fn trusted_socket(p: &Path) -> Result<(), String> {
@@ -129,32 +121,34 @@ fn trusted_socket(p: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Takes the one-controller lock for the session: a file holding this process's pid. A lock
-/// whose pid is gone is taken over.
-fn lock(path: &Path) -> Result<(), String> {
-    for _ in 0..2 {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-        {
-            Ok(mut f) => {
-                return writeln!(f, "{}", std::process::id()).map_err(|e| e.to_string());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                let held = std::fs::read_to_string(path)
-                    .ok()
-                    .and_then(|s| s.trim().parse::<u32>().ok());
-                if held.is_some_and(|p| p != std::process::id() && pid_alive(p)) {
-                    return Err("another controller already holds this session".into());
-                }
-                let _ = std::fs::remove_file(path);
-            }
-            Err(e) => return Err(format!("control lock: {e}")),
-        }
+/// Takes the one-controller lock for the session: a file holding this process's pid. The check
+/// and the takeover of a dead holder's lock run under an exclusive `flock` on a guard file, so
+/// two callers cannot both take over, and nobody reads a pid that is half written.
+fn lock(dir: &Path, path: &Path) -> Result<(), String> {
+    let guard = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(dir.join(".guard"))
+        .map_err(|e| format!("control lock: {e}"))?;
+    rustix::fs::flock(&guard, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(|e| format!("control lock: {e}"))?;
+    let held = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok());
+    if held.is_some_and(|p| p != std::process::id() && crate::agents::alive(p)) {
+        return Err("another controller already holds this session".into());
     }
-    Err("another controller already holds this session".into())
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut f| writeln!(f, "{}", std::process::id()))
+        .map_err(|e| format!("control lock: {e}"))
+    // `guard` closes here and releases the flock.
 }
 
 fn audit_append(path: &Path, row: &Value) -> Result<(), String> {
@@ -165,18 +159,6 @@ fn audit_append(path: &Path, row: &Value) -> Result<(), String> {
         .open(path)
         .map_err(|e| format!("audit log: {e}"))?;
     writeln!(f, "{row}").map_err(|e| format!("audit log: {e}"))
-}
-
-fn sent_in_last_minute(audit: &Path, now_ms: i64) -> usize {
-    let Ok(s) = std::fs::read_to_string(audit) else {
-        return 0;
-    };
-    s.lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|v| v["via"] == "tap" && v["outcome"] == "sent")
-        .filter_map(|v| v["ts_ms"].as_i64())
-        .filter(|t| *t > now_ms - 60_000 && *t <= now_ms)
-        .count()
 }
 
 /// Sends `text` to the session's inbox socket after `confirm` says yes to the exact text that
@@ -203,6 +185,17 @@ pub fn send(
     };
     if !crate::tap::valid_id(&session.session_id) {
         return Err("not a plain session id".into());
+    }
+    // What the terminal would interpret (ESC, CR, C1, bidi, zero-width) is refused outright, so
+    // what the operator sees at the prompt is exactly what leaves. Newlines are fine.
+    if text.chars().any(|c| {
+        c != '\n' && {
+            let mut b = [0u8; 4];
+            let one: &str = c.encode_utf8(&mut b);
+            aibus_trace::view::clean(one, 1) != one
+        }
+    }) {
+        return Err("guidance has control characters a terminal would interpret (escape, carriage return, bidi and the like); remove them".into());
     }
     let text = text.trim();
     if text.is_empty() {
@@ -238,13 +231,23 @@ pub fn send(
         .create(&dir)
         .map_err(|e| format!("control dir: {e}"))?;
     let audit = dir.join("audit.jsonl");
-    if sent_in_last_minute(&audit, now_ms) >= MAX_PER_MINUTE {
-        return Err("more than 10 a minute: wait a little before sending again".into());
-    }
     let lock_path = dir.join(format!("{}.lock", session.session_id));
-    lock(&lock_path)?;
+    lock(&dir, &lock_path)?;
     // The lock is released on every exit from this block.
     let result = (|| -> Result<String, String> {
+        // Counted from the audit rows once the session's lock is held (the count is still
+        // global, so two sessions sent to at the same instant can each see 9: docs/DEFERRED.md).
+        let sent = std::fs::read_to_string(&audit)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["via"] == "tap" && v["outcome"] == "sent")
+            .filter_map(|v| v["ts_ms"].as_i64())
+            .filter(|t| *t > now_ms - 60_000 && *t <= now_ms)
+            .count();
+        if sent >= 10 {
+            return Err("more than 10 a minute: wait a little before sending again".into());
+        }
         let clean = redactor.redact(text);
         let message = format!(
             "[aibus] guidance sent from aibus by the person at the keyboard, not a permission answer: {clean}"

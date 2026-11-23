@@ -120,11 +120,17 @@ pub fn merge_local(list: &mut [Session], sessions_dir: &Path) {
     }
 }
 
-fn alive(pid: u32) -> bool {
+/// A process of another user answers EPERM: it is there.
+pub(crate) fn alive(pid: u32) -> bool {
     i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
-        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+        .is_some_and(|p| {
+            matches!(
+                rustix::process::test_kill_process(p),
+                Ok(()) | Err(rustix::io::Errno::PERM)
+            )
+        })
 }
 
 fn ago(ms: i64) -> String {

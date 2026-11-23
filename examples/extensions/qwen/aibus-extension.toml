@@ -1,0 +1,113 @@
+# The Qwen Code extension (#291, A3.1): the official, unmodified Qwen Code CLI as an aibus extension on the
+# A2.1 contract. Local, opt-in use with the user's own installed CLI; the CLI owns its sign-in and
+# aibus never reads or stores the token.
+#
+# UNVERIFIED: the CLI was never installed or run when this was written. The flags and the stream
+# shape below come from the vendor's public documentation as I read it, not from a recording, and
+# the fixtures are synthetic. Nothing here is enabled by default.
+
+schema_version = "2"
+id = "org.devshell.aibus.qwen-cli"
+version = "0.1.0"
+name = "Qwen Code"
+kind = "official_cli"
+provider = "Alibaba"
+license = "MIT"
+source_url = "https://github.com/spdrman/aibus/tree/main/examples/extensions/qwen"
+
+[publisher]
+name = "devshell"
+url = "https://devshell.org"
+
+[compat]
+protocol = ">=1.1.0, <2.0.0"
+os = ["macos", "linux"]
+# A placeholder: no version has been run. Tighten it when someone records one.
+cli_versions = ">=0.1.0, <1000.0.0"
+
+[cli]
+executable_candidates = ["qwen"]
+vendor_urls = ["https://github.com/QwenLM/qwen-code"]
+
+[auth]
+owner = "vendor_cli"
+credential_access = "forbidden"
+login_argv = []
+status_argv = []
+
+[execution]
+# UNVERIFIED: the argv, and that the prompt can go on stdin.
+argv = ["--output-format", "stream-json"]
+prompt = "stdin"
+stdout = "jsonl"
+env_allow = []
+
+[limits]
+wall_time_secs = 1800
+
+[normalizer]
+engine = "declarative-jsonl"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "assistant"
+when = [{ pointer = "/message/content/0/type", equals = "tool_use" }]
+kind = "tool_started"
+id_pointer = "/message/content/0/id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "assistant"
+kind = "message_chunk"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "user"
+when = [{ pointer = "/message/content/0/type", equals = "tool_result" }]
+kind = "tool_completed"
+id_pointer = "/message/content/0/tool_use_id"
+
+[[normalizer.rule]]
+pointer = "/type"
+equals = "result"
+kind = "usage_reported"
+tokens_in_pointer = "/usage/input_tokens"
+tokens_out_pointer = "/usage/output_tokens"
+
+[capabilities]
+login_status = "unsupported"
+one_shot = "supported"
+structured_events = "probe_required"
+native_child_lineage = "unsupported"
+tool_events = "supported"
+usage_report = "supported"
+session_resume = "unsupported"
+interactive_approval = "unsupported"
+cancel = "supported"
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "unsupported"
+
+[[probe]]
+capability = "structured_events"
+flags = ["--output-format"]
+
+[runtime]
+usage_quality = "reported"
+
+[permissions]
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "aibus maintainers"
+review_date = "2026-11-22"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/tool-run.jsonl", "fixtures/crash.jsonl"]
+
+[notes]
+upgrade = "Install the new version from the registry. A version that asks for more executables, environment names, flags or capabilities has to be accepted by name."
+rollback = "aibus extensions rollback org.devshell.aibus.qwen-cli returns to the previous installed version."

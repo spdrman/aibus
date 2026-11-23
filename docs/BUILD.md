@@ -21,6 +21,7 @@ These are the crates with a `build.rs` (or a proc macro we rely on) in our tree,
 | `rustls`, `httparse` | `build.rs` for compiler feature detection (`rustls` only sets a cfg on nightly; `httparse` reads `rustc --version` to switch on SIMD paths) |
 | `icu_normalizer_data`, `icu_properties_data` | `build.rs` only looks at the `ICU4X_DATA_DIR` environment variable (transitive, via `reqwest` and `url`) |
 | `proc-macro2`, `quote` | `build.rs` for compiler feature detection, under every proc macro below |
+| `ts-rs-macros` | proc macro behind `#[derive(TS)]` in `aibus-bridge` (B1.3): generates the TypeScript DTO files in tests, nothing at run time |
 | `serde_derive`, `thiserror-impl`, `async-trait`, `tokio-macros`, `tracing-attributes`, `clap_derive` | proc macros for the derives and attributes the provider trait, the CLI and the tests use |
 
 `aibus-graph` (A1.2) adds no row of its own: its `serde`, `serde_derive`, `proc-macro2` and `quote` are the ones above, and `smol_str`, `indexmap` and `base64` have no build script. Its dev-dependency `proptest` pulls in a few more (`getrandom`, `libc`, `zerocopy`, `num-traits`), which only run in tests.

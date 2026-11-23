@@ -4,11 +4,8 @@
 
 mod common;
 
-use std::fs;
-
-use aibus_extension::manifest::{escalations, Manifest};
-use aibus_extension::package;
-use common::{edit, template_manifest, wasm_manifest, wasm_package};
+use aibus_extension::manifest::Manifest;
+use common::wasm_manifest;
 
 #[cfg(not(feature = "wasm"))]
 #[test]
@@ -23,9 +20,13 @@ fn a_build_without_the_feature_refuses_a_manifest_that_names_a_module_and_says_w
 #[cfg(feature = "wasm")]
 mod with_the_host {
     use super::*;
+    use std::fs;
+
+    use aibus_extension::manifest::escalations;
+    use aibus_extension::package;
     use aibus_extension::policy::Policy;
     use aibus_extension::registry::{signed_message, Refusal, Registry, Signature};
-    use common::{guest_wasm, registry_of, template_as};
+    use common::{edit, guest_wasm, registry_of, template_as, template_manifest, wasm_package};
     use ring::signature::{Ed25519KeyPair, KeyPair};
 
     fn hex(b: &[u8]) -> String {

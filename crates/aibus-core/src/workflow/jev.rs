@@ -1,7 +1,8 @@
 //! The Jev decision record (#283, spec section 5.2) and the first deterministic routing rules.
 //! Jev reads structured metadata, never a token or a prompt, and every decision says which rule
-//! made it. The full policy engine and scheduler are #288; what is here is enough for the compiler
-//! to pick a runtime and an execution mode for each step, and the same record #288 will log.
+//! made it. The compiler uses it to pick a runtime and an execution mode for each step, and the
+//! scheduler (`sched`, #288) asks it again at run time with the resolved account and logs the
+//! same record.
 
 use serde::{Deserialize, Serialize};
 

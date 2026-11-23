@@ -492,3 +492,25 @@ fn an_attached_step_plans_and_a_headless_run_refuses_it_before_anything_starts()
         stderr(&out)
     );
 }
+
+/// #288: the text dry run shows what the scheduler would do: Jev's pick per step, the routes, what a
+/// run would ask a person for, the artifact contract and the waves under max_parallel.
+#[test]
+fn the_text_dry_run_shows_the_schedule_288() {
+    let home = xdg_temp();
+    let h = home.path();
+    install(h, "fixtures/workflows/graph/fan-out.toml", "fan-out");
+    let out = aibus(h, &["workflow", "plan", "fan-out", "--dry-run"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let shown = stdout(&out);
+    for want in [
+        "schedule (policy ",
+        "routes: code when plan.completed && plan.artifact_valid",
+        "asks: approval:repo_write, approval:shell",
+        "handoffs: handoff:code->build, handoff:tests->build",
+        "artifact: json",
+        "waves (max_parallel 2): [plan] [code, tests] [build]",
+    ] {
+        assert!(shown.contains(want), "{want} missing from:\n{shown}");
+    }
+}

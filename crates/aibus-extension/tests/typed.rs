@@ -598,7 +598,7 @@ async fn issue_334_prepare_puts_the_hosts_typed_values_in_the_launch() {
     );
     let m = model_manifest();
     let p = prepare(&m, &grant, &[]).await.unwrap();
-    let args = strs(&p.launch.args.iter().cloned().collect::<Vec<_>>());
+    let args = strs(&p.launch.args);
     let n = m.execution.argv.len();
     assert_eq!(&args[..n], &m.execution.argv[..]);
     assert_eq!(&args[n..n + 2], ["--model", "claude-sonnet-4"]);

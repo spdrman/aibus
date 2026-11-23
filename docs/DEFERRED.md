@@ -70,6 +70,20 @@ dry run. These parts are not in it:
 - **Cost and latency preference** (spec 5.2 rule 6): nothing has evidence-backed numbers, so there is
   no ranking rather than a made-up one.
 
+## #289 A2.4 Durable aibus state, checkpoints, attempts and crash reconciliation
+
+I landed durable journaled transitions, `requires_reconciliation`, a new attempt id per retry with the old trace kept read-only, and the persisted handoff spent set (`workflow::durable`, D-289). These parts are not in it:
+
+- **No host uses `Run` yet.** Like the scheduler (#288), nothing in `aibus workflow run`, the TUI or the MCP tool drives it, and nothing chooses where `<root>` lives. That comes with the host wiring.
+- **Queue position and checkpoint references.** There is no queue across runs to have a position in yet, and no step writes a checkpoint the journal could point to.
+- **Recorded-trace replay across attempts, `rerun --isolated`, and the manifest and environment-difference reports.** `trace` reads any attempt's records, but there is no command, no rendering and no environment manifest to diff. The command spelling question (`aibus rerun` or `aibus runs rerun`) stays open with it.
+- **Vendor-session resume capability gates.** A vendor step is never resumed: it starts over in a new session after a yes. A documented resume API per vendor, and how `/resume` (#124) maps onto `vendor_resume`, are not done.
+- **Detecting live or orphaned CLI processes.** The run lock tells a live aibus from a dead one; a child process that outlived its aibus is not looked for.
+- **Causl.** Spec 7.4 asks for its event persistence and snapshot durability to be validated before crash recovery depends on it; nobody has, so the journal is plain JSONL.
+- **Crash-safety edges the review found.** The new run directory's entry in `<root>` is not synced after it is created, so a power cut right after `create` could lose the whole run. `retry` returns an error if making the old journal read-only fails, although by then the run already is the new attempt. `open` does not check a retry's `previous` id or carried spent set against the earlier attempt's journal. And the failed-write cut-back (the `broken` latch) and the skip of an empty attempt in `open` have no tests, since both need fault injection.
+- **Upgrades.** A new Jev policy revision makes `Scheduler::new` refuse the pinned plan, so a run that was in flight across an upgrade cannot be reopened. It fails closed; carrying such a run over (or finishing it on the old revision) is not designed.
+- **Tamper resistance against someone who can write the run directory.** The hash chain catches an edit that changes a decision on replay, but someone with write access can rewrite the whole journal consistently. An HMAC keyed from the keychain would close that, same as the D-360 note.
+
 ## #290 A2.5 Git worktree attempts, artifacts, code review and fleet UX
 
 I cut this to the library layer in `aibus_core::worktree`: a worktree per write attempt with its base commit pinned under `refs/aibus/base/<id>`, one repository lock around every change to the repository, cleanup that keeps uncommitted work, and `review` / `approve` / `reject` with no automatic merge. These parts are not in it:

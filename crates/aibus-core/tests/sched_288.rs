@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use aibus_core::agent::discover::discover;
 use aibus_core::workflow::compile::compile;
+use aibus_core::workflow::jev::{decide, Request};
 use aibus_core::workflow::sched::{
     dry_run, Action, EventKind, Outcome, RunState, Scheduler, Status,
 };
@@ -540,6 +541,55 @@ fn the_dry_run_shows_candidates_approvals_and_artifact_contracts() {
 }
 
 #[test]
+fn a_route_to_or_from_a_step_the_plan_does_not_schedule_is_refused() {
+    // The plan hash is not keyed, so a re-hashed plan gets past it: the edges are checked anyway.
+    for (from, to) in [("plan", "ghost"), ("ghost", "build")] {
+        let mut p = plan_of(&fan_out());
+        p["edges"].as_array_mut().unwrap().push(json!({
+            "kind": "route", "from": from, "to": to, "when": "plan.completed"
+        }));
+        p["plan_hash"] = json!(aibus_core::workflow::compile::plan_hash(&p));
+        let why = Scheduler::new(&p).unwrap_err();
+        assert!(
+            why.iter()
+                .any(|w| w.contains("not a step this plan schedules")),
+            "{from} -> {to}: {why:?}"
+        );
+    }
+    // A data edge from the input has no scheduled end and is fine.
+    let p = plan_of(READ_CHAIN);
+    assert!(p["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["kind"] == "data" && e["from"] == "input"));
+    assert!(Scheduler::new(&p).is_ok());
+}
+
+#[test]
+fn an_aibus_step_waits_for_its_account_before_it_starts() {
+    let mut s = Scheduler::new(&plan_of(READ_CHAIN)).unwrap();
+    // No account yet: nothing starts, and no person is asked, since it is the host's to set.
+    assert!(started(&s.advance()).is_empty());
+    assert_eq!(s.status("a"), Some(&Status::Ready));
+    assert_eq!(s.pending("a"), ["account:unresolved"]);
+    assert!(s
+        .events()
+        .iter()
+        .any(|e| e.kind == EventKind::Deferred && e.reason_code == "account_unresolved"));
+    assert!(s.approve("a", "rom").is_err());
+    // Asking again logs nothing new.
+    let logged = s.events().len();
+    assert!(started(&s.advance()).is_empty());
+    assert_eq!(s.events().len(), logged);
+    // Once it is known to be OpenRouter's, Jev holds it for a person before it starts.
+    s.set_account("a", "openrouter", "or");
+    assert!(started(&s.advance()).is_empty());
+    assert_eq!(s.status("a"), Some(&Status::WaitingApproval));
+    assert_eq!(s.pending("a"), ["runtime:openrouter"]);
+}
+
+#[test]
 fn routing_makes_no_model_call() {
     // The scheduler and the policy are plain synchronous functions over data: no provider, no
     // runtime, no network. Their sources say so, and the log says every decision was Jev's rules.
@@ -558,12 +608,22 @@ fn routing_makes_no_model_call() {
             assert!(!src.contains(banned), "{file} mentions {banned}");
         }
     }
-    let mut s = Scheduler::new(&plan_of(READ_CHAIN)).unwrap();
-    same_account(&mut s, &["a", "b"]);
+    // Every logged decision is what Jev's pure function gives for the logged request alone, so
+    // nothing outside the request (a model, a clock, a network answer) went into it.
+    let mut s = Scheduler::new(&plan_of(&fan_out())).unwrap();
+    same_account(&mut s, &["plan", "code", "tests", "build"]);
     s.advance();
-    assert!(s
+    s.report("plan", ok()).unwrap();
+    s.advance();
+    let decisions: Vec<&Value> = s
         .events()
         .iter()
         .filter(|e| e.kind == EventKind::Started)
-        .all(|e| e.detail["decision"]["decision_source"] == "jev_deterministic"));
+        .map(|e| &e.detail)
+        .collect();
+    assert_eq!(decisions.len(), 3);
+    for d in decisions {
+        let request: Request = serde_json::from_value(d["request"].clone()).unwrap();
+        assert_eq!(json!(decide(&request)), d["decision"]);
+    }
 }

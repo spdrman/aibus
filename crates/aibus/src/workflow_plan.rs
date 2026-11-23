@@ -233,12 +233,8 @@ pub fn plan(
         for note in plan["notes"].as_array().into_iter().flatten() {
             println!("note: {}", short(note));
         }
-        print_schedule(plan);
-    }
-
-    /// What the scheduler would do (#288): who Jev picks and why, what a person is asked, what each
-    /// step hands on, and which steps can run together. Nothing runs.
-    fn print_schedule(plan: &Value) {
+        // What the scheduler would do (#288): who Jev picks and why, what a person is asked, what
+        // each step hands on, and which steps can run together. Nothing runs.
         let d = match workflow::sched::dry_run(plan) {
             Ok(d) => d,
             Err(why) => {

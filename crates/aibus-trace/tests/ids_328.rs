@@ -351,7 +351,7 @@ fn an_event_in_the_same_millisecond_as_the_stores_own_gap_is_accepted_328() {
     };
     for i in 0..60u8 {
         let tmp = tempfile::tempdir().unwrap();
-        let mut s = open(&tmp.path().join("run"), limits.clone());
+        let mut s = open(&tmp.path().join("run"), limits);
         let mut ids = EventIds::default();
         let started = ev(ids.next(at(MS), &[b"s", &[i]]), EventKind::AttemptStarted);
         let chunk = ev(ids.next(at(MS), &[b"c", &[i]]), EventKind::MessageChunk);

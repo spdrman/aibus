@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aibus-graph",
  "aibus-provider",
@@ -32,6 +32,7 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
+ "sha2",
  "smol_str",
  "thiserror 2.0.21",
  "tokio",
@@ -40,13 +41,14 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "uuid",
  "yaml-rust2",
  "zstd",
 ]
 
 [[package]]
 name = "aibus-graph"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "indexmap",
@@ -72,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "aibus-provider"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -89,8 +91,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-supervisor"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-trace",
+ "regex",
+ "rustix 1.1.6",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
+name = "aibus-tap"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "aibus-supervisor",
+ "aibus-trace",
+ "indexmap",
+ "rustix 1.1.6",
+ "serde_json",
+ "subtle",
+ "uuid",
+]
+
+[[package]]
 name = "aibus-testkit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aibus-core",
  "aibus-graph",
@@ -109,12 +139,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aibus-trace"
+version = "0.2.1"
+dependencies = [
+ "aibus-core",
+ "fs4",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+]
+
+[[package]]
 name = "aibus-tui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aibus-core",
  "aibus-graph",
  "aibus-provider",
+ "aibus-tap",
+ "aibus-trace",
  "arboard",
  "crossterm",
  "rataflow",
@@ -308,7 +353,7 @@ dependencies = [
 [[package]]
 name = "causl-engine-core"
 version = "0.0.0"
-source = "git+https://git.opsite.ca/causl/causl-core-rs.git?rev=a6247b36b38dda4d97017d0577210aa8c724e4f2#a6247b36b38dda4d97017d0577210aa8c724e4f2"
+source = "git+https://git.opsite.ca/causl/causl-core-rs.git?rev=f00c4f8a5f2455acc66c8cae6b786c29b34814e0#f00c4f8a5f2455acc66c8cae6b786c29b34814e0"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -2072,6 +2117,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "subtle"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2273,6 +2324,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -2464,6 +2516,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

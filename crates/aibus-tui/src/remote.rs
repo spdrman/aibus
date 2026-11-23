@@ -781,9 +781,8 @@ pub fn keyboard<G: Graph>(
                 );
                 format!("step {token} queued; the session takes it with next_step")
             }),
-        "cancel" => ui.attach.cancel(now).map(|said| {
+        "cancel" => ui.attach.cancel(now).inspect(|said| {
             let _ = row(app, step, who.as_deref(), said.clone());
-            said
         }),
         "status" => Ok(ui.attach.status().to_string()),
         _ => Err("/attach: accept <code>, deny, step <text>, cancel or status".into()),

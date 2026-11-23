@@ -521,8 +521,8 @@ async fn case_04_cancelled_run() -> Value {
 }
 
 /// 5. The CLI dies mid-tool, aibus dies mid-write, aibus starts again: the store repairs itself, the
-/// first attempt stays interrupted with its open tool flagged, the retry is a new attempt, and
-/// nothing is resumed.
+///    first attempt stays interrupted with its open tool flagged, the retry is a new attempt, and
+///    nothing is resumed.
 async fn case_05_restart() -> Value {
     let rig = Rig::new();
     let mut lines = stream_values("11-foreground");
@@ -889,8 +889,8 @@ async fn case_08_missing_usage() -> Value {
 }
 
 /// 9. Approval. Phase 1 has no approval surface of its own: the CLI is launched with
-/// `--permission-prompts none` so it denies what would prompt, the workflow plan lists which steps
-/// are held for approval, and nothing is ever approved on the user's behalf.
+///    `--permission-prompts none` so it denies what would prompt, the workflow plan lists which steps
+///    are held for approval, and nothing is ever approved on the user's behalf.
 async fn case_09_approval() -> Value {
     let mut c = Checks::default();
 
@@ -1198,7 +1198,7 @@ fn fidelity(runs: &[(&str, Vec<TraceEvent>)]) -> Value {
     let produced: Vec<String> = by_kind.keys().cloned().collect();
     let missing: Vec<String> = ALL_KINDS
         .iter()
-        .map(|k| wire(k))
+        .map(wire)
         .filter(|k| !by_kind.contains_key(k))
         .collect();
     json!({

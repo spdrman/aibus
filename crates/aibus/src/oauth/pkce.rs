@@ -23,8 +23,15 @@ const WAIT: Duration = Duration::from_secs(5 * 60);
 const HEAD_BYTES: usize = 8 * 1024;
 const HEAD_WAIT: Duration = Duration::from_secs(5);
 
-const PAGE: &str = "<!doctype html><meta charset=utf-8><title>aibus</title>\
-<p>You are logged in. You can close this tab and return to the terminal.";
+/// The page the browser lands on after the redirect: connected, or refused.
+pub(super) fn page(connected: bool, provider: &str) -> String {
+    let _ = provider;
+    if connected {
+        "<!doctype html><meta charset=utf-8><title>aibus</title><p>You are logged in. You can close this tab and return to the terminal.".into()
+    } else {
+        "The login was refused. You can close this tab.".into()
+    }
+}
 
 fn random_b64() -> String {
     URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>())
@@ -80,7 +87,7 @@ impl Login {
         });
 
         let want_state = (d.state == StateMode::Echoed).then_some(state.as_str());
-        let code = tokio::time::timeout(WAIT, wait_for_code(listener, want_state, paste, cancel))
+        let code = tokio::time::timeout(WAIT, wait_for_code(listener, want_state, d.provider_name, paste, cancel))
             .await
             .map_err(|_| "timed out after 5 minutes waiting for the browser; run the command again".to_owned())??;
 
@@ -140,6 +147,7 @@ fn paste_line() -> tokio::sync::oneshot::Receiver<String> {
 async fn wait_for_code(
     listener: TcpListener,
     state: Option<&str>,
+    name: &str,
     mut paste: Option<tokio::sync::oneshot::Receiver<String>>,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
@@ -170,11 +178,11 @@ async fn wait_for_code(
                 };
                 match judge(&head, state) {
                     Verdict::Code(code) => {
-                        respond(&mut sock, "200 OK", PAGE).await;
+                        respond(&mut sock, "200 OK", &page(true, name)).await;
                         return Ok(code);
                     }
                     Verdict::Refused(why) => {
-                        respond(&mut sock, "200 OK", "The login was refused. You can close this tab.").await;
+                        respond(&mut sock, "200 OK", &page(false, name)).await;
                         return Err(why);
                     }
                     Verdict::Ignore(status, why) => respond(&mut sock, status, why).await,

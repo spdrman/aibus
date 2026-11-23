@@ -297,9 +297,11 @@ async fn supervised(
     (out, root)
 }
 
+/// The scripts wait for their daemons' pid files, so the deadline only has to outlast process
+/// start-up on a loaded gate host.
 fn quick() -> Limits {
     Limits {
-        wall_time: Duration::from_millis(1500),
+        wall_time: Duration::from_secs(4),
         grace: Duration::from_millis(300),
         drain_stall: Duration::from_millis(300),
         drain_max: Duration::from_secs(2),
@@ -325,6 +327,7 @@ async fn issue_352_the_deadline_ends_the_whole_tree_even_for_a_cli_that_ignores_
     let body = format!(
         "trap '' TERM\n{DAEMON} DIR/daemon.pid\n\
          sh -c '{NESTED} DIR/grandchild.pid; while :; do sleep 0.05; done' &\n\
+         while [ ! -s DIR/daemon.pid ] || [ ! -s DIR/grandchild.pid ]; do sleep 0.02; done\n\
          echo $$ > DIR/cli.pid\nwhile :; do sleep 0.05; done",
         NESTED = DAEMON.replace('\'', "'\\''")
     );
@@ -346,12 +349,14 @@ async fn issue_352_the_deadline_ends_the_whole_tree_even_for_a_cli_that_ignores_
 
 #[tokio::test]
 async fn issue_352_a_cancel_ends_the_whole_tree() {
-    let body = format!("{DAEMON} DIR/daemon.pid\nwhile :; do sleep 0.05; done");
+    let body = format!(
+        "{DAEMON} DIR/daemon.pid\nwhile [ ! -s DIR/daemon.pid ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done"
+    );
     let limits = Limits {
         wall_time: Duration::from_secs(60),
         ..quick()
     };
-    let (out, root) = supervised(&body, limits, Some(Duration::from_millis(700))).await;
+    let (out, root) = supervised(&body, limits, Some(Duration::from_secs(3))).await;
     assert_eq!(out.status, aibus_trace::AttemptStatus::Cancelled);
     let pid = pid_from(&root.join("daemon.pid"));
     assert!(

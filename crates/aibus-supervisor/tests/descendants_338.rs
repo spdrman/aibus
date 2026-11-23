@@ -109,9 +109,12 @@ async fn dead_within(pid: &str, limit: Duration) -> bool {
     !alive(pid)
 }
 
+/// The CLI scripts wait for the escaped child's pid file before they go on, so the deadline only
+/// has to outlast process start-up, which is slow on a loaded gate host (each attempt also runs
+/// `ps` every 50 ms).
 fn quick() -> Limits {
     Limits {
-        wall_time: Duration::from_millis(1500),
+        wall_time: Duration::from_secs(4),
         grace: Duration::from_millis(300),
         drain_stall: Duration::from_millis(300),
         drain_max: Duration::from_secs(2),
@@ -123,7 +126,7 @@ macro_rules! cases {
     ($helped:expr, $(#[$nolinger:meta])*) => {
     #[tokio::test]
     async fn issue_338_a_setsid_child_does_not_outlive_the_wall_deadline() {
-        let body = format!("{} PIDFILE &\nwhile :; do sleep 0.05; done", detach(None));
+        let body = format!("{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done", detach(None));
         let (status, pid) = run(&body, quick(), None, $helped).await;
         assert_eq!(status, AttemptStatus::Interrupted);
         assert!(
@@ -135,7 +138,7 @@ macro_rules! cases {
     #[tokio::test]
     async fn issue_338_a_double_forked_setsid_child_does_not_outlive_the_wall_deadline() {
         let body = format!(
-            "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            "{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done",
             detach(Some(0.4))
         );
         let (_, pid) = run(&body, quick(), None, $helped).await;
@@ -148,14 +151,14 @@ macro_rules! cases {
     #[tokio::test]
     async fn issue_338_a_deactivated_run_leaves_no_escaped_child() {
         let body = format!(
-            "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            "{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done",
             detach(Some(0.4))
         );
         let limits = Limits {
             wall_time: Duration::from_secs(60),
             ..quick()
         };
-        let (status, pid) = run(&body, limits, Some(Duration::from_millis(700)), $helped).await;
+        let (status, pid) = run(&body, limits, Some(Duration::from_secs(3)), $helped).await;
         assert_eq!(status, AttemptStatus::Cancelled);
         assert!(
             dead_within(&pid, Duration::from_secs(3)).await,
@@ -166,7 +169,7 @@ macro_rules! cases {
     #[tokio::test]
     async fn issue_338_a_cli_that_ignores_term_still_loses_its_escaped_child() {
         let body = format!(
-            "trap '' TERM\n{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            "trap '' TERM\n{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done",
             detach(Some(0.4))
         );
         let (_, pid) = run(&body, quick(), None, $helped).await;
@@ -179,7 +182,7 @@ macro_rules! cases {
     #[tokio::test]
     async fn issue_338_a_child_left_behind_by_a_cli_that_exits_by_itself_is_ended_with_the_attempt() {
         // The CLI returns normally while its detached child is still running.
-        let body = format!("{} PIDFILE &\nsleep 0.5\necho '{{}}'", detach(Some(0.4)));
+        let body = format!("{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\necho '{{}}'", detach(Some(0.4)));
         let limits = Limits {
             wall_time: Duration::from_secs(20),
             ..quick()
@@ -194,7 +197,7 @@ macro_rules! cases {
     #[tokio::test]
     async fn issue_338_a_child_in_the_group_that_forks_a_setsid_grandchild_is_ended_too() {
         let body = format!(
-            "sh -c '{} PIDFILE &\nwhile :; do sleep 0.05; done' &\nwhile :; do sleep 0.05; done",
+            "sh -c '{} PIDFILE &\nwhile :; do sleep 0.05; done' &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done",
             detach(Some(0.4)).replace('\'', "'\\''")
         );
         let (_, pid) = run(&body, quick(), None, $helped).await;
@@ -212,7 +215,7 @@ macro_rules! cases {
     $(#[$nolinger])*
     async fn issue_338_a_daemon_double_fork_with_no_linger_does_not_outlive_the_deadline() {
         let body = format!(
-            "{} PIDFILE &\nwhile :; do sleep 0.05; done",
+            "{} PIDFILE &\nwhile [ ! -s PIDFILE ]; do sleep 0.02; done\nwhile :; do sleep 0.05; done",
             detach(Some(0.0))
         );
         let (_, pid) = run(&body, quick(), None, $helped).await;

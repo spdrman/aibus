@@ -22,9 +22,9 @@ export interface Layout {
   height: number;
 }
 
-export const NODE_W = 180;
+export const NODE_W = 230;
 export const NODE_H = 44;
-const COL = 210;
+const COL = 260;
 const ROW = 64;
 const TOP = 24;
 const LEFT = 24;

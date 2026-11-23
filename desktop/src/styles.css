@@ -32,7 +32,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -app
 .muted { color: var(--muted); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--surface); white-space: nowrap; }
-th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--bg); }
+th { color: var(--muted); font-weight: 600; position: sticky; top: -12px; z-index: 1; background: var(--bg); }
 tr[data-selected="true"] td { background: var(--surface); }
 .node rect { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; }
 .node[data-selected="true"] rect { stroke: var(--accent); stroke-width: 3; }

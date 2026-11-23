@@ -351,6 +351,14 @@ fn ask(v: &Value) -> Result<(Ask, bool), String> {
             },
             true,
         ),
+        "step_ack" => (Ask::StepAck { token: field("token")? }, true),
+        "step_tool_call" => (
+            Ask::StepToolCall {
+                token: field("token")?,
+                name: field("name")?,
+            },
+            true,
+        ),
         "present" => (
             Ask::Present {
                 title: field("title")?,
@@ -365,7 +373,7 @@ fn ask(v: &Value) -> Result<(Ask, bool), String> {
         ),
         _ => {
             return Err(
-                "unknown op: want status, transcript, send, command, cancel, permission, attach, next_step, step_result or present".into(),
+                "unknown op: want status, transcript, send, command, cancel, permission, attach, next_step, step_result, step_ack, step_tool_call or present".into(),
             )
         }
     })

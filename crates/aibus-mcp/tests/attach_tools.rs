@@ -305,3 +305,29 @@ fn every_attach_call_leaves_an_audit_line_tagged_with_the_session() {
     assert_eq!(lines[0]["args"]["attach"], true, "{}", lines[0]);
     assert_eq!(lines[0]["args"]["present"], true, "{}", lines[0]);
 }
+
+// #346: step_ack and step_tool_call.
+
+#[test]
+fn step_ack_and_step_tool_call_go_down_redacted_and_are_not_session_changes() {
+    let (s, _home, fake) = server(&["attach"], keyed());
+    assert!(names(&s).contains(&"step_ack".into()) && names(&s).contains(&"step_tool_call".into()));
+    call(&s, "step_ack", json!({"token": "st-01A"})).unwrap();
+    call(&s, "step_tool_call", json!({"token": "st-01A", "name": format!("Bash {KEY}")})).unwrap();
+    let sent = fake.sent.lock().unwrap();
+    assert_eq!(sent[0], json!({"op": "step_ack", "token": "st-01A"}));
+    assert_eq!(sent[1]["op"], "step_tool_call");
+    assert!(!sent[1].to_string().contains(KEY), "{}", sent[1]);
+}
+
+#[test]
+fn the_new_tools_need_their_flag_and_exact_arguments() {
+    let (none, ..) = server(&["session-status"], Redactor::new());
+    for t in ["step_ack", "step_tool_call"] {
+        assert_eq!(call(&none, t, json!({})).unwrap_err().code.0, -32602, "{t}");
+    }
+    let (s, ..) = server(&["attach"], Redactor::new());
+    assert!(call(&s, "step_ack", json!({})).is_err());
+    assert!(call(&s, "step_tool_call", json!({"token": "st-1"})).is_err());
+    assert!(call(&s, "step_ack", json!({"token": "st-1", "extra": 1})).is_err());
+}

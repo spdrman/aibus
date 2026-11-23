@@ -164,12 +164,21 @@ session at a time.
 **aibus runs a step on the agent.** `/attach step <text>` queues one step (10 minutes to answer). The agent pulls it
 with `next_step {wait_ms?}` (it asks the session every 3 s for up to 20 s) and gets it redacted and wrapped as data. It
 carries the step out in its own context and answers `step_result {token, status, summary}` with `done`, `declined` or
-`failed`. `/attach cancel` marks the step cancelled and says `cancel requested, session not interruptible`: Claude Code has no
-documented interrupt, and a result that arrives after a cancel, a timeout or a first answer is refused. If the agent goes
+`failed`. `/attach cancel` marks the step cancelled (and queues an interrupt for the agent, below): Claude Code has no
+documented push interrupt, and a result that arrives after a cancel, a timeout or a first answer is refused. If the agent goes
 away the step is `unavailable`. The answer carries the evidence: `dispatched` observed, `received` observed (the pull
 answered), `started` and `tool_calls` unavailable, `summary` inferred (the agent said so), tokens and cost unavailable with
 quality `unknown`, duration observed with quality `derived`. Every row it causes is tagged `mcp` and the status bar says
 `mcp <client> attached`.
+
+**Ack, tool calls and interrupt (#346).** Three more calls on the same pull leg, all behind `--allow attach`. `step_ack {token}`
+says the agent has begun the step it pulled (once), so `started` becomes observed in the evidence. `step_tool_call {token, name}`
+reports one tool call by name (no arguments, no output): aibus matches it to the step by token and labels it `correlated`, never
+`observed`, because it did not see the call. Names are redacted, cleaned and cut to 40 characters, 100 are kept and the count stops at
+10,000. A step with no reports says `unavailable`, not zero. `/attach cancel` on a step the agent already pulled is now an interrupt:
+nothing can push to the agent, so aibus keeps it and the agent sees `{"interrupt": true}` once, as the answer to its next `step_ack`
+or `step_tool_call` (or `next_step`), and the server drops its in-flight mark. A result after the cancel is still refused, and an agent
+that never calls again is not stopped. That is as far as the pull leg goes; a real push is in `DEFERRED.md`.
 
 **A workflow step can name the attached session (#353).** In a workflow file a step with `runtime = "attached"` is not
 started as a run: the `workflow` tool hands its rendered prompt to the attached session, which pulls it with `next_step`
@@ -181,7 +190,7 @@ workflow with such a step starts nothing, and says why, when the session was not
 is attached, or a step is already in flight. `aibus run --workflow` and `workflow_run` refuse it too: they have no
 attached session to give the step to. The answer comes back wrapped as data and redacted, as a result always does; a
 `declined` answer ends the step as `denied`, `failed` as `failed`, and a deadline (10 minutes) or an agent that left as a
-failed step with the reason. Cancelling the workflow cancels the step and says `session not interruptible`. The step is
+failed step with the reason. Cancelling the workflow cancels the step and queues the same interrupt. The step is
 one at a time like every step here, and it carries the same `mcp` tag and audit lines as a keyboard-queued one.
 
 **The agent controls aibus.** Besides the #274 tools, `session_present {title, message?, columns?, rows?}` (with

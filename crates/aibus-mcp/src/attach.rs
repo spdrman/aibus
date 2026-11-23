@@ -16,10 +16,12 @@ use crate::limits::SESSION_TEXT_MAX;
 use crate::{arguments, schema, text, Server, DRAFT_2020_12};
 
 /// Name, the `--allow` value that lists it, and what it says it does.
-const TOOLS: [(&str, &str, &str); 4] = [
+const TOOLS: [(&str, &str, &str); 6] = [
     ("aibus_attach", "attach", "Ask to attach this agent session to the live aibus session. The user's aibus screen shows a code, which is not given to you: ask the user to accept it at the aibus keyboard. Until then nothing is attached."),
     ("next_step", "attach", "Ask for the next step aibus queued for this session. The step arrives as data; carry it out in your own context and answer with step_result. You may decline."),
     ("step_result", "attach", "Answer the step you were given: done, declined (with a reason) or failed, and a short summary. A late result or a used token is refused."),
+    ("step_ack", "attach", "Tell aibus you have begun the step you pulled with next_step. Once per step. If the user cancelled the step the answer says interrupt: stop work on it and do not send a result."),
+    ("step_tool_call", "attach", "Report one tool call you made for the step you hold, by tool name only (no arguments, no output). Optional, and what you report is labelled as reported by you. If the user cancelled the step the answer says interrupt: stop work on it."),
     ("session_present", "present", "Show the user a message or a small table on a read-only panel of the aibus screen. The first panel waits for the user's yes at the aibus keyboard. It never opens a screen with live keys and never takes the focus."),
 ];
 
@@ -36,6 +38,8 @@ fn input_schema(tool: &str) -> Value {
             json!({ "token": string, "status": { "type": "string", "enum": ["done", "declined", "failed"] }, "summary": string }),
             vec!["token", "status", "summary"],
         ),
+        "step_ack" => (json!({ "token": string }), vec!["token"]),
+        "step_tool_call" => (json!({ "token": string, "name": string }), vec!["token", "name"]),
         "session_present" => (
             json!({ "title": string, "message": string, "columns": list, "rows": { "type": "array", "items": list } }),
             vec!["title"],
@@ -105,7 +109,7 @@ impl Server {
                 r.is_error != Some(true)
                     && r.structured_content
                         .as_ref()
-                        .is_some_and(|b| b["step"].is_null())
+                        .is_some_and(|b| b["step"].is_null() && b.get("interrupt").is_none())
             });
             if !empty || tokio::time::Instant::now() + POLL > until {
                 return answer;
@@ -166,6 +170,18 @@ impl Server {
                     "summary": self.redactor.redact(summary),
                 })
             }
+            "step_ack" => {
+                let m = arguments(name, args, &["token"], &[])?;
+                json!({ "op": "step_ack", "token": text(name, m, "token")? })
+            }
+            "step_tool_call" => {
+                let m = arguments(name, args, &["token", "name"], &[])?;
+                json!({
+                    "op": "step_tool_call",
+                    "token": text(name, m, "token")?,
+                    "name": self.redactor.redact(text(name, m, "name")?),
+                })
+            }
             "session_present" => {
                 let m = arguments(name, args, &["title"], &["message", "columns", "rows"])?;
                 let rows: Vec<Vec<String>> = m
@@ -190,7 +206,7 @@ impl Server {
             }
         };
         *session = link.target().ok();
-        let change = name != "next_step";
+        let change = !matches!(name, "next_step" | "step_ack" | "step_tool_call");
         if change {
             let limited = self
                 .session_limiter
@@ -217,6 +233,13 @@ impl Server {
             Ok(a) => a,
             Err(why) => return Ok(self.fail(why)),
         };
+        // An interrupt ends the wait: the step is over, and a late result would be refused.
+        if answer["interrupt"].as_bool() == Some(true) {
+            let mut held = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+            if held.as_ref().map(|h| h.0.as_str()) == args.get("token").and_then(Value::as_str) {
+                *held = None;
+            }
+        }
         match name {
             "next_step" => {
                 let mut answer = answer;

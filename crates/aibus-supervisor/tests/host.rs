@@ -50,6 +50,7 @@ impl Rig {
             env: cli::bounded_env(Vec::<(OsString, OsString)>::new(), &[], &[]).unwrap(),
             stdin: b"the prompt".to_vec(),
             limits,
+            helper: None,
         }
     }
 

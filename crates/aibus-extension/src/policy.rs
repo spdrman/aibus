@@ -45,6 +45,8 @@ impl TrustedKey {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum RawKey {
+    // Only matched to refuse it with a message, never read.
+    #[allow(dead_code)]
     Old(String),
     Scoped(TrustedKey),
 }

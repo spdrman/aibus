@@ -204,19 +204,17 @@ fn a_result_is_redacted_capped_and_checked_before_it_goes_down() {
     )
     .unwrap_err();
     assert_eq!(bad.code.0, -32602);
-    for tool in ["step_result"] {
-        assert_eq!(
-            call(
-                &s,
-                tool,
-                json!({"token": "st-01A", "status": "done", "summary": "x", "extra": 1})
-            )
-            .unwrap_err()
-            .code
-            .0,
-            -32602
-        );
-    }
+    assert_eq!(
+        call(
+            &s,
+            "step_result",
+            json!({"token": "st-01A", "status": "done", "summary": "x", "extra": 1})
+        )
+        .unwrap_err()
+        .code
+        .0,
+        -32602
+    );
 }
 
 #[test]

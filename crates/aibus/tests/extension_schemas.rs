@@ -295,6 +295,7 @@ fn issue_334_manifest_v2_accepts_typed_flags_and_v1_refuses_them() {
     );
     assert_eq!(check_against(&v1, &template), Vec::<String>::new());
 
+    #[allow(clippy::type_complexity)]
     let cases: [(&str, fn(&mut Value)); 5] = [
         ("a value", |v| {
             v["execution"]["typed"][0]["value"] = json!("gpt-5")

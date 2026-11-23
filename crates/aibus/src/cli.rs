@@ -425,8 +425,8 @@ pub enum ExtensionsCmd {
 }
 
 /// `aibus sessions` (#355, phase 1 of #348): the list comes from `claude agents --json`; a tap
-/// is built from hook events the session posts to a loopback endpoint of aibus. Nothing here
-/// sends anything to a session.
+/// is built from hook events the session posts to a loopback endpoint of aibus. Guidance goes only through the
+/// session's documented inbox socket, after a keyboard confirmation.
 #[derive(Args, Debug)]
 pub struct SessionsArgs {
     #[command(subcommand)]
@@ -444,6 +444,16 @@ pub enum SessionsCmd {
         /// Listen for the session's hook events and print the text again after each one
         #[arg(long)]
         follow: bool,
+        /// The Claude Code config directory (default: CLAUDE_CONFIG_DIR, else ~/.claude)
+        #[arg(long, value_name = "DIR")]
+        config_dir: Option<PathBuf>,
+    },
+    /// Send guidance to a session over its inbox socket, after you confirm the exact text
+    Send {
+        /// A session id or a unique prefix of one, a background job id or a unique name
+        session: String,
+        /// The guidance (redacted before it leaves; 8 KiB at most)
+        text: String,
         /// The Claude Code config directory (default: CLAUDE_CONFIG_DIR, else ~/.claude)
         #[arg(long, value_name = "DIR")]
         config_dir: Option<PathBuf>,
@@ -797,6 +807,7 @@ mod tests {
         "runs rerun",
         "sessions list",
         "sessions tap",
+        "sessions send",
         "sessions hooks install",
         "sessions hooks uninstall",
         "sessions allow-transcripts",

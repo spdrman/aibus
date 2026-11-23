@@ -32,6 +32,10 @@ pub enum RunState {
     Failed,
     Cancelled,
     Interrupted,
+    /// Nothing is running and a step that may have changed the world outside aibus was cut off.
+    /// Steps that do not depend on it still start; it, and whatever depends on it, wait until a
+    /// person says whether it happened (`reconcile`), and the run cannot finish before that.
+    RequiresReconciliation,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -52,6 +56,9 @@ pub enum Status {
     Interrupted,
     /// Policy could not decide, or a limit or safety rule stopped it; a person is told.
     Escalated,
+    /// It has irreversible side effects and was running when the host went away, so it may have
+    /// happened. Never started again on its own: a person answers with `reconcile`.
+    RequiresReconciliation,
 }
 
 impl Status {
@@ -68,7 +75,8 @@ impl Status {
 }
 
 /// How a host says a step it started ended.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Outcome {
     /// `artifact_valid` is what `<step>.artifact_valid` reads in a route.
     Completed { artifact_valid: bool },
@@ -102,6 +110,8 @@ pub enum EventKind {
     Deferred,
     Rerun,
     Escalated,
+    RequiresReconciliation,
+    Reconciled,
 }
 
 /// One logged decision. `reason_code` says which rule made it; `detail` carries the Jev request and
@@ -131,6 +141,10 @@ struct Node {
     artifact_valid: bool,
     /// The last thing logged about this step while it waited, so a repeat is not logged again.
     waiting_on: Option<String>,
+    /// A vendor CLI step cut off by a restart. Its session is the vendor's and is not restored,
+    /// so starting it over in a new session waits for a person (`restart:vendor_session`).
+    #[serde(default)]
+    fresh_session: bool,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -237,6 +251,7 @@ impl Scheduler {
                 account: None,
                 artifact_valid: false,
                 waiting_on: None,
+                fresh_session: false,
             });
         }
         let at = |k: &Value| nodes.iter().position(|n| k == n.key.as_str());
@@ -326,7 +341,7 @@ impl Scheduler {
             plan_hash: plan["plan_hash"].as_str().unwrap_or_default().to_owned(),
             policy_revision: policy,
             scheduler_revision: compile::content_hash(
-                "aibus-scheduler/1\nroute: a step starts when its forward routes are settled and one was taken\nvalidate: routes only between scheduled steps\nholds: an aibus step waits for its account; the OpenRouter approval holds for the run; the plan's approvals and handoff consent are asked per attempt\nlimits: max_parallel (default 1), max_agent_runs, write-exclusive without isolation, wall clock\nretry: bounded, retryable only, never over a step with side effects after a failure\nfailure: nothing new starts, a person is told\n",
+                "aibus-scheduler/2\nroute: a step starts when its forward routes are settled and one was taken\nvalidate: routes only between scheduled steps\nholds: an aibus step waits for its account; the OpenRouter approval holds for the run; the plan's approvals and handoff consent are asked per attempt\nlimits: max_parallel (default 1), max_agent_runs, write-exclusive without isolation, wall clock\nretry: bounded, retryable only, never over a step with side effects after a failure\nfailure: nothing new starts, a person is told\nresume: aibus and OpenRouter steps come back, a vendor CLI step waits for a yes to start a new session, a step with side effects requires reconciliation\n",
             ),
             state: RunState::Queued,
             nodes,
@@ -367,6 +382,11 @@ impl Scheduler {
 
     pub fn status(&self, step: &str) -> Option<&Status> {
         self.nodes.iter().find(|n| n.key == step).map(|n| &n.status)
+    }
+
+    /// Every scheduled step and its status, in plan order.
+    pub fn steps(&self) -> impl Iterator<Item = (&str, &Status)> {
+        self.nodes.iter().map(|n| (n.key.as_str(), &n.status))
     }
 
     /// What a step is held for: `account:unresolved` (an `aibus` step whose account the host has
@@ -504,6 +524,10 @@ impl Scheduler {
                 holds.push(h);
             }
         }
+        let restart = "restart:vendor_session";
+        if self.nodes[i].fresh_session && !self.nodes[i].granted.contains(restart) {
+            holds.push(restart.to_owned());
+        }
         for &(from, _) in self.data.iter().filter(|d| d.1 == i) {
             let context = Context {
                 run_id: String::new(),
@@ -622,6 +646,7 @@ impl Scheduler {
             n.status = Status::Running;
             n.attempts += 1;
             n.waiting_on = None;
+            n.fresh_session = false;
             let attempt = n.attempts;
             self.started += 1;
             self.log(
@@ -649,6 +674,8 @@ impl Scheduler {
         let any = |f: &dyn Fn(&Status) -> bool| self.nodes.iter().any(|n| f(&n.status));
         let next = if any(&|s| *s == Status::Running) {
             RunState::Running
+        } else if any(&|s| *s == Status::RequiresReconciliation) {
+            RunState::RequiresReconciliation
         } else if any(&|s| *s == Status::WaitingApproval) {
             RunState::WaitingApproval
         } else if self.nodes.iter().all(|n| n.status.terminal()) {
@@ -928,7 +955,8 @@ impl Scheduler {
                     reason: "cancelled".into(),
                 });
             }
-            if !n.status.terminal() {
+            // A cancel is not an answer to "did it happen", so that question stays open.
+            if !n.status.terminal() && n.status != Status::RequiresReconciliation {
                 n.status = Status::Cancelled;
             }
         }
@@ -954,8 +982,11 @@ impl Scheduler {
         self.log(EventKind::RunState, None, "interrupted", json!({}));
     }
 
-    /// Picks an interrupted run up again. A step that was running comes back Ready, unless it has
-    /// irreversible side effects: nobody knows how far it got, so it is not run again on its own.
+    /// Picks an interrupted run up again. Only aibus-owned work comes back on its own: a step that
+    /// was running and has irreversible side effects may have happened, so it goes to
+    /// `RequiresReconciliation` for a person; a vendor CLI step comes back Ready but its session is
+    /// not restored, so starting it over in a new one is held for a person too. Everything else
+    /// that was running (an `aibus` or OpenRouter step, whose state aibus holds) is Ready again.
     pub fn resume(&mut self) {
         if self.state != RunState::Interrupted {
             return;
@@ -964,22 +995,66 @@ impl Scheduler {
             if self.nodes[i].status != Status::Interrupted {
                 continue;
             }
-            let key = self.nodes[i].key.clone();
-            if self.nodes[i].request.risk_class == "side_effects" {
-                self.nodes[i].status = Status::Escalated;
-                self.log(
-                    EventKind::Escalated,
-                    Some(&key),
-                    "irreversible_not_retried",
-                    json!({}),
-                );
+            let n = &mut self.nodes[i];
+            let (key, runtime, attempt) = (n.key.clone(), n.runtime, n.attempts);
+            n.granted.clear();
+            let (kind, reason) = if n.request.risk_class == "side_effects" {
+                n.status = Status::RequiresReconciliation;
+                (
+                    EventKind::RequiresReconciliation,
+                    "irreversible_may_have_happened",
+                )
+            } else if matches!(runtime, Runtime::Aibus | Runtime::OpenRouter) {
+                n.status = Status::Ready;
+                (EventKind::Rerun, "resumed_aibus_owned")
             } else {
-                self.nodes[i].status = Status::Ready;
-                self.nodes[i].granted.clear();
-            }
+                n.status = Status::Ready;
+                n.fresh_session = true;
+                (EventKind::Rerun, "vendor_session_not_restored")
+            };
+            self.log(
+                kind,
+                Some(&key),
+                reason,
+                json!({ "attempt": attempt, "runtime": runtime }),
+            );
         }
         self.state = RunState::Queued;
         self.settle();
+    }
+
+    /// A person's answer for a step in `RequiresReconciliation`, as `by`. `applied` says the
+    /// action did happen: the step counts as completed, with no artifact to read. Otherwise it did
+    /// not, and the step is Ready to run again, asking for its approvals afresh.
+    pub fn reconcile(&mut self, step: &str, applied: bool, by: &str) -> Result<(), String> {
+        let i = self.index(step).ok_or_else(|| format!("no step {step}"))?;
+        if by.trim().is_empty() {
+            return Err("a reconciliation needs the name of who checked".into());
+        }
+        if self.nodes[i].status != Status::RequiresReconciliation {
+            return Err(format!("step {step} does not need reconciliation"));
+        }
+        // Not applied on a run that stopped starting things: it stays undone, it does not run.
+        let stopped = self.halted || self.state == RunState::Cancelled;
+        let n = &mut self.nodes[i];
+        n.status = if applied {
+            Status::Completed
+        } else if stopped {
+            Status::Cancelled
+        } else {
+            Status::Ready
+        };
+        n.artifact_valid = false;
+        n.granted.clear();
+        self.log(
+            EventKind::Reconciled,
+            Some(step),
+            if applied { "applied" } else { "not_applied" },
+            json!({ "by": by }),
+        );
+        self.settle_pending();
+        self.settle();
+        Ok(())
     }
 
     /// The wall clock the host measured. Past `max_wall_seconds` the run is stopped and escalated.
@@ -1001,7 +1076,7 @@ impl Scheduler {
                     reason: "wall_clock_exhausted".into(),
                 });
                 n.status = Status::Cancelled;
-            } else if !n.status.terminal() {
+            } else if !n.status.terminal() && n.status != Status::RequiresReconciliation {
                 n.status = Status::Cancelled;
             }
         }

@@ -16,6 +16,16 @@ Runtime dependencies of the shipped packages: none. React, react-dom and the tok
 
 The colour values come from `iasbuilt/tokens` (`@iasbuilt/tokens` 0.1.4, `global.*`, `feedback.*`, `actions.link` and `actions.checkbox` in `light.json` and `dark.json`). That package is marked UNLICENSED, all rights reserved. Putting the values in a public MIT package is the owner's decision of 2026-11-14 ("public, MIT-compatible only"), and the colour data and the focus-trap and dialog behaviour that I ported are iAsBuilt's to relicense. **This is the one row that needs the owner's explicit sign-off before the packages are published or the repo is split out**, since the licence file on `iasbuilt/tokens` says otherwise today. Two roles are my own picks and not iAsBuilt's values: the light `border` and the action and danger fills (see `DECISIONS.md`). I did not copy the data grid, CAD, comments or per-button tokens.
 
+### Merge gate (checked 2026-11-22)
+
+aibus is a public repository, so landing these values on `main` counts as publishing them. I checked `iasbuilt/tokens` again on 2026-11-22: the repo is private, `package.json` still says `"license": "UNLICENSED"` at 0.1.4, and GitHub reads its `LICENSE` as "Other". So the PR that adds `shared-ui/` merges only after the owner signs off, in one of these ways...
+
+1. Relicense, or add a written grant to, `iasbuilt/tokens` so the colour values may ship under MIT, then update the row above with a link to that commit.
+2. Or record the sign-off here (who, date, scope: "the `global.*`, `feedback.*`, `actions.link` and `actions.checkbox` colour values in `@sharedui/design-tokens` may be published under MIT").
+3. If neither happens, replace the iAsBuilt values with independently picked ones (the contrast tests in `contrast.test.ts` are the spec they have to meet) and drop the origin claim above.
+
+Until one of those is done, the sign-off row stays open and the PR stays unmerged.
+
 ## Dependencies installed in the workspace (tooling only, nothing shipped)
 
 Counts from the gate on 2026-11-18 (`npm run licences`, "everything installed"): MIT 101, Apache-2.0 4, ISC 4, BSD-2-Clause 2, BSD-3-Clause 2, MIT-0 1. Notable direct ones:

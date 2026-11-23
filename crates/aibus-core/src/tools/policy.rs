@@ -61,33 +61,32 @@ pub fn spec_matches(spec: &str, subject: &str) -> bool {
 /// `spec_matches` for the path tools, whose subjects are canonical. The rule as written always
 /// counts. Its resolved form counts too, so `/var/x/**` meets `/private/var/x/f`, but a deny
 /// takes any symlink while an allow only takes links owned by root (`/var`, `/tmp`, `/etc`, a
-/// merged `/bin`), because a link the user can retarget would move where an allow points.
+/// merged `/bin`), because a link the user can retarget would move where an allow points. When
+/// aibus itself runs as root every link it can make is root's, so an allow takes none.
 pub(crate) fn path_spec_matches(spec: &str, subject: &str, deny: bool) -> bool {
-    spec_matches(spec, subject)
-        || resolve_spec_prefix(spec, !deny).is_some_and(|resolved| spec_matches(&resolved, subject))
-}
-
-/// The literal directory part of an absolute spec, canonicalised. `None` when the spec is not an
-/// absolute path, the prefix does not resolve, or `system_only` and a link on the way is not root's.
-fn resolve_spec_prefix(spec: &str, system_only: bool) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
-    if !spec.starts_with('/') {
-        return None;
+    if spec_matches(spec, subject) {
+        return true;
     }
-    let cut = spec.find(['*', '?', '[', '{']).unwrap_or(spec.len());
-    let literal = &spec[..cut];
-    let slash = literal.rfind('/')?;
-    let dir = Path::new(&literal[..slash.max(1)]);
-    if system_only
-        && dir.ancestors().any(|a| {
-            std::fs::symlink_metadata(a).is_ok_and(|m| m.file_type().is_symlink() && m.uid() != 0)
-        })
-    {
-        return None;
-    }
-    let dir = dir.canonicalize().ok()?;
-    let dir = dir.to_str()?.trim_end_matches('/');
-    Some(format!("{dir}{}", &spec[slash..]))
+    // The literal directory part of an absolute spec, canonicalised, with the rest re-attached.
+    let resolved = || -> Option<String> {
+        if !spec.starts_with('/') {
+            return None;
+        }
+        let cut = spec.find(['*', '?', '[', '{']).unwrap_or(spec.len());
+        let slash = spec[..cut].rfind('/')?;
+        let dir = Path::new(&spec[..slash.max(1)]);
+        let retargetable = |m: std::fs::Metadata| {
+            m.file_type().is_symlink() && (m.uid() != 0 || rustix::process::geteuid().is_root())
+        };
+        if !deny && dir.ancestors().any(|a| std::fs::symlink_metadata(a).is_ok_and(retargetable)) {
+            return None;
+        }
+        let dir = dir.canonicalize().ok()?;
+        let dir = dir.to_str()?.trim_end_matches('/');
+        Some(format!("{dir}{}", &spec[slash..]))
+    };
+    resolved().is_some_and(|r| spec_matches(&r, subject))
 }
 
 /// Canonicalises `p` (relative to `cwd`), resolving symlinks, and says whether the result is
@@ -140,7 +139,7 @@ pub(crate) fn confine(cwd: &Path, p: &str) -> Result<PathBuf, ToolError> {
 }
 
 #[cfg(test)]
-mod symlinked_rule_tests {
+mod tests {
     use super::spec_matches;
 
     /// A merged-/usr layout (`bin -> usr/bin`): a rule written with the `bin` form keeps matching

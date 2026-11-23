@@ -431,6 +431,7 @@ fn the_login_pages_escape_the_provider_and_carry_their_titles() {
             assert!(!page.contains(banned), "{banned} in the page");
         }
     }
+    assert!(super::pkce::page(true, "O'Neil").contains("O&#39;Neil"));
     assert!(super::pkce::page(true, "X").contains("You're connected to X"));
     assert!(super::pkce::page(false, "X").contains("X did not give aibus access"));
 }

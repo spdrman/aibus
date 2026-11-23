@@ -182,8 +182,9 @@ fn holds_cond(c: &Cond, fact: &dyn Fn(&str, Pred) -> bool) -> bool {
 
 impl Scheduler {
     /// Validates `plan` and queues the run: the plan has to be one this build compiled (its hash
-    /// matches its content), made under the current policy revision, with every edge between steps
-    /// it schedules and no cycle among the forward routes. `Err` is every reason it was refused.
+    /// matches its content), made under the current policy revision, with every route, sequence and
+    /// retry edge between steps it schedules and no cycle among the forward routes. `Err` is every
+    /// reason it was refused.
     pub fn new(plan: &Value) -> Result<Self, Vec<String>> {
         let mut bad = Vec::new();
         if plan["kind"] != "aibus.workflow.plan" {
@@ -242,10 +243,19 @@ impl Scheduler {
         let mut edges = Vec::new();
         let mut data = Vec::new();
         for e in list(&plan["edges"]) {
+            let kind = e["kind"].as_str().unwrap_or_default();
             let (Some(from), Some(to)) = (at(&e["from"]), at(&e["to"])) else {
+                // A data edge from `input` or a native step has no scheduled end, and that is
+                // fine. A route without one would leave its target with no way in, so the target
+                // would start at once: refused, whatever the plan hash says.
+                if matches!(kind, "sequence" | "retry" | "route" | "loop") {
+                    bad.push(format!(
+                        "{kind} edge {} -> {}: not a step this plan schedules",
+                        e["from"], e["to"]
+                    ));
+                }
                 continue;
             };
-            let kind = e["kind"].as_str().unwrap_or_default();
             let (when, back, max) = match kind {
                 "sequence" => (format!("{}.completed", nodes[from].key), false, 0),
                 "retry" => (
@@ -316,7 +326,7 @@ impl Scheduler {
             plan_hash: plan["plan_hash"].as_str().unwrap_or_default().to_owned(),
             policy_revision: policy,
             scheduler_revision: compile::content_hash(
-                "aibus-scheduler/1\nroute: a step starts when its forward routes are settled and one was taken\nholds: Jev's, the plan's, handoff consent, each asked per attempt\nlimits: max_parallel (default 1), max_agent_runs, write-exclusive without isolation, wall clock\nretry: bounded, retryable only, never over a step with side effects after a failure\nfailure: nothing new starts, a person is told\n",
+                "aibus-scheduler/1\nroute: a step starts when its forward routes are settled and one was taken\nvalidate: routes only between scheduled steps\nholds: an aibus step waits for its account; the OpenRouter approval holds for the run; the plan's approvals and handoff consent are asked per attempt\nlimits: max_parallel (default 1), max_agent_runs, write-exclusive without isolation, wall clock\nretry: bounded, retryable only, never over a step with side effects after a failure\nfailure: nothing new starts, a person is told\n",
             ),
             state: RunState::Queued,
             nodes,
@@ -359,8 +369,9 @@ impl Scheduler {
         self.nodes.iter().find(|n| n.key == step).map(|n| &n.status)
     }
 
-    /// What a waiting step is held for: `approval:<capability>`, `runtime:openrouter` or
-    /// `handoff:<from>-><to>`. Show these, then `approve`.
+    /// What a step is held for: `account:unresolved` (an `aibus` step whose account the host has
+    /// not set yet; only `set_account` clears it), `approval:<capability>`, `runtime:openrouter` or
+    /// `handoff:<from>-><to>`. Show the last three, then `approve`.
     pub fn pending(&self, step: &str) -> Vec<String> {
         self.nodes
             .iter()
@@ -384,21 +395,20 @@ impl Scheduler {
         self.nodes.iter().position(|n| n.key == step)
     }
 
-    fn fact(&self, step: &str, what: Pred) -> bool {
-        self.nodes
-            .iter()
-            .find(|n| n.key == step)
-            .is_some_and(|n| match what {
-                Pred::Completed => n.status == Status::Completed,
-                Pred::Failed => matches!(n.status, Status::Failed { .. }),
-                Pred::ArtifactValid => n.status == Status::Completed && n.artifact_valid,
-            })
-    }
-
     fn edge_active(&self, e: &Edge) -> bool {
+        let fact = |step: &str, what: Pred| {
+            self.nodes
+                .iter()
+                .find(|n| n.key == step)
+                .is_some_and(|n| match what {
+                    Pred::Completed => n.status == Status::Completed,
+                    Pred::Failed => matches!(n.status, Status::Failed { .. }),
+                    Pred::ArtifactValid => n.status == Status::Completed && n.artifact_valid,
+                })
+        };
         let from = &self.nodes[e.from];
         matches!(from.status, Status::Completed | Status::Failed { .. })
-            && Cond::parse(&e.when).is_ok_and(|c| holds_cond(&c, &|s, p| self.fact(s, p)))
+            && Cond::parse(&e.when).is_ok_and(|c| holds_cond(&c, &fact))
     }
 
     /// Moves every Pending step whose forward routes are all settled: Ready when one was taken,
@@ -461,26 +471,30 @@ impl Scheduler {
         r
     }
 
-    fn party(&self, i: usize) -> Party {
-        let n = &self.nodes[i];
-        let (provider, account) = n
-            .account
-            .clone()
-            .unwrap_or_else(|| ("unresolved".into(), "unresolved".into()));
-        Party {
-            step: n.key.clone(),
-            runtime: n.runtime,
-            provider: handoff::provider_of(n.runtime)
-                .map(str::to_owned)
-                .unwrap_or(provider),
-            account,
-        }
-    }
-
     /// Jev's decision for step `i` and what it is still held for.
     fn holds_for(&self, i: usize) -> (jev::Decision, Vec<String>) {
+        let party = |i: usize| {
+            let n = &self.nodes[i];
+            let (provider, account) = n
+                .account
+                .clone()
+                .unwrap_or_else(|| ("unresolved".into(), "unresolved".into()));
+            Party {
+                step: n.key.clone(),
+                runtime: n.runtime,
+                provider: handoff::provider_of(n.runtime)
+                    .map(str::to_owned)
+                    .unwrap_or(provider),
+                account,
+            }
+        };
         let decision = jev::decide(&self.request_for(i));
         let mut holds = Vec::new();
+        // Jev can only hold an `aibus` step for OpenRouter once it knows the account, so until the
+        // host says which one, the step waits (fail closed, like a handoff to an unknown account).
+        if self.nodes[i].runtime == Runtime::Aibus && self.nodes[i].account.is_none() {
+            holds.push("account:unresolved".to_owned());
+        }
         if decision.reason_code == "openrouter_needs_approval" {
             holds.push("runtime:openrouter".to_owned());
         }
@@ -494,8 +508,8 @@ impl Scheduler {
             let context = Context {
                 run_id: String::new(),
                 plan_hash: self.plan_hash.clone(),
-                from: self.party(from),
-                to: self.party(i),
+                from: party(from),
+                to: party(i),
             };
             let edge = format!("{}->{}", self.nodes[from].key, self.nodes[i].key);
             if handoff::needs_consent(&context) && !self.consented.contains(&edge) {
@@ -503,13 +517,6 @@ impl Scheduler {
             }
         }
         (decision, holds)
-    }
-
-    fn running(&self) -> usize {
-        self.nodes
-            .iter()
-            .filter(|n| n.status == Status::Running)
-            .count()
     }
 
     /// The steps that may start now, in plan order. A step that must wait for a person moves to
@@ -529,6 +536,19 @@ impl Scheduler {
             }
             let key = self.nodes[i].key.clone();
             let (decision, holds) = self.holds_for(i);
+            if holds.iter().any(|h| h == "account:unresolved") {
+                // Not a person's call: the host sets the account, then the step is decided.
+                if self.nodes[i].waiting_on.as_deref() != Some("account_unresolved") {
+                    self.nodes[i].waiting_on = Some("account_unresolved".to_owned());
+                    self.log(
+                        EventKind::Deferred,
+                        Some(&key),
+                        "account_unresolved",
+                        json!({}),
+                    );
+                }
+                continue;
+            }
             let detail = json!({
                 "request": self.request_for(i),
                 "decision": decision,
@@ -567,7 +587,12 @@ impl Scheduler {
                 );
                 continue;
             }
-            let defer = if self.running() as u32 >= self.max_parallel {
+            let running = self
+                .nodes
+                .iter()
+                .filter(|n| n.status == Status::Running)
+                .count();
+            let defer = if running as u32 >= self.max_parallel {
                 Some("max_parallel")
             } else if self.nodes[i].request.risk_class != "read_only"
                 && !self.nodes[i].isolated
@@ -584,12 +609,12 @@ impl Scheduler {
             if let Some(why) = defer {
                 if self.nodes[i].waiting_on.as_deref() != Some(why) {
                     self.nodes[i].waiting_on = Some(why.to_owned());
-                    self.log(
-                        EventKind::Deferred,
-                        Some(&key),
-                        why,
-                        json!({ "max_parallel": self.max_parallel }),
-                    );
+                    let detail = if why == "max_parallel" {
+                        json!({ "max_parallel": self.max_parallel, "running": running })
+                    } else {
+                        json!({})
+                    };
+                    self.log(EventKind::Deferred, Some(&key), why, detail);
                 }
                 continue;
             }
@@ -652,27 +677,6 @@ impl Scheduler {
         }
     }
 
-    /// The steps from `to` forward that can reach `from`: what a route back runs again.
-    fn cycle(&self, to: usize, from: usize) -> Vec<usize> {
-        let reach = |start: usize, rev: bool| {
-            let mut seen = BTreeSet::from([start]);
-            let mut stack = vec![start];
-            while let Some(i) = stack.pop() {
-                for e in self.edges.iter().filter(|e| !e.back) {
-                    let (a, b) = if rev { (e.to, e.from) } else { (e.from, e.to) };
-                    if a == i && seen.insert(b) {
-                        stack.push(b);
-                    }
-                }
-            }
-            seen
-        };
-        reach(to, false)
-            .intersection(&reach(from, true))
-            .copied()
-            .collect()
-    }
-
     /// Records how step `step` ended, then takes any route back its outcome calls for.
     pub fn report(&mut self, step: &str, outcome: Outcome) -> Result<(), String> {
         let i = self.index(step).ok_or_else(|| format!("no step {step}"))?;
@@ -713,7 +717,24 @@ impl Scheduler {
                 }
                 continue;
             }
-            let range = self.cycle(to, i);
+            // What the route back runs again: the steps from `to` forward that can reach `i`.
+            let reach = |start: usize, rev: bool| {
+                let mut seen = BTreeSet::from([start]);
+                let mut stack = vec![start];
+                while let Some(at) = stack.pop() {
+                    for e in self.edges.iter().filter(|e| !e.back) {
+                        let (a, b) = if rev { (e.to, e.from) } else { (e.from, e.to) };
+                        if a == at && seen.insert(b) {
+                            stack.push(b);
+                        }
+                    }
+                }
+                seen
+            };
+            let range: Vec<usize> = reach(to, false)
+                .intersection(&reach(i, true))
+                .copied()
+                .collect();
             if failed {
                 let retryable = matches!(
                     status,
@@ -783,21 +804,17 @@ impl Scheduler {
                 why,
                 json!({ "error": reason }),
             );
-            self.halt();
-        }
-    }
-
-    /// Nothing new starts: what has not started is cancelled, what is running finishes.
-    fn halt(&mut self) {
-        self.halted = true;
-        for i in 0..self.nodes.len() {
-            if matches!(
-                self.nodes[i].status,
-                Status::Pending | Status::Ready | Status::WaitingApproval
-            ) {
-                let key = self.nodes[i].key.clone();
-                self.nodes[i].status = Status::Cancelled;
-                self.log(EventKind::Skipped, Some(&key), "run_halted", json!({}));
+            // Nothing new starts: what has not started is cancelled, what is running finishes.
+            self.halted = true;
+            for j in 0..self.nodes.len() {
+                if matches!(
+                    self.nodes[j].status,
+                    Status::Pending | Status::Ready | Status::WaitingApproval
+                ) {
+                    let key = self.nodes[j].key.clone();
+                    self.nodes[j].status = Status::Cancelled;
+                    self.log(EventKind::Skipped, Some(&key), "run_halted", json!({}));
+                }
             }
         }
     }
@@ -836,6 +853,9 @@ impl Scheduler {
     /// The person said no: the step fails, not retryable, and no route is taken that needs it.
     pub fn deny(&mut self, step: &str, by: &str) -> Result<(), String> {
         let i = self.index(step).ok_or_else(|| format!("no step {step}"))?;
+        if by.trim().is_empty() {
+            return Err("a refusal needs the name of who gave it".into());
+        }
         if self.nodes[i].status != Status::WaitingApproval {
             return Err(format!("step {step} is not waiting for approval"));
         }
@@ -1001,8 +1021,9 @@ impl Scheduler {
         out
     }
 
-    /// Writes the run to `path`, owner-only (0600 in a 0700 directory) and atomically, so the
-    /// pending decision is on disk before anyone is shown it.
+    /// Writes the run to `path` atomically, the file owner-only (0600), so the pending decision is
+    /// on disk before anyone is shown it. A directory it creates gets 0700; one that already exists
+    /// keeps its mode (the file's own mode and owner are what `load` checks).
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         use std::io::Write;
         #[cfg(unix)]
@@ -1035,10 +1056,29 @@ impl Scheduler {
     /// Reads a run `save` wrote. A symlink, a file someone else owns, or one that is not
     /// owner-only is refused: others could have edited the approvals in it.
     pub fn load(path: &Path) -> Result<Self, String> {
+        use std::io::Read;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.read(true);
+        // The checks run on the file that was opened, never on the path a second time, and a
+        // symlink is not followed, so nothing can be swapped in between. Non-blocking, so a FIFO
+        // planted here cannot hang the open.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let flags = rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK;
+            opts.custom_flags(flags.bits() as i32);
+        }
+        let mut f = opts.open(path).map_err(|e| {
+            if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+                format!("{}: not a regular file", path.display())
+            } else {
+                e.to_string()
+            }
+        })?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::{MetadataExt, PermissionsExt};
-            let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+            let meta = f.metadata().map_err(|e| e.to_string())?;
             if !meta.file_type().is_file() {
                 return Err(format!("{}: not a regular file", path.display()));
             }
@@ -1058,7 +1098,8 @@ impl Scheduler {
                 ));
             }
         }
-        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let mut text = String::new();
+        f.read_to_string(&mut text).map_err(|e| e.to_string())?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 }
@@ -1079,7 +1120,7 @@ pub fn dry_run(plan: &Value) -> Result<Value, Vec<String>> {
             .filter(|h| h.starts_with("handoff:"))
             .cloned()
             .collect();
-        holds.retain(|h| !h.starts_with("handoff:"));
+        holds.retain(|h| !h.starts_with("handoff:") && !h.starts_with("account:"));
         let out: Vec<Value> = s
             .edges
             .iter()
@@ -1112,6 +1153,12 @@ pub fn dry_run(plan: &Value) -> Result<Value, Vec<String>> {
             "handoffs": handoffs,
             "artifact": { "output": output, "read_by": readers, "validity_tested_by_routes_to": tests },
         }));
+    }
+    // Accounts are picked when a step runs, so the simulation stands one in that every check treats
+    // as unknown (a handoff into it still asks, and it is answered yes like the rest).
+    for n in s.nodes.iter_mut().filter(|n| n.account.is_none()) {
+        let unknown = "resolved when the step runs".to_owned();
+        n.account = Some((unknown.clone(), unknown));
     }
     let mut waves: Vec<Vec<String>> = Vec::new();
     let mut guard = 0;

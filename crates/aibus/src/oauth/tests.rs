@@ -421,11 +421,26 @@ fn the_login_pages_escape_the_provider_and_carry_their_titles() {
     let name = "Open<Router>&\"Co\"";
     for connected in [true, false] {
         let page = super::pkce::page(connected, name);
-        assert!(page.contains("Open&lt;Router&gt;&amp;&quot;Co&quot;"), "{page}");
-        assert!(!page.contains("<Router>") && !page.contains("&\"Co"), "{page}");
-        let title = if connected { "<title>aibus: connected</title>" } else { "<title>aibus: login refused</title>" };
+        assert!(
+            page.contains("Open&lt;Router&gt;&amp;&quot;Co&quot;"),
+            "{page}"
+        );
+        assert!(
+            !page.contains("<Router>") && !page.contains("&\"Co"),
+            "{page}"
+        );
+        let title = if connected {
+            "<title>aibus: connected</title>"
+        } else {
+            "<title>aibus: login refused</title>"
+        };
         assert!(page.contains(title), "{page}");
-        assert!(page.contains("lang=\"en\"") && page.contains("<main>") && page.contains("<h1>") && page.contains("<ol>"));
+        assert!(
+            page.contains("lang=\"en\"")
+                && page.contains("<main>")
+                && page.contains("<h1>")
+                && page.contains("<ol>")
+        );
         assert!(page.contains("prefers-color-scheme: dark") && page.contains("name=\"viewport\""));
         for banned in ["http", "src=", "@import", "<script", "url("] {
             assert!(!page.contains(banned), "{banned} in the page");
@@ -439,7 +454,9 @@ fn the_login_pages_escape_the_provider_and_carry_their_titles() {
 /// Sends one raw request to the callback and returns the whole answer.
 async fn callback_answer(cb: &str, query: &str) -> String {
     let addr = Url::parse(cb).unwrap();
-    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", addr.port().unwrap())).await.unwrap();
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", addr.port().unwrap()))
+        .await
+        .unwrap();
     let req = format!("GET /callback?{query} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
     s.write_all(req.as_bytes()).await.unwrap();
     let mut reply = String::new();
@@ -464,14 +481,20 @@ fn assert_page_headers(reply: &str) {
 async fn the_listener_answers_with_the_connected_page_and_the_headers_and_never_echoes_the_query() {
     let auth = FakeAuthServer::start().await;
     auth.token_status(200, json!({ "key": KEY })).await;
-    let (out, _) = login_with(Login::new(pkce_def(&auth, StateMode::None)), |_, cb| async move {
-        let reply = callback_answer(&cb, "code=the-code&leak=zz-marker").await;
-        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
-        assert_page_headers(&reply);
-        assert!(reply.contains("<title>aibus: connected</title>"), "{reply}");
-        assert!(reply.contains("Open&lt;Router&gt;&amp;Co"), "{reply}");
-        assert!(!reply.contains("the-code") && !reply.contains("zz-marker"), "{reply}");
-    })
+    let (out, _) = login_with(
+        Login::new(pkce_def(&auth, StateMode::None)),
+        |_, cb| async move {
+            let reply = callback_answer(&cb, "code=the-code&leak=zz-marker").await;
+            assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+            assert_page_headers(&reply);
+            assert!(reply.contains("<title>aibus: connected</title>"), "{reply}");
+            assert!(reply.contains("Open&lt;Router&gt;&amp;Co"), "{reply}");
+            assert!(
+                !reply.contains("the-code") && !reply.contains("zz-marker"),
+                "{reply}"
+            );
+        },
+    )
     .await;
     assert!(out.is_ok());
 }
@@ -479,14 +502,26 @@ async fn the_listener_answers_with_the_connected_page_and_the_headers_and_never_
 #[tokio::test]
 async fn the_listener_answers_a_refusal_with_the_refused_page_and_never_echoes_the_query() {
     let auth = FakeAuthServer::start().await;
-    let (out, _) = login_with(Login::new(pkce_def(&auth, StateMode::None)), |_, cb| async move {
-        let reply = callback_answer(&cb, "error=access_denied&leak=zz-marker").await;
-        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
-        assert_page_headers(&reply);
-        assert!(reply.contains("<title>aibus: login refused</title>"), "{reply}");
-        assert!(reply.contains("Open&lt;Router&gt;&amp;Co did not give aibus access"), "{reply}");
-        assert!(!reply.contains("access_denied") && !reply.contains("zz-marker"), "{reply}");
-    })
+    let (out, _) = login_with(
+        Login::new(pkce_def(&auth, StateMode::None)),
+        |_, cb| async move {
+            let reply = callback_answer(&cb, "error=access_denied&leak=zz-marker").await;
+            assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+            assert_page_headers(&reply);
+            assert!(
+                reply.contains("<title>aibus: login refused</title>"),
+                "{reply}"
+            );
+            assert!(
+                reply.contains("Open&lt;Router&gt;&amp;Co did not give aibus access"),
+                "{reply}"
+            );
+            assert!(
+                !reply.contains("access_denied") && !reply.contains("zz-marker"),
+                "{reply}"
+            );
+        },
+    )
     .await;
     assert!(out.is_err());
 }

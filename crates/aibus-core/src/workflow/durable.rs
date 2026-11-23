@@ -3,9 +3,9 @@
 //! `<attempt id>.jsonl`. A journal holds what the host told the scheduler (`Input`), one record per
 //! line, each with an event id (uuid v7), a monotonic sequence number and the time it was written.
 //! The scheduler is deterministic, so replaying the inputs on the pinned plan rebuilds every
-//! decision it made, and each record carries the event count and a hash chain over the scheduler's
-//! events, so a replay that would decide differently (an edited journal, a changed build) is
-//! refused instead of trusted.
+//! decision it made. Each record carries the event count and a hash chain over the record itself
+//! and the scheduler events it added, so an edited line (any field of it) or a build that would
+//! decide differently is refused on replay instead of trusted.
 //!
 //! A transition is written and synced before the host sees what it returns, and an input that
 //! changes nothing is not written, so asking twice (a recovery that runs again, an approval sent
@@ -92,7 +92,7 @@ pub struct Record {
     pub input: Input,
     /// The scheduler's event count after this input.
     pub events: u64,
-    /// `sha256(previous chain + the events this input added)`.
+    /// `sha256(previous chain + this record's other fields + the events its input added)`.
     pub chain: String,
 }
 
@@ -217,9 +217,11 @@ fn step(s: &mut Scheduler, input: &Input) -> Result<Vec<Action>, String> {
     })
 }
 
-fn chain(previous: &str, s: &Scheduler, from: usize) -> Result<String, DurableError> {
+fn chain(previous: &str, r: &Record, s: &Scheduler, from: usize) -> Result<String, DurableError> {
+    let head = serde_json::to_string(&(r.id, r.seq, r.at_unix_ms, &r.input, r.events))
+        .map_err(io::Error::other)?;
     let added = serde_json::to_string(&s.events()[from..]).map_err(io::Error::other)?;
-    Ok(content_hash(&format!("{previous}\n{added}")))
+    Ok(content_hash(&format!("{previous}\n{head}\n{added}")))
 }
 
 /// Every attempt of a run, oldest first. Each one's trace stays readable (`trace`).
@@ -413,7 +415,7 @@ impl Run {
             }
             let before = sched.events().len();
             step(&mut sched, &r.input).map_err(|e| why(&format!("replay refused it: {e}")))?;
-            chain_now = chain(&chain_now, &sched, before)?;
+            chain_now = chain(&chain_now, r, &sched, before)?;
             if sched.events().len() as u64 != r.events || chain_now != r.chain {
                 return Err(why(
                     "replaying it does not give the decisions recorded (edited, or another build)",
@@ -480,7 +482,7 @@ impl Run {
                 "an earlier write failed and could not be undone; open the run again",
             ));
         }
-        let r = Record {
+        let mut r = Record {
             id: Uuid::now_v7(),
             seq: self.seq + 1,
             at_unix_ms: SystemTime::now()
@@ -488,8 +490,9 @@ impl Run {
                 .map_or(0, |d| d.as_millis() as u64),
             input,
             events: next.events().len() as u64,
-            chain: chain(&self.chain, &next, before)?,
+            chain: String::new(),
         };
+        r.chain = chain(&self.chain, &r, &next, before)?;
         let mut line = serde_json::to_vec(&r).map_err(io::Error::other)?;
         line.push(b'\n');
         if let Err(e) = self

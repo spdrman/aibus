@@ -3,8 +3,6 @@
 //! waits for a person instead of running it again, and a retry is a new attempt with a new id while
 //! the old trace stays as it was.
 
-use std::path::Path;
-
 use aibus_core::agent::discover::discover;
 use aibus_core::workflow::compile::compile;
 use aibus_core::workflow::durable::{attempts, trace, DurableError, Input, Run};
@@ -26,47 +24,6 @@ fn plan_of(text: &str) -> Value {
     let wf = Workflow::parse("t", text).unwrap_or_else(|e| panic!("{e}\n{text}"));
     compile(&wf, text, &agents(), &Redactor::new()).unwrap_or_else(|p| panic!("{p:?}"))
 }
-
-/// A plan step, then an aibus step and a Claude CLI step at once. Every step is held for a yes.
-const FAN: &str = r#"
-name = "fan"
-description = "plan, then look and scan at once"
-
-[[step]]
-id = "plan"
-agent = "explore"
-requires = ["repo_read"]
-prompt = "Plan: {{input}}"
-
-[[step]]
-id = "look"
-agent = "explore"
-runtime = "cli.claude"
-requires = ["repo_read"]
-prompt = "Look: {{input}}"
-
-[[step]]
-id = "scan"
-agent = "explore"
-requires = ["repo_read"]
-prompt = "Scan: {{input}}"
-
-[[route]]
-from = "plan"
-to = "look"
-when = "plan.completed"
-
-[[route]]
-from = "plan"
-to = "scan"
-when = "plan.completed"
-
-[limits]
-max_parallel = 2
-
-[approvals]
-required_for = ["repo_read"]
-"#;
 
 /// One step that runs a shell: it can change things outside aibus that cannot be taken back.
 const DEPLOY: &str = r#"
@@ -147,19 +104,58 @@ fn accounts(run: &mut Run, keys: &[&str]) {
     }
 }
 
-fn reasons<'a>(run: &'a Run, step: &str) -> Vec<&'a str> {
-    run.scheduler()
-        .events()
-        .iter()
-        .filter(|e| e.step.as_deref() == Some(step))
-        .map(|e| e.reason_code.as_str())
-        .collect()
-}
-
 #[test]
 fn a_restart_mid_workflow_rebuilds_the_decisions_and_resumes_only_aibus_owned_steps() {
+    // A plan step, then an aibus step and a Claude CLI step at once. Every step is held for a yes.
+    let fan = r#"
+name = "fan"
+description = "plan, then look and scan at once"
+
+[[step]]
+id = "plan"
+agent = "explore"
+requires = ["repo_read"]
+prompt = "Plan: {{input}}"
+
+[[step]]
+id = "look"
+agent = "explore"
+runtime = "cli.claude"
+requires = ["repo_read"]
+prompt = "Look: {{input}}"
+
+[[step]]
+id = "scan"
+agent = "explore"
+requires = ["repo_read"]
+prompt = "Scan: {{input}}"
+
+[[route]]
+from = "plan"
+to = "look"
+when = "plan.completed"
+
+[[route]]
+from = "plan"
+to = "scan"
+when = "plan.completed"
+
+[limits]
+max_parallel = 2
+
+[approvals]
+required_for = ["repo_read"]
+"#;
+    let reasons = |run: &Run, step: &str| -> Vec<String> {
+        run.scheduler()
+            .events()
+            .iter()
+            .filter(|e| e.step.as_deref() == Some(step))
+            .map(|e| e.reason_code.clone())
+            .collect()
+    };
     let root = tempfile::tempdir().unwrap();
-    let mut run = Run::create(root.path(), &plan_of(FAN)).unwrap();
+    let mut run = Run::create(root.path(), &plan_of(fan)).unwrap();
     let id = run.run_id();
     accounts(&mut run, &["plan", "look", "scan"]);
     assert!(started(&advance(&mut run)).is_empty());
@@ -211,8 +207,8 @@ fn a_restart_mid_workflow_rebuilds_the_decisions_and_resumes_only_aibus_owned_st
     assert!(s
         .pending("look")
         .contains(&"restart:vendor_session".to_owned()));
-    assert!(reasons(&back, "look").contains(&"vendor_session_not_restored"));
-    assert!(reasons(&back, "scan").contains(&"resumed_aibus_owned"));
+    assert!(reasons(&back, "look").contains(&"vendor_session_not_restored".to_owned()));
+    assert!(reasons(&back, "scan").contains(&"resumed_aibus_owned".to_owned()));
     approve(&mut back, "scan");
     assert_eq!(started(&advance(&mut back)), ["scan"]);
     assert_eq!(
@@ -472,11 +468,6 @@ fn a_live_run_is_not_opened_twice() {
     ));
 }
 
-fn journal_of(root: &Path, run: &Run) -> std::path::PathBuf {
-    root.join(run.run_id().to_string())
-        .join(format!("{}.jsonl", run.attempt_id()))
-}
-
 #[test]
 fn an_edited_journal_is_refused_and_a_torn_tail_is_dropped() {
     let root = tempfile::tempdir().unwrap();
@@ -485,7 +476,10 @@ fn an_edited_journal_is_refused_and_a_torn_tail_is_dropped() {
     accounts(&mut run, &["deploy"]);
     advance(&mut run);
     approve(&mut run, "deploy");
-    let path = journal_of(root.path(), &run);
+    let path = root
+        .path()
+        .join(id.to_string())
+        .join(format!("{}.jsonl", run.attempt_id()));
     drop(run);
     let good = std::fs::read_to_string(&path).unwrap();
 
@@ -498,6 +492,16 @@ fn an_edited_journal_is_refused_and_a_torn_tail_is_dropped() {
 
     // Who approved it is part of the decisions, so changing it does not replay.
     std::fs::write(&path, good.replace("\"by\":\"rom\"", "\"by\":\"eve\"")).unwrap();
+    let err = Run::open(root.path(), id).err().unwrap().to_string();
+    assert!(
+        err.contains("does not give the decisions recorded"),
+        "{err}"
+    );
+    // So is any field that decides nothing, like when a record was written.
+    let at = good.find("\"at_unix_ms\":").unwrap() + "\"at_unix_ms\":".len();
+    let end = at + good[at..].find(',').unwrap();
+    let later = good[at..end].parse::<u64>().unwrap() + 1;
+    std::fs::write(&path, format!("{}{later}{}", &good[..at], &good[end..])).unwrap();
     let err = Run::open(root.path(), id).err().unwrap().to_string();
     assert!(
         err.contains("does not give the decisions recorded"),

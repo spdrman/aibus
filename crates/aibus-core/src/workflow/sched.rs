@@ -32,8 +32,9 @@ pub enum RunState {
     Failed,
     Cancelled,
     Interrupted,
-    /// A step that may have changed the world outside aibus was cut off, and nothing else can
-    /// start or finish the run until a person says whether it happened (`reconcile`).
+    /// Nothing is running and a step that may have changed the world outside aibus was cut off.
+    /// Steps that do not depend on it still start; it, and whatever depends on it, wait until a
+    /// person says whether it happened (`reconcile`), and the run cannot finish before that.
     RequiresReconciliation,
 }
 
@@ -330,7 +331,7 @@ impl Scheduler {
             plan_hash: plan["plan_hash"].as_str().unwrap_or_default().to_owned(),
             policy_revision: policy,
             scheduler_revision: compile::content_hash(
-                "aibus-scheduler/1\nroute: a step starts when its forward routes are settled and one was taken\nholds: Jev's, the plan's, handoff consent, each asked per attempt\nlimits: max_parallel (default 1), max_agent_runs, write-exclusive without isolation, wall clock\nretry: bounded, retryable only, never over a step with side effects after a failure\nfailure: nothing new starts, a person is told\n",
+                "aibus-scheduler/2\nroute: a step starts when its forward routes are settled and one was taken\nholds: Jev's, the plan's, handoff consent, each asked per attempt\nlimits: max_parallel (default 1), max_agent_runs, write-exclusive without isolation, wall clock\nretry: bounded, retryable only, never over a step with side effects after a failure\nfailure: nothing new starts, a person is told\nresume: aibus and OpenRouter steps come back, a vendor CLI step waits for a yes to start a new session, a step with side effects requires reconciliation\n",
             ),
             state: RunState::Queued,
             nodes,

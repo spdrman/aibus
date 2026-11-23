@@ -39,3 +39,4 @@ I cut this to the library layer in `aibus_core::worktree`: a worktree per write 
 - **Ignored files** in a rejected or approved attempt are not captured in its patch, and `reject` removes them with the checkout.
 - **Windows** is untested: paths and the lock use `fs4`, but I only ran the tests on Linux.
 - **Two small things in `create`** (from review): the parent directory is made before the "inside the repository" check, so a refused path can leave an empty directory behind, and `git worktree prune` there clears every stale registration of the repository, not only this attempt's.
+- **A swapped `.git` file in the attempt's checkout.** The attempt's tree is the agent's, so it can replace the `.git` file (the `gitdir:` pointer) with one pointing elsewhere before `review` or `approve` run git inside it. Checking that the pointer still names this repository's `worktrees/<id>` directory before every call is the follow-up.

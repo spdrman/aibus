@@ -418,3 +418,61 @@ fn the_list_and_the_tap_view_say_what_can_be_done() {
     let c = control::status_lines(&session(Some("/tmp/x.sock".into())), Inbound::Refuse);
     assert!(c.contains("watch only"), "{c}");
 }
+
+// ---- text the terminal would interpret (review of #386) ----
+
+#[test]
+fn text_a_terminal_would_interpret_is_refused_before_anything_is_shown_or_written() {
+    for bad in [
+        "stop \u{1b}[2K\u{1b}[8m hidden",
+        "looks fine\rBut this overwrites it",
+        "c1 \u{9b}2J",
+        "bidi \u{202e}txt.exe",
+    ] {
+        let t = tempfile::tempdir().unwrap();
+        let e = env(t.path());
+        let (_d, sock, l) = listen();
+        l.set_nonblocking(true).unwrap();
+        let mut asked = false;
+        let err = send(&e, &session(Some(sock)), bad, 1_000, &mut |_| {
+            asked = true;
+            true
+        })
+        .unwrap_err();
+        assert!(err.contains("control"), "{bad:?}: {err}");
+        assert!(!asked, "{bad:?} reached the prompt");
+        assert!(l.accept().is_err(), "{bad:?} connected");
+        assert!(!e.state.join("taps/control/audit.jsonl").exists());
+        assert!(!e.state.join(format!("taps/control/{S}.lock")).exists());
+    }
+}
+
+#[test]
+fn a_newline_is_fine_in_guidance() {
+    let t = tempfile::tempdir().unwrap();
+    let e = env(t.path());
+    let (_d, sock, l) = listen();
+    let rx = read_line(l);
+    send(&e, &session(Some(sock)), "one\ntwo", 1_000, &mut yes).unwrap();
+    let line = rx.join().unwrap();
+    assert_eq!(line.matches('\n').count(), 1, "{line:?}");
+}
+
+#[test]
+fn nine_sends_in_the_minute_are_still_allowed() {
+    let t = tempfile::tempdir().unwrap();
+    let e = env(t.path());
+    let rows: String = (0..9)
+        .map(|i| {
+            format!(
+                "{{\"ts_ms\":{},\"via\":\"tap\",\"outcome\":\"sent\"}}\n",
+                100_000 + i
+            )
+        })
+        .collect();
+    write(&e.state.join("taps/control/audit.jsonl"), &rows);
+    let (_d, sock, l) = listen();
+    let rx = read_line(l);
+    send(&e, &session(Some(sock)), "hello", 110_000, &mut yes).unwrap();
+    rx.join().unwrap();
+}

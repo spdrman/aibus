@@ -369,12 +369,17 @@ fn a_handoff_to_another_account_waits_for_consent() {
 
 #[test]
 fn the_run_budget_and_wall_clock_stop_the_run_with_an_escalation() {
-    let text = READ_CHAIN.to_owned() + "\n[limits]\nmax_agent_runs = 2\nmax_wall_seconds = 60\n";
+    // Four runs is the chain's static worst case (two steps, one retry), so the plan compiles. A
+    // restart after an interruption is a run the static count does not know about.
+    let text = READ_CHAIN.to_owned() + "\n[limits]\nmax_agent_runs = 4\nmax_wall_seconds = 60\n";
     let mut s = Scheduler::new(&plan_of(&text)).unwrap();
     same_account(&mut s, &["a", "b"]);
-    s.advance();
+    assert_eq!(started(&s.advance()), ["a"]);
+    s.interrupt();
+    s.resume();
+    assert_eq!(started(&s.advance()), ["a"]);
     s.report("a", ok()).unwrap();
-    s.advance();
+    assert_eq!(started(&s.advance()), ["b"]);
     s.report(
         "b",
         Outcome::Failed {
@@ -383,7 +388,9 @@ fn the_run_budget_and_wall_clock_stop_the_run_with_an_escalation() {
         },
     )
     .unwrap();
-    // Two runs are spent, so the retry of a is not started.
+    assert_eq!(started(&s.advance()), ["a"]);
+    s.report("a", ok()).unwrap();
+    // Four runs are spent, so the retry of b is not started.
     assert!(started(&s.advance()).is_empty());
     assert!(s
         .events()

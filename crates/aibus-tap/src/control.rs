@@ -272,10 +272,10 @@ pub fn send(
             c.flush()
         })();
         if let Err(e) = wrote {
-            let _ = audit_append(audit, &row("failed"));
+            let _ = audit_append(&audit, &row("failed"));
             return Err(format!("could not write to the inbox socket: {e}"));
         }
-        audit_append(audit, &row("sent"))?;
+        audit_append(&audit, &row("sent"))?;
         let mut out = String::from(
             "sent; delivery unknown (the socket gives no receipt, and aibus shows it as delivered only if a later event proves it)",
         );

@@ -1,0 +1,43 @@
+[package]
+name = "aibus-desktop"
+version = "0.0.1"
+edition = "2021"
+# tauri 2.12 and tauri-build 2.7 need Rust 1.90 themselves, so this crate carries its own toolchain
+# pin and lockfile, outside the repository workspace (which stays at 1.89 and never sees WebKitGTK).
+# Decided on #304; see docs/desktop/B1.1-go-no-go.md.
+rust-version = "1.90"
+license = "MIT"
+publish = false
+
+# Its own workspace root, so the `crates/*` workspace never adopts it. Resolver 3 picks dependency
+# versions that build on this crate's rust-version.
+[workspace]
+resolver = "3"
+
+[lib]
+name = "aibus_desktop_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aibus-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+# No shell, fs, opener or http plugin: the webview gets the two commands in `lib.rs` and nothing
+# else. Processes are Rust's job (tokio::process, through aibus-supervisor), never the webview's.
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+aibus-supervisor = { path = "../../crates/aibus-supervisor" }
+aibus-trace = { path = "../../crates/aibus-trace" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+uuid = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

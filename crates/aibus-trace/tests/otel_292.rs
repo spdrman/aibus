@@ -203,7 +203,8 @@ fn a_thin_trace_reports_what_is_missing() {
         &Redactor::new(),
     );
     assert_eq!(c.attempts_without_usage, 1);
-    assert_eq!(c.unfinished, 1, "the tool never completed");
+    // The tool never completed, and the fixture never stops the lead agent either.
+    assert_eq!(c.unfinished, 2);
     let s = spans(&body);
     let tool = find(&s, "aibus.tool", None);
     assert_eq!(attr(tool, "aibus.complete").unwrap()["boolValue"], false);

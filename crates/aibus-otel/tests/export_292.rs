@@ -77,7 +77,11 @@ fn a_hung_collector_is_cut_off_by_the_timeout() {
         &json!({}),
     );
     assert!(matches!(out, Outcome::Failed(_)), "{out:?}");
-    assert!(t.elapsed() < Duration::from_secs(2));
+    assert!(
+        t.elapsed() < Duration::from_millis(1500),
+        "{:?}",
+        t.elapsed()
+    );
     keep.join().unwrap();
 }
 

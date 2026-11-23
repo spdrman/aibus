@@ -12,7 +12,7 @@ The trace id is the workflow run id and span ids are derived from it, so exporti
 
 ## Turning it on
 
-`aibus_otel::Destination { endpoint, headers, timeout }` is the opt-in. With `None`, nothing connects (the standard `OTEL_EXPORTER_OTLP_*` variables are ignored on purpose). `aibus_otel::spawn` runs the export on its own thread; a refused connection, a hung collector or a 5xx comes back as `Outcome::Failed` and goes nowhere near the run.
+`aibus_otel::Destination { endpoint, headers, timeout }` is the opt-in. With `None`, nothing connects (the standard `OTEL_EXPORTER_OTLP_*` variables are ignored on purpose; once a destination is set, reqwest's proxy variables apply to it). `aibus_otel::spawn` runs the export on its own thread; a refused connection, a hung collector or a 5xx comes back as `Outcome::Failed` and goes nowhere near the run.
 
 Exported traces can contain file paths, agent names and anything a tool name carries, even without payload capture. Redaction is best effort for unregistered secrets.
 

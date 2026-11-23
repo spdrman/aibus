@@ -9,3 +9,4 @@ Cut from the reduced scope, still wanted:
 - Langfuse interop. The OTLP body follows the generic OTLP/HTTP shape, but I have not run it against Langfuse, so that row is unverified. Langfuse-specific attribute mapping (`langfuse.*`) is not done.
 - Wiring the completeness diagnostics into the trace inspector.
 - Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
+- A bounded queue between the run and the exporter. `spawn` starts one thread per export; a slow collector under many exports would pile threads up, so a bounded queue with drop-on-full belongs here.

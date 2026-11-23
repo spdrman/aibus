@@ -54,8 +54,11 @@ struct Span {
     end: Option<u64>,
     status: u8,
     attrs: Vec<(String, Value)>,
-    events: Vec<(u64, String, Vec<(String, Value)>)>,
+    /// (time, name, attributes)
+    events: Vec<SpanEvent>,
 }
+
+type SpanEvent = (u64, String, Vec<(String, Value)>);
 
 /// Unix nanoseconds of `YYYY-MM-DDTHH:MM:SS[.fff]Z`, the format the store writes.
 fn nanos(ts: &str) -> Option<u64> {
@@ -66,6 +69,16 @@ fn nanos(ts: &str) -> Option<u64> {
     let (hms, frac) = time.split_once('.').unwrap_or((time, "0"));
     let mut t = hms.split(':').map(|x| x.parse::<i64>().ok());
     let (h, mi, s) = (t.next()??, t.next()??, t.next()??);
+    // A vendor timestamp is untrusted: bound every field so the arithmetic below cannot overflow.
+    if !(1970..=9999).contains(&y)
+        || !(1..=12).contains(&m)
+        || !(1..=31).contains(&day)
+        || !(0..24).contains(&h)
+        || !(0..60).contains(&mi)
+        || !(0..61).contains(&s)
+    {
+        return None;
+    }
     let y = y - i64::from(m <= 2);
     let era = y.div_euclid(400);
     let yoe = y.rem_euclid(400);
@@ -75,7 +88,7 @@ fn nanos(ts: &str) -> Option<u64> {
     let secs = u64::try_from(days * 86_400 + h * 3_600 + mi * 60 + s).ok()?;
     let digits: String = frac.chars().take(9).collect();
     let ns = format!("{digits:0<9}").parse::<u64>().ok()?;
-    Some(secs * 1_000_000_000 + ns)
+    secs.checked_mul(1_000_000_000)?.checked_add(ns)
 }
 
 fn span_id(run: Uuid, kind: &str, key: &[&str]) -> [u8; 8] {
@@ -164,12 +177,12 @@ pub fn to_otlp(
     for e in &evs {
         let t = when(e);
         let att = e.attempt_id;
-        if !at_ix.contains_key(&att) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = at_ix.entry(att) {
             let parent = match e.parent_attempt_id {
                 Some(p) if attempts.contains(&p) => span_id(run, "attempt", &[&p.to_string()]),
                 _ => run_span,
             };
-            at_ix.insert(att, spans.len());
+            slot.insert(spans.len());
             spans.push(Span {
                 id: span_id(run, "attempt", &[&att.to_string()]),
                 parent: Some(parent),

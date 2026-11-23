@@ -37,8 +37,9 @@ pub struct Review {
     pub files: Vec<String>,
     /// `git diff --stat`.
     pub stat: String,
-    /// The full patch (binary files included).
-    pub patch: String,
+    /// The full patch (binary files included), as the bytes git wrote: a text file that is not
+    /// UTF-8 stays as it is, so what `reject` saves hashes to `patch_sha256`.
+    pub patch: Vec<u8>,
     /// SHA-256 of the patch bytes: what `approve` and `reject` must be given back.
     pub patch_sha256: String,
 }
@@ -136,7 +137,7 @@ pub fn create(project: &Path, at: &Path) -> Result<WorktreeInfo, String> {
         let base_ref = format!("refs/aibus/base/{id}");
         let _ = git(&repo, &["worktree", "prune"]);
         git(&repo, &["update-ref", &base_ref, &base])?;
-        if let Err(e) = git(&repo, &["worktree", "add", "--detach", "--", &at.to_string_lossy(), &base]) {
+        if let Err(e) = git(&repo, &["-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", "--", &at.to_string_lossy(), &base]) {
             let _ = git(&repo, &["update-ref", "-d", &base_ref]);
             return Err(e);
         }
@@ -243,7 +244,7 @@ pub fn review(info: &WorktreeInfo) -> Result<Review, String> {
         .collect();
     Ok(Review {
         patch_sha256: format!("{:x}", Sha256::digest(&patch)),
-        patch: String::from_utf8_lossy(&patch).into_owned(),
+        patch,
         stat: String::from_utf8_lossy(&diff(&["--stat"])?).trim().to_owned(),
         files,
         base,
@@ -290,24 +291,29 @@ pub fn approve(info: &WorktreeInfo, reviewed: &str, by: &str) -> Result<Merge, S
     }
     let id = id_of(&info.path)?;
     let branch = format!("aibus/{id}");
-    // Hooks of the repository do not run for the attempt's commit or the merge.
-    let agent = ["-c", "user.name=aibus", "-c", "user.email=aibus@localhost", "-c", "commit.gpgsign=false"];
+    // No hook runs for the switch, the attempt's commit, the merge or its abort: `--no-verify` only
+    // skips three of them, and a relative `core.hooksPath` would run the attempt's own files as
+    // the operator, so the hooks directory is pointed at nothing.
+    let agent = ["-c", "core.hooksPath=/dev/null", "-c", "user.name=aibus", "-c", "user.email=aibus@localhost", "-c", "commit.gpgsign=false"];
     let mut commit = agent.to_vec();
     commit.extend(["commit", "-q", "--no-verify", "-m"]);
     let message = format!("{id}: attempt approved by {by}");
     commit.push(&message);
-    git(&info.path, &["switch", "-q", "-c", &branch])?;
+    git(&info.path, &["-c", "core.hooksPath=/dev/null", "switch", "-q", "-c", &branch])?;
     if git(&info.path, &["diff", "--cached", "--quiet"]).is_err() {
         git(&info.path, &commit)?;
     }
     let configured = git(&info.repo, &["config", "user.email"]).is_ok_and(|s| !s.is_empty());
-    let mut merge = if configured { vec![] } else { agent[..4].to_vec() };
+    let mut merge = vec!["-c", "core.hooksPath=/dev/null"];
+    if !configured {
+        merge.extend(&agent[2..6]);
+    }
     merge.extend(["merge", "--no-ff", "--no-edit", "--no-verify", "-m"]);
     let message = format!("Merge attempt {id}, approved by {by}");
     merge.extend([message.as_str(), branch.as_str()]);
     if let Err(e) = git(&info.repo, &merge) {
         let conflicts = git(&info.repo, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
-        let _ = git(&info.repo, &["merge", "--abort"]);
+        let _ = git(&info.repo, &["-c", "core.hooksPath=/dev/null", "merge", "--abort"]);
         let files: Vec<String> = conflicts.lines().map(str::to_owned).collect();
         return if files.is_empty() { Err(format!("merge failed: {e}")) } else { Ok(Merge::Conflict(files)) };
     }
@@ -473,7 +479,7 @@ mod tests {
         std::fs::write(wt.cwd.join("new.txt"), "n\n").unwrap();
         let r = review(&wt).unwrap();
         assert_eq!(r.files, ["a.txt", "new.txt"]);
-        assert!(r.patch.contains("+two") && r.stat.contains("2 files changed"), "{}", r.stat);
+        assert!(String::from_utf8_lossy(&r.patch).contains("+two") && r.stat.contains("2 files changed"), "{}", r.stat);
         assert_eq!(r, review(&wt).unwrap());
         std::fs::write(wt.cwd.join("new.txt"), "changed\n").unwrap();
         assert_ne!(review(&wt).unwrap().patch_sha256, r.patch_sha256);
@@ -524,7 +530,7 @@ mod tests {
         assert_eq!(head(project.path()), before);
         assert!(git(project.path(), &["status", "--porcelain"]).unwrap().is_empty());
         let dir = project.path().join(".git/aibus/attempts");
-        assert_eq!(std::fs::read_to_string(dir.join("r.patch")).unwrap(), r.patch);
+        assert_eq!(std::fs::read(dir.join("r.patch")).unwrap(), r.patch);
         assert!(std::fs::read_to_string(dir.join("r.json")).unwrap().contains("\"rejected\""));
     }
 
@@ -598,5 +604,55 @@ mod tests {
         git(project.path(), &["update-ref", "refs/aibus/base/ghost", "HEAD"]).unwrap();
         let wt = create(project.path(), &cache.path().join("s/ghost")).unwrap();
         assert_eq!(review(&wt).unwrap().base, head(project.path()));
+    }
+
+    #[test]
+    fn reject_saves_the_exact_patch_even_for_a_text_file_that_is_not_utf8() {
+        let project = repo();
+        let cache = tempfile::tempdir().unwrap();
+        let wt = create(project.path(), &cache.path().join("s/r")).unwrap();
+        // Latin-1 text: no NUL byte, so git diffs it as text, but it is not UTF-8.
+        std::fs::write(wt.cwd.join("latin.txt"), b"caf\xe9\n").unwrap();
+        let r = review(&wt).unwrap();
+        assert!(std::str::from_utf8(&r.patch).is_err());
+        reject(&wt, &r.patch_sha256, "rom").unwrap();
+        let saved = std::fs::read(project.path().join(".git/aibus/attempts/r.patch")).unwrap();
+        assert_eq!(format!("{:x}", Sha256::digest(&saved)), r.patch_sha256);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_hook_runs_for_create_review_approve_or_a_conflict_abort() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = repo();
+        let marks = tempfile::tempdir().unwrap();
+        let hooks = project.path().join(".githooks");
+        std::fs::create_dir(&hooks).unwrap();
+        for name in [
+            "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "post-checkout",
+            "pre-merge-commit", "post-merge", "pre-push",
+        ] {
+            let at = hooks.join(name);
+            std::fs::write(&at, format!("#!/bin/sh\ntouch '{}/{name}'\n", marks.path().display())).unwrap();
+            std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        sh(project.path(), &["add", "."]);
+        sh(project.path(), &["commit", "-q", "-m", "hooks"]);
+        // A relative path: inside the attempt's checkout it names the attempt's own files.
+        sh(project.path(), &["config", "core.hooksPath", ".githooks"]);
+        let cache = tempfile::tempdir().unwrap();
+        let wt = create(project.path(), &cache.path().join("s/r")).unwrap();
+        std::fs::write(wt.cwd.join("b.txt"), "b\n").unwrap();
+        let r = review(&wt).unwrap();
+        assert!(matches!(approve(&wt, &r.patch_sha256, "rom").unwrap(), Merge::Merged(_)));
+        // And the abort after a conflict.
+        let wt = create(project.path(), &cache.path().join("s/c")).unwrap();
+        std::fs::write(wt.cwd.join("a.txt"), "agent\n").unwrap();
+        let r = review(&wt).unwrap();
+        std::fs::write(project.path().join("a.txt"), "other\n").unwrap();
+        git(project.path(), &["-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qam", "x"]).unwrap();
+        assert!(matches!(approve(&wt, &r.patch_sha256, "rom").unwrap(), Merge::Conflict(_)));
+        let ran: Vec<_> = std::fs::read_dir(marks.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert!(ran.is_empty(), "hooks ran: {ran:?}");
     }
 }

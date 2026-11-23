@@ -38,3 +38,4 @@ I cut this to the library layer in `aibus_core::worktree`: a worktree per write 
 - **A second `approve` after a conflict.** The conflict is aborted and the attempt kept on `aibus/<id>`, but calling `approve` again fails on the existing branch. Resolving the conflict, by rebasing the attempt or merging by hand, is the operator's job for now.
 - **Ignored files** in a rejected or approved attempt are not captured in its patch, and `reject` removes them with the checkout.
 - **Windows** is untested: paths and the lock use `fs4`, but I only ran the tests on Linux.
+- **Two small things in `create`** (from review): the parent directory is made before the "inside the repository" check, so a refused path can leave an empty directory behind, and `git worktree prune` there clears every stale registration of the repository, not only this attempt's.

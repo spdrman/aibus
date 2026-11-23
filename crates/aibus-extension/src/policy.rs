@@ -45,7 +45,8 @@ impl TrustedKey {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum RawKey {
-    Old(String),
+    // Read by serde only: an old plain-string entry is matched so it can be refused by name.
+    Old(#[allow(dead_code)] String),
     Scoped(TrustedKey),
 }
 

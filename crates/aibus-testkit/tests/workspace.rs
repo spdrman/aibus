@@ -72,7 +72,7 @@ fn provider_crates_use_rustls_and_never_openssl() {
 
 #[test]
 fn only_the_provider_http_crates_open_sockets() {
-    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider", "aibus-mcp"] {
+    for krate in ["aibus-core", "aibus-graph", "aibus-tui", "aibus-provider", "aibus-mcp", "aibus-trace"] {
         let deps = closure(krate);
         for banned in ["reqwest", "hyper", "h2", "rustls"] {
             assert!(!deps.contains(banned), "{krate} depends on {banned}");

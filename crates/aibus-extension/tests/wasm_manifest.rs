@@ -26,8 +26,7 @@ mod with_the_host {
     use aibus_extension::package;
     use aibus_extension::policy::Policy;
     use aibus_extension::registry::{signed_message, Refusal, Registry, Signature};
-    use common::{edit, template_manifest, wasm_package};
-    use common::{guest_wasm, registry_of, template_as};
+    use common::{edit, guest_wasm, registry_of, template_as, template_manifest, wasm_package};
     use ring::signature::{Ed25519KeyPair, KeyPair};
 
     fn hex(b: &[u8]) -> String {

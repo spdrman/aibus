@@ -425,8 +425,10 @@ fn an_interrupted_run_resumes_but_never_reruns_an_irreversible_step() {
     s.advance();
     s.interrupt();
     s.resume();
-    assert_eq!(s.status("build"), Some(&Status::Escalated));
-    assert_eq!(s.state(), RunState::Failed);
+    // It may have happened, so a person says whether it did (#289).
+    assert_eq!(s.status("build"), Some(&Status::RequiresReconciliation));
+    assert_eq!(s.state(), RunState::RequiresReconciliation);
+    assert!(started(&s.advance()).is_empty());
 }
 
 #[test]

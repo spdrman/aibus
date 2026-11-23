@@ -37,6 +37,7 @@ pub mod handoff;
 pub mod jev;
 pub mod manifest;
 pub mod native;
+pub mod sched;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Workflow {

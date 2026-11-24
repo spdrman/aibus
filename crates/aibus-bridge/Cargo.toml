@@ -1,0 +1,22 @@
+[package]
+name = "aibus-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# The Rust half of the desktop bridge (B1.3, #306): versioned DTOs over the `aibus-trace` projections,
+# a run cursor with gap detection and resubscribe, and the TypeScript bindings generated from them.
+# Read-only by construction: no process, no network, no write to the trace store. The Tauri commands
+# that carry these calls land with the desktop shell (#307).
+[dependencies]
+aibus-trace = { path = "../aibus-trace" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ts-rs = { version = "10", default-features = false, features = ["serde-compat"] }
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"

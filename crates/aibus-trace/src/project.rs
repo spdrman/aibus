@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{AttemptStatus, EventKind, Metric, Origin, TraceEvent, Visibility};
 
 /// One source event behind a node or an edge.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Evidence {
     pub event_id: Uuid,
     pub position: u64,
@@ -20,7 +20,7 @@ pub struct Evidence {
     pub origin: Origin,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AttemptView {
     pub attempt_id: Uuid,
     pub status: Option<AttemptStatus>,
@@ -30,7 +30,7 @@ pub struct AttemptView {
     pub evidence: Vec<Evidence>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AgentNode {
     pub attempt_id: Uuid,
     pub agent_id: String,
@@ -41,7 +41,7 @@ pub struct AgentNode {
 }
 
 /// A delegation edge. `sources` is never empty (spec 2.2: a causal edge points to its events).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Edge {
     pub attempt_id: Uuid,
     /// `None` when nothing says who delegated: the edge is then `Unavailable`.
@@ -55,7 +55,8 @@ pub struct Edge {
     pub sources: Vec<Evidence>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolOutcome {
     Completed,
     Failed,
@@ -63,7 +64,7 @@ pub enum ToolOutcome {
     Unknown,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ToolNode {
     pub attempt_id: Uuid,
     pub tool_use_id: String,
@@ -73,7 +74,7 @@ pub struct ToolNode {
     pub evidence: Vec<Evidence>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TimelineRow {
     pub position: u64,
     pub observed_at: String,
@@ -85,7 +86,7 @@ pub struct TimelineRow {
     pub corroborates: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct GapRow {
     pub position: u64,
     pub attempt_id: Uuid,
@@ -93,7 +94,7 @@ pub struct GapRow {
 }
 
 /// The replayed run.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Projection {
     pub attempts: Vec<AttemptView>,
     pub agents: Vec<AgentNode>,

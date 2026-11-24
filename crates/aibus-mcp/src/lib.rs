@@ -446,7 +446,7 @@ impl Server {
             }
         }
         match name {
-            "aibus_attach" | "next_step" | "step_result" | "session_present" => {
+            "aibus_attach" | "next_step" | "step_result" | "step_ack" | "step_tool_call" | "session_present" => {
                 self.attach_tool(name, args, client, session)
             }
             "workflow_list" => {

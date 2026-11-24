@@ -283,7 +283,7 @@ async fn an_unanswered_step_times_out_and_a_cancelled_workflow_cancels_its_step(
     assert!(
         notes
             .iter()
-            .any(|n| n.contains("session not interruptible")),
+            .any(|n| n.contains("interrupt queued") || n.contains("before the session pulled it")),
         "{notes:?}"
     );
     assert_eq!(a.steps().last().unwrap().state, StepState::Cancelled);

@@ -24,7 +24,7 @@ aibus is a public repository, so landing these values on `main` counts as publis
 2. Or record the sign-off here (who, date, scope: "the `global.*`, `feedback.*`, `actions.link` and `actions.checkbox` colour values in `@sharedui/design-tokens` may be published under MIT").
 3. If neither happens, replace the iAsBuilt values with independently picked ones (the contrast tests in `contrast.test.ts` are the spec they have to meet) and drop the origin claim above.
 
-Until one of those is done, the sign-off row stays open and the PR stays unmerged.
+**Cleared 2026-11-24 (option 2).** The owner (Roman Goldmann) signed off in chat: the `global.*`, `feedback.*`, `actions.link` and `actions.checkbox` colour values in `@sharedui/design-tokens` may be published under MIT, with the same licence text as libviprs (`shared-ui/LICENSE` is a copy of it). The sign-off row above is closed, and the PR no longer waits on it.
 
 ## Dependencies installed in the workspace (tooling only, nothing shipped)
 

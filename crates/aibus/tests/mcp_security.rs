@@ -418,7 +418,7 @@ fn with_no_flag_nothing_writes_runs_connects_or_spawns() {
         #[cfg(target_os = "linux")]
         {
             let unix = std::fs::read_to_string(format!("/proc/{}/net/unix", c.pid())).unwrap();
-            let mut unnamed = 0;
+            let mut unnamed = std::collections::BTreeSet::new();
             for fd in std::fs::read_dir(format!("/proc/{}/fd", c.pid()))
                 .unwrap()
                 .flatten()
@@ -439,14 +439,18 @@ fn with_no_flag_nothing_writes_runs_connects_or_spawns() {
                     .map(|l| l.split_whitespace().collect::<Vec<_>>())
                     .find(|f| f.get(6) == Some(&inode));
                 match row {
-                    Some(f) if f.len() == 7 && f[3] == "00000000" => unnamed += 1,
+                    // One socket can sit behind two fds (a dup), so they are counted by inode.
+                    Some(f) if f.len() == 7 && f[3] == "00000000" => {
+                        unnamed.insert(inode.to_owned());
+                    }
                     _ => panic!("{p:?}: an open socket {target}"),
                 }
             }
             assert_eq!(
-                unnamed % 2,
+                unnamed.len() % 2,
                 0,
-                "{p:?}: {unnamed} unnamed unix sockets, so one of them is a connection out"
+                "{p:?}: {} unnamed unix sockets, so one of them is a connection out",
+                unnamed.len()
             );
         }
         let (done, lines) = c.finish();

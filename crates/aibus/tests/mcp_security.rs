@@ -409,10 +409,27 @@ fn with_no_flag_nothing_writes_runs_connects_or_spawns() {
         assert!(!sentinel.exists(), "{p:?}: the gate ran");
         // Network: no connection reached the listener, and no socket is open in the server.
         assert!(matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock), "{p:?}: a connection");
+        // Every tokio runtime that has the `process` feature on (the supervisor's) opens
+        // an unnamed pair of connected unix sockets for its signal driver, and both ends stay in the
+        // process. That pair talks to nobody, so it is the one kind of socket that is let through: a
+        // unix socket with no path that is not listening, and an even number of them (a connection
+        // out to a socket would leave one end here and make the count odd). Anything else, an inet
+        // or netlink socket, a named or listening one, fails.
         #[cfg(target_os = "linux")]
-        for fd in std::fs::read_dir(format!("/proc/{}/fd", c.pid())).unwrap().flatten() {
-            let target = std::fs::read_link(fd.path()).map(|t| t.display().to_string()).unwrap_or_default();
-            assert!(!target.starts_with("socket:"), "{p:?}: an open socket {target}");
+        {
+            let unix = std::fs::read_to_string(format!("/proc/{}/net/unix", c.pid())).unwrap();
+            let mut unnamed = 0;
+            for fd in std::fs::read_dir(format!("/proc/{}/fd", c.pid())).unwrap().flatten() {
+                let target = std::fs::read_link(fd.path()).map(|t| t.display().to_string()).unwrap_or_default();
+                let Some(inode) = target.strip_prefix("socket:[").and_then(|t| t.strip_suffix(']')) else { continue };
+                // Num RefCount Protocol Flags Type St Inode [Path]; flag 0x10000 is a listener.
+                let row = unix.lines().skip(1).map(|l| l.split_whitespace().collect::<Vec<_>>()).find(|f| f.get(6) == Some(&inode));
+                match row {
+                    Some(f) if f.len() == 7 && f[3] == "00000000" => unnamed += 1,
+                    _ => panic!("{p:?}: an open socket {target}"),
+                }
+            }
+            assert_eq!(unnamed % 2, 0, "{p:?}: {unnamed} unnamed unix sockets, so one of them is a connection out");
         }
         let (done, lines) = c.finish();
         assert!(done.status.success(), "{p:?}: {}", done.stderr);

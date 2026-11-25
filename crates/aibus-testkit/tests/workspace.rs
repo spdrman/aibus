@@ -281,3 +281,27 @@ fn the_causl_crate_lock_and_deny_follow_the_root() {
     let deny = std::fs::read_to_string(dir.join("deny.toml")).expect("read the causl crate deny.toml");
     assert!(!deny.contains("RUSTSEC-2024-0436"), "the causl crate deny.toml still ignores the paste advisory");
 }
+
+/// Versions the lock file must not go below, because a RustSec advisory was fixed there (#295):
+/// `cargo deny check advisories` found these four on 2026-11-25. A lock that falls back (a bare
+/// `cargo update` with an old pin, a merge that takes an old side) fails here without the network.
+#[test]
+fn the_lock_holds_no_version_with_a_known_advisory_fix_missed() {
+    let floors = [
+        // RUSTSEC-2026-0566, -0569 and -0571 (wasmtime, wasmtime-wasi, wasmtime-wasi-http)
+        ("wasmtime", [36, 0, 21]),
+        // RUSTSEC-2026-0592 (Url::origin stack overflow on nested blob: URLs)
+        ("url", [2, 5, 9]),
+    ];
+    let lock = std::fs::read_to_string(root().join("Cargo.lock")).expect("read Cargo.lock");
+    let mut name = "";
+    for line in lock.lines() {
+        if let Some(n) = line.strip_prefix("name = \"") {
+            name = n.trim_end_matches('"');
+        } else if let Some(v) = line.strip_prefix("version = \"") {
+            let Some((_, floor)) = floors.iter().find(|(n, _)| *n == name) else { continue };
+            let have: Vec<u32> = v.trim_end_matches('"').split('.').map(|p| p.parse().expect("numeric version")).collect();
+            assert!(have.as_slice() >= floor.as_slice(), "{name} {v} in Cargo.lock is below {floor:?}, which has the advisory fix");
+        }
+    }
+}

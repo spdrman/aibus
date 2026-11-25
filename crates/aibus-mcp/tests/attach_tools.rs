@@ -230,6 +230,7 @@ fn while_a_step_is_in_flight_the_same_server_refuses_to_start_more_work() {
         ("session_send", json!({"text": "hello"})),
         ("session_command", json!({"line": "/model haiku"})),
         ("workflow_run", json!({"name": "x", "input": "y"})),
+        ("agent_run", json!({"name": "general", "input": "y"})),
     ] {
         let r = call(&s, tool, a).unwrap();
         assert_eq!(r.is_error, Some(true), "{tool}");

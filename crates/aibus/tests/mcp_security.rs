@@ -381,6 +381,7 @@ fn with_no_flag_nothing_writes_runs_connects_or_spawns() {
             ("workflow_create", json!({ "name": "evil", "scope": "project", "toml": toml })),
             ("workflow_update", json!({ "name": "trap", "scope": "project", "toml": toml, "expected_revision": "0".repeat(64) })),
             ("workflow_run", json!({ "name": "trap", "scope": "project", "input": "x" })),
+            ("agent_run", json!({ "name": "general", "input": "x" })),
             ("run_status", json!({ "run": "run-00000000000000000000000000" })),
             ("run_cancel", json!({ "run": "run-00000000000000000000000000" })),
         ] {

@@ -1,6 +1,6 @@
-//! `workflow_run`, `run_status` and `run_cancel` (#104, behind `--allow run`).
+//! `workflow_run`, `agent_run`, `run_status` and `run_cancel` (#104, #391, behind `--allow run`).
 //!
-//! A run is a child `aibus run --workflow <name> --json` of this process, started with the
+//! A run is a child `aibus run --workflow <name> --json` (or `--agent <name> run`) of this process, started with the
 //! permission mode `dont-ask` on the command line, `AIBUS_I_KNOW` removed from its environment,
 //! the `--allow-tool` patterns as its only pre-approvals, and its input on stdin (never on the
 //! command line, where `ps` shows it to other users) which is then closed, so nothing it does
@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use aibus_core::ids::AgentName;
 use aibus_core::run::result::escape_markers;
 use aibus_core::workflow;
 use aibus_core::Redactor;
@@ -166,6 +167,32 @@ pub(crate) fn tools() -> Vec<Tool> {
                     "input": { "type": "string" },
                 },
                 "required": ["name", "scope", "input"],
+                "additionalProperties": false,
+            })),
+        )
+        .with_raw_output_schema(schema(json!({
+            "$schema": DRAFT_2020_12,
+            "type": "object",
+            "properties": {
+                "run": handle,
+                "status": { "type": "string" },
+                "session": { "type": ["string", "null"] },
+            },
+            "required": ["run", "status", "session"],
+            "additionalProperties": false,
+        })))
+        .with_annotations(ToolAnnotations::new().read_only(false).destructive(false).idempotent(false).open_world(true)),
+        Tool::new(
+            "agent_run",
+            "Start one agent as a run and return a handle at once, with the same caps and the same no-prompt rules as workflow_run. Poll with run_status.",
+            schema(json!({
+                "$schema": DRAFT_2020_12,
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+                    "input": { "type": "string" },
+                },
+                "required": ["name", "input"],
                 "additionalProperties": false,
             })),
         )
@@ -486,7 +513,7 @@ impl Runs {
         &self,
         name: &str,
         input: &str,
-        steps: Vec<String>,
+        steps: Option<Vec<String>>,
         project: &std::path::Path,
         allow_tools: &[String],
         redactor: &Redactor,
@@ -527,8 +554,15 @@ impl Runs {
         }
         // The input goes to the child on stdin (`-`), never as an argument: a command line is
         // readable by every local user for as long as the child lives, and the input may hold a key.
-        cmd.args(["run", "--workflow", name, "--", "-"])
-            .env_remove("AIBUS_I_KNOW")
+        // No workflow steps means one agent, which is its own only step.
+        let agent = steps.is_none();
+        let steps = steps.unwrap_or_else(|| vec![name.to_owned()]);
+        if agent {
+            cmd.args(["--agent", name, "run", "--", "-"]);
+        } else {
+            cmd.args(["run", "--workflow", name, "--", "-"]);
+        }
+        cmd.env_remove("AIBUS_I_KNOW")
             .env("AIBUS_MAX_COST_USD", format!("{left}"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -791,9 +825,9 @@ impl Server {
                 None,
             ));
         }
-        let Some(runs) = &self.runs else {
+        if self.runs.is_none() {
             return Ok(self.fail("this server was started without a way to run workflows"));
-        };
+        }
         if !workflow::valid_name(name) {
             return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$"));
         }
@@ -847,8 +881,55 @@ impl Server {
         }
         let steps = parsed.steps.iter().map(|s| s.agent.to_string()).collect();
 
-        // Only a start that would spawn a child costs a token: a typo in a name or a workflow
-        // that does not validate starts nothing, and the per-call limit still counts it.
+        self.begin(now, run, name, input, Some(steps))
+    }
+
+    /// `agent_run`: the same checks and caps as `workflow_run`, for one agent.
+    pub(crate) fn agent_run(
+        &self,
+        args: &Value,
+        now: Instant,
+        run: &mut Option<String>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let map = arguments("agent_run", args, &["name", "input"], &[])?;
+        let (name, input) = (
+            text("agent_run", map, "name")?,
+            text("agent_run", map, "input")?,
+        );
+        if self.runs.is_none() {
+            return Ok(self.fail("this server was started without a way to run agents"));
+        }
+        if AgentName::new(name).is_err() {
+            return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$"));
+        }
+        if input.trim().is_empty() {
+            return Ok(self.fail("the input is empty"));
+        }
+        let roster = match self.roster() {
+            Ok(r) => r,
+            Err(e) => return Ok(self.fail(e)),
+        };
+        if !roster.iter().any(|a| a.as_str() == name) {
+            return Ok(self.fail(format!("no agent named {name}")));
+        }
+        self.begin(now, run, name, input, None)
+    }
+
+    /// Takes the start token and the run slot, and starts the child (`steps` of a workflow, or
+    /// `None` for one agent). Only a start that would
+    /// spawn a child costs a token: a typo in a name or a workflow that does not validate starts
+    /// nothing, and the per-call limit still counts it.
+    fn begin(
+        &self,
+        now: Instant,
+        run: &mut Option<String>,
+        name: &str,
+        input: &str,
+        steps: Option<Vec<String>>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let Some(runs) = &self.runs else {
+            return Ok(self.fail("this server was started without a way to run workflows"));
+        };
         let limited = self
             .run_limiter
             .lock()

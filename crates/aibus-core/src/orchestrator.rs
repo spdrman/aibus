@@ -111,6 +111,26 @@ pub fn parse_mention(text: &str) -> Option<(AgentName, &str)> {
     Some((name.parse().ok()?, rest.trim_start()))
 }
 
+/// Every agent a prompt names with `@agent-<name>`, and the text each is given. One mention at the
+/// start is `parse_mention`: the name and the rest. Two or more mentions anywhere (`Use
+/// @agent-docs and @agent-review on this`) give each named agent the whole prompt, since no
+/// single piece of it belongs to one of them. The same name twice is one delegate (#390).
+pub fn parse_mentions(text: &str) -> Vec<(AgentName, &str)> {
+    let mut names: Vec<AgentName> = Vec::new();
+    for word in text.split_whitespace() {
+        let word = word.trim_end_matches(|c: char| c.is_ascii_punctuation() && c != '-');
+        if let Some(name) = word.strip_prefix("@agent-").and_then(|n| n.parse::<AgentName>().ok()) {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    if names.len() < 2 {
+        return parse_mention(text).into_iter().collect();
+    }
+    names.into_iter().map(|n| (n, text.trim())).collect()
+}
+
 /// What a `delegate` call may name: the workers, and the text that goes in its description.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Roster {
@@ -118,7 +138,8 @@ pub struct Roster {
     pub agents: Vec<(AgentName, bool)>,
     /// One `- name: description` line per non-built-in definition (01 section 1.5).
     pub text: String,
-    pub builtins: Vec<AgentName>,
+    /// The built-in workers with the first line of their description.
+    pub builtins: Vec<(AgentName, String)>,
     /// Agents whose definition says `isolation: worktree`.
     pub isolated: Vec<AgentName>,
 }
@@ -131,7 +152,7 @@ impl Roster {
             text: roster::text(defs.clone()),
             builtins: workers()
                 .filter(|d| d.source.scope == Scope::Builtin)
-                .map(|d| d.name.clone())
+                .map(|d| (d.name.clone(), d.description.lines().next().unwrap_or_default().trim().to_owned()))
                 .collect(),
             isolated: workers()
                 .filter(|d| d.isolation == Isolation::Worktree)

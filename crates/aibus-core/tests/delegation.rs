@@ -121,7 +121,7 @@ impl Launcher for TestLauncher {
                 context: Vec::new(),
                 background: spec.background,
                 max_spawn_depth: 3,
-                forced: None,
+                forced: Vec::new(),
                 start: Start::New,
                 worktree: None,
             },
@@ -256,7 +256,7 @@ impl Rig {
             .unwrap();
     }
 
-    fn start_lead(&mut self, prompt: &str, forced: Option<(&str, &str)>) {
+    fn start_lead(&mut self, prompt: &str, forced: &[(&str, &str)]) {
         self.lead_started();
         let handle = spawn(
             RunConfig {
@@ -276,9 +276,10 @@ impl Rig {
                 context: Vec::new(),
                 background: false,
                 max_spawn_depth: 3,
-                forced: forced.map(|(a, r)| {
-                    ("delegate".into(), json!({"agent": a, "prompt": r, "background": false}))
-                }),
+                forced: forced
+                    .iter()
+                    .map(|(a, r)| ("delegate".into(), json!({"agent": a, "prompt": r, "background": false})))
+                    .collect(),
                 start: Start::New,
                 worktree: None,
             },
@@ -317,7 +318,7 @@ impl Rig {
     }
 
     async fn run(&mut self, prompt: &str) -> Out {
-        self.start_lead(prompt, None);
+        self.start_lead(prompt, &[]);
         self.pump(|_, _, _| {}).await
     }
 
@@ -473,7 +474,7 @@ async fn ctrl_b_moves_a_foreground_wait_to_the_background() {
             .chain([delay(10), text("moved on"), end(), text("final")]),
     );
     let mut rig = Rig::new(Setup::default(), lead, |_| script([delay(5), text("child report")]));
-    rig.start_lead("go", None);
+    rig.start_lead("go", &[]);
     let lead = rig.lead;
     let mut pressed = false;
     let out = rig
@@ -518,7 +519,7 @@ async fn a_background_runs_permission_prompt_names_the_run_and_a_deny_lets_it_ca
         )
     };
     let mut rig = Rig::new(set, lead, move |_| child_script());
-    rig.start_lead("go", None);
+    rig.start_lead("go", &[]);
     let mut asked = Vec::new();
     let out = rig
         .pump(|_, orch, msg| {
@@ -761,7 +762,7 @@ async fn a_mention_opens_the_lead_with_a_delegate_and_the_lead_still_gets_the_re
     let mut rig = Rig::new(Setup::default(), script([text("thanks")]), |_| {
         script([text("the report")])
     });
-    rig.start_lead("@agent-explore map the repo", Some(("explore", "map the repo")));
+    rig.start_lead("@agent-explore map the repo", &[("explore", "map the repo")]);
     let out = rig.pump(|_, _, _| {}).await;
 
     let reqs = rig.lead_requests();
@@ -786,4 +787,35 @@ async fn a_mention_opens_the_lead_with_a_delegate_and_the_lead_still_gets_the_re
     assert_eq!(out.finished(child).summary, "the report");
     let lead = out.finished(rig.lead);
     assert_eq!((lead.status, lead.turns, lead.summary.as_str()), (RunStatus::Completed, 1, "thanks"));
+}
+
+#[tokio::test]
+async fn two_mentions_open_the_lead_with_two_delegates_and_it_gets_both_reports() {
+    let _clock = FakeClock::new();
+    let mut rig = Rig::new(Setup::default(), script([text("thanks")]), |_| {
+        script([text("a report")])
+    });
+    let prompt = "Use @agent-explore and @agent-plan on the parser";
+    rig.start_lead(prompt, &[("explore", prompt), ("plan", prompt)]);
+    rig.pump(|_, _, _| {}).await;
+
+    let reqs = rig.lead_requests();
+    assert_eq!(reqs.len(), 1, "the delegates stood in for the first request");
+    let m = &reqs[0].request.messages;
+    assert_eq!(m.len(), 3, "the task, the turn with two delegate calls, their results");
+    let agents: Vec<String> = m[1]
+        .blocks
+        .iter()
+        .map(|b| match b {
+            ContentBlock::ToolUse { name, input, .. } => {
+                assert_eq!(name.as_str(), "delegate");
+                input["agent"].as_str().unwrap().to_owned()
+            }
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(agents, ["explore", "plan"]);
+    assert_eq!(results(&reqs[0]).len(), 2);
+    assert_eq!(rig.launched().len(), 2);
+    assert!(rig.launched().iter().all(|l| l.parent == Some(rig.lead)));
 }

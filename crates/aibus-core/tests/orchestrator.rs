@@ -374,6 +374,20 @@ fn a_mention_is_the_name_and_the_rest() {
 }
 
 #[test]
+fn mentions_anywhere_are_one_delegate_each_and_one_at_the_start_still_takes_the_rest() {
+    let m = |t: &str| -> Vec<(String, String)> {
+        parse_mentions(t).into_iter().map(|(a, r)| (a.to_string(), r.to_owned())).collect()
+    };
+    assert_eq!(m("@agent-explore find it"), [("explore".into(), "find it".into())]);
+    assert!(m("please @agent-explore this").is_empty(), "one mention, not at the start, is no delegate");
+    let both = "Use @agent-docs, and @agent-review.";
+    assert_eq!(m(both), [("docs".into(), both.into()), ("review".into(), both.into())]);
+    assert_eq!(m("@agent-explore x @agent-explore y").len(), 1, "the same name twice is one delegate");
+    assert!(m("@agent-Bad @agent-worse").is_empty());
+    assert!(m("mail me@agent-explore.com and you@agent-plan.org").is_empty(), "inside a word is not a mention");
+}
+
+#[test]
 fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
     let mut a = app();
     a.step(Msg::SubmitPrompt { text: "hello".into() }).unwrap();

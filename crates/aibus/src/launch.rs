@@ -506,7 +506,7 @@ impl Launcher for ChildLauncher {
                 context: Vec::new(),
                 background: spec.background,
                 max_spawn_depth: self.max_spawn_depth,
-                forced: forced.map(|(tool, input)| (tool.into(), input)),
+                forced: forced.into_iter().map(|(tool, input)| (tool.into(), input)).collect(),
                 start: Start::New,
                 worktree,
             },

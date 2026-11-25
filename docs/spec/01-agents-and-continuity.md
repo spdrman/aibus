@@ -40,7 +40,7 @@ Names are `snake_case` in aibus. The loader also accepts the Claude Code `camelC
 | `name` | yes | string, `[a-z0-9][a-z0-9_-]{0,63}`, no `:` | | Unique id inside its scope. Hooks receive it as `agent_type`. |
 | `description` | yes | string | | Tells the lead when to delegate. Counted toward the 15,000 token roster budget (1.5). |
 | `role` | no | `lead`, `worker`, `advisor`, `router` | `worker` | See 2. |
-| `tools` | no | list or comma string | all worker-available tools | Allow-list. Entries are tool names, optionally with a specifier: `bash(git *)`. |
+| `tools` | no | list or comma string | all worker-available tools | Allow-list. Entries are tool names, optionally with a specifier: `bash(git *)`. Claude Code spellings are read as ours: `WebFetch` is `web_fetch`, `Task` and `Agent` are `delegate`, `mcp__server__tool` is `mcp:server:tool` (`mcp__server` is `mcp:server:*`). A name with no counterpart (`TodoWrite`, `NotebookEdit`, `WebSearch`) is a warning when the file is read, not an error, and does nothing. |
 | `disallowed_tools` | no | list | `[]` | Deny-list, applied before `tools`. A specifier entry still removes the whole tool, matching Claude Code. |
 | `model` | no | alias, full id, or `inherit` | `inherit` | See 3. |
 | `account` | no | account name | inherited | See 03 section 4. |
@@ -101,7 +101,7 @@ Built-ins can be overridden by a project or user definition with the same name, 
 
 ### 1.4 Validation
 
-`aibus agent validate [path]` checks: frontmatter parses, required fields present, `name` matches the regex and is unique within scope, every tool in `tools` is a known tool or `mcp:*` pattern, `model` resolves on some account, `account` exists, hook commands exist and are executable, `checkpoints` only on advisors, `router` only on routers. Exit code 3 on error.
+`aibus agent validate [path]` checks: frontmatter parses, required fields present, `name` matches the regex and is unique within scope, every tool in `tools` is a known tool or `mcp:*` pattern (an unknown name is a warning), `model` resolves on some account, `account` exists, hook commands exist and are executable, `checkpoints` only on advisors, `router` only on routers. Exit code 3 on error.
 
 ### 1.5 The roster budget
 
@@ -128,7 +128,7 @@ The lead's `delegate` tool description embeds the roster: every non-built-in def
 
 - **lead**: the only role that receives user prompts and the only one that may call `delegate`, `send_message` and `resume_run` by default. One lead per session.
 - **worker**: a sub-agent. Starts with a fresh context (section 5). Can delegate too, up to the nesting depth.
-- **advisor**: subscribed to the session's event stream. At a checkpoint it receives a compacted view of the entire session so far (every tool call, every result, every message) and returns advice. The advice is injected into the lead's next turn as a system message prefixed `[advisor]`. It cannot call editing tools even if listed. The lead applies the advice; the advisor never writes code (frame f01, "never writes code itself. Sonnet applies the advice.").
+- **advisor**: subscribed to the session's event stream. At a checkpoint it receives a compacted view of the entire session so far (every tool call, every result, every message) and returns advice. The advice is injected into the lead's next turn as a system message prefixed `[advisor]`. It cannot call editing tools even if listed. The lead applies the advice; the advisor never writes code (frame f01, "never writes code itself. Sonnet applies the advice."). Note that "advisor" here is the reviewer at checkpoints. The "advisor model" in the Claude Code post, a principal with an evolving roster, is a different thing (H1.5 of EPIC H, #387); `examples/agents/principal.md` is the starting profile for a lead that only routes, reviews and synthesises.
 - **router**: a small, cheap model answering fixed-form questions (`which_file`, `which_tool`, `retry_or_stop`, plus definition-supplied ones) with a label and a probability. Section 7.2.
 
 ## 3. Model selection
@@ -172,7 +172,7 @@ The model chooses based on the roster descriptions and the task. aibus does not 
 
 ### 4.2 Explicit
 
-- In the prompt: `@agent-code-reviewer look at src/auth.rs`. The `@agent-<name>` token is parsed by aibus and becomes a forced `delegate` call with the rest of the prompt; the lead still receives the result.
+- In the prompt: `@agent-code-reviewer look at src/auth.rs`. The `@agent-<name>` token is parsed by aibus and becomes a forced `delegate` call with the rest of the prompt; the lead still receives the result. With two or more mentions anywhere in the prompt (`Use @agent-docs and @agent-review on this`), each named agent gets one forced `delegate` with the whole prompt, and the lead receives every result.
 - Whole session as one agent: `aibus --agent code-reviewer`. The named definition becomes the lead; its `initial_prompt` is auto-submitted.
 - From the TUI: the command palette (`:`) offers `delegate <name>`.
 - From the CLI: `aibus run --agent <name> "<prompt>"` runs it as the lead of a headless session.

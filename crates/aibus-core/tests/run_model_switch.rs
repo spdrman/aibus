@@ -52,7 +52,7 @@ async fn the_request_after_set_model_carries_the_new_model_and_the_in_flight_one
         context: Vec::new(),
         background: false,
         max_spawn_depth: 3,
-        forced: None,
+        forced: Vec::new(),
         start: Start::New,
         worktree: None,
     };

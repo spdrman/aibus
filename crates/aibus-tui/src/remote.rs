@@ -237,6 +237,8 @@ pub fn msgs(
         | Ask::Attach { .. }
         | Ask::NextStep
         | Ask::StepResult { .. }
+        | Ask::StepAck { .. }
+        | Ask::StepToolCall { .. }
         | Ask::Present { .. } => Ok(Vec::new()),
         Ask::Send { text } => {
             let text = text.trim();
@@ -492,6 +494,8 @@ pub fn handle<G: Graph>(
                 Ask::Attach { .. }
                 | Ask::NextStep
                 | Ask::StepResult { .. }
+                | Ask::StepAck { .. }
+                | Ask::StepToolCall { .. }
                 | Ask::Present { .. } => {
                     let answer = attached(app, ui, &name, &ask, busy, step)?;
                     if let Err(why) = &answer {
@@ -646,6 +650,17 @@ fn attached<G: Graph>(
         Ask::NextStep => {
             match ui.attach.next_step(client, now) {
                 Ok(out) => {
+                    if let Some(token) = out["interrupt"]["token"].as_str() {
+                        note_row(
+                            app,
+                            step,
+                            client,
+                            format!(
+                                "attached ({client}): step {} interrupt shown to the session",
+                                short(token, 40)
+                            ),
+                        )?;
+                    }
                     if let Some(token) = out["step"]["token"].as_str() {
                         note_row(app, step, client, format!("attached ({client}): step {token} delivered, waiting for its result"))?;
                     }
@@ -667,6 +682,40 @@ fn attached<G: Graph>(
                     short(summary, 200)
                 );
                 note_row(app, step, client, line)?;
+                Ok(out)
+            }
+            Err(why) => Err(why),
+        },
+        Ask::StepAck { token } => match ui.attach.step_ack(client, token, now) {
+            Ok(out) => {
+                let what = if out["interrupt"] == true {
+                    "interrupt shown to the session"
+                } else {
+                    "started"
+                };
+                note_row(
+                    app,
+                    step,
+                    client,
+                    format!("attached ({client}): step {} {what}", short(token, 40)),
+                )?;
+                Ok(out)
+            }
+            Err(why) => Err(why),
+        },
+        Ask::StepToolCall { token, name } => match ui.attach.tool_call(client, token, name, now) {
+            Ok(out) => {
+                if out["interrupt"] == true {
+                    note_row(
+                        app,
+                        step,
+                        client,
+                        format!(
+                            "attached ({client}): step {} interrupt shown to the session",
+                            short(token, 40)
+                        ),
+                    )?;
+                }
                 Ok(out)
             }
             Err(why) => Err(why),

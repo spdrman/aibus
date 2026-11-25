@@ -1,0 +1,26 @@
+{
+  "name": "@sharedui/react-primitives",
+  "version": "0.1.0",
+  "description": "Accessible, domain-neutral React primitives: button, form controls, dialog and tabs, themed by @sharedui/design-tokens.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": ["*.css"],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": ["dist"],
+  "peerDependencies": {
+    "@sharedui/design-tokens": "^0.1.0",
+    "react": "^18.3.0 || ^19.0.0",
+    "react-dom": "^18.3.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@sharedui/design-tokens": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').mkdirSync('dist',{recursive:true});require('fs').copyFileSync('src/styles.css','dist/styles.css')\""
+  }
+}

@@ -37,6 +37,10 @@ pub enum Ask {
         status: String,
         summary: String,
     },
+    /// The attached session says it began the step it pulled (#346).
+    StepAck { token: String },
+    /// The attached session reports one tool call (by name) it made for its step (#346).
+    StepToolCall { token: String, name: String },
     /// A read-only panel on the screen: a message and a table, never a screen with live keys.
     Present {
         title: String,

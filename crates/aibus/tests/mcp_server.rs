@@ -181,7 +181,7 @@ fn an_unknown_tool_is_minus_32602() {
 
 #[test]
 fn the_default_flags_list_no_write_or_run_tool() {
-    let off = ["workflow_create", "workflow_update", "workflow_run", "run_status", "run_cancel"];
+    let off = ["workflow_create", "workflow_update", "workflow_run", "agent_run", "run_status", "run_cancel"];
     for p in Protocol::BOTH {
         let home = xdg_temp();
         let mut c = client(home.path(), p, &[]);
@@ -354,7 +354,7 @@ fn the_run_status_cancel_scenario_matches_its_golden_transcript() {
         let mut c = client(home.path(), p, &["--allow", "run"]);
         let names: Vec<String> =
             c.list_tools().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
-        for n in ["workflow_run", "run_status", "run_cancel"] {
+        for n in ["workflow_run", "agent_run", "run_status", "run_cancel"] {
             assert!(names.iter().any(|x| x == n), "{p:?}: {n} in {names:?}");
         }
         // Read-only until the first run: no session exists yet.

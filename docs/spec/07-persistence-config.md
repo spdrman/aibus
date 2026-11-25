@@ -188,6 +188,14 @@ read_max_lines = 2000
 session_start = [{ command = ".aibus/hooks/load-context.sh", timeout = 10 }]
 pre_tool_use = [{ matcher = "bash", command = ".aibus/hooks/guard.sh" }]
 
+[[schedule]]            # a run an outside scheduler starts; `aibus schedule print` renders it (#391)
+name = "morning-triage"
+agent = "explore"
+prompt = "summarise what changed overnight"
+cron = "30 7 * * 1-5"   # minute hour day-of-month month day-of-week; numbers, *, a-b, a,b, */n
+project = "/home/me/proj"
+max_cost_usd = 2.5      # optional, becomes AIBUS_MAX_COST_USD for the run
+
 [persist]
 snapshot_every_commits = 64
 snapshot_every_secs = 30

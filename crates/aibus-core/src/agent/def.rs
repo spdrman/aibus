@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use smol_str::SmolStr;
 use yaml_rust2::{Yaml, YamlLoader};
 
+use super::validate::KNOWN_TOOLS;
 use super::{
     AgentDef, CheckpointSpec, DefSource, Effort, HookKind, HookSet, HookSpec, ModelRef,
     PermissionMode, Role, RouterSpec, ToolPattern, ToolPolicy,

@@ -68,13 +68,14 @@ pub fn commands_send(data: &[u8]) {
     match sent {
         Sent::Bad(why) => assert!(!echoes(&why), "a refusal repeats the words after the provider: {why}"),
         Sent::Msgs(msgs) | Sent::Login(_, msgs) => {
-            // Accepted: the command is one that /help lists, and a prompt only for the two the
-            // reducer reads from a prompt.
+            // Accepted: the command is one that /help lists, and a prompt only for the commands the
+            // reducer reads from a prompt: /fork and /compact, and /workflow, which as the first
+            // line of a session starts the lead with the workflow call.
             let name = format!("/{word}");
             assert!(help_lines().iter().any(|(entry, _)| entry.split(' ').next() == Some(name.as_str())), "{name} is accepted and not in /help");
             for m in &msgs {
                 if matches!(m, Msg::SubmitPrompt { .. }) {
-                    assert!(matches!(word, "fork" | "compact"), "/{word} became a prompt: {m:?}");
+                    assert!(matches!(word, "fork" | "compact" | "workflow"), "/{word} became a prompt: {m:?}");
                 }
             }
             assert!(!echoes(&format!("{msgs:?}")), "{msgs:?} carries the words after the provider");

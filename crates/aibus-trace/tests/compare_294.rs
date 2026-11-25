@@ -32,6 +32,12 @@ struct Shape {
     gap: bool,
     /// Keep the prompt of the delegation and the message text as payload objects.
     retain: bool,
+    /// The sizes of the message chunks.
+    chunks: Vec<u64>,
+    /// A second attempt of the run, by this provider, that reports nothing at all.
+    extra_attempt: Option<&'static str>,
+    /// Control, bidi and C1 characters in the unit and source of every usage metric.
+    hostile_usage: bool,
 }
 
 impl Shape {
@@ -48,6 +54,9 @@ impl Shape {
             artifact: false,
             gap: false,
             retain: false,
+            chunks: vec![42],
+            extra_attempt: None,
+            hostile_usage: false,
         }
     }
 }
@@ -157,18 +166,20 @@ fn build(seed: u128, s: &Shape) -> Built {
             &none,
         );
     }
-    add(
-        EventKind::MessageChunk,
-        Some("lead"),
-        None,
-        200,
-        json!({ "bytes": 42, "role": "assistant" }),
-        &|e| {
-            if s.retain {
-                e.payload_ref = Some(format!("local://objects/{REPLY}.json"));
-            }
-        },
-    );
+    for (i, bytes) in s.chunks.iter().enumerate() {
+        add(
+            EventKind::MessageChunk,
+            Some("lead"),
+            None,
+            200 + i as u64,
+            json!({ "bytes": bytes, "role": "assistant" }),
+            &|e| {
+                if s.retain && i == 0 {
+                    e.payload_ref = Some(format!("local://objects/{REPLY}.json"));
+                }
+            },
+        );
+    }
     if s.artifact {
         add(
             EventKind::ArtifactCreated,
@@ -189,7 +200,12 @@ fn build(seed: u128, s: &Shape) -> Built {
             &none,
         );
     }
-    let metric = |name: &str, v: Option<f64>, unit: &str, q: &str| json!({ "name": name, "value": v, "unit": unit, "quality": q, "source": "result.usage" });
+    let (unit_tail, source) = if s.hostile_usage {
+        ("\u{9b}x", "result\u{202e}.usage")
+    } else {
+        ("", "result.usage")
+    };
+    let metric = |name: &str, v: Option<f64>, unit: &str, q: &str| json!({ "name": name, "value": v, "unit": format!("{unit}{unit_tail}"), "quality": q, "source": source });
     let mut metrics = Vec::new();
     if let Some(t) = s.tokens {
         metrics.push(metric("input_tokens", Some(t), "tokens", "reported"));
@@ -221,6 +237,35 @@ fn build(seed: u128, s: &Shape) -> Built {
         json!({ "status": "completed" }),
         &none,
     );
+
+    if let Some(provider) = s.extra_attempt {
+        let second = AttemptRef {
+            workflow_run_id: Uuid::from_u128(seed),
+            attempt_id: Uuid::from_u128(seed + 2),
+            parent_attempt_id: None,
+            provider_extension: provider.into(),
+        };
+        for (k, kind) in [EventKind::AttemptStarted, EventKind::AttemptCompleted]
+            .into_iter()
+            .enumerate()
+        {
+            n += 1;
+            let at = SystemTime::UNIX_EPOCH
+                + Duration::from_millis(1_800_000_000_000 + 5_000 + k as u64);
+            let id = ids.next(at, &[&n.to_le_bytes(), &seed.to_le_bytes()]);
+            let mut e = TraceEvent::new(
+                &second,
+                id,
+                kind,
+                Origin::CliStream,
+                Visibility::Observed,
+                at,
+                "test/1",
+            );
+            e.data = json!({ "status": "completed" });
+            evs.push(e);
+        }
+    }
 
     let dir = tempfile::tempdir().unwrap();
     let mut body = Vec::new();
@@ -307,6 +352,12 @@ fn result(
     }
 }
 
+/// `r` as the result of the run built from `seed`.
+fn bound(mut r: EvaluationResult, seed: u128) -> EvaluationResult {
+    r.workflow_run_ids = vec![Uuid::from_u128(seed)];
+    r
+}
+
 fn traces() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/claude-code/traces-284")
 }
@@ -330,8 +381,8 @@ fn one_comparison_answers_what_ran_why_routed_what_each_made_what_changed_and_wh
     let mut sb = Shape::base();
     sb.tools.push(("Bash", "t4"));
     let (a, b) = (build(10, &sa), build(20, &sb));
-    let ra = result("a", 3, 1, 0, "abc123");
-    let rb = result("b", 4, 0, 0, "abc123");
+    let ra = bound(result("a", 3, 1, 0, "abc123"), 10);
+    let rb = bound(result("b", 4, 0, 0, "abc123"), 20);
     let c = compare_runs(
         &RunInput {
             id: "run-a",
@@ -516,7 +567,10 @@ fn runs_are_never_called_comparable_while_something_about_them_is_unknown() {
     let mut s = Shape::base();
     s.plan = Some(r#"{"plan_hash":"sha256:same","steps":[]}"#);
     let (a, b) = (build(10, &s), build(20, &s));
-    let (ra, rb) = (result("a", 1, 0, 0, "abc"), result("b", 1, 0, 0, "abc"));
+    let (ra, rb) = (
+        bound(result("a", 1, 0, 0, "abc"), 10),
+        bound(result("b", 1, 0, 0, "abc"), 20),
+    );
     let c = compare_runs(
         &RunInput {
             id: "a",
@@ -531,7 +585,7 @@ fn runs_are_never_called_comparable_while_something_about_them_is_unknown() {
     );
     assert_eq!(c.comparable, Comparable::Yes, "{:?}", c.environment);
     // A different revision breaks it again.
-    let rc = result("b", 1, 0, 0, "def");
+    let rc = bound(result("b", 1, 0, 0, "def"), 20);
     let c = compare_runs(
         &RunInput {
             id: "a",
@@ -563,7 +617,7 @@ fn quality_is_a_gap_without_a_result_and_not_run_checks_never_count_as_passes() 
         "{}",
         render(&c)
     );
-    let ra = result("a", 2, 0, 2, "abc");
+    let ra = bound(result("a", 2, 0, 2, "abc"), 10);
     match side(&RunInput {
         id: "a",
         rec: &a.rec,
@@ -821,4 +875,224 @@ fn a_damaged_trace_says_so_in_the_replay_caveats() {
     fs::write(empty.path().join("events.jsonl"), b"").unwrap();
     let r = reproducibility("e", &Recorded::load(empty.path()).unwrap());
     assert!(!r.replay.available);
+}
+
+// ---- round 1 review of #401 ----
+
+/// Both runs with the same plan and a result each from the same revision: comparable.
+fn yes_pair() -> (Built, Built, EvaluationResult, EvaluationResult) {
+    let mut s = Shape::base();
+    s.plan = Some(r#"{"plan_hash":"sha256:same","steps":[]}"#);
+    (
+        build(10, &s),
+        build(20, &s),
+        bound(result("a", 1, 0, 0, "abc"), 10),
+        bound(result("b", 1, 0, 0, "abc"), 20),
+    )
+}
+
+fn with<'a>(
+    a: (&'a Built, &'a EvaluationResult),
+    b: (&'a Built, &'a EvaluationResult),
+) -> aibus_trace::compare::Comparison {
+    compare_runs(
+        &RunInput {
+            id: "a",
+            rec: &a.0.rec,
+            result: Some(a.1),
+        },
+        &RunInput {
+            id: "b",
+            rec: &b.0.rec,
+            result: Some(b.1),
+        },
+    )
+}
+
+#[test]
+fn a_result_of_another_run_or_of_another_version_is_never_taken_for_the_run() {
+    let (a, b, ra, rb) = yes_pair();
+    assert_eq!(
+        with((&a, &ra), (&b, &rb)).comparable,
+        Comparable::Yes,
+        "the bound pair is the baseline"
+    );
+    // A result whose workflow_run_ids name some other run.
+    let foreign = bound(result("b", 1, 0, 0, "abc"), 999);
+    let c = with((&a, &ra), (&b, &foreign));
+    assert!(
+        !matches!(c.comparable, Comparable::Yes),
+        "{:?}",
+        c.comparable
+    );
+    assert!(
+        matches!(&c.b.quality, Known::Gap(why) if why.contains("workflow_run_ids")),
+        "{:?}",
+        c.b.quality
+    );
+    assert!(
+        matches!(&c.b.git_revision, Known::Gap(_)),
+        "a foreign result must not supply the revision: {:?}",
+        c.b.git_revision
+    );
+    // A result of a version this build does not read.
+    let mut old = bound(result("b", 1, 0, 0, "abc"), 20);
+    old.result_version = RESULT_VERSION + 98;
+    let c = with((&a, &ra), (&b, &old));
+    assert!(
+        !matches!(c.comparable, Comparable::Yes),
+        "{:?}",
+        c.comparable
+    );
+    assert!(
+        matches!(&c.b.quality, Known::Gap(why) if why.contains("result_version")),
+        "{:?}",
+        c.b.quality
+    );
+    // A result that names no run at all is not bound to this one either.
+    let mut unbound = result("b", 1, 0, 0, "abc");
+    unbound.workflow_run_ids = vec![];
+    let c = with((&a, &ra), (&b, &unbound));
+    assert!(
+        !matches!(c.comparable, Comparable::Yes),
+        "{:?}",
+        c.comparable
+    );
+}
+
+#[test]
+fn results_of_different_cases_make_the_runs_not_comparable() {
+    let (a, b, ra, mut rb) = yes_pair();
+    rb.case_id = "case-2".into();
+    let c = with((&a, &ra), (&b, &rb));
+    match &c.comparable {
+        Comparable::No(why) => assert!(why.iter().any(|w| w.contains("case_id")), "{why:?}"),
+        other => panic!("{other:?}"),
+    }
+    let (a, b, ra, mut rb) = yes_pair();
+    rb.suite_version = 2;
+    match &with((&a, &ra), (&b, &rb)).comparable {
+        Comparable::No(why) => assert!(why.iter().any(|w| w.contains("suite_version")), "{why:?}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn an_attempt_that_reported_no_usage_makes_the_run_total_unknown() {
+    let mut s = Shape::base();
+    s.extra_attempt = Some("org.aibus.test");
+    let (a, b) = (build(10, &s), build(20, &Shape::base()));
+    let sa = side(&input("a", &a));
+    assert_eq!(sa.attempts, 2);
+    for name in ["cost_usd", "input_tokens"] {
+        let m = sa.usage.iter().find(|m| m.name == name).unwrap();
+        assert_eq!(
+            m.value, None,
+            "{name}: one attempt's number is not the run's"
+        );
+        assert_eq!(m.quality, DataQuality::Unknown, "{name}");
+        assert!(m.source.contains("1 of 2"), "{name}: {}", m.source);
+    }
+    let c = compare_runs(&input("a", &a), &input("b", &b));
+    let cost = c.deltas.iter().find(|d| d.metric == "cost_usd").unwrap();
+    assert!(matches!(&cost.change, Known::Gap(_)), "{:?}", cost.change);
+    let t = render(&c);
+    assert!(
+        t.lines()
+            .any(|l| l.contains("cost_usd") && l.contains("1 of 2 attempts")),
+        "{t}"
+    );
+}
+
+#[test]
+fn a_hostile_usage_metric_is_cleaned_in_the_inspector_json_and_text() {
+    let mut s = Shape::base();
+    s.hostile_usage = true;
+    let b = build(10, &s);
+    for node in ["lead".to_owned(), Uuid::from_u128(11).to_string()] {
+        let v = inspector(&b.rec, &node).unwrap();
+        let json = serde_json::to_string(&v).unwrap();
+        for bad in ['\u{202e}', '\u{9b}', '\u{1b}'] {
+            assert!(!json.contains(bad), "{node}: {bad:?} in {json}");
+        }
+        assert!(
+            json.contains("\\u{202e}") && json.contains("\\u{9b}"),
+            "{node}: {json}"
+        );
+    }
+    let t = render(&compare_runs(&input("a", &b), &input("b", &b)));
+    assert!(!t.contains('\u{202e}') && !t.contains('\u{9b}'), "{t:?}");
+}
+
+#[test]
+fn a_trace_read_with_skipped_lines_says_so_in_the_comparison() {
+    let (a, b, ra, rb) = yes_pair();
+    assert_eq!(with((&a, &ra), (&b, &rb)).comparable, Comparable::Yes);
+    let mut raw = fs::read(a.dir.path().join("events.jsonl")).unwrap();
+    raw.extend_from_slice(b"not json\n{\"schema_version\":99}\n{\"torn");
+    fs::write(a.dir.path().join("events.jsonl"), raw).unwrap();
+    let a2 = Built {
+        rec: Recorded::load(a.dir.path()).unwrap(),
+        dir: a.dir,
+    };
+    let c = with((&a2, &ra), (&b, &rb));
+    let t = render(&c);
+    assert!(
+        t.contains("1 corrupt") && t.contains("another schema") && t.contains("torn"),
+        "{t}"
+    );
+    let j = serde_json::to_value(&c).unwrap();
+    assert_eq!(j["a"]["corrupt_lines"], 1, "{j}");
+    assert_eq!(j["a"]["unsupported_schema"], 1, "{j}");
+    assert_eq!(j["b"]["corrupt_lines"], 0, "{j}");
+    assert!(
+        !matches!(c.comparable, Comparable::Yes),
+        "a partly read trace is not known to be like the other: {:?}",
+        c.comparable
+    );
+}
+
+#[test]
+fn message_sizes_that_overflow_are_a_gap_and_never_a_panic() {
+    let mut s = Shape::base();
+    s.chunks = vec![u64::MAX, u64::MAX];
+    let b = build(10, &s);
+    let o = side(&input("a", &b)).outputs;
+    assert_eq!(o.message_chunks, 2);
+    assert!(
+        matches!(&o.message_bytes, Known::Gap(why) if why.contains("overflow")),
+        "{:?}",
+        o.message_bytes
+    );
+}
+
+#[test]
+fn environment_values_are_compared_whole_and_not_as_they_are_cut_for_display() {
+    let long = |tail: char| -> &'static str {
+        Box::leak(format!("{}{tail}", "m".repeat(200)).into_boxed_str())
+    };
+    let (mut sa, mut sb) = (Shape::base(), Shape::base());
+    sa.model = long('a');
+    sb.model = long('b');
+    let (a, b) = (build(10, &sa), build(20, &sb));
+    let c = compare_runs(&input("a", &a), &input("b", &b));
+    assert_eq!(env_row(&c, "model").verdict, EnvVerdict::Differs);
+    // A hidden character is not the same value as its spelled-out escape.
+    sa.model = "x\u{202e}y";
+    sb.model = r"x\u{202e}y";
+    let (a, b) = (build(10, &sa), build(20, &sb));
+    let c = compare_runs(&input("a", &a), &input("b", &b));
+    assert_eq!(env_row(&c, "model").verdict, EnvVerdict::Differs);
+}
+
+#[test]
+fn a_run_that_spans_two_providers_is_not_the_same_as_one_of_the_first() {
+    let mut sb = Shape::base();
+    sb.extra_attempt = Some("org.other");
+    let (a, b) = (build(10, &Shape::base()), build(20, &sb));
+    let c = compare_runs(&input("a", &a), &input("b", &b));
+    assert_eq!(
+        env_row(&c, "provider_extension").verdict,
+        EnvVerdict::Differs
+    );
 }

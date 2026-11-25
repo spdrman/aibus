@@ -199,3 +199,25 @@ fn a_hostile_trace_reaches_the_screen_as_text() {
         "{text}"
     );
 }
+
+#[test]
+fn slash_runs_compare_says_when_a_trace_was_only_partly_read() {
+    let root = tempfile::tempdir().unwrap();
+    for name in ["06-basic", "07-deleg"] {
+        let dir = root.path().join(name);
+        std::fs::create_dir(&dir).unwrap();
+        let mut events = std::fs::read(traces().join(name).join("events.jsonl")).unwrap();
+        if name == "07-deleg" {
+            events.extend_from_slice(b"not json\n");
+        }
+        std::fs::write(dir.join("events.jsonl"), events).unwrap();
+    }
+    let mut r = rig();
+    line(&mut r, root.path(), "/runs compare 06-basic 07-deleg");
+    let text = r.text();
+    assert!(
+        text.contains("comparison of 06-basic (a) and 07-deleg (b)"),
+        "{text}"
+    );
+    assert!(text.contains("1 corrupt"), "{text}");
+}

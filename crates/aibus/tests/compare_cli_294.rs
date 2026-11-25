@@ -69,6 +69,11 @@ fn result(variant: &str, pass: usize, revision: &str) -> EvaluationResult {
     }
 }
 
+/// The workflow run id of a spike recording.
+fn run_id(name: &str) -> uuid::Uuid {
+    Recorded::load(&traces().join(name)).unwrap().events[0].workflow_run_id
+}
+
 #[test]
 fn runs_compare_prints_what_the_library_renders() {
     let home = aibus_testkit::xdg_temp();
@@ -127,8 +132,11 @@ fn runs_compare_reads_evaluation_results_and_shows_which_variant_passed_more() {
     let home = aibus_testkit::xdg_temp();
     let dir = tempfile::tempdir().unwrap();
     let (pa, pb) = (dir.path().join("a.json"), dir.path().join("b.json"));
-    fs::write(&pa, serde_json::to_vec(&result("a", 2, "abc")).unwrap()).unwrap();
-    fs::write(&pb, serde_json::to_vec(&result("b", 5, "abc")).unwrap()).unwrap();
+    let (mut ra, mut rb) = (result("a", 2, "abc"), result("b", 5, "abc"));
+    ra.workflow_run_ids = vec![run_id("06-basic")];
+    rb.workflow_run_ids = vec![run_id("07-deleg")];
+    fs::write(&pa, serde_json::to_vec(&ra).unwrap()).unwrap();
+    fs::write(&pb, serde_json::to_vec(&rb).unwrap()).unwrap();
     let mut c = command(home.path());
     c.env("PATH", "")
         .args(["runs", "compare", "06-basic", "07-deleg", "--root"])
@@ -213,4 +221,77 @@ fn runs_inspect_node_json_is_the_typed_inspector() {
         &["inspect", "07-deleg", "--node", "nobody"],
     );
     assert_eq!(o.status.code(), Some(2));
+}
+
+#[test]
+fn runs_compare_refuses_a_result_of_another_run_or_another_version() {
+    let home = aibus_testkit::xdg_temp();
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("r.json");
+    let run = |p: &Path| {
+        let mut c = command(home.path());
+        c.env("PATH", "")
+            .args(["runs", "compare", "06-basic", "07-deleg", "--root"])
+            .arg(traces());
+        c.arg("--result-a").arg(p);
+        c.output().unwrap()
+    };
+    // Names no run, then names another run.
+    for ids in [vec![], vec![run_id("07-deleg")]] {
+        let mut r = result("a", 1, "abc");
+        r.workflow_run_ids = ids;
+        fs::write(&p, serde_json::to_vec(&r).unwrap()).unwrap();
+        let o = run(&p);
+        assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+        assert!(o.stdout.is_empty());
+        assert!(stderr(&o).contains("workflow_run_ids"), "{}", stderr(&o));
+    }
+    // The right run, a version this build does not read.
+    let mut r = result("a", 1, "abc");
+    r.workflow_run_ids = vec![run_id("06-basic")];
+    r.result_version = RESULT_VERSION + 98;
+    fs::write(&p, serde_json::to_vec(&r).unwrap()).unwrap();
+    let o = run(&p);
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stderr(&o).contains("result_version"), "{}", stderr(&o));
+}
+
+#[test]
+fn runs_inspect_json_writes_no_bidi_or_c1_character_from_a_hostile_usage_metric() {
+    let home = aibus_testkit::xdg_temp();
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("hostile");
+    fs::create_dir(&run).unwrap();
+    let events = fs::read_to_string(traces().join("07-deleg/events.jsonl"))
+        .unwrap()
+        .replace("task_notification.usage", "tn\\u202e\\u009busage");
+    fs::write(run.join("events.jsonl"), events).unwrap();
+    let rec = Recorded::load(&run).unwrap();
+    let agent = aibus_trace::project(&rec.events)
+        .agents
+        .iter()
+        .find(|a| {
+            rec.events.iter().any(|e| {
+                e.agent_id.as_deref() == Some(&a.agent_id)
+                    && e.kind == aibus_trace::EventKind::UsageReported
+            })
+        })
+        .expect("an agent with usage")
+        .agent_id
+        .clone();
+    let mut c = command(home.path());
+    c.env("PATH", "").args([
+        "--json", "runs", "inspect", "hostile", "--node", &agent, "--root",
+    ]);
+    c.arg(root.path());
+    let o = c.output().unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let text = out(&o);
+    assert!(
+        text.contains("tn\\\\u{202e}"),
+        "usage is shown, cleaned: {text}"
+    );
+    for bad in ['\u{202e}', '\u{9b}'] {
+        assert!(!text.contains(bad), "{bad:?} in {text}");
+    }
 }

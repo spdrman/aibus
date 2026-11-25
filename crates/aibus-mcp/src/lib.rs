@@ -71,7 +71,7 @@ pub struct Caps {
     pub write: bool,
     /// `--allow gates`: a written workflow may carry `gate` commands.
     pub gates: bool,
-    /// `--allow run`: `workflow_run`, `run_status` and `run_cancel`.
+    /// `--allow run`: `workflow_run`, `agent_run`, `run_status` and `run_cancel`.
     pub run: bool,
     /// `--allow-tool`: pre-approvals for runs.
     pub allow_tools: Vec<String>,
@@ -439,7 +439,7 @@ impl Server {
         }
         // A step from aibus is in flight on this server's client: anything that would start more
         // work through aibus is a loop (#322).
-        if matches!(name, "workflow_run" | "session_send" | "session_command" | "next_step") {
+        if matches!(name, "workflow_run" | "agent_run" | "session_send" | "session_command" | "next_step") {
             let held = self.in_flight.lock().unwrap_or_else(|e| e.into_inner()).clone();
             if let Some((token, _)) = held.filter(|(_, until)| now < *until) {
                 return Ok(self.fail(format!("would loop (step {token} is in flight on this attachment)")));
@@ -460,6 +460,7 @@ impl Server {
             "workflow_create" => self.workflow_write(false, args, now),
             "workflow_update" => self.workflow_write(true, args, now),
             "workflow_run" => self.workflow_run(args, now, run),
+            "agent_run" => self.agent_run(args, now, run),
             "run_status" | "run_cancel" => self.run_tool(name, args, run),
             n if n.starts_with("session_") => self.session_tool(n, args, client, now, session),
             // The read tools; it answers `-32602` for a name it does not know either.

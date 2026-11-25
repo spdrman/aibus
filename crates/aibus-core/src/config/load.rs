@@ -3,7 +3,7 @@
 //! Each file is checked on its own first, so a mistake is reported against the file and line that
 //! hold it: a syntax or type error, a `key = "..."` under `auth`, and unknown keys (warnings).
 //! The merge works on the TOML tables before they become a `Config`: tables merge, arrays
-//! replace, `[[account]]` and `[[provider]]` come from the user file only and `[hooks]` arrays concatenate.
+//! replace, `[[account]]`, `[[provider]]` and `[[schedule]]` come from the user file only and `[hooks]` arrays concatenate.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -108,7 +108,7 @@ fn merge(user: Table, project: Table) -> Table {
     let mut out = user;
     for (key, value) in project {
         match (key.as_str(), value) {
-            ("account" | "provider", _) => {}
+            ("account" | "provider" | "schedule", _) => {}
             ("hooks", Value::Table(hooks)) => {
                 let slot = out
                     .entry("hooks")
@@ -147,7 +147,7 @@ pub fn load(user: &Path, project: Option<&Path>) -> Result<Loaded, ConfigFileErr
     }
     if let Some(path) = project {
         if let Some((t, w, text)) = read(path)? {
-            for table in ["account", "provider"] {
+            for table in ["account", "provider", "schedule"] {
                 if t.contains_key(table) {
                     warnings.push(format!(
                         "{}:{}: [[{table}]] is user-only, ignored here",
@@ -422,6 +422,22 @@ mod tests {
         assert!(l.config.accounts.is_empty());
         assert_eq!(l.warnings.len(), 1);
         assert!(l.warnings[0].contains("settings.toml:1: [[account]] is user-only"));
+    }
+
+    #[test]
+    fn a_project_file_cannot_replace_the_users_schedules() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("config.toml");
+        let project = dir.path().join("settings.toml");
+        let row = |n: &str| {
+            format!("[[schedule]]\nname = \"{n}\"\nagent = \"explore\"\nprompt = \"x\"\ncron = \"0 6 * * *\"\nproject = \"/p\"\n")
+        };
+        std::fs::write(&user, row("mine")).unwrap();
+        std::fs::write(&project, row("theirs")).unwrap();
+        let l = load(&user, Some(&project)).unwrap();
+        assert_eq!(l.config.schedules.len(), 1);
+        assert_eq!(l.config.schedules[0].name, "mine");
+        assert!(l.warnings[0].contains("settings.toml:1: [[schedule]] is user-only"));
     }
 
     #[test]

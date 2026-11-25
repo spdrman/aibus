@@ -120,7 +120,7 @@ impl Launcher for TestLauncher {
                 context: Vec::new(),
                 background: spec.background,
                 max_spawn_depth: 3,
-                forced: None,
+                forced: Vec::new(),
                 start: Start::New,
                 worktree: None,
             },
@@ -288,7 +288,10 @@ impl Rig {
                 context: Vec::new(),
                 background: false,
                 max_spawn_depth: 3,
-                forced: forced.map(|(a, r)| (a.parse().unwrap(), r.into())),
+                forced: forced
+                    .map(|(a, r)| (a.parse().unwrap(), r.into()))
+                    .into_iter()
+                    .collect(),
                 start: Start::New,
                 worktree: None,
             },

@@ -1,0 +1,78 @@
+==> crontab line <==
+*/30 0,12 1 * * /usr/local/bin/aibus run --agent general --permission-mode dont-ask --cwd '/srv/my proj' -- 'it'\''s 100\% done & <ok> $HOME'
+
+==> ~/Library/LaunchAgents/aibus.quarter-hour.plist <==
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>aibus.quarter-hour</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/aibus</string>
+    <string>run</string>
+    <string>--agent</string>
+    <string>general</string>
+    <string>--permission-mode</string>
+    <string>dont-ask</string>
+    <string>--cwd</string>
+    <string>/srv/my proj</string>
+    <string>--</string>
+    <string>it's 100% done &amp; &lt;ok&gt; $HOME</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Day</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>0</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Day</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>0</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Day</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>12</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Day</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>12</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+  </array>
+</dict>
+</plist>
+
+==> ~/.config/systemd/user/aibus-quarter-hour.service <==
+[Unit]
+Description=aibus scheduled run quarter-hour
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aibus run --agent general --permission-mode dont-ask --cwd "/srv/my proj" -- "it's 100%% done & <ok> $$HOME"
+
+==> ~/.config/systemd/user/aibus-quarter-hour.timer <==
+[Unit]
+Description=aibus schedule quarter-hour
+
+[Timer]
+OnCalendar=*-*-01 00,12:00,30:00
+
+[Install]
+WantedBy=timers.target

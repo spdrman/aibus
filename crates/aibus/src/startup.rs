@@ -21,7 +21,7 @@ use aibus_core::persist::retention::prune_if_due;
 use aibus_core::persist::session::{read_runs, SessionMeta, SessionWriter};
 use aibus_core::permission::bypass_allowed;
 use aibus_core::{
-    expand, parse_mention, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
+    expand, parse_mentions, AccountName, AccountRegistry, AccountView, AgentName, AibusError, App,
     AutoHandoff, Bash, Budgets, Compactor, CreateHandoff, CredentialStore, Delegate, Effects, Fork,
     Gate, HookEvent, HookInput, HookRunner, LedgerUpdate, Limits, MemoryAppend, MemoryRead,
     MemoryWrite, Msg, ModelCompactor, ModelDefaults, ModelId, Orchestrator, PermissionMode, Recall,
@@ -671,23 +671,25 @@ impl Step for EnterLoop {
             ));
         }
         // `@agent-<name> <rest>` opens the lead with a delegate to that agent (01 section 4.2).
-        let mut forced = match parse_mention(&prompt).filter(|_| resume.is_none()) {
-            Some((agent, rest)) => {
-                if !agents.agents.contains_key(&agent) {
-                    return Err(AibusError::UnknownAgent(agent.to_string()));
-                }
-                if rest.is_empty() {
-                    return Err(AibusError::Usage(format!(
-                        "@agent-{agent}: say what it should do"
-                    )));
-                }
-                Some((
-                    "delegate".to_owned(),
-                    serde_json::json!({"agent": agent, "prompt": rest, "background": false}),
-                ))
+        // Each `@agent-<name>` in the prompt is one such delegate (#390).
+        let mut forced = Vec::new();
+        for (agent, rest) in parse_mentions(&prompt)
+            .into_iter()
+            .filter(|_| resume.is_none())
+        {
+            if !agents.agents.contains_key(&agent) {
+                return Err(AibusError::UnknownAgent(agent.to_string()));
             }
-            None => None,
-        };
+            if rest.is_empty() {
+                return Err(AibusError::Usage(format!(
+                    "@agent-{agent}: say what it should do"
+                )));
+            }
+            forced.push((
+                "delegate".to_owned(),
+                serde_json::json!({"agent": agent, "prompt": rest, "background": false}),
+            ));
+        }
         // `--workflow <name>` takes the prompt as the workflow's input (01 section 8.4); the lead
         // opens with a `workflow` call and then goes on with the report in hand.
         let workflow_dirs = aibus_core::workflow::dirs(&ctx.cwd, Some(&paths.config));
@@ -699,7 +701,10 @@ impl Step for EnterLoop {
                     "workflow {name} has an attached step, which runs from the interactive session started with --control-attach (/workflow run {name}); nothing was started"
                 )));
             }
-            forced = Some(("workflow".to_owned(), serde_json::json!({"name": name, "input": prompt})));
+            forced = vec![(
+                "workflow".to_owned(),
+                serde_json::json!({"name": name, "input": prompt}),
+            )];
             prompt = format!("/workflow {name} {prompt}");
         }
         let limits = Limits::resolve(cfg, |k| std::env::var(k).ok())?;
@@ -1000,7 +1005,9 @@ impl Step for EnterLoop {
             _ => (ctx.cwd.clone(), None),
         };
         // `/fix <text>` or `/workflow <name> <text>` as the prompt is the same as `--workflow`.
-        let forced = forced.or_else(|| launcher.slash_workflow(&prompt).filter(|_| resume.is_none()));
+        if forced.is_empty() {
+            forced.extend(launcher.slash_workflow(&prompt).filter(|_| resume.is_none()));
+        }
         let run_cfg = RunConfig {
             run,
             def,
@@ -1018,7 +1025,7 @@ impl Step for EnterLoop {
             context: Vec::new(),
             background: false,
             max_spawn_depth: limits.max_spawn_depth,
-            forced: forced.map(|(tool, input)| (tool.into(), input)),
+            forced: forced.into_iter().map(|(tool, input)| (tool.into(), input)).collect(),
             start: if resume.is_some() { Start::Resume } else { Start::New },
             worktree,
         };

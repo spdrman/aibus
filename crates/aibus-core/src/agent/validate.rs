@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use super::def::{parse, DefError};
 use super::discover::{list_md, MAX_FILES_PER_SCOPE};
-use super::{AgentDef, DefSource, ModelRef, Role, Scope, ToolPattern};
+use super::{AgentDef, DefSource, ModelRef, Role, Scope};
 use crate::ids::{AccountName, AgentName};
 
 /// What the definitions are checked against.
@@ -49,7 +49,7 @@ impl Report {
 }
 
 /// The tools a definition may name (01 section 9), besides `mcp:*` patterns.
-const KNOWN_TOOLS: [&str; 25] = [
+pub(super) const KNOWN_TOOLS: [&str; 25] = [
     "read",
     "write",
     "edit",
@@ -106,20 +106,6 @@ pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
             message,
         })
     };
-
-    let mut tool_errors = Vec::new();
-    let mut check_tools = |field: &'static str, list: &[ToolPattern]| {
-        for p in list {
-            if !KNOWN_TOOLS.contains(&p.tool.as_str()) && !p.tool.starts_with("mcp") {
-                tool_errors.push((field, format!("unknown tool `{}`", p.tool)));
-            }
-        }
-    };
-    check_tools("tools", def.tools.allow.as_deref().unwrap_or_default());
-    check_tools("disallowed_tools", &def.tools.deny);
-    for (field, message) in tool_errors {
-        error(field, message);
-    }
 
     let reserved = matches!(&def.model, ModelRef::Alias(a) if RESERVED_MODELS.contains(&a.as_str()));
     if def.model != ModelRef::Inherit && !reserved && !(cx.model_resolves)(&def.model) {

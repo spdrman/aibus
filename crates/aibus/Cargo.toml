@@ -57,6 +57,10 @@ zeroize = "1"
 rustix = { version = "1", default-features = false, features = ["std", "termios"] }
 signal-hook = "0.3"
 
+# The hidden subreaper helper mode of main.rs (D-352).
+[target.'cfg(target_os = "linux")'.dependencies]
+aibus-supervisor = { path = "../aibus-supervisor" }
+
 [dev-dependencies]
 tempfile = "3"
 aibus-testkit.workspace = true

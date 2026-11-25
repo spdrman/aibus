@@ -17,7 +17,7 @@ use crate::agent::{AgentDef, Isolation, ModelRef, Role, Scope};
 use crate::error::{AibusError, CredentialError};
 use crate::ids::{AgentName, PermissionId, RunId};
 use crate::msg::{AccountView, ClientEvent, Command, Decision, ModelTarget, Msg, Pane, Screen, Selection, TrOp, UiIntent};
-use crate::orchestrator::parse_mention;
+use crate::orchestrator::parse_mentions;
 use crate::run::{Progress, RunStatus, Usage};
 use crate::workflow::{self, WorkflowRow};
 
@@ -177,7 +177,8 @@ impl R<'_> {
 
     /// A deterministic id: the clock for the time part, the session and a counter for the rest.
     fn next_run_id(&mut self) -> RunId {
-        let seq = as_i64(self.cur(RUN_SEQ)).unwrap_or(0) + 1;
+        // The pending value: two runs queued in one step (two `@agent-` mentions) get two ids.
+        let seq = as_i64(&self.now(RUN_SEQ)).unwrap_or(0) + 1;
         self.put(RUN_SEQ, n(seq));
         let session = as_str(self.cur(SESSION_ID))
             .and_then(|t| Ulid::from_string(t).ok())
@@ -198,7 +199,7 @@ impl R<'_> {
         let max = get(self.cur(LIMITS), "max_runs_per_session")
             .and_then(as_i64)
             .unwrap_or(500);
-        if as_list(self.cur(RUNS_ORDER)).len() as i64 >= max {
+        if as_list(&self.now(RUNS_ORDER)).len() as i64 >= max {
             self.log("warn", "run limit reached, nothing queued");
             return;
         }
@@ -1101,13 +1102,16 @@ fn arm(r: &mut R, msg: &Msg) -> Result<(), AibusError> {
                 });
             } else if let Some(c) = slash(text, as_list(r.cur(RUNS_ORDER)).first().and_then(as_str)) {
                 r.command(&c);
-            } else if let Some((agent, rest)) = parse_mention(text) {
-                // `@agent-<name> <rest>` is a forced delegate; the lead still gets the result.
+            } else if !parse_mentions(text).is_empty() {
+                // `@agent-<name> <rest>` is a forced delegate, one for each agent the prompt
+                // mentions; the lead still gets the results.
                 let lead = as_list(r.cur(RUNS_ORDER))
                     .first()
                     .and_then(as_str)
                     .and_then(|id| id.parse().ok());
-                r.queue_run(Queue::new(agent.as_str(), rest, true, Isolation::None, lead));
+                for (agent, rest) in parse_mentions(text) {
+                    r.queue_run(Queue::new(agent.as_str(), rest, true, Isolation::None, lead));
+                }
             } else {
                 r.log("info", "prompt for the running lead");
                 // A client's message shows in the lead's transcript with its badge (#274).

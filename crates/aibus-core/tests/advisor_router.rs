@@ -136,7 +136,7 @@ async fn go(s: Setup<'_>, before: impl FnOnce(&World)) -> (World, Vec<Msg>) {
         context: Vec::new(),
         background: false,
         max_spawn_depth: 3,
-        forced: None,
+        forced: Vec::new(),
         start: Start::New,
         worktree: None,
     };

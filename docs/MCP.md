@@ -31,7 +31,7 @@ The surface is fixed when the process starts, and nothing a client sends can rai
 | none | the read tools, resources and prompts below | yes, the default |
 | `--allow write` | `workflow_create` and `workflow_update` | yes |
 | `--allow gates` | a written workflow may carry `gate` commands; needs `write` (exit 2 otherwise) | yes |
-| `--allow run` | `workflow_run`, `run_status` and `run_cancel` | yes |
+| `--allow run` | `workflow_run`, `agent_run`, `run_status` and `run_cancel` | yes |
 | `--allow-tool <pattern>` | pre-approves a tool for runs (the only pre-approvals a run gets) | yes |
 | `--max-runs N`, `--max-concurrent-runs N`, `--max-cost-usd X` | the run caps below (10, 1 and `limits.max_cost_usd`); need `--allow run` | yes |
 | `--no-provenance` | leave the `# written through aibus mcp` line out of written files | yes |
@@ -91,6 +91,7 @@ At most 10 writes a minute per process. Nothing here can reach `.aibus/settings.
 | Tool | What it does |
 |---|---|
 | `workflow_run {name, scope, input}` | starts the workflow and answers at once with `{run, status: "starting", session}` (`session` is `null` until the run has made one) |
+| `agent_run {name, input}` | starts one agent (a built-in, or one in the project or user definitions) the same way and answers the same way. The caps below count it together with `workflow_run`, it is asked about like `workflow_run` (see Confirmation), and it is refused for a name no agent has |
 | `run_status {run, wait_ms?}` | `{run, status, step, attempts:[{step, agent, status, failure?}], usage, exit_code, session, tail}`. `wait_ms` is capped at 30 000 and returns early on any change |
 | `run_cancel {run}` | cancels and answers with the final status; on a finished run it changes nothing |
 
@@ -115,9 +116,37 @@ The caps are process flags, so a model can neither see nor change them:
 * `--max-runs` (10): the eleventh `workflow_run` is an `isError`.
 * `--max-concurrent-runs` (1): a second run while one is live is an `isError`.
 * `--max-cost-usd` (`limits.max_cost_usd`): the sum of the finished runs' `cost_usd`. Each run starts with what is left of it as its own limit, so a run that would overspend ends with the budget reason and exit code 8; once it is spent no run starts.
-* 5 `workflow_run` calls a minute.
+* 5 `workflow_run` and `agent_run` calls a minute, together.
 
 When stdin closes (or the HTTP server stops) every live run gets SIGINT, 10 seconds to write its snapshot, and then a kill. Handles live as long as the process; a handle from an earlier process is an unknown one.
+
+## Scheduled runs
+
+`aibus mcp` starts a run when a client asks. For a run that starts without anyone asking (every morning, say) a scheduler outside aibus starts the same child, and aibus does not install or keep that scheduler. There is no daemon: `docs/DECISIONS.md` (D-391) says why, and what would reopen it.
+
+The command is `aibus run --agent <name> --permission-mode dont-ask --cwd <project> -- '<prompt>'`. Nothing can answer a prompt, so a tool call that would ask is denied; add `--allow 'bash(cargo *)'` for what the run may do. Put the cost limit in `AIBUS_MAX_COST_USD` (the run ends with exit code 8 when it is spent), and use a full path to the binary, since cron, launchd and systemd do not have your `PATH`. The prompt is on the command line here, so keep keys out of it.
+
+Write the run as a `[[schedule]]` in the user config (spec 07 section 3; a project's `settings.toml` can't set one, it is ignored with a warning) and let `aibus schedule print [<name>]` render it. It prints a crontab line, a launchd plist and a systemd service with its timer, and nothing else: it installs nothing, starts nothing and writes no file. `--bin <path>` sets the binary (default: this one) and `--json` gives the same text as data. `cron` is five fields; a day of month together with a day of week is refused, because cron runs on either and launchd and systemd only on both.
+
+| Form | Where it goes | Then |
+|---|---|---|
+| crontab line | `crontab -e` | nothing to load; cron mails the output, a `%` in the prompt is already escaped |
+| launchd plist | `~/Library/LaunchAgents/aibus.<name>.plist` | `launchctl bootstrap gui/$(id -u) <file>`; add `StandardOutPath` and `StandardErrorPath` if you want the output |
+| systemd units | `~/.config/systemd/user/aibus-<name>.service` and `.timer` | `systemctl --user enable --now aibus-<name>.timer`; `journalctl --user -u aibus-<name>` has the output |
+
+What a scheduler should do with the exit code of `aibus run` (06 section 3):
+
+| Exit | Meaning | Do |
+|---|---|---|
+| 0 | the lead completed | nothing |
+| 5 | the provider failed after its retries | try again later; the next tick is usually enough |
+| 7 | interrupted (SIGINT or SIGTERM) | nothing, or look at why it was stopped |
+| 8 | the token or cost budget was spent | raise `max_cost_usd` or shrink the prompt; do not retry in a loop |
+| 3, 4 | config or agent definition invalid; no credential | fix it, a retry will fail the same way |
+| 6, 10 | a tool was denied, or the run failed or ended partial | alert someone; add an `--allow` or fix the prompt |
+| 1, 2 | unexpected error, usage error | alert someone |
+
+Two limits to know. A run started this way is its own process, so `--max-runs` and `--max-concurrent-runs` do not see it; a scheduler that fires twice at once runs twice, and the cost limit is per run. And on Linux an unattended run still waits for the descendant sweep (#352).
 
 ## Live sessions (`--allow session-*`)
 

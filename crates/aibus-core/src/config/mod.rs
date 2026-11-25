@@ -2,8 +2,10 @@
 //! Loading, merging and validating live in `load`.
 
 mod load;
+mod schedule;
 
 pub use load::{find_line, load, parse_file, ConfigFileError, Loaded};
+pub use schedule::{Cron, Schedule};
 
 use std::collections::BTreeMap;
 
@@ -28,6 +30,9 @@ pub struct Config {
     pub providers: Vec<aibus_provider::ProviderDef>,
     pub agents: Agents,
     pub skills: Skills,
+    /// `[[schedule]]`: runs an outside scheduler starts; `aibus schedule print` renders them (#391).
+    #[serde(rename = "schedule")]
+    pub schedules: Vec<Schedule>,
     pub limits: Limits,
     pub router: Router,
     pub advisor: Advisor,
@@ -555,6 +560,17 @@ impl Config {
         }
         if self.limits.max_turns == 0 {
             bad("limits.max_turns", "must be at least 1".into());
+        }
+        for (i, s) in self.schedules.iter().enumerate() {
+            for (field, why) in s.problems() {
+                bad(&format!("schedule.{i}.{field}"), why);
+            }
+            if self.schedules[..i].iter().any(|o| o.name == s.name) {
+                bad(
+                    &format!("schedule.{i}.name"),
+                    format!("{} is used twice", s.name),
+                );
+            }
         }
         for event in self.hooks.events.keys() {
             if crate::msg::HookEvent::parse(event).is_none() {

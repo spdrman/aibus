@@ -49,7 +49,7 @@ pub use error::{AibusError, CredentialError};
 pub use hooks::{Blocked, Fired, HookInput, HookRunner, HookTransport, Ran};
 pub use ids::*;
 pub use msg::*;
-pub use orchestrator::{parse_mention, Launcher, Limits, Orchestrator, Roster, Waited};
+pub use orchestrator::{parse_mention, parse_mentions, Launcher, Limits, Orchestrator, Roster, Waited};
 pub use run::*;
 pub use tool::*;
 pub use worktree::WorktreeInfo;

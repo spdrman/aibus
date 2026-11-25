@@ -181,7 +181,7 @@ impl SessionWriter {
                 Msg::Via { client, .. } => Some(client.as_str()),
                 _ => None,
             };
-            let message = !text.starts_with('/') && crate::orchestrator::parse_mention(text).is_none();
+            let message = !text.starts_with('/') && crate::orchestrator::parse_mentions(text).is_empty();
             if let (true, Some(t)) = (message, self.lead.and_then(|l| self.runs.get_mut(&l))) {
                 t.user(at, text, via)?;
             }

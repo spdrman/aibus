@@ -1,5 +1,5 @@
 //! The server's own question before a write or a run (E12, #107). When a client declared
-//! `elicitation` (form mode), `workflow_create`, `workflow_update` and `workflow_run` ask the
+//! `elicitation` (form mode), `workflow_create`, `workflow_update`, `workflow_run` and `agent_run` ask the
 //! user to retype the workflow name (and, for a run, to accept a cost under the process cap)
 //! before anything is written or started. A client without the capability, and
 //! `--confirm never`, keep the epic's behaviour: the flags are the only gate.
@@ -33,7 +33,12 @@ use serde_json::{json, Value};
 use crate::Server;
 
 /// The tools that change the disk or spend money, the ones the epic puts a human in front of.
-const GATED: [&str; 3] = ["workflow_create", "workflow_update", "workflow_run"];
+const GATED: [&str; 4] = [
+    "workflow_create",
+    "workflow_update",
+    "workflow_run",
+    "agent_run",
+];
 
 /// The live-session tools that change the session (#274): the same question, with the session's
 /// short id to retype in place of a workflow name.
@@ -57,7 +62,7 @@ Nothing was written or started. Call the tool again to be asked again.";
 pub struct ConfirmConfig {
     /// `--confirm elicit` (the default) is true, `--confirm never` is false.
     pub elicit: bool,
-    /// The cap a `workflow_run` confirmation may accept. `None` leaves the field out.
+    /// The cap a `workflow_run` or `agent_run` confirmation may accept. `None` leaves the field out.
     pub run_cap_usd: Option<f64>,
     /// How long a `2026-07-28` `requestState` is good for.
     pub ttl: Duration,
@@ -128,6 +133,10 @@ impl Server {
         let session = SESSION_GATED.contains(&tool);
         let (title, description) = match session {
             true => ("Session", "Type the session id shown above again to confirm."),
+            false if tool == "agent_run" => (
+                "Agent name",
+                "Type the name of the agent again to confirm.",
+            ),
             false => ("Workflow name", "Type the name of the workflow again to confirm."),
         };
         let mut properties = json!({
@@ -140,7 +149,11 @@ impl Server {
             },
         });
         let mut required = vec!["name"];
-        let cap = self.confirm.config.run_cap_usd.filter(|_| tool == "workflow_run");
+        let cap = self
+            .confirm
+            .config
+            .run_cap_usd
+            .filter(|_| matches!(tool, "workflow_run" | "agent_run"));
         if let Some(cap) = cap {
             properties["max_cost_usd"] = json!({
                 "type": "number",
@@ -159,6 +172,7 @@ impl Server {
             "session_cancel" => format!("Confirm: cancel a run in the live aibus session {name}."),
             "session_permission" => format!("Confirm: answer a permission prompt of the live aibus session {name}."),
             "workflow_run" => format!("Confirm: start a run of the workflow {name}."),
+            "agent_run" => format!("Confirm: start a run of the agent {name}."),
             "workflow_update" => format!("Confirm: overwrite the workflow {name}."),
             _ => format!("Confirm: create the workflow {name}."),
         };
@@ -196,10 +210,16 @@ impl Server {
         if typed.is_none() || typed != want.as_deref() {
             return Err(match SESSION_GATED.contains(&tool) {
                 true => "the id typed in the confirmation is not the session's, so nothing was sent".into(),
+                false if tool == "agent_run" => "the name typed in the confirmation is not the agent's name, so nothing was started".into(),
                 false => "the name typed in the confirmation is not the workflow's name, so nothing was written or started".into(),
             });
         }
-        if let Some(cap) = self.confirm.config.run_cap_usd.filter(|_| tool == "workflow_run") {
+        if let Some(cap) = self
+            .confirm
+            .config
+            .run_cap_usd
+            .filter(|_| matches!(tool, "workflow_run" | "agent_run"))
+        {
             let cost = content.and_then(|c| c.get("max_cost_usd")).and_then(Value::as_f64);
             if !cost.is_some_and(|c| c > 0.0 && c <= cap) {
                 return Err(format!(

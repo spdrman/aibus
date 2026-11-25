@@ -1,0 +1,92 @@
+==> crontab line <==
+30 7 * * 1-5 AIBUS_MAX_COST_USD=2.5 /usr/local/bin/aibus run --agent explore --permission-mode dont-ask --cwd /home/me/proj -- 'summarise what changed overnight'
+
+==> ~/Library/LaunchAgents/aibus.morning-triage.plist <==
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>aibus.morning-triage</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/aibus</string>
+    <string>run</string>
+    <string>--agent</string>
+    <string>explore</string>
+    <string>--permission-mode</string>
+    <string>dont-ask</string>
+    <string>--cwd</string>
+    <string>/home/me/proj</string>
+    <string>--</string>
+    <string>summarise what changed overnight</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AIBUS_MAX_COST_USD</key>
+    <string>2.5</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>7</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>2</integer>
+      <key>Hour</key>
+      <integer>7</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>3</integer>
+      <key>Hour</key>
+      <integer>7</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>4</integer>
+      <key>Hour</key>
+      <integer>7</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>5</integer>
+      <key>Hour</key>
+      <integer>7</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+  </array>
+</dict>
+</plist>
+
+==> ~/.config/systemd/user/aibus-morning-triage.service <==
+[Unit]
+Description=aibus scheduled run morning-triage
+
+[Service]
+Type=oneshot
+Environment=AIBUS_MAX_COST_USD=2.5
+ExecStart=/usr/local/bin/aibus run --agent explore --permission-mode dont-ask --cwd /home/me/proj -- "summarise what changed overnight"
+
+==> ~/.config/systemd/user/aibus-morning-triage.timer <==
+[Unit]
+Description=aibus schedule morning-triage
+
+[Timer]
+OnCalendar=Mon,Tue,Wed,Thu,Fri *-*-* 07:30:00
+
+[Install]
+WantedBy=timers.target

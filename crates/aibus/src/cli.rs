@@ -193,6 +193,9 @@ pub enum Command {
     /// The config file
     #[command(subcommand)]
     Config(ConfigCmd),
+    /// Print the crontab, launchd and systemd forms of the config's [[schedule]] runs (installs nothing)
+    #[command(subcommand)]
+    Schedule(ScheduleCmd),
     /// Serve workflows to an MCP client over stdio or loopback HTTP
     Mcp(McpArgs),
     /// Put the example workflows in .aibus/workflows
@@ -511,6 +514,19 @@ pub enum SessionsHooksCmd {
         config_dir: Option<PathBuf>,
         #[arg(long)]
         yes: bool,
+    },
+}
+
+/// `aibus schedule` (#391).
+#[derive(Subcommand, Debug)]
+pub enum ScheduleCmd {
+    /// Print one schedule (or every one) as a crontab line, a launchd plist and systemd units
+    Print {
+        /// The schedule's name; every schedule when left out
+        name: Option<String>,
+        /// The aibus binary the scheduler starts (default: this one); an absolute path
+        #[arg(long, value_name = "PATH")]
+        bin: Option<PathBuf>,
     },
 }
 
@@ -849,6 +865,7 @@ mod tests {
         "extensions test",
         "extensions publish",
         "init",
+        "schedule print",
         "config path",
         "config show",
         "config init",

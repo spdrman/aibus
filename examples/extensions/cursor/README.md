@@ -3,6 +3,8 @@
 The official Cursor Agent CLI as an aibus extension (#291). Local, opt-in use of your own installed CLI
 only: it signs in on its own, and aibus never reads or stores the token.
 
+**Host policy.** aibus only launches CLIs on its official list (claude, codex, gemini, kimi), so `cursor-agent` is refused with `NotOfficial` until you add it to `extra_official_clis`. It also has no per-CLI flag list yet, so only the denylist checks its arguments. Adding it to the core allowlist is deferred (`docs/DEFERRED.md`).
+
 **Unverified.** The CLI was never installed or run where this was written, so no stream was recorded.
 The fixtures are synthetic, built from the vendor's public documentation as I read it.
 Not checked against any real version: the flags, reading the prompt from stdin, the event shapes,

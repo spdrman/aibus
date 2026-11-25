@@ -1,4 +1,4 @@
-# The GitHub Copilot CLI extension (#291, A3.1): the official, unmodified GitHub Copilot CLI CLI as an aibus extension on the
+# The GitHub Copilot CLI extension (#291, A3.1): the official, unmodified GitHub Copilot CLI as an aibus extension on the
 # A2.1 contract. Local, opt-in use with the user's own installed CLI; the CLI owns its sign-in and
 # aibus never reads or stores the token.
 #

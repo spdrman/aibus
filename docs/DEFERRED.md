@@ -151,4 +151,5 @@ imports them by package name. What I left for later...
 - Tool failure and error-result mappings, which need each CLI's real failure events.
 - A published community fixture pack. The fixtures sit under `examples/extensions/<name>/fixtures`
   for now, and where to publish them (repo, the A2.1 catalog or a release asset) is still open.
-- Building anything for xAI/Grok or DeepSeek: xAI has a first-party CLI (Grok Build) but stays `disabled` until its terms are read, DeepSeek is `unavailable`.
+- Building anything for xAI/Grok or DeepSeek: both have a first-party CLI (Grok Build, and DeepSeek Harness `dsh` with `--profile headless/acp/sdk`, read 2026-11-25) and both stay `disabled` until their terms and login flows are read. See `docs/PROVIDER-FEASIBILITY.md`.
+- Host policy for the new extensions: `sandbox::OFFICIAL_CLIS` only lists claude, codex, gemini and kimi, so `copilot`, `cursor-agent` and `qwen` are refused with `NotOfficial` until the user adds them to `extra_official_clis`, and `flags.rs` has no per-CLI flag list for them, so once added only the denylist checks their argv. Adding them to the allowlist with flag lists is a core edit that waits until a real CLI of each has been read.

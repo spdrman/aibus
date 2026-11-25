@@ -1104,6 +1104,27 @@ async fn a_passing_schema_with_no_hooks_does_not_verify_a_configured_done_when()
 }
 
 #[tokio::test]
+async fn a_cancel_while_done_when_runs_ends_the_run_cancelled_not_completed() {
+    let (p, rx) = plan(
+        script([Step::Text("ok".into())]),
+        done_def(Some("sleep 30"), None, None),
+    );
+    let started = std::time::Instant::now();
+    let done = collect(p, rx, |h| {
+        let cancel = h.cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            cancel.cancel();
+        });
+    })
+    .await;
+    let r = done.finished();
+    assert_eq!(r.status, RunStatus::Cancelled, "the user cancelled the run");
+    assert!(!r.verified);
+    assert!(started.elapsed().as_secs() < 20, "the command was killed");
+}
+
+#[tokio::test]
 async fn done_when_runs_in_the_worktree_of_the_run_not_the_project_dir() {
     let (mut p, rx) = plan(
         script([Step::Text("ok".into())]),

@@ -429,7 +429,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let user = dir.path().join("config.toml");
         let project = dir.path().join("settings.toml");
-        let row = |n: &str| format!("[[schedule]]\nname = \"{n}\"\nagent = \"explore\"\nprompt = \"x\"\ncron = \"0 6 * * *\"\nproject = \"/p\"\n");
+        let row = |n: &str| {
+            format!("[[schedule]]\nname = \"{n}\"\nagent = \"explore\"\nprompt = \"x\"\ncron = \"0 6 * * *\"\nproject = \"/p\"\n")
+        };
         std::fs::write(&user, row("mine")).unwrap();
         std::fs::write(&project, row("theirs")).unwrap();
         let l = load(&user, Some(&project)).unwrap();

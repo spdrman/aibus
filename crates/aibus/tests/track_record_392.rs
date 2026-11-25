@@ -131,34 +131,54 @@ fn a_worker_with_local_memory_is_gitignored_and_not_committed() {
 }
 
 #[test]
-fn an_earlier_lead_run_of_the_session_is_not_extracted_as_a_worker() {
+fn an_earlier_lead_run_in_the_session_is_not_extracted_as_a_worker() {
     let home = xdg_temp();
     let h = home.path();
-    agent(h, "scribe", "memory: project\n");
-    let dir = h.join("session");
+    write(
+        &proj(h).join(".aibus/agents/boss.md"),
+        "---\nname: boss\ndescription: Runs things.\nrole: lead\nmemory: project\n---\nDo it.\n",
+    );
     let script = h.join("s.ron");
-    // Two lead runs in one session, both as `scribe` (a lead whose definition sets memory). The
-    // second run's end must not ask for the first one's learnings as if it were a worker's.
-    for _ in 0..2 {
-        fs::write(
-            &script,
-            format!(
-                "[Text(\"done\"), Stop(EndTurn), Text({LEAD_REPLY:?}), Text({WORKER_REPLY:?})]"
-            ),
-        )
-        .unwrap();
+    fs::write(
+        &script,
+        format!("[Text(\"done\"), Stop(EndTurn), Text({LEAD_REPLY:?}), Stop(EndTurn), Text({WORKER_REPLY:?}), Stop(EndTurn)]"),
+    )
+    .unwrap();
+    let run = |dir: &Path| {
         let out = command(h)
-            .args(["run", "--agent", "scribe", "--json", "--script"])
+            .args(["run", "--json", "--script"])
             .arg(&script)
             .arg("--session-dir")
-            .arg(&dir)
+            .arg(dir)
             .arg("go")
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
+    };
+    // A first session's lead run, made over as a completed lead run of `boss` and moved into the
+    // session the second run joins (a session with more than one lead run).
+    let (first, second) = (h.join("first"), h.join("second"));
+    run(&first);
+    let earlier = fs::read_dir(first.join("runs"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    let to = second.join("runs").join(earlier.file_name());
+    fs::create_dir_all(&to).unwrap();
+    for e in fs::read_dir(earlier.path()).unwrap() {
+        let e = e.unwrap();
+        fs::copy(e.path(), to.join(e.file_name())).unwrap();
     }
+    let meta = to.join("meta.json");
+    let mut m: Value = serde_json::from_str(&fs::read_to_string(&meta).unwrap()).unwrap();
+    m["agent"] = json!("boss");
+    m["role"] = json!("lead");
+    fs::write(&meta, m.to_string()).unwrap();
+    run(&second);
+
     assert!(!proj(h)
-        .join(".aibus/agent-memory/scribe/LEARNINGS.md")
+        .join(".aibus/agent-memory/boss/LEARNINGS.md")
         .exists());
 }
 

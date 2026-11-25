@@ -34,7 +34,7 @@ npx tauri build --no-bundle -- --locked
 
 ## What to check and write down
 
-1. The window opens titled "aibus Desktop (B1.1 spike)".
+1. The window opens titled "aibus Desktop".
 2. The yellow banner says **Fixture** with "Recorded fixture, not a live run" and the step counter
    climbs to its total in about 11 seconds.
 3. The Graph panel ends with one `lead` agent, two subagents (`reader-a`, `reader-b`), a `Read` tool

@@ -48,6 +48,8 @@ pub enum Outcome {
 /// What a provider publishes about its login for third-party applications.
 #[derive(Clone, Debug)]
 pub struct Def {
+    /// How the browser pages and messages name the provider.
+    pub provider_name: &'static str,
     pub kind: Kind,
     pub authorize_url: String,
     pub token_url: String,
@@ -79,6 +81,7 @@ pub fn is_openrouter(provider: &str, base_url: Option<&str>) -> bool {
 /// at openrouter.ai until the provider list carries its own entry.
 pub fn definition(provider: &str, base_url: Option<&str>) -> Option<Def> {
     is_openrouter(provider, base_url).then(|| Def {
+        provider_name: "OpenRouter",
         kind: Kind::PkceLoopback,
         authorize_url: "https://openrouter.ai/auth".into(),
         token_url: "https://openrouter.ai/api/v1/auth/keys".into(),

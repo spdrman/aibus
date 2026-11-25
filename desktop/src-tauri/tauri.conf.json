@@ -12,7 +12,7 @@
   "app": {
     "withGlobalTauri": false,
     "windows": [
-      { "label": "main", "title": "aibus Desktop (B1.1 spike)", "width": 1280, "height": 800 }
+      { "label": "main", "title": "aibus Desktop", "width": 1280, "height": 800, "minWidth": 640, "minHeight": 480 }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"

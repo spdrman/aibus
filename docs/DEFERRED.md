@@ -1,3 +1,15 @@
+# Deferred work
+
+Things I cut from an issue's scope on purpose, with where they stand. One section per issue.
+
+## #373 send guidance to a Claude Code session (phase 2 of #348)
+
+* Fork into aibus (start a new session from a tapped one) is not built. It is a follow-up.
+* The live check of the `[aibus]` message line is not done. The line format for a sender that is not a Claude session is not documented, so the tests pin what aibus controls (consent, limits, audit, refusals), not what the session does with the line. Someone with a real session needs to send one line and see how the session's own screen shows it.
+* Delivery is always reported as `delivery unknown`. Marking a send delivered needs a later event that proves it, and phase 1's hook events do not name the message.
+* The rate limit counts the audit rows inside the session's lock, but the count is global and the lock is per session, so two different sessions sent to at the same instant can each see 9 rows and both send. Each send still needs a person at a terminal, so I left it. A global flock around count and append would close it.
+* The socket is checked before the confirmation and connected to after it. Re-checking right before `connect`, a parent directory owner and mode check, and a peer credential check after connect would close the window. Not done.
+* Managed settings that cannot be read (unreadable, over 1 MiB, a symlink, invalid JSON) fall back to the user's settings, so the session's own setting decides. Failing closed for a managed file that exists but cannot be read is a follow-up.
 # Deferred
 
 Work that was in scope for an issue once and got cut to fit. Nothing here has an issue of its own yet.
@@ -36,8 +48,7 @@ I cut these from the spike on 2026-11-22. B1.5 (#308) reviews them with the go/n
 - **Timing benchmarks.** The Linux numbers in `docs/desktop/B1.1-go-no-go.md` are observations from
   two Xvfb runs on the NAS, not benchmarks. A queued Mercury run (`bench-queue.sh`) can repeat them once
   Phase 2 has a workload worth timing.
-- **Shared UI components.** The spike styles its own few elements. #307 swaps them for the shared
-  React primitives and tokens from #305 (PR #374) once that merges.
+- **Shared UI components.** Done in #307: the shell uses the shared primitives and tokens.
 - **Bundling and signing.** `bundle.active` is false. AppImage/deb, `.app`/`.dmg`, notarisation and
   updater keys are release work, not spike work.
 
@@ -115,6 +126,19 @@ gaps came up in review that were already there before this change, and I left th
 
 Scope I cut on purpose, with where it goes. I add a section per piece of work and I do not open issues for these.
 
+## B1.4 desktop shell and workspace layout (#307)
+
+I built the shell, the four workspaces from a list, the shared primitives and tokens, theme, shortcuts, state notices, safe external links and the saved dock layout, all in `desktop/src`. Left for later...
+
+- **The bridge wiring.** The Tauri commands and the `Channel` that carry a `Request` to `aibus_bridge::handle_json` are not added: `desktop/src-tauri` still only has the two spike commands. The Run and Trace workspaces keep reading the fixture replay. It needs a build of `src-tauri` with WebKitGTK, which the main gate does not have.
+- **Live tailing and the open-run summary row** (both listed under B1.3) wait on that wiring.
+- **An opener command for external links.** `ExternalLink` only accepts plain https URLs and hands them to an injected opener. The default is `window.open` with `noopener,noreferrer`, which a Tauri webview may block. A host command (no shell or opener plugin in the capability) is the proper fix and needs the Rust build too.
+- **Native window size and position across restart.** The dock layout, workspace and theme persist in webview storage. The window frame itself needs `tauri-plugin-window-state` (or a small host command), again Rust. `tauri.conf.json` now sets a 640 by 480 minimum so small windows stay usable.
+- **Playwright and GIFs.** The suite is vitest in jsdom. Nothing drives the real webview, so layout at small sizes and mixed DPI is untested. Spacing tokens, some font sizes, a 720px media query and the graph SVG size are fixed pixels, so I am not claiming the layout scales.
+- **Webview parity on macOS and Linux.** Not run on either (no Tauri build ran). Steps stay in `docs/desktop/VERIFY-MACOS.md`.
+- **Keyboard use of graph nodes.** The graph is an `svg` with `role="img"` and click-only nodes, so tool nodes cannot be selected from the keyboard. Making them operable means restructuring the graph for assistive tech, which I left for a follow-up.
+- **Replay and Compare** is #314: one more entry in the list in `App.tsx`.
+
 ## B1.3 typed bridge (#306)
 
 I landed the Rust half in `crates/aibus-bridge`: versioned DTOs over the `aibus-trace` projections, the run cursor, gap detection and resubscribe, a bounded channel feed, and the generated TypeScript bindings with a contract test. What I left for the desktop shell (#307):
@@ -143,3 +167,25 @@ imports them by package name. What I left for later...
 - **Data grid package.** TanStack Table plus Virtual, when B1.4 or later has a real use for it.
 - **Webapp adoption.** Moving the webapp onto the packages is a webapp change and needs paulotten's review.
   The local `scripts/webapp-consumer-check.mjs` run is the cross-consumer check until then.
+
+## A3.1 extensions (#291), cut on 2026-11-22
+
+- Install, login-state and launch tests against a real Kimi Code, Copilot CLI, Cursor Agent and
+  Qwen Code, then replacing the synthetic fixtures with recordings and tightening `cli_versions`.
+- Tool failure and error-result mappings, which need each CLI's real failure events.
+- A published community fixture pack. The fixtures sit under `examples/extensions/<name>/fixtures`
+  for now, and where to publish them (repo, the A2.1 catalog or a release asset) is still open.
+- Building anything for xAI/Grok or DeepSeek: both have a first-party CLI (Grok Build, and DeepSeek Harness `dsh` with `--profile headless/acp/sdk`, read 2026-11-25) and both stay `disabled` until their terms and login flows are read. See `docs/PROVIDER-FEASIBILITY.md`.
+- Host policy for the new extensions: `sandbox::OFFICIAL_CLIS` only lists claude, codex, gemini and kimi, so `copilot`, `cursor-agent` and `qwen` are refused with `NotOfficial` until the user adds them to `extra_official_clis`, and `flags.rs` has no per-CLI flag list for them, so once added only the denylist checks their argv. Adding them to the allowlist with flag lists is a core edit that waits until a real CLI of each has been read.
+
+## A3.2 OpenTelemetry export (#292)
+
+Cut from the reduced scope, still wanted:
+
+- A retention policy (per-project retention and deletion of local traces). Export redaction is in; retention is not.
+- Reading `Destination` and `Revisions` from the aibus config file and a CLI switch. Today they are plain structs a caller fills in.
+- Langfuse interop. The OTLP body follows the generic OTLP/HTTP shape, but I have not run it against Langfuse, so that row is unverified. Langfuse-specific attribute mapping (`langfuse.*`) is not done.
+- Wiring the completeness diagnostics into the trace inspector.
+- Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
+- A bounded queue between the run and the exporter. Each export is one thread (the caller writes the `thread::spawn`), so a slow collector under many exports would pile threads up; a bounded queue with drop-on-full belongs with the config wiring.
+- Model and version labels on the resource (spec 7.2). Only the provider extension is exported today.

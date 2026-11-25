@@ -7,11 +7,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-# Tap in (#348, phase 1, #355): find the Claude Code sessions that are already open in other
-# terminals and watch them, read-only. The one process this crate may start is the documented
-# `claude agents --json`; it sends nothing to a session, injects no keystroke and answers no
-# permission prompt. Hook events go through the supervisor's `Normalizer` into a tap run
-# directory with `PayloadPolicy::MetadataOnly`. It never reads a `.key` file or a token.
+# Tap in (#348, phases 1 and 2, #355, #373): find the Claude Code sessions that are already open
+# in other terminals, watch them, and send guidance through the documented inbox socket after a
+# keyboard confirmation. The one process this crate may start is the documented
+# `claude agents --json`; it injects no keystroke and answers no permission prompt.
+# Hook events go through the supervisor's `Normalizer` into a tap run directory with `PayloadPolicy::MetadataOnly`. It never reads a `.key` file or a token.
 [dependencies]
 aibus-core.workspace = true
 aibus-supervisor = { path = "../aibus-supervisor" }

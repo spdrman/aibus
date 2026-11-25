@@ -17,9 +17,6 @@ use crate::agent_cmd::Env;
 use crate::cli::Global;
 use crate::session_cmd;
 
-/// Bumped when a field of the eval scorecard is added, removed or changes meaning.
-const SCORECARD_VERSION: &str = "1.0.0";
-
 fn known(env: &Env, g: &Global, name: &str) -> Result<AgentName, AibusError> {
     let wanted = AgentName::new(name).map_err(|e| AibusError::Usage(e.to_string()))?;
     if env.discover(g)?.agents.contains_key(&wanted) {
@@ -172,6 +169,8 @@ pub fn eval(
         }));
     }
     let passed = rows.iter().filter(|r| r["result"] == "pass").count();
+    // Bumped when a field of the scorecard is added, removed or changes meaning.
+    const SCORECARD_VERSION: &str = "1.0.0";
     let card = json!({
         "scorecard_version": SCORECARD_VERSION,
         "agent": name.as_str(),

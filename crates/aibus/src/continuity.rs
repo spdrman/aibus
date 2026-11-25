@@ -158,74 +158,75 @@ pub fn end(ctx: &mut Ctx) {
             Err(_) => warn("extracting learnings", "timed out"),
         }
     }
-    if wanted && !ctx.interrupted {
-        extract_workers(ctx, &c, lead.map(|r| r.to_string()).as_deref());
-    }
-    reindex(&c.layout);
-    ctx.continuity = Some(c);
-}
-
-/// H1.5: every finished worker run of the session whose definition sets `memory` is asked for its
-/// learnings, and they go to that agent's own `LEARNINGS.md` (the scope its `memory` names), never
-/// to the lead's. The same model that extracts the lead's learnings is asked; at most
-/// `MAX_WORKERS` runs a session, since each is a call of up to `EXTRACT_WITHIN`.
-fn extract_workers(ctx: &Ctx, c: &Continuity, lead_run: Option<&str>) {
-    const MAX_WORKERS: usize = 4;
-    let (Some(session), Some(agents), Some(rt), Some(extractor)) = (
-        ctx.session.as_ref(),
+    // H1.5: every finished worker run (role "worker", so never a lead run) of the session whose
+    // definition sets `memory` is asked for its learnings, and they go to that agent's own
+    // `LEARNINGS.md` (the scope its `memory` names), never to the lead's. The same model that
+    // extracts the lead's learnings is asked; at most four runs a session, since each is a call of
+    // up to `EXTRACT_WITHIN`.
+    if let (true, false, Some(agents), Some(rt), Some(extractor)) = (
+        wanted,
+        ctx.interrupted,
         ctx.agents.as_ref(),
         ctx.rt.as_ref(),
         &c.extractor,
-    ) else {
-        return;
-    };
-    let runs = read_runs(&session.dir)
-        .into_iter()
-        .filter(|r| Some(r.id.as_str()) != lead_run && r.status == RunStatus::Completed.as_value());
-    let mut asked = 0;
-    for r in runs {
-        let Some((def, dir)) = aibus_core::AgentName::new(&r.agent)
-            .ok()
-            .and_then(|n| agents.agents.get(&n))
-            .and_then(|d| {
-                Some((
-                    d,
-                    memory::memory_dir(d, &c.layout.project, Some(&c.layout.data))?,
-                ))
-            })
-        else {
-            continue;
-        };
-        if asked == MAX_WORKERS {
-            break;
-        }
-        let file = session
-            .dir
-            .join("runs")
-            .join(&r.id)
-            .join("conversation.jsonl");
-        let Ok(loaded) = aibus_core::run::transcript::load(&file) else {
-            continue;
-        };
-        asked += 1;
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let found = rt.block_on(async {
-            tokio::time::timeout(EXTRACT_WITHIN, extractor.extract(&loaded.conv, &cancel)).await
-        });
-        match found {
-            Ok(Ok(found)) if !found.is_empty() => {
-                let heading = format!("{} run {} ({})", date(SystemTime::now()), r.id, def.name);
-                if let Err(e) =
-                    learn::append(&dir.join("LEARNINGS.md"), &found, &heading, &ctx.redactor)
-                {
-                    warn("writing LEARNINGS.md", e);
-                }
+    ) {
+        let runs = read_runs(&session.dir)
+            .into_iter()
+            .filter(|r| r.role == "worker" && r.status == RunStatus::Completed.as_value());
+        let mut asked = 0;
+        for r in runs {
+            let Some((def, dir)) = aibus_core::AgentName::new(&r.agent)
+                .ok()
+                .and_then(|n| agents.agents.get(&n))
+                .and_then(|d| {
+                    Some((
+                        d,
+                        memory::memory_dir(d, &c.layout.project, Some(&c.layout.data))?,
+                    ))
+                })
+            else {
+                continue;
+            };
+            if asked == 4 {
+                break;
             }
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => warn("extracting learnings", e),
-            Err(_) => warn("extracting learnings", "timed out"),
+            let file = session
+                .dir
+                .join("runs")
+                .join(&r.id)
+                .join("conversation.jsonl");
+            let Ok(loaded) = aibus_core::run::transcript::load(&file) else {
+                continue;
+            };
+            asked += 1;
+            let cancel = tokio_util::sync::CancellationToken::new();
+            let found = rt.block_on(async {
+                tokio::time::timeout(EXTRACT_WITHIN, extractor.extract(&loaded.conv, &cancel)).await
+            });
+            match found {
+                Ok(Ok(found)) if !found.is_empty() => {
+                    if let Some(project) = memory::local_project(&dir) {
+                        if let Err(e) = memory::ensure_local_ignored(project) {
+                            warn("ignoring the local memory scope", e);
+                            continue;
+                        }
+                    }
+                    let heading =
+                        format!("{} run {} ({})", date(SystemTime::now()), r.id, def.name);
+                    if let Err(e) =
+                        learn::append(&dir.join("LEARNINGS.md"), &found, &heading, &ctx.redactor)
+                    {
+                        warn("writing LEARNINGS.md", e);
+                    }
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => warn("extracting learnings", e),
+                Err(_) => warn("extracting learnings", "timed out"),
+            }
         }
     }
+    reindex(&c.layout);
+    ctx.continuity = Some(c);
 }
 
 /// The handoff for a session whose ledger changed: the ledger's goal and first open item, the

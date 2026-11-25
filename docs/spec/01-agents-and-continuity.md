@@ -520,6 +520,7 @@ The tool set workers can be granted. Names are lower-case; specifiers in parenth
 | `ls` | `path` | |
 | `bash` | `command`, `timeout?`, `background?` | 08 section 3; specifier `bash(git *)` |
 | `web_fetch` | `url`, `prompt?` | off by default, `tools.web = true` |
+| `skill` | `name` | read-only; lead and workers; offered when a skill exists (1.6) |
 | `delegate` | 4.1 | lead and workers below depth limit |
 | `fork` | `prompt` | lead only |
 | `resume_run`, `send_message` | | lead only |

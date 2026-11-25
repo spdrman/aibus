@@ -132,10 +132,10 @@ fn run_tools_need_the_flag_and_the_session_starts_lazily() {
     assert!(
         !listed
             .iter()
-            .any(|n| n == "workflow_run" || n.starts_with("run_")),
+            .any(|n| n == "workflow_run" || n == "agent_run" || n.starts_with("run_")),
         "{listed:?}"
     );
-    for tool in ["workflow_run", "run_status", "run_cancel"] {
+    for tool in ["workflow_run", "agent_run", "run_status", "run_cancel"] {
         let e = server
             .call(
                 None,
@@ -157,8 +157,8 @@ fn run_tools_need_the_flag_and_the_session_starts_lazily() {
         .map(|t| t.name.to_string())
         .collect();
     assert_eq!(
-        listed[listed.len() - 3..],
-        ["workflow_run", "run_status", "run_cancel"]
+        listed[listed.len() - 4..],
+        ["workflow_run", "agent_run", "run_status", "run_cancel"]
     );
     assert!(!rig.fake_dir().join("argv.txt").exists());
     assert!(!rig.fake_dir().join("session").exists());
@@ -460,6 +460,141 @@ fn a_workflow_that_does_not_validate_or_is_hidden_starts_nothing() {
         is_error(&r) && message(&r).contains("does not validate"),
         "{r}"
     );
+    assert!(
+        !rig.fake_dir().join("argv.txt").exists(),
+        "no run was started"
+    );
+}
+
+// #391: `agent_run` beside `workflow_run`, under the same flag and the same caps.
+impl Rig {
+    fn start_agent(&self, name: &str, input: &str, now: Instant) -> Value {
+        self.call("agent_run", json!({ "name": name, "input": input }), now)
+    }
+}
+
+#[test]
+fn agent_run_is_listed_only_under_the_run_flag_and_after_workflow_run() {
+    let (server, _home) = common::server(Caps::default(), Redactor::new());
+    assert!(!server.tools().iter().any(|t| t.name == "agent_run"));
+    let rig = rig();
+    let tools = rig.server.tools();
+    let at = |n: &str| tools.iter().position(|t| t.name == n).unwrap_or(usize::MAX);
+    assert_eq!(at("agent_run"), at("workflow_run") + 1);
+    let tool = &tools[at("agent_run")];
+    assert_eq!(tool.input_schema["required"], json!(["name", "input"]));
+    assert_eq!(tool.input_schema["additionalProperties"], false);
+}
+
+#[test]
+fn agent_run_starts_one_agent_as_a_child_with_no_prompts_and_its_input_on_stdin() {
+    let rig = rig();
+    let run = run_id(&rig.start_agent("general", "ok", Instant::now()));
+    let (done, _) = rig.until(&run, |b| !b["exit_code"].is_null());
+    assert_eq!(done["exit_code"], 0, "{done}");
+    assert_eq!(done["status"], "completed");
+    let argv: Vec<String> = fs::read_to_string(rig.fake_dir().join("argv.txt"))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let has = |pair: [&str; 2]| argv.windows(2).any(|w| w == pair);
+    assert!(has(["--agent", "general"]), "{argv:?}");
+    assert!(has(["--permission-mode", "dont-ask"]), "{argv:?}");
+    assert!(has(["--allow", "bash(cargo *)"]), "{argv:?}");
+    assert!(
+        argv.contains(&"run".to_owned()) && !argv.contains(&"--workflow".to_owned()),
+        "{argv:?}"
+    );
+    assert_eq!(argv.last().unwrap(), "-");
+    let via = fs::read_to_string(rig.fake_dir().join("input-via.txt")).unwrap();
+    assert_eq!(via.trim(), "stdin");
+    let env = fs::read_to_string(rig.fake_dir().join("env.txt")).unwrap();
+    assert!(
+        !env.lines().any(|l| l.starts_with("AIBUS_I_KNOW=")),
+        "{env}"
+    );
+    assert!(env.lines().any(|l| l == "AIBUS_MAX_COST_USD=20"), "{env}");
+}
+
+#[test]
+fn agent_run_counts_against_the_same_caps_as_workflow_run() {
+    // --max-runs: a workflow run and an agent run share the count.
+    let rig = rig_with(|c| {
+        c.max_runs = 2;
+        c.max_concurrent = 2;
+    });
+    let t0 = Instant::now();
+    run_id(&rig.start("ok"));
+    run_id(&rig.start_agent("general", "ok", t0 + Duration::from_secs(60)));
+    let third = rig.start_agent("general", "ok", t0 + Duration::from_secs(120));
+    assert!(
+        is_error(&third) && message(&third).contains("--max-runs"),
+        "{third}"
+    );
+
+    // --max-concurrent-runs: a live agent run holds the slot a workflow run would take.
+    let rig = rig();
+    let held = run_id(&rig.start_agent("general", "step", Instant::now()));
+    let second = rig.start("ok");
+    assert!(
+        is_error(&second) && message(&second).contains("--max-concurrent-runs"),
+        "{second}"
+    );
+    let again = rig.start_agent("general", "ok", Instant::now() + Duration::from_secs(60));
+    assert!(
+        is_error(&again) && message(&again).contains("--max-concurrent-runs"),
+        "{again}"
+    );
+    rig.call("run_cancel", json!({ "run": held }), Instant::now());
+
+    // --max-cost-usd: what finished runs spent is gone from the cap, whichever tool started them.
+    let rig = rig_with(|c| c.max_cost_usd = 0.05);
+    let run = run_id(&rig.start_agent("general", "ok", Instant::now()));
+    rig.until(&run, |b| !b["exit_code"].is_null());
+    let next = rig.start_agent("general", "ok", Instant::now() + Duration::from_secs(60));
+    assert!(
+        is_error(&next) && message(&next).contains("--max-cost-usd"),
+        "{next}"
+    );
+    let next = rig.start("ok");
+    assert!(
+        is_error(&next) && message(&next).contains("--max-cost-usd"),
+        "{next}"
+    );
+}
+
+#[test]
+fn agent_run_shares_the_start_rate_limit_with_workflow_run() {
+    let rig = rig_with(|c| {
+        c.max_runs = 100;
+        c.max_concurrent = 100;
+    });
+    let t0 = Instant::now();
+    for _ in 0..3 {
+        assert!(!is_error(&rig.start("ok")));
+    }
+    for _ in 0..2 {
+        assert!(!is_error(&rig.start_agent("general", "ok", t0)));
+    }
+    let limited = rig.start_agent("general", "ok", t0);
+    assert!(
+        is_error(&limited) && message(&limited).contains("rate limit"),
+        "{limited}"
+    );
+}
+
+#[test]
+fn an_agent_that_is_not_there_or_a_bad_name_or_no_input_starts_nothing() {
+    let rig = rig();
+    for name in ["../general", "--cwd", "General", ""] {
+        let r = rig.start_agent(name, "ok", Instant::now());
+        assert!(is_error(&r), "{name:?}: {r}");
+    }
+    let r = rig.start_agent("nobody-by-this-name", "ok", Instant::now());
+    assert!(is_error(&r) && message(&r).contains("no agent"), "{r}");
+    let r = rig.start_agent("general", "  ", Instant::now());
+    assert!(is_error(&r), "{r}");
     assert!(
         !rig.fake_dir().join("argv.txt").exists(),
         "no run was started"

@@ -49,7 +49,7 @@ fn properties(form: &rmcp::model::ElicitRequestParams) -> Value {
 fn confirm_never_skips_it() {
     let (server, _home) = server(ConfirmConfig { elicit: false, ..ConfirmConfig::default() });
     let args = json!({ "name": "ship" });
-    for tool in ["workflow_create", "workflow_update", "workflow_run"] {
+    for tool in ["workflow_create", "workflow_update", "workflow_run", "agent_run"] {
         assert!(server.confirmation_form(tool, &args).is_none(), "{tool}");
         assert!(server.confirmation_ask(tool, &args, None).is_none(), "{tool}");
     }
@@ -205,7 +205,7 @@ fn no_form_ever_asks_for_a_credential_shaped_field() {
     let names: Vec<String> = names.into_iter().chain([ "x".repeat(64)]).collect();
     for cap in [None, Some(1.0), Some(100.0)] {
         let (server, _home) = server(ConfirmConfig { run_cap_usd: cap, ..ConfirmConfig::default() });
-        for tool in ["workflow_create", "workflow_update", "workflow_run"] {
+        for tool in ["workflow_create", "workflow_update", "workflow_run", "agent_run"] {
             for name in &names {
                 let Some(form) = server.confirmation_form(tool, &json!({ "name": name })) else { continue };
                 let wire = serde_json::to_value(&form).unwrap();
@@ -227,4 +227,21 @@ fn no_form_ever_asks_for_a_credential_shaped_field() {
             }
         }
     }
+}
+
+// #391: `agent_run` starts spend the same way `workflow_run` does, so it asks the same way: the
+// name of the agent retyped, and the cost under the cap.
+#[test]
+fn an_agent_run_asks_for_the_agent_name_and_the_cost_cap() {
+    let (server, _home) = server(ConfirmConfig { run_cap_usd: Some(5.0), ..ConfirmConfig::default() });
+    let args = json!({ "name": "general" });
+    let form = server.confirmation_form("agent_run", &args).expect("agent_run is gated");
+    let schema = properties(&form);
+    assert_eq!(schema["properties"]["name"]["minLength"], 7);
+    assert_eq!(schema["required"], json!(["name", "max_cost_usd"]));
+    let accept = |c: Value| answer(ElicitationAction::Accept, Some(c));
+    assert!(server.confirmation_check("agent_run", &args, &accept(json!({ "name": "general", "max_cost_usd": 1.0 }))).is_ok());
+    assert!(server.confirmation_check("agent_run", &args, &accept(json!({ "name": "general" }))).is_err());
+    let e = server.confirmation_check("agent_run", &args, &accept(json!({ "name": "other", "max_cost_usd": 1.0 }))).unwrap_err();
+    assert!(e.contains("agent"), "{e}");
 }

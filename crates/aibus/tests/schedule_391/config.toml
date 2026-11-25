@@ -1,0 +1,14 @@
+[[schedule]]
+name = "morning-triage"
+agent = "explore"
+prompt = "summarise what changed overnight"
+cron = "30 7 * * 1-5"
+project = "/home/me/proj"
+max_cost_usd = 2.5
+
+[[schedule]]
+name = "quarter-hour"
+agent = "general"
+prompt = "it's 100% done & <ok> $HOME"
+cron = "*/30 0,12 1 * *"
+project = "/srv/my proj"

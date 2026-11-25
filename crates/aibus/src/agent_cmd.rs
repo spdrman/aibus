@@ -15,6 +15,7 @@ use aibus_core::{AccountName, AgentName, AibusError, ModelRef, Scope};
 use aibus_provider::ProviderRegistry;
 use serde_json::{json, Value};
 
+use crate::agent_track;
 use crate::cli::{AgentCmd, Global};
 use crate::providers::{os_factories, provider_configs};
 
@@ -23,7 +24,7 @@ pub(crate) struct Env {
     pub(crate) cwd: PathBuf,
     user_dir: PathBuf,
     config: Config,
-    paths: Paths,
+    pub(crate) paths: Paths,
 }
 
 impl Env {
@@ -103,6 +104,8 @@ pub fn agent(cmd: &AgentCmd, g: &Global) -> Result<u8, AibusError> {
         AgentCmd::Validate { path } => validate(&env, g, path.as_deref()),
         AgentCmd::Where => where_(&env, g),
         AgentCmd::Import { dir } => import(&env, g, dir),
+        AgentCmd::Stats { name, last } => agent_track::stats(&env, g, name, *last),
+        AgentCmd::Eval { name, cases, timeout } => agent_track::eval(&env, g, name, cases.as_deref(), *timeout),
     }
 }
 

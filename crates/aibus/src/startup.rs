@@ -752,7 +752,21 @@ impl Step for EnterLoop {
 
         let (tx, rx) = mpsc::channel(MSG_CAPACITY);
         let orch = Orchestrator::new(limits.clone(), tx.clone());
-        orch.set_roster(Roster::of(agents.agents.values()));
+        let mut roster = Roster::of(agents.agents.values());
+        let index_file = paths.data.join("index.sqlite");
+        if cfg.agents.roster_stats && index_file.is_file() {
+            // Counts only (H1.5): the suffix never carries a word a past run wrote.
+            match Index::open(&index_file) {
+                Ok(idx) => {
+                    roster.text = aibus_core::agent::roster::text_with(agents.agents.values(), |n| {
+                        let s = idx.agent_stats(n.as_str(), aibus_core::agent::roster::RECENT_RUNS).ok()?;
+                        Some((s.runs, s.completed))
+                    })
+                }
+                Err(e) => eprintln!("aibus: warning: roster stats: {e}"),
+            }
+        }
+        orch.set_roster(roster);
         let tool_limits = ToolLimits {
             result_max_bytes: cfg.limits.result_max_bytes,
             bash_max_output_bytes: cfg.tools.bash_max_output_bytes,

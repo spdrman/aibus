@@ -162,6 +162,8 @@ pub struct Agents {
     pub extra_dirs: Vec<String>,
     pub trusted_dirs: Vec<String>,
     pub reload_on_change: bool,
+    /// Add `(last 18 runs: 15 completed)` to each roster line the lead reads, from the index (H1.5).
+    pub roster_stats: bool,
 }
 
 impl Default for Agents {
@@ -170,6 +172,7 @@ impl Default for Agents {
             extra_dirs: Vec::new(),
             trusted_dirs: Vec::new(),
             reload_on_change: true,
+            roster_stats: false,
         }
     }
 }

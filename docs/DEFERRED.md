@@ -189,3 +189,11 @@ Cut from the reduced scope, still wanted:
 - Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
 - A bounded queue between the run and the exporter. Each export is one thread (the caller writes the `thread::spawn`), so a slow collector under many exports would pile threads up; a bounded queue with drop-on-full belongs with the config wiring.
 - Model and version labels on the resource (spec 7.2). Only the provider extension is exported today.
+
+## H1.5 per-agent track record (#392)
+
+- **Evals result type.** #293 (A3.3) was building an `EvaluationResult` schema in parallel and had no branch (`feat/293-evals`) to read on 2026-11-25, so the `agent eval` scorecard is its own minimal JSON (`scorecard_version`, `agent`, `summary`, `cases[]` with `result`, `reason` and the two exit codes). Moving it onto that type is a follow-up once it lands.
+- **Cases only judge by exit codes.** A case passes when the run exits 0 and its `done_when` exits 0. Output matching, scoring and cost or turn budgets per case are not there. Cases run in the project directory, not a scratch copy, so a case whose agent writes files leaves them there.
+- **Learning extraction uses the lead's model** for workers too, one call per finished worker run (at most four a session). A per-agent extraction model is not wired.
+- **Roster suffix is read once at session start.** An agent reload (`reload_on_change`, TUI) rebuilds the roster without it until the next session.
+- **`agent stats` reads the session index**, so runs of a session that was killed before it ended are not counted until `aibus session list --rebuild` or the next start rebuilds the index.

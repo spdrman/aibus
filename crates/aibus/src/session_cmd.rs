@@ -204,7 +204,7 @@ pub fn session(cmd: &SessionCmd, g: &Global, redactor: &Redactor) -> Result<u8, 
 
 /// The index, opened now and not before. A missing file, or one that disagrees with the
 /// directories on how many sessions there are, is rebuilt (07 section 2.3).
-fn index(paths: &Paths, rebuild: bool) -> Result<Index, AibusError> {
+pub(crate) fn index(paths: &Paths, rebuild: bool) -> Result<Index, AibusError> {
     let sessions = paths.state.join("sessions");
     let path = paths.data.join("index.sqlite");
     let fresh = !path.is_file();

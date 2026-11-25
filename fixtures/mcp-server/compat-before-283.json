@@ -808,7 +808,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List the agents a workflow step can name: built-in, project and user, with role, model and tools.",
+      "description": "List the agents a workflow step can name: built-in, project and user, with role, model and tools, and the skills of the project and the user.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -842,6 +842,12 @@
                 "scope": {
                   "type": "string"
                 },
+                "skills": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
                 "tools": {
                   "items": {
                     "type": "string"
@@ -858,6 +864,33 @@
                 "role",
                 "model",
                 "tools",
+                "description"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "scope",
+                "path",
                 "description"
               ],
               "type": "object"

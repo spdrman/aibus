@@ -10,6 +10,7 @@ use crate::agent::discover::project_root;
 use crate::agent::AgentDef;
 use crate::continuity::memory::memory_dir;
 use crate::run::{ContentBlock, Conversation, Message, MessageRole};
+use crate::skill::{self, SkillSet};
 
 /// `git status --short` and the branch, as they were when the run started.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -113,20 +114,23 @@ pub fn build(input: &ContextInput<'_>) -> Conversation {
     }
     system.push_str("</environment>\n");
 
+    let (user_dir, extra_dirs) = skill::session_dirs();
+    let skills = if def.skills.is_empty() {
+        SkillSet::default()
+    } else {
+        skill::discover(root, user_dir, extra_dirs)
+    };
     let mut seen: Vec<&str> = Vec::new();
     for name in &def.skills {
-        let safe = !name.is_empty()
-            && name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-            && !name.starts_with('.');
-        if !safe || seen.contains(&name.as_str()) || seen.len() == 32 {
+        if !skill::valid_name(name) || seen.contains(&name.as_str()) || seen.len() == 32 {
             continue;
         }
         seen.push(name);
-        let file = root.join(".aibus/skills").join(name).join("SKILL.md");
-        if let Ok(body) = fs::read_to_string(file) {
-            system.push_str(&format!("\n## Skill: {name}\n{}\n", body.trim_end()));
+        match skills.body(name) {
+            Some(body) => system.push_str(&format!("\n## Skill: {name}\n{body}\n")),
+            None => {
+                tracing::warn!(agent = %def.name, skill = %name, "preloaded skill not found, skipped")
+            }
         }
     }
 

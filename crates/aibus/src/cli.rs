@@ -162,6 +162,9 @@ pub enum Command {
     /// Agent definitions
     #[command(subcommand)]
     Agent(AgentCmd),
+    /// Skills the model can load on demand
+    #[command(subcommand)]
+    Skill(SkillCmd),
     /// Provider accounts
     #[command(subcommand)]
     Account(AccountCmd),
@@ -320,6 +323,23 @@ pub enum AgentCmd {
     Validate { path: Option<PathBuf> },
     Import { dir: PathBuf },
     Where,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillCmd {
+    List {
+        /// Names only, one per line
+        #[arg(long, hide = true)]
+        names: bool,
+    },
+    Show {
+        name: String,
+    },
+    Validate,
+    /// Copy the SKILL.md files of a directory such as .claude/skills into .aibus/skills
+    Import {
+        dir: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -783,6 +803,10 @@ mod tests {
         "agent validate",
         "agent import",
         "agent where",
+        "skill list",
+        "skill show",
+        "skill validate",
+        "skill import",
         "account add",
         "account list",
         "account show",

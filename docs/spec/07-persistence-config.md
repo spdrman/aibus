@@ -145,6 +145,9 @@ extra_dirs = [".claude/agents"]
 trusted_dirs = []
 reload_on_change = true
 
+[skills]               # read after .aibus/skills and ~/.config/aibus/skills
+extra_dirs = []
+
 [limits]
 max_turns = 50
 max_tokens_total = 2_000_000

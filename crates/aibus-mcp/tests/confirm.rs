@@ -49,12 +49,7 @@ fn properties(form: &rmcp::model::ElicitRequestParams) -> Value {
 fn confirm_never_skips_it() {
     let (server, _home) = server(ConfirmConfig { elicit: false, ..ConfirmConfig::default() });
     let args = json!({ "name": "ship" });
-    for tool in [
-        "workflow_create",
-        "workflow_update",
-        "workflow_run",
-        "agent_run",
-    ] {
+    for tool in ["workflow_create", "workflow_update", "workflow_run", "agent_run"] {
         assert!(server.confirmation_form(tool, &args).is_none(), "{tool}");
         assert!(server.confirmation_ask(tool, &args, None).is_none(), "{tool}");
     }
@@ -210,12 +205,7 @@ fn no_form_ever_asks_for_a_credential_shaped_field() {
     let names: Vec<String> = names.into_iter().chain([ "x".repeat(64)]).collect();
     for cap in [None, Some(1.0), Some(100.0)] {
         let (server, _home) = server(ConfirmConfig { run_cap_usd: cap, ..ConfirmConfig::default() });
-        for tool in [
-            "workflow_create",
-            "workflow_update",
-            "workflow_run",
-            "agent_run",
-        ] {
+        for tool in ["workflow_create", "workflow_update", "workflow_run", "agent_run"] {
             for name in &names {
                 let Some(form) = server.confirmation_form(tool, &json!({ "name": name })) else { continue };
                 let wire = serde_json::to_value(&form).unwrap();

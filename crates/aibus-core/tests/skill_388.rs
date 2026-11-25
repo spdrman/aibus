@@ -510,14 +510,20 @@ mod confinement {
     fn import_skips_a_link_out_of_the_claude_skills_directory() {
         let d = xdg_temp();
         let outside = secret(d.path());
+        let target = outside.join("valid.md");
+        fs::write(&target, "---\nname: stolen\ndescription: d\n---\nsecret").unwrap();
         let from = d.path().join(".claude/skills");
         fs::create_dir_all(from.join("stolen")).unwrap();
-        symlink(outside.join("id_ed25519"), from.join("stolen/SKILL.md")).unwrap();
+        symlink(&target, from.join("stolen/SKILL.md")).unwrap();
         let to = d.path().join(".aibus/skills");
         let done = skill::import(&from, &to).unwrap();
-        assert!(done
-            .iter()
-            .all(|(_, o)| matches!(o, aibus_core::agent::import::Outcome::Skipped(_))));
+        assert_eq!(done.len(), 1, "{done:?}");
+        match &done[0].1 {
+            aibus_core::agent::import::Outcome::Skipped(why) => {
+                assert!(why.contains("outside the skill directory"), "{why}")
+            }
+            other => panic!("expected Skipped, got {other:?}"),
+        }
         assert!(!to.join("stolen").exists());
     }
 }

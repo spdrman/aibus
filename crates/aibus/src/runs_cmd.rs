@@ -24,11 +24,23 @@ fn load(root: &Path, run: &str) -> Result<(String, Recorded), AibusError> {
     Ok((name, rec))
 }
 
-/// An `EvaluationResult` read from a file the user named: a regular file of at most 4 MiB, opened
-/// once so a file that grows after the check is not read whole.
+/// An `EvaluationResult` read from a file the user named: a regular file of at most 4 MiB (a
+/// symlink to one is followed, a FIFO or device is refused before it is opened, so a FIFO with no
+/// writer cannot hang the command), opened once so a file that grows after the check is not read
+/// whole. The message is cleaned for a terminal because a parse error echoes the file's text.
 fn result_file(path: &Path) -> Result<EvaluationResult, AibusError> {
-    let bad =
-        |why: String| AibusError::Usage(format!("evaluation result {}: {why}", path.display()));
+    let bad = |why: String| {
+        let msg = format!("evaluation result {}: {why}", path.display());
+        AibusError::Usage(
+            String::from_utf8_lossy(&view::terminal_safe_line(msg.as_bytes())).into_owned(),
+        )
+    };
+    if !std::fs::metadata(path)
+        .map_err(|e| bad(e.to_string()))?
+        .is_file()
+    {
+        return Err(bad("not a regular file of at most 4 MiB".into()));
+    }
     let file = std::fs::File::open(path).map_err(|e| bad(e.to_string()))?;
     if !file.metadata().map_err(|e| bad(e.to_string()))?.is_file() {
         return Err(bad("not a regular file of at most 4 MiB".into()));

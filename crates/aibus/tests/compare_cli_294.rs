@@ -289,3 +289,56 @@ fn runs_inspect_json_writes_no_bidi_or_c1_character_from_a_hostile_usage_metric(
         assert!(!text.contains(bad), "{bad:?} in {text}");
     }
 }
+
+#[test]
+fn runs_compare_refuses_a_fifo_as_a_result_file_without_waiting_for_a_writer() {
+    let home = aibus_testkit::xdg_temp();
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("r.fifo");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let mut c = command(home.path());
+    c.env("PATH", "")
+        .args(["runs", "compare", "06-basic", "07-deleg", "--root"])
+        .arg(traces())
+        .arg("--result-b")
+        .arg(&fifo)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    let start = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > std::time::Duration::from_secs(10) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("aibus waited on a FIFO with no writer");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let o = child.wait_with_output().unwrap();
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stderr(&o).contains("regular file"), "{}", stderr(&o));
+}
+
+#[test]
+fn runs_compare_writes_no_bidi_character_from_a_result_file_parse_error() {
+    let home = aibus_testkit::xdg_temp();
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("r.json");
+    let mut v = serde_json::to_value(result("a", 1, "abc")).unwrap();
+    v["verdict"] = serde_json::json!("\u{202e}evil");
+    fs::write(&p, serde_json::to_vec(&v).unwrap()).unwrap();
+    let mut c = command(home.path());
+    c.env("PATH", "")
+        .args(["runs", "compare", "06-basic", "07-deleg", "--root"])
+        .arg(traces())
+        .arg("--result-a")
+        .arg(&p);
+    let o = c.output().unwrap();
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stderr(&o).contains("evil"), "{}", stderr(&o));
+    assert!(!stderr(&o).contains('\u{202e}'), "{}", stderr(&o));
+}

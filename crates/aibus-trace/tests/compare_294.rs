@@ -494,7 +494,7 @@ fn a_change_is_computed_only_when_both_numbers_are_known_in_the_same_unit() {
     assert_eq!(d("cost_usd").change, Known::Value(0.25));
     assert_eq!(d("latency_ms").a.quality, DataQuality::Derived);
     assert_eq!(d("latency_ms").change, Known::Value(2_000.0));
-    // Reported by neither side's trace under the same name: shown with unknown on the other side.
+    // Both sides report input_tokens under the same name with the same value: a known change of 0.
     assert!(matches!(d("input_tokens").change, Known::Value(v) if v == 0.0));
 }
 

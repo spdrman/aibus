@@ -77,12 +77,11 @@ pub struct InspectorView {
     pub worktree_diff: Known<String>,
 }
 
-/// The most text of one retained payload an inspector field holds.
-const MAX_TEXT: usize = 4096;
-
 /// A retained payload as text: its JSON pretty-printed when it is JSON, cleaned for a terminal and
 /// cut at 4 KiB.
 fn payload_text(rec: &Recorded, payload_ref: &str) -> Option<String> {
+    /// The most text of one retained payload an inspector field holds.
+    const MAX_TEXT: usize = 4096;
     let b = payload_bytes(rec, payload_ref)?;
     let text = serde_json::from_slice::<Value>(&b)
         .ok()

@@ -346,15 +346,15 @@ fn validate_checks_the_done_keys() {
     );
     assert!(r.ok, "{:?}", r.errors);
     for (frontmatter, field) in [
-        ("role: advisor\ndone_when: true", "done_when"),
+        ("role: advisor\ndone_when: 'true'", "done_when"),
         ("done_when: '  '", "done_when"),
         ("done_retries: 2", "done_retries"),
         (
-            "done_when: true\noutput_schema:\n  type: banana",
+            "done_when: 'true'\noutput_schema:\n  type: banana",
             "output_schema",
         ),
         (
-            "done_when: true\noutput_schema:\n  oneOf: []",
+            "done_when: 'true'\noutput_schema:\n  oneOf: []",
             "output_schema",
         ),
     ] {

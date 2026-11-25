@@ -966,9 +966,17 @@ fn a_task_file_that_is_a_link_is_not_read() {
 fn the_script_never_posts_to_a_socket_in_a_directory_that_is_not_ours() {
     use std::os::unix::net::UnixListener;
     let (_t, script, _) = script_for();
-    // /tmp belongs to root and anyone may create a socket in it: the shape of a squatter at a
-    // guessable fallback name. The script must not connect.
-    let squat = PathBuf::from(format!("/tmp/aibus-tap-test-{}.sock", std::process::id()));
+    // A directory that is not ours with a socket in it: the shape of a squatter at a guessable
+    // fallback name. For a normal user /tmp is that directory (root owns it, anyone may create a
+    // socket in it). Root owns /tmp, so `[ -O dir ]` is true for root there, and the gate runs as
+    // root: then the directory is a fresh one handed to another user, which is not ours either.
+    let other = tempfile::tempdir().unwrap();
+    let squat = if rustix::process::geteuid().is_root() {
+        std::os::unix::fs::chown(other.path(), Some(65534), None).unwrap();
+        other.path().join("squat.sock")
+    } else {
+        PathBuf::from(format!("/tmp/aibus-tap-test-{}.sock", std::process::id()))
+    };
     let _ = fs::remove_file(&squat);
     let l = UnixListener::bind(&squat).unwrap();
     l.set_nonblocking(true).unwrap();

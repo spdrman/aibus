@@ -31,6 +31,9 @@ fn examples() -> Vec<(String, String)> {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        // Written after #283 (cross-provider came with #360), so the code before it never saw it
+        // and before-283.json has nothing to pin for it. aibus-core's copy of this check skips it too.
+        .filter(|p| p.file_stem().is_some_and(|s| s != "cross-provider"))
         .map(|p| {
             let stem = p.file_stem().unwrap().to_string_lossy().into_owned();
             (stem, std::fs::read_to_string(&p).unwrap())

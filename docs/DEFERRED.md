@@ -35,6 +35,15 @@ Smaller leftovers from the #385 review, none of them a bug...
 Work cut from an issue's reduced definition of done, kept here so it is not lost. Each section names
 the issue it came from and what picks it up.
 
+## B1.5 Phase 1 gate (#308)
+
+The gate record is `docs/desktop/B1.5-phase1-gate.md`: GO-WITH-CONDITIONS on ADR-B-001. What it leaves open, and who takes it...
+
+- **macOS run and numeric responsiveness targets.** They block opening Phase 2 (conditions 1 and 3 there); the owner runs `docs/desktop/VERIFY-MACOS.md`.
+- **Bridge wiring, deltas, the per-call re-read of the trace, and a bounded graph** go to #310. The re-read costs about 53 ms per 500-event batch at 10,000 events and about 0.6 s at 100,000.
+- **Virtualised timeline** goes to #311, **command grants and the DTO credential test** to #312, **Playwright on the real webview and keyboard access to graph nodes** to #313.
+- **Webview timings at medium and large** (first render, latency, memory, graph interaction) and **React Flow with memoisation** are unmeasured; nothing here runs a webview at scale.
+
 ## B1.1 Tauri desktop spike (#304)
 
 I cut these from the spike on 2026-11-22. B1.5 (#308) reviews them with the go/no-go.

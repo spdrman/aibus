@@ -134,8 +134,9 @@ I built the shell, the four workspaces from a list, the shared primitives and to
 - **Live tailing and the open-run summary row** (both listed under B1.3) wait on that wiring.
 - **An opener command for external links.** `ExternalLink` only accepts plain https URLs and hands them to an injected opener. The default is `window.open` with `noopener,noreferrer`, which a Tauri webview may block. A host command (no shell or opener plugin in the capability) is the proper fix and needs the Rust build too.
 - **Native window size and position across restart.** The dock layout, workspace and theme persist in webview storage. The window frame itself needs `tauri-plugin-window-state` (or a small host command), again Rust. `tauri.conf.json` now sets a 640 by 480 minimum so small windows stay usable.
-- **Playwright and GIFs.** The suite is vitest in jsdom. Nothing drives the real webview, so layout at small sizes and mixed DPI is untested; the CSS uses rem, flex and relative units only.
-- **Webview parity on macOS and Windows.** Not run. Steps stay in `docs/desktop/VERIFY-MACOS.md`.
+- **Playwright and GIFs.** The suite is vitest in jsdom. Nothing drives the real webview, so layout at small sizes and mixed DPI is untested. Spacing tokens, some font sizes, a 720px media query and the graph SVG size are fixed pixels, so I am not claiming the layout scales.
+- **Webview parity on macOS and Linux.** Not run on either (no Tauri build ran). Steps stay in `docs/desktop/VERIFY-MACOS.md`.
+- **Keyboard use of graph nodes.** The graph is an `svg` with `role="img"` and click-only nodes, so tool nodes cannot be selected from the keyboard. Making them operable means restructuring the graph for assistive tech, which I left for a follow-up.
 - **Replay and Compare** is #314: one more entry in the list in `App.tsx`.
 
 ## B1.3 typed bridge (#306)

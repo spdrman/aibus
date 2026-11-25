@@ -26,7 +26,7 @@ export function ProvenanceBanner({ snap, error, onReplay }: { snap: Snapshot | n
       ) : (
         <span>{error ?? "Starting..."}</span>
       )}
-      <Button variant="quiet" size="sm" onClick={onReplay}>Replay</Button>
+      <Button variant="primary" size="sm" onClick={onReplay}>Replay</Button>
       {stack && (
         <span className="stack">
           Tauri {stack.tauri}, {stack.os}/{stack.arch}, webview {stack.webview ?? "unknown"}

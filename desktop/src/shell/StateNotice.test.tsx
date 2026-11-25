@@ -15,6 +15,19 @@ describe("state notices", () => {
     expect(screen.getByRole("alert", { name: "Codex sign-in failed" })).toHaveTextContent("codex login");
   });
 
+  it("two notices of the same kind each keep their own name", () => {
+    render(
+      <>
+        <StateNotice kind="empty" title="No workflow open" />
+        <StateNotice kind="empty" title="Waiting for a run" />
+      </>,
+    );
+    expect(screen.getByRole("status", { name: "No workflow open" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Waiting for a run" })).toBeInTheDocument();
+    const ids = Array.from(document.querySelectorAll("h2")).map((h) => h.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it("an empty state is a status, not an alert", () => {
     render(<StateNotice kind="empty" title="Nothing here">Try again later.</StateNotice>);
     expect(screen.getByRole("status", { name: "Nothing here" })).toBeInTheDocument();

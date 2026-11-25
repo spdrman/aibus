@@ -18,6 +18,8 @@ const pairs: [ColorToken, ColorToken, number, string][] = [
   ["text-success", "surface-raised", 4.5, "completed nodes"],
   ["text-warning", "bg-app", 4.5, "warnings"],
   ["action-fg", "action-bg", 4.5, "active nav button"],
+  ["action-fg", "action-bg", 4.5, "Replay button text on the banner"],
+  ["action-bg", "surface-selected", 3, "Replay button edge on the banner"],
   ["border", "bg-app", 3, "table and notice edges"],
   ["border", "surface-raised", 3, "graph node edges"],
   ["border-danger", "surface-raised", 3, "error notice edge"],

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 export type NoticeKind = "empty" | "missing-cli" | "auth-failed" | "error";
 
@@ -6,9 +6,10 @@ export type NoticeKind = "empty" | "missing-cli" | "auth-failed" | "error";
 // appear; empty states are a status region. The title names the problem, the body says what to do.
 export function StateNotice({ kind, title, children, action }: { kind: NoticeKind; title: string; children?: ReactNode; action?: ReactNode }) {
   const isError = kind !== "empty";
+  const titleId = useId();
   return (
-    <section className="notice" data-kind={kind} role={isError ? "alert" : "status"} aria-labelledby={`notice-${kind}`}>
-      <h2 id={`notice-${kind}`}>{title}</h2>
+    <section className="notice" data-kind={kind} role={isError ? "alert" : "status"} aria-labelledby={titleId}>
+      <h2 id={titleId}>{title}</h2>
       {children && <p>{children}</p>}
       {action}
     </section>

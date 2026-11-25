@@ -72,7 +72,7 @@ export function Shell({ workspaces, header }: { workspaces: Workspace[]; header?
           ))}
         </nav>
         <div className="shell__tools">
-          <Button variant="quiet" size="sm" onClick={toggle} aria-label="Toggle light and dark theme" title={`Theme: ${choice}`}>
+          <Button variant="quiet" size="sm" onClick={toggle} title="Toggle light and dark theme">
             Theme: {choice}
           </Button>
           <Button variant="quiet" size="sm" aria-expanded={help} onClick={() => setHelp((h) => !h)}>

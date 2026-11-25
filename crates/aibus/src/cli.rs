@@ -596,6 +596,27 @@ pub enum RunsCmd {
         #[arg(long)]
         events: bool,
     },
+    /// Two recorded runs side by side: tests, latency, tokens and cost, tools, routing, outputs, git state and environment mismatches
+    Compare {
+        /// The run to start from (a)
+        a: String,
+        /// The run to compare it with (b)
+        b: String,
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        /// An evaluation result (the JSON of an `EvaluationResult`) for run a: gives its tests and revision
+        #[arg(long, value_name = "FILE")]
+        result_a: Option<PathBuf>,
+        /// An evaluation result (JSON) for run b
+        #[arg(long, value_name = "FILE")]
+        result_b: Option<PathBuf>,
+    },
+    /// What a replay and what a rerun of one recorded run would need, and what its trace does not carry
+    Repro {
+        run: String,
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+    },
     /// Run it again as a new attempt (not available yet; its outcome could differ from the recording)
     Rerun {
         run: String,
@@ -863,6 +884,8 @@ mod tests {
         "runs list",
         "runs inspect",
         "runs replay",
+        "runs compare",
+        "runs repro",
         "runs rerun",
         "sessions list",
         "sessions tap",

@@ -13,6 +13,8 @@
 //! offline replay. Nothing here launches a process.
 #![forbid(unsafe_code)]
 
+pub mod causal;
+pub mod compare;
 pub mod eval;
 pub mod experiment;
 pub mod otel;

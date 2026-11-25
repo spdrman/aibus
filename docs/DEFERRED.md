@@ -226,3 +226,18 @@ Cut from the reduced scope, still wanted:
 - **Learning extraction uses the lead's model** for workers too, one call per finished worker run (at most four a session). A per-agent extraction model is not wired.
 - **Roster suffix is read once at session start.** An agent reload (`reload_on_change`, TUI) rebuilds the roster without it until the next session.
 - **`agent stats` reads the session index**, so runs of a session that was killed before it ended are not counted until `aibus session list --rebuild` or the next start rebuilds the index.
+
+## A3.4 Visual workflow comparison, causal inspector and reproducibility UX (#294)
+
+I built the library and CLI/TUI side that exists without the desktop UI: `aibus_trace::compare` (two runs side by side), `aibus_trace::causal` (the typed inspector and the reproducibility report), `aibus runs compare`, `aibus runs repro`, `runs inspect --node --json` and `/runs compare` and `/runs repro`. These parts of the issue are not in it:
+
+- **The graphical client.** Click-through causal evidence, trace-gap overlays, a planned-versus-actual graph overlay and the comparison view are desktop work (EPIC B Phase 2), which waits on the #303 conditions. The typed `InspectorView` and `Comparison` are the view models it would read; both serialise to JSON.
+- **Planned versus actual graph comparison.** The comparison does not diff a run's `plan.json` against its execution graph, and says nothing about the critical path or retry paths. `inspect` already prints the plan next to what ran; a structured diff is not built.
+- **Jev reason codes.** The comparison shows the fields of `route_decided` events as recorded (strings and numbers, cleaned). The trace has no documented reason-code field, so nothing is explained or ranked, and a run with no `route_decided` event shows a gap.
+- **Shareable redacted run bundles.** There is no bundle format (manifest, events, artifacts, diffs) and no exporter. What a bundle contains is an open question on the issue. Whether to reuse the `.aibus` container of #271 is undecided.
+- **Git and worktree diff.** No trace records a revision or a diff, so the comparison shows the revision only when an evaluation result is handed in and always shows the diff as a gap. Recording a revision at attempt start and a diff artifact at the end needs the scheduler (#288, #289).
+- **Artifact and diff contents.** Linked artifacts are listed by position, name and payload reference. Their contents are not compared.
+- **`rerun`.** Still refused (#288, #289). `runs repro` says what a rerun would need and what the trace lacks. It does not check anything on this machine against it.
+- **Evaluation results in the TUI.** `/runs compare` cannot take result files, so it shows quality as a gap. Only the CLI takes `--result-a` and `--result-b`.
+- **The inspector's approval gate.** A prompt is shown when the delegating payload was retained, which only happens under an explicit payload policy. There is no separate per-prompt approval state to check.
+- **Cross-attempt comparison inside one run directory.** A side is the whole run (all its attempts, usage summed only when every attempt agrees on the unit). Comparing two attempts of one run is not built.

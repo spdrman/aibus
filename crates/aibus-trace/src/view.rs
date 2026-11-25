@@ -190,7 +190,17 @@ pub fn clean(s: &str, max: usize) -> String {
     out
 }
 
-fn opt(s: Option<&str>) -> String {
+/// `m` with its name, unit and source cleaned for a terminal.
+pub(crate) fn clean_metric(m: &Metric) -> Metric {
+    Metric {
+        name: clean(&m.name, 160),
+        unit: clean(&m.unit, 160),
+        source: clean(&m.source, 160),
+        ..m.clone()
+    }
+}
+
+pub(crate) fn opt(s: Option<&str>) -> String {
     s.map_or_else(|| "-".into(), |t| clean(t, 160))
 }
 
@@ -217,18 +227,18 @@ pub fn terminal_safe_line(raw: &[u8]) -> Vec<u8> {
 }
 
 /// The wire name of an enum value (`tool_started`, `cli_stream`, ...).
-fn wire(v: impl Serialize) -> String {
+pub(crate) fn wire(v: impl Serialize) -> String {
     match serde_json::to_value(v) {
         Ok(Value::String(s)) => s,
         _ => "?".into(),
     }
 }
 
-fn data_str<'a>(e: &'a TraceEvent, key: &str) -> Option<&'a str> {
+pub(crate) fn data_str<'a>(e: &'a TraceEvent, key: &str) -> Option<&'a str> {
     e.data.get(key).and_then(Value::as_str)
 }
 
-fn metric_line(m: &Metric) -> String {
+pub(crate) fn metric_line(m: &Metric) -> String {
     let value = m.value.map_or_else(|| "unknown".into(), |v| v.to_string());
     format!(
         "{} {value} {} ({}, {})",
@@ -254,7 +264,7 @@ fn levels<'a>(ev: impl Iterator<Item = &'a crate::Evidence>) -> String {
         .join(", ")
 }
 
-fn edge_line(e: &Edge) -> String {
+pub(crate) fn edge_line(e: &Edge) -> String {
     fn sources(ev: &[crate::Evidence]) -> String {
         ev.iter()
             .map(|e| format!("#{} {}/{}", e.position, wire(e.visibility), wire(e.origin)))
@@ -1054,20 +1064,34 @@ pub fn timeline(rec: &Recorded, filter: &Filter) -> String {
     s
 }
 
+/// `local://objects/<64 hex>.json` and nothing else names a payload.
+fn payload_path(rec: &Recorded, payload_ref: &str) -> Option<PathBuf> {
+    let name = payload_ref
+        .strip_prefix("local://objects/")?
+        .strip_suffix(".json")?;
+    (name.len() == 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    .then(|| rec.dir.join("objects").join(format!("{name}.json")))
+}
+
+/// The bytes of a payload the run kept, at most 1 MiB, read the way `push_payload` reads one:
+/// only a plain object reference, only a regular file inside the run's own `objects` directory.
+pub(crate) fn payload_bytes(rec: &Recorded, payload_ref: &str) -> Option<Vec<u8>> {
+    let path = payload_path(rec, payload_ref)?;
+    if !fs::symlink_metadata(rec.dir.join("objects")).is_ok_and(|m| m.is_dir()) {
+        return None;
+    }
+    let file = open_regular(&path).ok()?;
+    let mut b = Vec::new();
+    file.take(1 << 20).read_to_end(&mut b).ok()?;
+    Some(b)
+}
+
 fn push_payload(s: &mut String, rec: &Recorded, payload_ref: &str, pad: &str) {
     /// The most of one payload the inspector shows.
     const MAX_PAYLOAD: usize = 4096;
-    /// `local://objects/<64 hex>.json` and nothing else names a payload.
-    fn payload_path(rec: &Recorded, payload_ref: &str) -> Option<PathBuf> {
-        let name = payload_ref
-            .strip_prefix("local://objects/")?
-            .strip_suffix(".json")?;
-        (name.len() == 64
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
-        .then(|| rec.dir.join("objects").join(format!("{name}.json")))
-    }
 
     let Some(path) = payload_path(rec, payload_ref) else {
         let _ = writeln!(
@@ -1170,7 +1194,9 @@ fn payloads(s: &mut String, x: &Facts, events: &[&TraceEvent], what: &str) {
     }
 }
 
-fn elapsed(events: &[&TraceEvent]) -> String {
+/// First to last `observed_at` of `events` in milliseconds, on aibus's own clock; `None` when no
+/// event has a timestamp in the form aibus writes.
+pub(crate) fn span_ms(events: &[&TraceEvent]) -> Option<i64> {
     /// Milliseconds since the epoch of `YYYY-MM-DDTHH:MM:SS[.mmm]Z`, the form aibus writes.
     fn millis(ts: &str) -> Option<i64> {
         let b = ts.as_bytes();
@@ -1202,12 +1228,16 @@ fn elapsed(events: &[&TraceEvent]) -> String {
         .iter()
         .filter_map(|e| millis(&e.observed_at))
         .collect();
-    match (ms.iter().min(), ms.iter().max()) {
-        (Some(a), Some(b)) => format!(
+    Some(ms.iter().max()? - ms.iter().min()?)
+}
+
+fn elapsed(events: &[&TraceEvent]) -> String {
+    match span_ms(events) {
+        Some(ms) => format!(
             "{:.3} s (derived from aibus's clock, first to last event)",
-            (b - a) as f64 / 1000.0
+            ms as f64 / 1000.0
         ),
-        _ => "unknown".into(),
+        None => "unknown".into(),
     }
 }
 

@@ -31,6 +31,9 @@ aibus runs inspect <run> [--root DIR]              header, plan, execution, gaps
                    [--node ID]                     the inspector of one agent, tool use or attempt
                    [--event SEQUENCE]              one event in full
 aibus runs replay <run> [--offline] [--events] [--root DIR]
+aibus runs compare <a> <b> [--root DIR]            two runs side by side (#294)
+                   [--result-a FILE] [--result-b FILE]   an EvaluationResult JSON for a run: its tests and revision
+aibus runs repro <run> [--root DIR]                what a replay and what a rerun would need (#294)
 aibus runs rerun <run> [--isolated] [--root DIR]   refused for now (exit 2)
 ```
 
@@ -42,20 +45,36 @@ A missing run, an ambiguous prefix, a run id that is not a plain name, an unknow
 
 `aibus runs rerun` would start a new attempt of the CLI, and that needs the scheduler (#288, #289). Until then it is refused, and the refusal says that a rerun's outcome may differ from the recording and points at `replay`. It never claims a rerun would come out the same.
 
+## Comparing two runs, the typed inspector and reproducibility (#294)
+
+`aibus runs compare <a> <b>` (`aibus_trace::compare`) reads two run directories and answers the five reviewer questions from one text: **what ran** (state, provider, counts, edges by level, gaps), **routing** (the `route_decided` events as recorded), **outputs** (message chunks and bytes, retained payloads, artifacts), **quality** (the checks of an `EvaluationResult` handed in with `--result-a` and `--result-b`: passed, failed and not run, where a check nobody ran never counts as a pass) and **git and worktree**. After those come latency, tokens and cost with `b - a`, the tool counts by name and outcome, and the environment.
+
+Everything the trace does not carry is a line that says `gap:` and why. A cost nobody reported stays `unknown`, and a change is computed only when both numbers are known and in the same unit. A trace carries no git revision and no diff: the revision comes only from an evaluation result, and the worktree diff is always a gap.
+
+The environment rows are the provider extension, the parsers, the CLI version, the model, the permission mode, the workflow plan (its `plan_hash`, or a hash of `plan.json`), the repository revision and the extension version. Two runs are `comparable` only when every row is known and equal; any row that differs makes the text say `not comparable as like for like` and name the rows, and a row one side does not know makes it say `comparability unknown`. Plain recordings never reach `comparable`, because none of them has a `plan.json` (the workflow plan is a gap), and the revision comes only from an evaluation result. Values are compared as the trace has them, never as they are cut or escaped for display, and a field with several values (a run that spans two providers) compares as the whole set.
+
+An evaluation result counts only for the run it belongs to: its `result_version` must be the one this build reads and its `workflow_run_ids` must name the run. `aibus runs compare` refuses a result that does not (usage error, exit 2); the library shows the quality of such a run as a gap and takes nothing from it. Results of different suites, suite versions or cases make the runs `not comparable`. A trace read with skipped lines, a torn tail or lines of another schema says so per side, and its runs are never `comparable`.
+
+Usage is summed over the attempts of a run only when every attempt reports the number once, in one unit. When some attempts report nothing, the total is `unknown` and says how many of the attempts did report; a sum that is not finite is unknown too, and message sizes that add up past 2^64 are a gap.
+
+`aibus_trace::causal::inspector` is the inspector of one agent, tool use or attempt as typed fields (`aibus runs inspect <run> --node <id> --json`): prompt and output as `Retained` text when the run kept the payload (the prompt is the payload of the delegating tool use), otherwise a gap that says why; native ids; the delegation link with its evidence level; every source event with its parser, raw hash and payload reference; the trace gaps; elapsed time (derived); reported usage; linked artifacts; and the worktree diff (a gap). Without `--json` the text inspector is unchanged.
+
+`aibus runs repro <run>` keeps recorded replay and re-execution apart. The replay section says it is offline and lists what makes it incomplete (skipped lines, a torn tail, payloads not kept). The rerun section is labelled `rerun`, says it is not a replay and that its outcome may differ, says it is not available yet (#288, #289), and lists what a fresh run would need with each input as a value from the trace or a gap: CLI version, model, permission mode, plan, prompts, repository revision and the environment.
+
 ## The `/runs` screen
 
-`/runs` in the dashboard opens the fleet, `/runs inspect <run>` the run's graph and timeline, `/runs inspect <run> <node>` the inspector, `/runs replay <run>` the replay. The terminal loop reads the trace store (`Command::Runs`, answered with `Msg::RunsLoaded`), and the screen shows the same text the commands print, up to 5,000 lines, with Up/Down (`k`/`j`), PgUp/PgDn (space), `g`/`G` and the wheel to scroll and Esc to close. The evidence levels are words in the text, so the screen adds no colour of its own and no new contrast pair. An error (no such run, not a run id) goes to the session log and opens nothing.
+`/runs` in the dashboard opens the fleet, `/runs inspect <run>` the run's graph and timeline, `/runs inspect <run> <node>` the inspector, `/runs replay <run>` the replay, `/runs compare <a> <b>` the comparison and `/runs repro <run>` the reproducibility report (the screen has no way to hand in evaluation results, so its comparison shows quality as a gap). The terminal loop reads the trace store (`Command::Runs`, answered with `Msg::RunsLoaded`), and the screen shows the same text the commands print, up to 5,000 lines, with Up/Down (`k`/`j`), PgUp/PgDn (space), `g`/`G` and the wheel to scroll and Esc to close. The evidence levels are words in the text, so the screen adds no colour of its own and no new contrast pair. An error (no such run, not a run id) goes to the session log and opens nothing.
 
 ## Terminal safety
 
-A trace is untrusted text: a name, an id, a timestamp or a payload can hold an escape sequence. `view::clean` writes every control character (C0, DEL, C1), bidi override and isolate, zero-width character and byte order mark as visible `\u{..}` text, and cuts single values at 160 characters, so a 20 MB name is a short line. JSON from a trace (an event, a payload) is cleaned line by line after it is pretty-printed. A payload is opened only when its reference is exactly `local://objects/<64 hex>.json` inside the run's own directory.
+A trace is untrusted text: a name, an id, a timestamp or a payload can hold an escape sequence. `view::clean` writes every control character (C0, DEL, C1), bidi override and isolate, zero-width character and byte order mark as visible `\u{..}` text, and cuts single values at 160 characters, so a 20 MB name is a short line. JSON from a trace (an event, a payload) is cleaned line by line after it is pretty-printed. Every text field of the typed inspector (usage names, units and sources included) is cleaned before it is serialised, and the `--json` output of `inspect --node`, `compare` and `repro` goes through the same escaping as `replay --events` on a terminal, so a bidi or C1 character is never written raw. A payload is opened only when its reference is exactly `local://objects/<64 hex>.json` inside the run's own directory.
 
 ## How it sits next to the rest
 
 - **#282.** The views are a module of `aibus-trace` and use its `project`, `Projection`, `Edge` and `TraceEvent` as they are; the trace format is unchanged. `Recorded::load` reads a run the way `TraceStore::read` does and keeps each line's bytes, which is what makes the replay byte for byte.
 - **#290.** The fleet's `RunRow` and `view::fleet` are the shared view model: #290 adds pause and stop to it, through the `CancellationToken` that `supervise` takes, next to the control socket of #274. Nothing here can stop or pause a run.
 - **#283.** The plan section reads `plan.json` as JSON (`steps[].key`, `agent`, `mode`, `runtime`, `prompt.sha256`, `edges[].from`, `to`, `kind`, `when`), so it does not depend on the compiler's types.
-- **#294.** Comparing two runs and the causal inspector build on these views.
+- **#294.** Done in the reduced form above. The graphical client, redacted run bundles and the rest are in `docs/DEFERRED.md`.
 
 ## Not here
 

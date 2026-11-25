@@ -35,6 +35,8 @@ struct Shape {
     idle_kids: usize,
     /// Children that run one tool each, one after another.
     serial_kids: usize,
+    /// Bash calls that ran (and were not denied).
+    bash: usize,
 }
 
 impl Shape {
@@ -50,6 +52,7 @@ impl Shape {
             artifact: true,
             idle_kids: 0,
             serial_kids: 0,
+            bash: 0,
         }
     }
 }
@@ -178,6 +181,9 @@ fn trace(seed: u128, s: &Shape) -> Vec<TraceEvent> {
     }
     for i in 0..s.denied {
         b.tool("lead", "Bash", &format!("d{i}"), Some("permission_denied"));
+    }
+    for i in 0..s.bash {
+        b.tool("lead", "Bash", &format!("b{i}"), None);
     }
     for i in 0..s.failed_edits {
         b.tool("lead", "Edit", &format!("f{i}"), Some("error"));
@@ -935,4 +941,134 @@ fn parallel_children_are_not_called_serializable() {
             .all(|s| s.category != Category::SerializableDelegation),
         "{found:?}"
     );
+}
+
+// ---- round 1 review of #398 ----
+
+#[test]
+fn every_record_of_a_command_counts_so_a_later_failure_is_not_hidden() {
+    use CheckOutcome::{Fail, NotRun, Pass};
+    let su = suite();
+    let name = su.cases[0].test_commands[0].clone();
+    for (records, want) in [
+        ([Pass, Fail], Verdict::Fail),
+        ([Fail, Pass], Verdict::Fail),
+        ([Pass, NotRun], Verdict::Incomplete),
+        ([Pass, Pass], Verdict::Pass),
+    ] {
+        let mut r = run(&su, 0, "v", 1, &Shape::base(), true);
+        r.checks.retain(|c| c.kind != CheckKind::UnitTests);
+        r.checks.extend(records.map(|outcome| CheckResult {
+            kind: CheckKind::UnitTests,
+            name: name.clone(),
+            outcome,
+            evidence: vec![],
+        }));
+        let got = evaluate(&su, &r).unwrap();
+        assert_eq!(got.verdict, want, "{records:?}");
+        assert_eq!(got.checks.iter().filter(|c| c.name == name).count(), 1);
+    }
+}
+
+#[test]
+fn an_unknown_cost_is_not_inside_a_cost_envelope() {
+    let su = suite();
+    assert!(su.cases[0].envelope.max_cost_usd.is_some());
+    let no_cost = Shape {
+        cost: None,
+        ..Shape::base()
+    };
+    let r = evaluate(&su, &run(&su, 0, "v", 1, &no_cost, true)).unwrap();
+    assert_eq!(r.verdict, Verdict::Incomplete);
+    assert!(r
+        .checks
+        .iter()
+        .any(|c| c.name == "within_envelope" && c.outcome == CheckOutcome::NotRun));
+}
+
+#[test]
+fn a_tool_the_case_does_not_allow_fails_the_case_and_the_check_is_always_in_the_result() {
+    let su = suite();
+    assert_eq!(su.cases[0].allowed_side_effects, ["Edit", "Write"]);
+    let side = |r: &EvaluationResult| {
+        r.checks
+            .iter()
+            .find(|c| c.name == "allowed_side_effects")
+            .cloned()
+    };
+    let clean = evaluate(&su, &run(&su, 0, "v", 1, &Shape::base(), true)).unwrap();
+    let c = side(&clean).expect("the side-effect check is listed");
+    assert_eq!(
+        (c.kind, c.outcome),
+        (CheckKind::PolicyInvariant, CheckOutcome::Pass)
+    );
+
+    let bash = Shape {
+        bash: 1,
+        ..Shape::base()
+    };
+    let r = evaluate(&su, &run(&su, 0, "v", 1, &bash, true)).unwrap();
+    assert_eq!(r.verdict, Verdict::Fail);
+    let c = side(&r).unwrap();
+    assert_eq!(c.outcome, CheckOutcome::Fail);
+    assert_eq!(c.evidence.len(), 1, "the Bash call is the evidence");
+
+    // A call the supervisor denied did not happen, so it is not a side effect.
+    let denied = Shape {
+        denied: 2,
+        ..Shape::base()
+    };
+    let r = evaluate(&su, &run(&su, 0, "v", 1, &denied, true)).unwrap();
+    assert_eq!(side(&r).unwrap().outcome, CheckOutcome::Pass);
+    assert_eq!(r.verdict, Verdict::Pass);
+}
+
+#[test]
+fn the_result_records_the_privacy_policy_it_was_made_under() {
+    let su = suite();
+    let r = evaluate(&su, &run(&su, 0, "v", 1, &Shape::base(), true)).unwrap();
+    assert_eq!(
+        serde_json::to_value(&r).unwrap()["privacy"],
+        json!("metadata_only")
+    );
+}
+
+#[test]
+fn a_dot_case_id_and_an_unnamed_human_reviewer_are_refused() {
+    for id in ["..", ".", ".hidden"] {
+        let mut s = suite();
+        s.cases[0].case_id = id.into();
+        assert!(s.validate().is_err(), "{id}");
+    }
+    let su = suite();
+    let mut r = run(&su, 0, "v", 1, &Shape::base(), true);
+    r.assessments.push(Assessment {
+        assessor: Assessor::Human {
+            reviewer: " ".into(),
+        },
+        rubric_item: su.cases[0].rubric[0].clone(),
+        score: 1.0,
+        max_score: 2.0,
+    });
+    assert!(matches!(
+        evaluate(&su, &r),
+        Err(EvalError::BadAssessment(_))
+    ));
+}
+
+#[test]
+fn a_manifest_that_is_not_a_plan_is_refused_by_compare() {
+    let (_, manifest, results) = experiment(1, |c| (lean(c), true));
+    for break_it in [
+        (|m: &mut aibus_trace::experiment::ComparisonManifest| m.repetitions = 0) as fn(&mut _),
+        |m| m.cases.clear(),
+        |m| m.manifest_version = 99,
+        |m| {
+            m.variants.truncate(1);
+        },
+    ] {
+        let mut m = manifest.clone();
+        break_it(&mut m);
+        assert!(compare(&m, &results).is_err());
+    }
 }

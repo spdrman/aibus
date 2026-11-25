@@ -448,7 +448,8 @@ impl Task<'_> {
         mode: PermissionMode,
         extra: Map<String, Value>,
     ) -> Fired {
-        self.fire_from(&self.cfg.def.hooks, true, event, matcher, mode, extra).await
+        self.fire_from(&self.cfg.def.hooks, true, event, matcher, mode, extra)
+            .await
     }
 
     /// The `done_when` command of the definition as the stop hook of `event`, run alone (the
@@ -482,7 +483,9 @@ impl Task<'_> {
             if let Some(goal) = &done.goal {
                 extra.insert("goal".into(), json!(goal));
             }
-            let fired = self.fire_from(&scoped, false, event, matcher, mode, extra).await;
+            let fired = self
+                .fire_from(&scoped, false, event, matcher, mode, extra)
+                .await;
             if let Some(b) = fired.block {
                 return Err(format!("done_when: {}", b.reason));
             }
@@ -519,7 +522,10 @@ impl Task<'_> {
         let fired = if with_global {
             self.deps.hooks.fire(&input, scoped, self.cancel).await
         } else {
-            self.deps.hooks.fire_scoped(&input, scoped, self.cancel).await
+            self.deps
+                .hooks
+                .fire_scoped(&input, scoped, self.cancel)
+                .await
         };
         for ran in &fired.ran {
             self.send(Msg::HookFired {
@@ -1233,7 +1239,12 @@ async fn drive(
                                 }
                                 return End::of(RunStatus::Partial);
                             }
-                            let goal = cfg.def.done.goal.as_deref().map_or(String::new(), |g| format!(" (goal: {g})"));
+                            let goal = cfg
+                                .def
+                                .done
+                                .goal
+                                .as_deref()
+                                .map_or(String::new(), |g| format!(" (goal: {g})"));
                             conv.messages.push(Message::text(
                                 MessageRole::User,
                                 &format!("[done check] not done yet{goal}: {reason}"),

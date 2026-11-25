@@ -896,7 +896,15 @@ fn done_def(done_when: Option<&str>, retries: Option<u32>, schema: Option<Value>
 fn stop_events(done: &Done) -> usize {
     done.msgs
         .iter()
-        .filter(|m| matches!(m, Msg::HookFired { event: HookEvent::SubagentStop, .. }))
+        .filter(|m| {
+            matches!(
+                m,
+                Msg::HookFired {
+                    event: HookEvent::SubagentStop,
+                    ..
+                }
+            )
+        })
         .count()
 }
 
@@ -914,9 +922,17 @@ async fn a_failing_done_when_keeps_the_worker_going_and_it_stops_once_it_passes(
     ]);
     let done = run(s, d).await;
     let r = done.finished();
-    assert_eq!((r.status, r.turns, r.summary.as_str()), (RunStatus::Completed, 2, "final"));
+    assert_eq!(
+        (r.status, r.turns, r.summary.as_str()),
+        (RunStatus::Completed, 2, "final")
+    );
     assert!(r.verified, "done_when passed on the last stop");
-    let sent = done.fake.requests()[1].request.messages.last().unwrap().plain_text();
+    let sent = done.fake.requests()[1]
+        .request
+        .messages
+        .last()
+        .unwrap()
+        .plain_text();
     assert!(sent.contains("tests still failing"), "{sent}");
     assert_eq!(stop_events(&done), 2, "the check ran at each stop");
 }
@@ -935,9 +951,17 @@ async fn the_retry_cap_ends_the_run_partial_with_the_last_reason_in_the_summary(
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Partial);
     assert!(!r.verified);
-    assert_eq!(done.fake.requests().len(), 3, "the first stop plus two retries");
+    assert_eq!(
+        done.fake.requests().len(),
+        3,
+        "the first stop plus two retries"
+    );
     assert!(r.summary.starts_with("three"), "{}", r.summary);
-    assert!(r.summary.contains("not done after 2 retries"), "{}", r.summary);
+    assert!(
+        r.summary.contains("not done after 2 retries"),
+        "{}",
+        r.summary
+    );
     assert!(r.summary.contains("still red"), "{}", r.summary);
 }
 
@@ -956,7 +980,11 @@ async fn the_done_when_command_is_told_the_agents_own_permission_mode_and_runs_o
     assert_eq!(v["permission_mode"], "plan");
     assert_eq!(v["hook_event_name"], "subagent_stop");
     assert_eq!(v["last_assistant_message"], "ok");
-    assert_eq!(done.file("stops").lines().count(), 1, "the agent's own stop hook is not run again");
+    assert_eq!(
+        done.file("stops").lines().count(),
+        1,
+        "the agent's own stop hook is not run again"
+    );
     assert!(done.finished().verified);
 }
 
@@ -970,32 +998,57 @@ async fn output_schema_rejects_a_malformed_final_message_and_verified_follows_it
     ]);
     let done = run(s, done_def(None, None, Some(schema.clone()))).await;
     let r = done.finished();
-    assert_eq!((r.status, r.summary.as_str()), (RunStatus::Completed, r#"{"answer": "42"}"#));
+    assert_eq!(
+        (r.status, r.summary.as_str()),
+        (RunStatus::Completed, r#"{"answer": "42"}"#)
+    );
     assert!(r.verified);
-    let sent = done.fake.requests()[1].request.messages.last().unwrap().plain_text();
-    assert!(sent.contains("output_schema") && sent.contains("not valid JSON"), "{sent}");
+    let sent = done.fake.requests()[1]
+        .request
+        .messages
+        .last()
+        .unwrap()
+        .plain_text();
+    assert!(
+        sent.contains("output_schema") && sent.contains("not valid JSON"),
+        "{sent}"
+    );
 
     // A model that never conforms ends Partial, unverified.
-    let s = script([Step::Text("{}".into()), Step::Stop(StopReason::EndTurn), Step::Text("{}".into())]);
+    let s = script([
+        Step::Text("{}".into()),
+        Step::Stop(StopReason::EndTurn),
+        Step::Text("{}".into()),
+    ]);
     let done = run(s, done_def(None, Some(1), Some(schema))).await;
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Partial);
     assert!(!r.verified);
-    assert!(r.summary.contains("missing required `answer`"), "{}", r.summary);
+    assert!(
+        r.summary.contains("missing required `answer`"),
+        "{}",
+        r.summary
+    );
 }
 
 #[tokio::test]
 async fn no_done_keys_means_no_change_and_verified_false() {
     let done = run(script([Step::Text("ok".into())]), def("general", &[])).await;
     let r = done.finished();
-    assert_eq!((r.status, r.turns, r.summary.as_str()), (RunStatus::Completed, 1, "ok"));
+    assert_eq!(
+        (r.status, r.turns, r.summary.as_str()),
+        (RunStatus::Completed, 1, "ok")
+    );
     assert!(!r.verified);
     assert_eq!(done.count("HookFired"), 0);
 }
 
 #[tokio::test]
 async fn done_when_under_no_hooks_is_not_verified() {
-    let (mut p, rx) = plan(script([Step::Text("ok".into())]), done_def(Some("exit 2"), None, None));
+    let (mut p, rx) = plan(
+        script([Step::Text("ok".into())]),
+        done_def(Some("exit 2"), None, None),
+    );
     p.deps.hooks = Arc::new(HookRunner::default());
     let done = collect(p, rx, |_| {}).await;
     let r = done.finished();

@@ -600,7 +600,10 @@ fn goal_done_when_and_output_schema_parse_and_round_trip() {
     assert_eq!(d.done.goal.as_deref(), Some("all tests pass"));
     assert_eq!(d.done.done_when.as_deref(), Some("cargo test"));
     assert_eq!(d.done.done_retries, Some(5));
-    assert_eq!(d.done.output_schema.as_ref().unwrap()["required"][0], "summary");
+    assert_eq!(
+        d.done.output_schema.as_ref().unwrap()["required"][0],
+        "summary"
+    );
     let again = ok(&aibus_core::agent::def::to_markdown(&d)).0;
     assert_eq!(again.done, d.done);
 }
@@ -610,13 +613,23 @@ fn a_definition_without_the_done_keys_has_an_empty_done_spec() {
     let (d, w) = ok("---\nname: plain\ndescription: Plain\n---\n\nHi.\n");
     assert!(w.is_empty());
     assert_eq!(d.done, DoneSpec::default());
-    assert!(aibus_core::agent::def::to_json(&d).get("done_when").is_none());
+    assert!(aibus_core::agent::def::to_json(&d)
+        .get("done_when")
+        .is_none());
 }
 
 #[test]
 fn the_done_keys_reject_the_wrong_types() {
-    for bad in ["done_when: [a]", "goal: 3", "done_retries: -1", "output_schema: nope"] {
+    for bad in [
+        "done_when: [a]",
+        "goal: 3",
+        "done_retries: -1",
+        "output_schema: nope",
+    ] {
         let text = format!("---\nname: x\ndescription: d\n{bad}\n---\n\nHi.\n");
-        assert!(matches!(parse(&text, src()), Err(DefError::Field { .. })), "{bad}");
+        assert!(
+            matches!(parse(&text, src()), Err(DefError::Field { .. })),
+            "{bad}"
+        );
     }
 }

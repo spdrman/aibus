@@ -151,13 +151,24 @@ pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
             "done_when and output_schema are for lead and worker agents (an advisor or router has no stop to check)".into(),
         );
     }
-    if done.done_when.as_deref().is_some_and(|c| c.trim().is_empty()) {
+    if done
+        .done_when
+        .as_deref()
+        .is_some_and(|c| c.trim().is_empty())
+    {
         error("done_when", "done_when is empty".into());
     }
     if done.done_retries.is_some() && done.done_when.is_none() && done.output_schema.is_none() {
-        error("done_retries", "done_retries needs done_when or output_schema".into());
+        error(
+            "done_retries",
+            "done_retries needs done_when or output_schema".into(),
+        );
     }
-    if let Some(problem) = done.output_schema.as_ref().and_then(crate::run::done::check_schema) {
+    if let Some(problem) = done
+        .output_schema
+        .as_ref()
+        .and_then(crate::run::done::check_schema)
+    {
         error("output_schema", problem);
     }
 

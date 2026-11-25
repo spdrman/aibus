@@ -340,16 +340,29 @@ fn show_json_is_snake_case_and_carries_the_prompt() {
 fn validate_checks_the_done_keys() {
     let dir = tree("done_keys");
     let head = "---\nname: x\ndescription: d\n";
-    let r = check(&format!("{head}done_when: cargo test\noutput_schema:\n  type: object\n---\n\nHi.\n"), &dir);
+    let r = check(
+        &format!("{head}done_when: cargo test\noutput_schema:\n  type: object\n---\n\nHi.\n"),
+        &dir,
+    );
     assert!(r.ok, "{:?}", r.errors);
     for (frontmatter, field) in [
         ("role: advisor\ndone_when: true", "done_when"),
         ("done_when: '  '", "done_when"),
         ("done_retries: 2", "done_retries"),
-        ("done_when: true\noutput_schema:\n  type: banana", "output_schema"),
-        ("done_when: true\noutput_schema:\n  oneOf: []", "output_schema"),
+        (
+            "done_when: true\noutput_schema:\n  type: banana",
+            "output_schema",
+        ),
+        (
+            "done_when: true\noutput_schema:\n  oneOf: []",
+            "output_schema",
+        ),
     ] {
         let r = check(&format!("{head}{frontmatter}\n---\n\nHi.\n"), &dir);
-        assert!(!r.ok && r.errors.iter().any(|e| e.field == field), "{frontmatter}: {:?}", r.errors);
+        assert!(
+            !r.ok && r.errors.iter().any(|e| e.field == field),
+            "{frontmatter}: {:?}",
+            r.errors
+        );
     }
 }

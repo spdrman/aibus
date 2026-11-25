@@ -12,7 +12,7 @@ synthetic. The fixture checks run offline in `crates/aibus-extension/tests/exten
 | `org.devshell.aibus.qwen-cli` | `qwen` | unverified | pass | pass | pass | unsupported | reported |
 | `org.devshell.aibus.gemini-cli` | `gemini` | unverified | pass | pass | pass | unsupported | reported |
 
-The xAI/Grok and DeepSeek rows are in `docs/PROVIDER-FEASIBILITY.md`, both `unavailable`.
+The xAI/Grok and DeepSeek rows are in `docs/PROVIDER-FEASIBILITY.md`, xAI/Grok `disabled` (CLI exists, terms unread) and DeepSeek `unavailable`.
 
 Not covered yet, and why: the install, login-state and launch tests against a real CLI, the
 negative-event tests against a recorded failure (the crash fixture only ends a stream early), and

@@ -141,7 +141,7 @@ fn the_feasibility_register_has_a_dated_yes_or_no_for_xai_and_deepseek() {
             .lines()
             .find(|l| l.starts_with('|') && l.contains(name))
             .unwrap_or_else(|| panic!("no row for {name}"));
-        assert!(row.contains("2026-11-22"), "{row}");
+        assert!(row.contains("2026-11-25"), "{row}");
         assert!(row.contains("| no |") || row.contains("| yes |"), "{row}");
     }
 }

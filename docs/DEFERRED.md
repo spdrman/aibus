@@ -7,4 +7,4 @@
 - Tool failure and error-result mappings, which need each CLI's real failure events.
 - A published community fixture pack. The fixtures sit under `examples/extensions/<name>/fixtures`
   for now, and where to publish them (repo, the A2.1 catalog or a release asset) is still open.
-- Building anything for xAI/Grok or DeepSeek: the register says `unavailable`.
+- Building anything for xAI/Grok or DeepSeek: xAI has a first-party CLI (Grok Build) but stays `disabled` until its terms are read, DeepSeek is `unavailable`.

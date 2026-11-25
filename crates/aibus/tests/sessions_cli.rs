@@ -358,3 +358,23 @@ fn a_slow_client_does_not_hold_the_receiver() {
     child.kill().unwrap();
     child.wait().unwrap();
 }
+
+/// #373: no tty means no send, and no `--yes` exists to get around it.
+#[test]
+fn sessions_send_without_a_terminal_sends_nothing() {
+    let home = aibus_testkit::xdg_temp();
+    let o = sessions(home.path(), &["send", S, "stop and re-read the plan"]);
+    assert!(!o.status.success());
+    assert!(
+        stderr(&o).contains("no tty means no send"),
+        "{}",
+        stderr(&o)
+    );
+    assert!(!home
+        .path()
+        .join("state")
+        .join("aibus/taps/control")
+        .exists());
+    let o = sessions(home.path(), &["send", S, "x", "--yes"]);
+    assert!(!o.status.success());
+}

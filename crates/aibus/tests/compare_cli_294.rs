@@ -237,7 +237,7 @@ fn runs_compare_refuses_a_result_of_another_run_or_another_version() {
         c.output().unwrap()
     };
     // Names no run, then names another run.
-    for ids in [vec![], vec![run_id("07-deleg")]] {
+    for ids in [vec![], vec![uuid::Uuid::from_u128(7)]] {
         let mut r = result("a", 1, "abc");
         r.workflow_run_ids = ids;
         fs::write(&p, serde_json::to_vec(&r).unwrap()).unwrap();
@@ -267,21 +267,15 @@ fn runs_inspect_json_writes_no_bidi_or_c1_character_from_a_hostile_usage_metric(
         .replace("task_notification.usage", "tn\\u202e\\u009busage");
     fs::write(run.join("events.jsonl"), events).unwrap();
     let rec = Recorded::load(&run).unwrap();
-    let agent = aibus_trace::project(&rec.events)
-        .agents
+    // The child whose usage the trace reports at agent scope.
+    let agent = "a1d31999c4945865c";
+    assert!(rec
+        .events
         .iter()
-        .find(|a| {
-            rec.events.iter().any(|e| {
-                e.agent_id.as_deref() == Some(&a.agent_id)
-                    && e.kind == aibus_trace::EventKind::UsageReported
-            })
-        })
-        .expect("an agent with usage")
-        .agent_id
-        .clone();
+        .any(|e| e.agent_id.as_deref() == Some(agent)));
     let mut c = command(home.path());
     c.env("PATH", "").args([
-        "--json", "runs", "inspect", "hostile", "--node", &agent, "--root",
+        "--json", "runs", "inspect", "hostile", "--node", agent, "--root",
     ]);
     c.arg(root.path());
     let o = c.output().unwrap();

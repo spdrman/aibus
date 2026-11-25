@@ -3,12 +3,12 @@
 //! of them starts a provider, a process or a connection. `rerun` is refused until the scheduler
 //! (#288, #289) can start a new attempt, and says that a rerun's outcome could differ.
 
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use aibus_core::AibusError;
 use aibus_trace::causal::{inspector, render_reproducibility, reproducibility};
-use aibus_trace::compare::{compare_runs, render, RunInput};
+use aibus_trace::compare::{compare_runs, render, result_mismatch, RunInput};
 use aibus_trace::eval::EvaluationResult;
 use aibus_trace::view::{self, Filter, Recorded};
 use serde_json::Value;
@@ -24,16 +24,30 @@ fn load(root: &Path, run: &str) -> Result<(String, Recorded), AibusError> {
     Ok((name, rec))
 }
 
-/// An `EvaluationResult` read from a file the user named: a regular file of at most 4 MiB.
+/// An `EvaluationResult` read from a file the user named: a regular file of at most 4 MiB, opened
+/// once so a file that grows after the check is not read whole.
 fn result_file(path: &Path) -> Result<EvaluationResult, AibusError> {
     let bad =
         |why: String| AibusError::Usage(format!("evaluation result {}: {why}", path.display()));
-    let meta = std::fs::metadata(path).map_err(|e| bad(e.to_string()))?;
-    if !meta.is_file() || meta.len() > 4 << 20 {
+    let file = std::fs::File::open(path).map_err(|e| bad(e.to_string()))?;
+    if !file.metadata().map_err(|e| bad(e.to_string()))?.is_file() {
         return Err(bad("not a regular file of at most 4 MiB".into()));
     }
-    let bytes = std::fs::read(path).map_err(|e| bad(e.to_string()))?;
+    let mut bytes = Vec::new();
+    file.take((4 << 20) + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| bad(e.to_string()))?;
+    if bytes.len() > 4 << 20 {
+        return Err(bad("not a regular file of at most 4 MiB".into()));
+    }
     serde_json::from_slice(&bytes).map_err(|e| bad(e.to_string()))
+}
+
+/// `v` as one line of JSON for a terminal: serde escapes the C0 controls, and `terminal_safe_line`
+/// writes bidi, zero-width and C1 characters as `\uXXXX` escapes, which is the same JSON value.
+fn json_line(json: serde_json::Result<String>) -> Result<String, AibusError> {
+    let line = json.map_err(std::io::Error::other)? + "\n";
+    Ok(String::from_utf8_lossy(&view::terminal_safe_line(line.as_bytes())).into_owned())
 }
 
 pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
@@ -81,7 +95,7 @@ pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
                 };
                 if g.json {
                     let v = inspector(&rec, id).ok_or_else(missing)?;
-                    serde_json::to_string(&v).map_err(std::io::Error::other)? + "\n"
+                    json_line(serde_json::to_string(&v))?
                 } else {
                     view::inspect(&rec, id).ok_or_else(missing)?
                 }
@@ -153,6 +167,14 @@ pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
             let (name_b, rec_b) = load(&root, b)?;
             let res_a = result_a.as_deref().map(result_file).transpose()?;
             let res_b = result_b.as_deref().map(result_file).transpose()?;
+            for (name, rec, res) in [(&name_a, &rec_a, &res_a), (&name_b, &rec_b, &res_b)] {
+                if let Some(why) = res.as_ref().and_then(|r| result_mismatch(rec, r)) {
+                    return Err(AibusError::Usage(format!(
+                        "evaluation result for run {}: {why}",
+                        view::clean(name, 160)
+                    )));
+                }
+            }
             let c = compare_runs(
                 &RunInput {
                     id: &name_a,
@@ -166,11 +188,7 @@ pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
                 },
             );
             if g.json {
-                writeln!(
-                    out,
-                    "{}",
-                    serde_json::to_string(&c).map_err(std::io::Error::other)?
-                )?;
+                out.write_all(json_line(serde_json::to_string(&c))?.as_bytes())?;
             } else {
                 out.write_all(render(&c).as_bytes())?;
             }
@@ -179,11 +197,7 @@ pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
             let (name, rec) = load(&root(r)?, run)?;
             let rep = reproducibility(&name, &rec);
             if g.json {
-                writeln!(
-                    out,
-                    "{}",
-                    serde_json::to_string(&rep).map_err(std::io::Error::other)?
-                )?;
+                out.write_all(json_line(serde_json::to_string(&rep))?.as_bytes())?;
             } else {
                 out.write_all(render_reproducibility(&rep).as_bytes())?;
             }

@@ -190,6 +190,16 @@ pub fn clean(s: &str, max: usize) -> String {
     out
 }
 
+/// `m` with its name, unit and source cleaned for a terminal.
+pub(crate) fn clean_metric(m: &Metric) -> Metric {
+    Metric {
+        name: clean(&m.name, 160),
+        unit: clean(&m.unit, 160),
+        source: clean(&m.source, 160),
+        ..m.clone()
+    }
+}
+
 pub(crate) fn opt(s: Option<&str>) -> String {
     s.map_or_else(|| "-".into(), |t| clean(t, 160))
 }

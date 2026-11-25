@@ -13,7 +13,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::compare::{environment, ArtifactRef, Known};
-use crate::view::{clean, data_str, edge_line, opt, payload_bytes, span_ms, Recorded};
+use crate::view::{
+    clean, clean_metric, data_str, edge_line, opt, payload_bytes, span_ms, Recorded,
+};
 use crate::{project, DataQuality, EventKind, Metric, Origin, TraceEvent, Visibility};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -338,6 +340,7 @@ pub fn inspector(rec: &Recorded, node: &str) -> Option<InspectorView> {
                     serde_json::from_value::<Vec<Metric>>(e.data["metrics"].clone())
                         .unwrap_or_default()
                 })
+                .map(|m| clean_metric(&m))
                 .collect();
             if ms.is_empty() {
                 Known::Gap("usage not reported for this agent (unknown)".into())
@@ -353,7 +356,7 @@ pub fn inspector(rec: &Recorded, node: &str) -> Option<InspectorView> {
             .filter(|a| !a.usage.is_empty())
             .map_or_else(
                 || Known::Gap("usage not reported for this attempt (unknown)".into()),
-                |a| Known::Value(a.usage.clone()),
+                |a| Known::Value(a.usage.iter().map(clean_metric).collect()),
             ),
     };
 

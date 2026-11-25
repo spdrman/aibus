@@ -137,7 +137,11 @@ impl Index {
             .map_err(io_err)?;
         let rows = stmt
             .query_map(params![agent, last], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
             })
             .map_err(io_err)?;
         let mut s = AgentStats::default();
@@ -289,13 +293,24 @@ mod tests {
             at(5, "completed", "scribe"),
             at(5, "completed", "other"),
         ];
-        idx.upsert(&session("S1", "2026-11-01T00:00:00.000Z"), &runs).unwrap();
+        idx.upsert(&session("S1", "2026-11-01T00:00:00.000Z"), &runs)
+            .unwrap();
         let all = idx.agent_stats("scribe", 20).unwrap();
-        assert_eq!((all.runs, all.completed, all.partial, all.failed), (5, 2, 1, 1));
+        assert_eq!(
+            (all.runs, all.completed, all.partial, all.failed),
+            (5, 2, 1, 1)
+        );
         assert_eq!((all.turns, all.cost_usd), (10, 2.5));
         let newest = idx.agent_stats("scribe", 2).unwrap();
-        assert_eq!((newest.runs, newest.completed, newest.partial, newest.failed), (2, 1, 0, 0), "cancelled and the newest completed");
-        assert_eq!(idx.agent_stats("nobody", 20).unwrap(), AgentStats::default());
+        assert_eq!(
+            (newest.runs, newest.completed, newest.partial, newest.failed),
+            (2, 1, 0, 0),
+            "cancelled and the newest completed"
+        );
+        assert_eq!(
+            idx.agent_stats("nobody", 20).unwrap(),
+            AgentStats::default()
+        );
     }
 
     #[test]

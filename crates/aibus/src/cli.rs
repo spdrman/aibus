@@ -820,6 +820,8 @@ mod tests {
         "agent validate",
         "agent import",
         "agent where",
+        "agent stats",
+        "agent eval",
         "skill list",
         "skill show",
         "skill validate",

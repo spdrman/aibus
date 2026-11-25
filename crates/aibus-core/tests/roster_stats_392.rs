@@ -35,8 +35,14 @@ fn the_suffix_is_counts_only_and_bounded() {
         "scribe" => Some((18, 15)),
         _ => None,
     });
-    assert!(text.contains("- scribe: Writes notes. (last 18 runs: 15 completed)\n"), "{text}");
-    assert!(text.contains("- newcomer: Writes notes.\n"), "no runs yet, no suffix: {text}");
+    assert!(
+        text.contains("- scribe: Writes notes. (last 18 runs: 15 completed)\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("- newcomer: Writes notes.\n"),
+        "no runs yet, no suffix: {text}"
+    );
 
     // A table that disagrees with itself still gives a line inside the bound.
     let wild = roster::text_with(defs.iter(), |_| Some((u32::MAX, u32::MAX)));

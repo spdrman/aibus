@@ -758,10 +758,13 @@ impl Step for EnterLoop {
             // Counts only (H1.5): the suffix never carries a word a past run wrote.
             match Index::open(&index_file) {
                 Ok(idx) => {
-                    roster.text = aibus_core::agent::roster::text_with(agents.agents.values(), |n| {
-                        let s = idx.agent_stats(n.as_str(), aibus_core::agent::roster::RECENT_RUNS).ok()?;
-                        Some((s.runs, s.completed))
-                    })
+                    roster.text =
+                        aibus_core::agent::roster::text_with(agents.agents.values(), |n| {
+                            let s = idx
+                                .agent_stats(n.as_str(), aibus_core::agent::roster::RECENT_RUNS)
+                                .ok()?;
+                            Some((s.runs, s.completed))
+                        })
                 }
                 Err(e) => eprintln!("aibus: warning: roster stats: {e}"),
             }

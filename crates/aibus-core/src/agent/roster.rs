@@ -28,7 +28,10 @@ pub fn text_with<'a>(
         out.push_str(&format!("- {}: {}", d.name, d.description.trim()));
         if let Some((runs, completed)) = recent(&d.name).filter(|(runs, _)| *runs > 0) {
             let runs = runs.min(RECENT_RUNS);
-            out.push_str(&format!(" (last {runs} runs: {} completed)", completed.min(runs)));
+            out.push_str(&format!(
+                " (last {runs} runs: {} completed)",
+                completed.min(runs)
+            ));
         }
         out.push('\n');
     }

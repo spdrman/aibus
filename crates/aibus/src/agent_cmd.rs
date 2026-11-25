@@ -105,7 +105,11 @@ pub fn agent(cmd: &AgentCmd, g: &Global) -> Result<u8, AibusError> {
         AgentCmd::Where => where_(&env, g),
         AgentCmd::Import { dir } => import(&env, g, dir),
         AgentCmd::Stats { name, last } => agent_track::stats(&env, g, name, *last),
-        AgentCmd::Eval { name, cases, timeout } => agent_track::eval(&env, g, name, cases.as_deref(), *timeout),
+        AgentCmd::Eval {
+            name,
+            cases,
+            timeout,
+        } => agent_track::eval(&env, g, name, cases.as_deref(), *timeout),
     }
 }
 

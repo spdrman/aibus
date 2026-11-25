@@ -58,6 +58,46 @@ pub fn spec_matches(spec: &str, subject: &str) -> bool {
         .is_ok_and(|g| g.compile_matcher().is_match(subject))
 }
 
+/// `spec_matches` for the path tools, whose subjects are canonical. The rule as written always
+/// counts. Its resolved form counts too, so `/var/x/**` meets `/private/var/x/f`, but a deny
+/// takes any symlink while an allow only takes links owned by root (`/var`, `/tmp`, `/etc`, a
+/// merged `/bin`), because a link the user can retarget would move where an allow points. When
+/// aibus itself runs as root every link it can make is root's, so an allow takes none. The rule's
+/// directory resolves the way a write's path does (`resolve_for_write`), so a deny on a directory
+/// that doesn't exist yet still meets the write that would create it. Off unix only the rule as
+/// written counts.
+pub(crate) fn path_spec_matches(spec: &str, subject: &str, deny: bool) -> bool {
+    if spec_matches(spec, subject) {
+        return true;
+    }
+    // The literal directory part of an absolute spec, resolved, with the rest re-attached.
+    #[cfg(unix)]
+    let resolved = || -> Option<String> {
+        use std::os::unix::fs::MetadataExt;
+        if !spec.starts_with('/') {
+            return None;
+        }
+        let cut = spec.find(['*', '?', '[', '{']).unwrap_or(spec.len());
+        let slash = spec[..cut].rfind('/')?;
+        let dir = Path::new(&spec[..slash.max(1)]);
+        let retargetable = |m: std::fs::Metadata| {
+            m.file_type().is_symlink() && (m.uid() != 0 || rustix::process::geteuid().is_root())
+        };
+        if !deny && dir.ancestors().any(|a| std::fs::symlink_metadata(a).is_ok_and(retargetable)) {
+            return None;
+        }
+        let (dir, _) = resolve_for_write(Path::new("/"), dir.to_str()?).ok()?;
+        let dir = dir.to_str()?.trim_end_matches('/');
+        Some(format!("{dir}{}", &spec[slash..]))
+    };
+    #[cfg(not(unix))]
+    let resolved = || -> Option<String> {
+        let _ = deny;
+        None
+    };
+    resolved().is_some_and(|r| spec_matches(&r, subject))
+}
+
 /// Canonicalises `p` (relative to `cwd`), resolving symlinks, and says whether the result is
 /// inside the canonical project root.
 pub(crate) fn resolve(cwd: &Path, p: &str) -> io::Result<(PathBuf, bool)> {
@@ -104,5 +144,26 @@ pub(crate) fn confine(cwd: &Path, p: &str) -> Result<PathBuf, ToolError> {
         Err(ToolError::Denied {
             reason: "path outside project".into(),
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::spec_matches;
+
+    /// A merged-/usr layout (`bin -> usr/bin`): a rule written with the `bin` form keeps matching
+    /// the text it names, so a deny on `/bin/rm` cannot stop matching `/bin/rm`.
+    #[test]
+    fn a_rule_as_written_matches_the_text_it_names_through_a_directory_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("usr/bin")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("usr/bin"), root.path().join("bin")).unwrap();
+        let rule = format!("{}/bin/rm *", root.path().display());
+        assert!(spec_matches(&rule, &format!("{}/bin/rm -rf x", root.path().display())));
+        // A deny also meets the resolved text; an allow does not, the link is the user's.
+        let resolved = format!("{}/usr/bin/rm -rf x", root.path().canonicalize().unwrap().display());
+        let rule = format!("{}/bin/rm *", root.path().canonicalize().unwrap().display());
+        assert!(super::path_spec_matches(&rule, &resolved, true));
+        assert!(!super::path_spec_matches(&rule, &resolved, false));
     }
 }

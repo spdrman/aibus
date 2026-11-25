@@ -1,15 +1,5 @@
 # Deferred
 
-## A3.2 OpenTelemetry export (#292)
-
-Cut from the reduced scope, still wanted:
-
-- A retention policy (per-project retention and deletion of local traces). Export redaction is in; retention is not.
-- Reading `Destination` and `Revisions` from the aibus config file and a CLI switch. Today they are plain structs a caller fills in.
-- Langfuse interop. The OTLP body follows the generic OTLP/HTTP shape, but I have not run it against Langfuse, so that row is unverified. Langfuse-specific attribute mapping (`langfuse.*`) is not done.
-- Wiring the completeness diagnostics into the trace inspector.
-- Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
-- A bounded queue between the run and the exporter. `spawn` starts one thread per export; a slow collector under many exports would pile threads up, so a bounded queue with drop-on-full belongs here.
 Work that was in scope for an issue once and got cut to fit. Nothing here has an issue of its own yet.
 
 ## Attach phase 2 leftovers (#346)
@@ -153,3 +143,15 @@ imports them by package name. What I left for later...
 - **Data grid package.** TanStack Table plus Virtual, when B1.4 or later has a real use for it.
 - **Webapp adoption.** Moving the webapp onto the packages is a webapp change and needs paulotten's review.
   The local `scripts/webapp-consumer-check.mjs` run is the cross-consumer check until then.
+
+## A3.2 OpenTelemetry export (#292)
+
+Cut from the reduced scope, still wanted:
+
+- A retention policy (per-project retention and deletion of local traces). Export redaction is in; retention is not.
+- Reading `Destination` and `Revisions` from the aibus config file and a CLI switch. Today they are plain structs a caller fills in.
+- Langfuse interop. The OTLP body follows the generic OTLP/HTTP shape, but I have not run it against Langfuse, so that row is unverified. Langfuse-specific attribute mapping (`langfuse.*`) is not done.
+- Wiring the completeness diagnostics into the trace inspector.
+- Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
+- A bounded queue between the run and the exporter. Each export is one thread (the caller writes the `thread::spawn`), so a slow collector under many exports would pile threads up; a bounded queue with drop-on-full belongs with the config wiring.
+- Model and version labels on the resource (spec 7.2). Only the provider extension is exported today.

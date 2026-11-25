@@ -244,15 +244,16 @@ pub fn to_otlp(
                     });
                     // parent resolved below, from these hints
                     let i = ag_ix[&k];
-                    if let Some(p) = &e.parent_tool_use_id {
-                        spans[i]
-                            .attrs
-                            .push(("aibus.parent_tool_use_id".into(), json!(p)));
-                    }
-                    if let Some(p) = &e.parent_agent_id {
-                        spans[i]
-                            .attrs
-                            .push(("aibus.parent_agent_id".into(), json!(p)));
+                    // A repeated AgentStarted must not duplicate the attribute keys.
+                    for (key, v) in [
+                        ("aibus.parent_tool_use_id", &e.parent_tool_use_id),
+                        ("aibus.parent_agent_id", &e.parent_agent_id),
+                    ] {
+                        if let Some(p) = v {
+                            if !spans[i].attrs.iter().any(|(n, _)| n == key) {
+                                spans[i].attrs.push((key.into(), json!(p)));
+                            }
+                        }
                     }
                 }
             }
@@ -277,16 +278,18 @@ pub fn to_otlp(
                     if let Some(r) = text(&e.data, "subagent_type") {
                         attrs.push(("aibus.agent.role".into(), json!(r)));
                     }
-                    deleg_ix.insert((att, tu.clone()), spans.len());
-                    spans.push(Span {
-                        id: span_id(run, "delegation", &[&att.to_string(), &tu]),
-                        parent: None,
-                        name: "aibus.delegation",
-                        start: t,
-                        end: Some(t),
-                        status: 1,
-                        attrs,
-                        events: Vec::new(),
+                    deleg_ix.entry((att, tu.clone())).or_insert_with(|| {
+                        spans.push(Span {
+                            id: span_id(run, "delegation", &[&att.to_string(), &tu]),
+                            parent: None,
+                            name: "aibus.delegation",
+                            start: t,
+                            end: Some(t),
+                            status: 1,
+                            attrs,
+                            events: Vec::new(),
+                        });
+                        spans.len() - 1
                     });
                 }
             }
@@ -394,6 +397,10 @@ pub fn to_otlp(
                 if let Some(a) = &agent {
                     resolved = ag_ix.get(&(*att, a.clone())).map(|&j| spans[j].id);
                 }
+            }
+            // Vendor ids are untrusted: an agent naming itself as its parent is not resolved.
+            if resolved == Some(spans[i].id) {
+                resolved = None;
             }
             let unresolved = resolved.is_none() && (tool.is_some() || agent.is_some());
             (i, resolved.or(Some(spans[at_ix[att]].id)), unresolved)

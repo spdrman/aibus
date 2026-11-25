@@ -6,7 +6,7 @@ use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
 use aibus_core::redact::Redactor;
-use aibus_otel::{export, spawn, Destination, Outcome};
+use aibus_otel::{export, Destination, Outcome};
 use aibus_trace::otel::{to_otlp, Revisions};
 use serde_json::json;
 
@@ -34,7 +34,12 @@ fn no_destination_means_no_connection_even_with_otel_env_set() {
     );
     let (body, _) = to_otlp(&[], &Revisions::default(), &Redactor::new());
     assert_eq!(export(None, &body), Outcome::Disabled);
-    assert_eq!(spawn(None, body).join().unwrap(), Outcome::Disabled);
+    assert_eq!(
+        std::thread::spawn(move || export(None, &body))
+            .join()
+            .unwrap(),
+        Outcome::Disabled
+    );
     std::thread::sleep(Duration::from_millis(200));
     assert!(
         l.accept().is_err(),
@@ -51,13 +56,11 @@ fn a_dead_collector_is_a_failed_outcome_not_an_error_in_the_run() {
         .unwrap()
         .port();
     let t = Instant::now();
-    let h = spawn(
-        Some(dest(format!("http://127.0.0.1:{port}/v1/traces"), 500)),
-        json!({}),
-    );
+    let d = dest(format!("http://127.0.0.1:{port}/v1/traces"), 500);
+    let h = std::thread::spawn(move || export(Some(&d), &json!({})));
     assert!(
         t.elapsed() < Duration::from_millis(100),
-        "spawn must not wait for the collector"
+        "starting the thread must not wait for the collector"
     );
     assert!(matches!(h.join().unwrap(), Outcome::Failed(_)));
 }

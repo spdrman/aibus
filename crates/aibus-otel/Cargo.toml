@@ -8,13 +8,13 @@ repository.workspace = true
 publish.workspace = true
 
 # Opt-in OTLP/HTTP export of a canonical trace (#292). The span mapping is pure and lives in
-# aibus-trace; this crate is the only place that opens a socket for it, and it does so only when a
+# aibus-trace (the tests build bodies with it); this crate is the only place that opens a socket for it, and it does so only when a
 # destination was configured.
 [dependencies]
-aibus-trace = { path = "../aibus-trace" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }
 serde_json = "1"
 
 [dev-dependencies]
+aibus-trace = { path = "../aibus-trace" }
 aibus-core.workspace = true
 uuid = { version = "1", features = ["v7", "v8", "serde"] }

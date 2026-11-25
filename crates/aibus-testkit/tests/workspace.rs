@@ -61,7 +61,7 @@ fn tui_never_sees_reqwest_or_a_provider_crate() {
 /// certificates through them; they do no TLS.
 #[test]
 fn provider_crates_use_rustls_and_never_openssl() {
-    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http"] {
+    for krate in ["aibus-provider-anthropic", "aibus-provider-openai", "aibus-provider-gemini", "aibus-provider-http", "aibus-otel"] {
         let deps = closure(krate);
         assert!(deps.contains("rustls") && deps.contains("reqwest"), "{krate} lost its TLS stack");
         for banned in ["openssl", "openssl-sys", "openssl-src", "native-tls", "hyper-tls"] {

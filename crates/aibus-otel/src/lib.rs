@@ -1,13 +1,12 @@
 //! Opt-in OTLP/HTTP export (#292, spec 7.2 and 10.3).
 //!
-//! There is no default destination and no `OTEL_*` variable is read: with `None` no
-//! socket is opened and no thread is started. With a destination, the export runs on its own
+//! There is no default destination and no `OTEL_*` variable is read: with `None`, `export` returns
+//! before it opens a socket or starts a thread. With a destination, the request runs on a worker
 //! thread with a hard timeout, and whatever goes wrong (refused, hung, a 5xx) comes back as
 //! `Outcome::Failed` for the caller to log. Nothing here returns an error into the run, and the
 //! local trace is never touched.
 #![forbid(unsafe_code)]
 
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -41,7 +40,8 @@ pub enum Outcome {
     Failed(String),
 }
 
-/// Sends `body` (from `aibus_trace::otel::to_otlp`) to `dest` and waits. Prefer `spawn`.
+/// Sends `body` (from `aibus_trace::otel::to_otlp`) to `dest` and waits at most `dest.timeout`. A caller that must not wait
+/// runs it on its own thread (`std::thread::spawn(move || export(dest.as_ref(), &body))`).
 pub fn export(dest: Option<&Destination>, body: &Value) -> Outcome {
     let Some(d) = dest else {
         return Outcome::Disabled;
@@ -60,6 +60,9 @@ pub fn export(dest: Option<&Destination>, body: &Value) -> Outcome {
             std::sync::OnceLock::new();
         let client = match CLIENT.get_or_init(|| {
             reqwest::blocking::Client::builder()
+                // A collector endpoint has no business redirecting; following one would resend custom
+                // auth headers and, on 307/308, the body.
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| e.without_url().to_string())
         }) {
@@ -83,11 +86,4 @@ pub fn export(dest: Option<&Destination>, body: &Value) -> Outcome {
     });
     rx.recv_timeout(timeout)
         .unwrap_or_else(|_| Outcome::Failed("export timed out".into()))
-}
-
-/// `export` on its own thread, so a slow or dead collector never holds the caller up. Join the
-/// handle (or drop it) whenever convenient: a panic in the thread is the only thing `join` reports
-/// as an `Err`, and the caller can ignore that too.
-pub fn spawn(dest: Option<Destination>, body: Value) -> JoinHandle<Outcome> {
-    std::thread::spawn(move || export(dest.as_ref(), &body))
 }

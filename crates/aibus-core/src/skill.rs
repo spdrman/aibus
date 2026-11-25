@@ -6,6 +6,7 @@
 //! (`~/.config/aibus/skills`), then `skills.extra_dirs`. A skill is `<dir>/<name>/SKILL.md`.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -17,16 +18,13 @@ use crate::agent::import::Outcome;
 use crate::agent::roster::estimate_tokens;
 use crate::agent::validate::{Finding, Report};
 use crate::agent::{AgentDef, Scope};
+use crate::tools::policy::resolve;
 
 /// The index in the `skill` tool description stays under this many tokens.
 pub const INDEX_BUDGET_TOKENS: u64 = 1_500;
-/// Most skill directories read from one scope.
-pub const MAX_SKILLS_PER_SCOPE: usize = 1_000;
 const MAX_FILE_BYTES: u64 = 256 * 1024;
 const MAX_NAME: usize = 64;
 const MAX_DESCRIPTION: usize = 1_024;
-/// The longest description the index shows for one skill.
-const INDEX_LINE_CHARS: usize = 200;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Skill {
@@ -36,6 +34,8 @@ pub struct Skill {
     pub description: String,
     pub scope: Scope,
     pub path: PathBuf,
+    /// The scope directory the skill was found in. Reads stay under it, whatever links are inside.
+    pub root: PathBuf,
 }
 
 #[derive(Debug, Default)]
@@ -111,29 +111,41 @@ pub fn session_dirs() -> (Option<&'static Path>, &'static [PathBuf]) {
         .map_or((None, &[][..]), |(u, e)| (u.as_deref(), e.as_slice()))
 }
 
-/// The scope directories, project first: `.aibus/skills` of the project, the user directory, then
-/// the extra ones.
-pub fn scope_dirs(
-    cwd: &Path,
-    user_dir: Option<&Path>,
-    extra_dirs: &[PathBuf],
-) -> Vec<(Scope, PathBuf)> {
-    project_root(cwd)
+/// The text of `<root>/<name>/SKILL.md`. The file is resolved through every link and must still be
+/// under `root` (the `read` tool's rule, `tools::policy::resolve`), so a link that leaves the scope
+/// is refused. The size cap is applied to what is read now, not to what discovery saw.
+fn read_skill(root: &Path, name: &str) -> Result<String, String> {
+    let (real, inside) = resolve(root, &format!("{name}/SKILL.md"))
+        .map_err(|e| format!("cannot read: {e}"))?;
+    if !inside {
+        return Err(format!(
+            "resolves to {}, outside the skill directory {}",
+            real.display(),
+            root.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(&real)
+        .and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(|e| format!("cannot read: {e}"))?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(format!("larger than {MAX_FILE_BYTES} bytes"));
+    }
+    String::from_utf8(bytes).map_err(|e| format!("cannot read: {e}"))
+}
+
+/// Reads every scope: `.aibus/skills` of the project, the user directory, then the extra ones.
+/// A bad file is a finding and never stops the walk.
+pub fn discover(cwd: &Path, user_dir: Option<&Path>, extra_dirs: &[PathBuf]) -> SkillSet {
+    /// Most skill directories read from one scope.
+    const MAX_SKILLS_PER_SCOPE: usize = 1_000;
+    let mut set = SkillSet::default();
+    let scopes = project_root(cwd)
         .map(|r| (Scope::Project, r.join(".aibus/skills")))
         .into_iter()
         .chain(user_dir.map(|d| (Scope::User, d.to_owned())))
-        .chain(
-            extra_dirs
-                .iter()
-                .map(|d| (Scope::Extra(d.clone()), d.clone())),
-        )
-        .collect()
-}
-
-/// Reads every scope. A bad file is a finding and never stops the walk.
-pub fn discover(cwd: &Path, user_dir: Option<&Path>, extra_dirs: &[PathBuf]) -> SkillSet {
-    let mut set = SkillSet::default();
-    for (scope, dir) in scope_dirs(cwd, user_dir, extra_dirs) {
+        .chain(extra_dirs.iter().map(|d| (Scope::Extra(d.clone()), d.clone())));
+    for (scope, dir) in scopes {
         let Ok(read) = fs::read_dir(&dir) else {
             continue;
         };
@@ -176,23 +188,19 @@ pub fn discover(cwd: &Path, user_dir: Option<&Path>, extra_dirs: &[PathBuf]) -> 
                 finding("name", format!("directory name `{dir_name}` is not a skill name (letters, digits, `-_.`, at most {MAX_NAME})"), true);
                 continue;
             }
-            let text = match fs::metadata(&file) {
-                Ok(m) if m.len() > MAX_FILE_BYTES => {
-                    finding("path", format!("larger than {MAX_FILE_BYTES} bytes"), true);
+            let text = match read_skill(&dir, &dir_name) {
+                Ok(t) => t,
+                Err(why) => {
+                    finding("path", why, true);
                     continue;
                 }
-                _ => match fs::read_to_string(&file) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        finding("path", format!("cannot read: {e}"), true);
-                        continue;
-                    }
-                },
             };
             let description = match split(&text) {
                 Err(why) => {
-                    // A file with no frontmatter keeps preloading as it always did.
-                    finding("frontmatter", why, true);
+                    // A file with no frontmatter keeps preloading whole, as it always did, so
+                    // that alone is a warning; a frontmatter that is broken is an error.
+                    let bare = why.starts_with("no frontmatter");
+                    finding("frontmatter", why, !bare);
                     String::new()
                 }
                 Ok((name, description, _)) => {
@@ -235,6 +243,7 @@ pub fn discover(cwd: &Path, user_dir: Option<&Path>, extra_dirs: &[PathBuf]) -> 
                 description,
                 scope: scope.clone(),
                 path: file.clone(),
+                root: dir.clone(),
             };
             match set.skills.get(&dir_name) {
                 Some(winner) => {
@@ -262,7 +271,7 @@ impl SkillSet {
     /// The body of `name` without its frontmatter. A file with no frontmatter is returned whole.
     pub fn body(&self, name: &str) -> Option<String> {
         let skill = self.skills.get(name)?;
-        let text = fs::read_to_string(&skill.path).ok()?;
+        let text = read_skill(&skill.root, name).ok()?;
         Some(match split(&text) {
             Ok((_, _, body)) => body.trim().to_owned(),
             Err(_) => text.trim_end().to_owned(),
@@ -274,6 +283,8 @@ impl SkillSet {
 /// then a line saying how many were left out. Returns the text and the number left out.
 pub fn index(set: &SkillSet, budget_tokens: u64) -> (String, usize) {
     const FOOTER_TOKENS: u64 = 60;
+    /// The longest description the index shows for one skill.
+    const INDEX_LINE_CHARS: usize = 200;
     let mut out = String::new();
     let mut listed = 0;
     for skill in set.skills.values() {
@@ -345,10 +356,9 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<(PathBuf, Outcome)>, String>
             if !valid_name(&name) {
                 return Outcome::Skipped(format!("`{name}` is not a skill name"));
             }
-            let text = match fs::read_to_string(&file) {
-                Ok(t) if t.len() as u64 <= MAX_FILE_BYTES => t,
-                Ok(_) => return Outcome::Skipped("file is too large".into()),
-                Err(e) => return Outcome::Skipped(format!("cannot read: {e}")),
+            let text = match read_skill(from, &name) {
+                Ok(t) => t,
+                Err(why) => return Outcome::Skipped(why),
             };
             match split(&text) {
                 Ok((Some(n), Some(d), _)) if n == name && !d.is_empty() => {}

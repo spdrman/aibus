@@ -7,7 +7,7 @@ mod continuity;
 mod delegate;
 mod lifecycle;
 mod memory;
-mod policy;
+pub(crate) mod policy;
 mod readonly;
 mod sandbox;
 mod shell;

@@ -461,22 +461,14 @@ impl Server {
             .collect()
     }
 
-    /// The `agent_list` answer: the agents, and the skills when there are any.
+    /// The `agent_list` answer: the agents, and the skills when there are any. The skills are
+    /// those of this project and user (the server does not read `skills.extra_dirs`), the winner
+    /// of each name, as `aibus skill list --json` shows them.
     fn agents_and_skills(&self) -> Value {
-        let mut out = json!({ "agents": self.agent_rows() });
-        let skills = self.skill_rows();
-        if !skills.is_empty() {
-            out["skills"] = Value::Array(skills);
-        }
-        out
-    }
-
-    /// The skills of this project and user (the server does not read `skills.extra_dirs`), the
-    /// winner of each name, as `aibus skill list --json` shows them.
-    pub(crate) fn skill_rows(&self) -> Vec<Value> {
         let set =
             aibus_core::skill::discover(&self.project, Some(&self.config.join("skills")), &[]);
-        set.skills
+        let skills: Vec<Value> = set
+            .skills
             .values()
             .map(|s| {
                 json!({
@@ -490,7 +482,12 @@ impl Server {
                     "description": s.description,
                 })
             })
-            .collect()
+            .collect();
+        let mut out = json!({ "agents": self.agent_rows() });
+        if !skills.is_empty() {
+            out["skills"] = Value::Array(skills);
+        }
+        out
     }
 
     /// The workflow file `name` in `scope` (the project first when there is none): its scope,

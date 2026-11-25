@@ -4,7 +4,6 @@
 use std::path::Path;
 
 use aibus_core::agent::import::Outcome;
-use aibus_core::agent::validate::Report;
 use aibus_core::persist::paths::project_dir;
 use aibus_core::skill::{self, SkillSet};
 use aibus_core::AibusError;
@@ -85,17 +84,13 @@ fn validate(env: &Env, g: &Global) -> Result<u8, AibusError> {
     let mut report = env.skill_set().findings;
     report.merge(env.agent_skill_report(None));
     report.ok = report.errors.is_empty();
-    emit(g, &report)
-}
-
-fn emit(g: &Global, report: &Report) -> Result<u8, AibusError> {
     if g.json {
         println!(
             "{}",
-            serde_json::to_string(report).map_err(std::io::Error::other)?
+            serde_json::to_string(&report).map_err(std::io::Error::other)?
         );
     } else {
-        print_report(report);
+        print_report(&report);
     }
     Ok(if report.ok { 0 } else { 12 })
 }
@@ -103,8 +98,8 @@ fn emit(g: &Global, report: &Report) -> Result<u8, AibusError> {
 /// `skill import <dir>`: copies the `SKILL.md` of each skill in `dir` (`.claude/skills`) into
 /// `.aibus/skills/`. Nothing else in a skill directory is copied.
 fn import(env: &Env, g: &Global, dir: &Path) -> Result<u8, AibusError> {
-    let from = env.cwd().join(dir);
-    let to = project_dir(env.cwd()).join("skills");
+    let from = env.cwd.join(dir);
+    let to = project_dir(&env.cwd).join("skills");
     let done = skill::import(&from, &to).map_err(AibusError::Usage)?;
     if g.json {
         let rows: Vec<Value> = done

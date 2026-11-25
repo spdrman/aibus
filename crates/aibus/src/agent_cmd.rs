@@ -20,7 +20,7 @@ use crate::providers::{os_factories, provider_configs};
 
 /// What every subcommand starts from: where definitions live and the config that says so.
 pub(crate) struct Env {
-    cwd: PathBuf,
+    pub(crate) cwd: PathBuf,
     user_dir: PathBuf,
     config: Config,
     paths: Paths,
@@ -40,10 +40,6 @@ impl Env {
             config: loaded.config,
             paths,
         })
-    }
-
-    pub(crate) fn cwd(&self) -> &Path {
-        &self.cwd
     }
 
     /// The skills of the project, the user and `skills.extra_dirs`.

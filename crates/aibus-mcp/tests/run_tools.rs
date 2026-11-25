@@ -534,7 +534,7 @@ fn agent_run_counts_against_the_same_caps_as_workflow_run() {
     );
 
     // --max-concurrent-runs: a live agent run holds the slot a workflow run would take.
-    let rig = rig();
+    let rig = rig_with(|_| {});
     let held = run_id(&rig.start_agent("general", "step", Instant::now()));
     let second = rig.start("ok");
     assert!(

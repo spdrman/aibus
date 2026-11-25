@@ -511,10 +511,9 @@ impl Runs {
     /// lock, so two calls at once cannot both take the last slot.
     fn start(
         &self,
-        agent: bool,
         name: &str,
         input: &str,
-        steps: Vec<String>,
+        steps: Option<Vec<String>>,
         project: &std::path::Path,
         allow_tools: &[String],
         redactor: &Redactor,
@@ -555,6 +554,9 @@ impl Runs {
         }
         // The input goes to the child on stdin (`-`), never as an argument: a command line is
         // readable by every local user for as long as the child lives, and the input may hold a key.
+        // No workflow steps means one agent, which is its own only step.
+        let agent = steps.is_none();
+        let steps = steps.unwrap_or_else(|| vec![name.to_owned()]);
         if agent {
             cmd.args(["--agent", name, "run", "--", "-"]);
         } else {
@@ -823,9 +825,9 @@ impl Server {
                 None,
             ));
         }
-        let Some(runs) = &self.runs else {
+        if self.runs.is_none() {
             return Ok(self.fail("this server was started without a way to run workflows"));
-        };
+        }
         if !workflow::valid_name(name) {
             return Ok(self.fail("the name must match ^[a-z0-9][a-z0-9_-]{0,63}$"));
         }
@@ -879,7 +881,7 @@ impl Server {
         }
         let steps = parsed.steps.iter().map(|s| s.agent.to_string()).collect();
 
-        self.begin(now, run, false, name, input, steps)
+        self.begin(now, run, name, input, Some(steps))
     }
 
     /// `agent_run`: the same checks and caps as `workflow_run`, for one agent.
@@ -910,20 +912,20 @@ impl Server {
         if !roster.iter().any(|a| a.as_str() == name) {
             return Ok(self.fail(format!("no agent named {name}")));
         }
-        self.begin(now, run, true, name, input, vec![name.to_owned()])
+        self.begin(now, run, name, input, None)
     }
 
-    /// Takes the start token and the run slot, and starts the child. Only a start that would
+    /// Takes the start token and the run slot, and starts the child (`steps` of a workflow, or
+    /// `None` for one agent). Only a start that would
     /// spawn a child costs a token: a typo in a name or a workflow that does not validate starts
     /// nothing, and the per-call limit still counts it.
     fn begin(
         &self,
         now: Instant,
         run: &mut Option<String>,
-        agent: bool,
         name: &str,
         input: &str,
-        steps: Vec<String>,
+        steps: Option<Vec<String>>,
     ) -> Result<CallToolResult, ErrorData> {
         let Some(runs) = &self.runs else {
             return Ok(self.fail("this server was started without a way to run workflows"));
@@ -939,7 +941,6 @@ impl Server {
             )));
         }
         match runs.start(
-            agent,
             name,
             input,
             steps,

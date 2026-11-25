@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "name": "aibus-small",
+  "suite_version": 1,
+  "model_judge": false,
+  "cases": [
+    {
+      "case_id": "case-01-fix-off-by-one",
+      "task_input": "Task 1: fix off by one in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/fix-off-by-one",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case1"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-02-add-cli-flag",
+      "task_input": "Task 2: add cli flag in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/add-cli-flag",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case2"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-03-rename-module",
+      "task_input": "Task 3: rename module in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/rename-module",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case3"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-04-remove-dead-code",
+      "task_input": "Task 4: remove dead code in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/remove-dead-code",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case4"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-05-add-unit-test",
+      "task_input": "Task 5: add unit test in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/add-unit-test",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case5"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-06-bump-dependency",
+      "task_input": "Task 6: bump dependency in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/bump-dependency",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case6"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-07-fix-doc-link",
+      "task_input": "Task 7: fix doc link in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/fix-doc-link",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case7"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-08-extract-function",
+      "task_input": "Task 8: extract function in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/extract-function",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case8"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-09-handle-empty-input",
+      "task_input": "Task 9: handle empty input in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/handle-empty-input",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case9"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      }
+    },
+    {
+      "case_id": "case-10-review-diff",
+      "task_input": "Task 10: review diff in the fixture repository, keeping the existing tests green.",
+      "fixture": {
+        "repository": "fixtures/eval-293/repos/review-diff",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "allowed_side_effects": [
+        "Edit",
+        "Write"
+      ],
+      "expected_artifacts": [
+        "report.md"
+      ],
+      "test_commands": [
+        "cargo test -p case10"
+      ],
+      "rubric": [
+        "correctness",
+        "minimal_diff"
+      ],
+      "privacy": "metadata_only",
+      "envelope": {
+        "max_duration_secs": 600,
+        "max_cost_usd": 5
+      },
+      "agent": "reviewer"
+    }
+  ]
+}

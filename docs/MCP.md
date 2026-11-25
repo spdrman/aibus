@@ -126,7 +126,7 @@ When stdin closes (or the HTTP server stops) every live run gets SIGINT, 10 seco
 
 The command is `aibus run --agent <name> --permission-mode dont-ask --cwd <project> -- '<prompt>'`. Nothing can answer a prompt, so a tool call that would ask is denied; add `--allow 'bash(cargo *)'` for what the run may do. Put the cost limit in `AIBUS_MAX_COST_USD` (the run ends with exit code 8 when it is spent), and use a full path to the binary, since cron, launchd and systemd do not have your `PATH`. The prompt is on the command line here, so keep keys out of it.
 
-Write the run as a `[[schedule]]` in the config (spec 07 section 3) and let `aibus schedule print [<name>]` render it. It prints a crontab line, a launchd plist and a systemd service with its timer, and nothing else: it installs nothing, starts nothing and writes no file. `--bin <path>` sets the binary (default: this one) and `--json` gives the same text as data. `cron` is five fields; a day of month together with a day of week is refused, because cron runs on either and launchd and systemd only on both.
+Write the run as a `[[schedule]]` in the user config (spec 07 section 3; a project's `settings.toml` can't set one, it is ignored with a warning) and let `aibus schedule print [<name>]` render it. It prints a crontab line, a launchd plist and a systemd service with its timer, and nothing else: it installs nothing, starts nothing and writes no file. `--bin <path>` sets the binary (default: this one) and `--json` gives the same text as data. `cron` is five fields; a day of month together with a day of week is refused, because cron runs on either and launchd and systemd only on both.
 
 | Form | Where it goes | Then |
 |---|---|---|

@@ -13,25 +13,6 @@ use serde_json::json;
 
 use crate::cli::{Global, ScheduleCmd};
 
-/// The command a schedule runs, with the binary first.
-fn argv(s: &Schedule, bin: &str) -> Vec<String> {
-    let project = s.project.to_string_lossy();
-    [
-        bin,
-        "run",
-        "--agent",
-        &s.agent,
-        "--permission-mode",
-        "dont-ask",
-        "--cwd",
-        &project,
-        "--",
-        &s.prompt,
-    ]
-    .map(str::to_owned)
-    .into()
-}
-
 fn env(s: &Schedule) -> BTreeMap<&'static str, String> {
     s.max_cost_usd
         .map(|c| ("AIBUS_MAX_COST_USD", c.to_string()))
@@ -39,40 +20,18 @@ fn env(s: &Schedule) -> BTreeMap<&'static str, String> {
         .collect()
 }
 
-/// One word for a POSIX shell: bare when it is plain, else in single quotes.
-fn shell_word(w: &str) -> String {
-    if !w.is_empty()
-        && w.chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c))
-    {
-        return w.to_owned();
-    }
-    format!("'{}'", w.replace('\'', "'\\''"))
-}
-
-/// One word of a systemd `ExecStart=`: `%` and `$` are specifiers there, so they double.
-fn unit_word(w: &str) -> String {
-    if !w.is_empty()
-        && w.chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_@+=:,./-".contains(c))
-    {
-        return w.to_owned();
-    }
-    let escaped = w
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('%', "%%")
-        .replace('$', "$$");
-    format!("\"{escaped}\"")
-}
-
-fn xml(t: &str) -> String {
-    t.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 fn crontab(s: &Schedule, argv: &[String]) -> String {
+    /// One word for a POSIX shell: bare when it is plain, else in single quotes.
+    fn shell_word(w: &str) -> String {
+        if !w.is_empty()
+            && w.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c))
+        {
+            return w.to_owned();
+        }
+        format!("'{}'", w.replace('\'', "'\\''"))
+    }
+
     let when = s.cron.split_whitespace().collect::<Vec<_>>().join(" ");
     let env: String = env(s)
         .iter()
@@ -84,6 +43,12 @@ fn crontab(s: &Schedule, argv: &[String]) -> String {
 }
 
 fn launchd(s: &Schedule, argv: &[String], cron: &Cron) -> String {
+    fn xml(t: &str) -> String {
+        t.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     out.push_str("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n");
@@ -141,6 +106,22 @@ fn launchd(s: &Schedule, argv: &[String], cron: &Cron) -> String {
 }
 
 fn systemd(s: &Schedule, argv: &[String], cron: &Cron) -> (String, String) {
+    /// One word of a systemd `ExecStart=`: `%` and `$` are specifiers there, so they double.
+    fn unit_word(w: &str) -> String {
+        if !w.is_empty()
+            && w.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_@+=:,./-".contains(c))
+        {
+            return w.to_owned();
+        }
+        let escaped = w
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('%', "%%")
+            .replace('$', "$$");
+        format!("\"{escaped}\"")
+    }
+
     let mut service = format!(
         "[Unit]\nDescription=aibus scheduled run {}\n\n[Service]\nType=oneshot\n",
         s.name
@@ -220,7 +201,22 @@ pub fn schedule(cmd: &ScheduleCmd, g: &Global) -> Result<u8, AibusError> {
     let mut text = Vec::new();
     for s in picked {
         let cron = s.cron_fields().map_err(AibusError::Usage)?;
-        let argv = argv(s, &bin);
+        let project = s.project.to_string_lossy();
+        // The command a schedule runs, the binary first.
+        let argv: Vec<String> = [
+            &*bin,
+            "run",
+            "--agent",
+            &s.agent,
+            "--permission-mode",
+            "dont-ask",
+            "--cwd",
+            &project,
+            "--",
+            &s.prompt,
+        ]
+        .map(str::to_owned)
+        .into();
         let (crontab, plist, (service, timer)) = (
             crontab(s, &argv),
             launchd(s, &argv, &cron),

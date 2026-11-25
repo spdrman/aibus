@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::ids::AgentName;
 use crate::workflow::valid_name;
 
-/// The most launchd `StartCalendarInterval` entries one schedule may expand to.
-const MAX_ENTRIES: usize = 128;
-
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Schedule {
     /// Names the schedule, the launchd label and the systemd units.
@@ -35,51 +32,54 @@ pub struct Cron {
     pub weekday: Option<Vec<u32>>,
 }
 
-fn field(text: &str, lo: u32, hi: u32, what: &str) -> Result<Option<Vec<u32>>, String> {
-    let bad = |why: &str| format!("cron {what} {text:?}: {why}");
-    let num = |s: &str| {
-        s.parse::<u32>()
-            .ok()
-            .filter(|n| (lo..=hi).contains(n))
-            .ok_or_else(|| bad(&format!("want a number from {lo} to {hi}")))
-    };
-    let mut out = Vec::new();
-    for item in text.split(',') {
-        let (range, step) = match item.split_once('/') {
-            Some((r, s)) => (
-                r,
-                Some(
-                    s.parse::<u32>()
-                        .ok()
-                        .filter(|s| *s > 0)
-                        .ok_or_else(|| bad("the step is a number above 0"))?,
-                ),
-            ),
-            None => (item, None),
-        };
-        let (from, to) = match range {
-            "*" => (lo, hi),
-            r => match r.split_once('-') {
-                Some((a, b)) => (num(a)?, num(b)?),
-                None => {
-                    let n = num(r)?;
-                    (n, if step.is_some() { hi } else { n })
-                }
-            },
-        };
-        if from > to {
-            return Err(bad("the range runs backwards"));
-        }
-        out.extend((from..=to).step_by(step.unwrap_or(1) as usize));
-    }
-    out.sort_unstable();
-    out.dedup();
-    Ok(Some(out).filter(|v| v.len() as u32 != hi - lo + 1))
-}
-
 impl Schedule {
     /// The cron field sets, or why the expression is not one aibus can print for all three forms.
     pub fn cron_fields(&self) -> Result<Cron, String> {
+        // The most launchd `StartCalendarInterval` entries one schedule may expand to.
+        const MAX_ENTRIES: usize = 128;
+
+        fn field(text: &str, lo: u32, hi: u32, what: &str) -> Result<Option<Vec<u32>>, String> {
+            let bad = |why: &str| format!("cron {what} {text:?}: {why}");
+            let num = |s: &str| {
+                s.parse::<u32>()
+                    .ok()
+                    .filter(|n| (lo..=hi).contains(n))
+                    .ok_or_else(|| bad(&format!("want a number from {lo} to {hi}")))
+            };
+            let mut out = Vec::new();
+            for item in text.split(',') {
+                let (range, step) = match item.split_once('/') {
+                    Some((r, s)) => (
+                        r,
+                        Some(
+                            s.parse::<u32>()
+                                .ok()
+                                .filter(|s| *s > 0)
+                                .ok_or_else(|| bad("the step is a number above 0"))?,
+                        ),
+                    ),
+                    None => (item, None),
+                };
+                let (from, to) = match range {
+                    "*" => (lo, hi),
+                    r => match r.split_once('-') {
+                        Some((a, b)) => (num(a)?, num(b)?),
+                        None => {
+                            let n = num(r)?;
+                            (n, if step.is_some() { hi } else { n })
+                        }
+                    },
+                };
+                if from > to {
+                    return Err(bad("the range runs backwards"));
+                }
+                out.extend((from..=to).step_by(step.unwrap_or(1) as usize));
+            }
+            out.sort_unstable();
+            out.dedup();
+            Ok(Some(out).filter(|v| v.len() as u32 != hi - lo + 1))
+        }
+
         let parts: Vec<&str> = self.cron.split_whitespace().collect();
         let [minute, hour, day, month, weekday] = parts[..] else {
             return Err(format!(

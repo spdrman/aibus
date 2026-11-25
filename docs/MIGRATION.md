@@ -65,3 +65,17 @@ Every capability field is optional and the layers merge field by field, so an ol
 * More providers: `gemini` (the native API), `bedrock` and `vertex` (Claude on those clouds), and the presets in `docs/CAPABILITIES.md`.
 * The built-in model tables moved to `catalog/` at the repo root. Nothing about `models()` or prices changes, and I fetch no third-party catalog at run time.
 * `aibus doctor` prints a row per provider and warns about a `[[provider]]` no account uses. A `base_url` that is plain `http://` to an address that is not this machine or a private network gets a warning when the config loads.
+
+# From 0.2.x to the EPIC A model (assumption, #295)
+
+I am assuming "migration guidance from v2" in #295 means someone on aibus 0.2.x (0.2.0 or 0.2.1) moving to what EPIC A added. The issue does not say, and if it meant the v2.0 EPIC A spec instead, this is the wrong document and a spec-delta note is still owed.
+
+Nothing here has to be done. I did not remove or rename a config key, a command or a file format in Phase 2 or 3 that I know of, and the 0.1.0 fixtures in `fixtures/config/` still load in the test run. I did not run a real 0.2.1 user directory through this build for this page, so treat "nothing breaks" as what the tests say and not as a promise. What is new, and off until you use it:
+
+* **Workflows** keep the v1 file format. The compiler adds a plan with a stable hash (`aibus workflow plan --dry-run`) and runtimes beyond `aibus` (`cli.codex`, `cli.gemini`, `openrouter`) that plan but do not run yet, because the scheduler has no host (D-283, D-359, docs/DEFERRED.md). A workflow you already have runs on the chain runner as before.
+* **Extensions**: `aibus extensions ...` manages local, signed or unsigned packages from a registry directory you point at. Nothing is installed by default, and nothing is fetched over a network. The program an extension may start has to be on the host's list (`claude`, `codex`, `gemini`, `kimi` and names you add to `extension-policy.toml`). See docs/spec/16-extensions.md.
+* **Runs and traces**: `aibus runs compare`, `runs repro` and `runs inspect --node --json` read recorded traces. They never start a run.
+* **OTLP export** has no config key. It does not run, and the `OTEL_*` variables are ignored on purpose (docs/OTEL.md).
+* **Handoffs between providers** need a recorded consent per transfer once the scheduler runs them (D-360). Today nothing asks, and nothing sends.
+
+If something you used on 0.2.x stops working after you move, that is a bug I want to know about, not a documented change.

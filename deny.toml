@@ -8,6 +8,13 @@ version = 2
 # `unmaintained = "warn"` cannot be written literally; a hit fails the check until reviewed.
 unmaintained = "all"
 yanked = "deny"
+# chrono 0.4.45 is flagged unmaintained (no fixed version exists, and it is a notice, not a
+# vulnerability). It comes in through rmcp 3.9 and schemars, so only `aibus-mcp` links it. Reviewed
+# for the v1 gate (#295) on 2026-11-25; review again by 2027-02-25, or when rmcp moves off it, and
+# drop this entry then. `unmaintained = "all"` stays, so any other notice still fails the check.
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained notice, via rmcp and schemars, no fix available; review by 2027-02-25 (#295)" },
+]
 
 [licenses]
 version = 2

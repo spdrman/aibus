@@ -165,3 +165,15 @@ imports them by package name. What I left for later...
   for now, and where to publish them (repo, the A2.1 catalog or a release asset) is still open.
 - Building anything for xAI/Grok or DeepSeek: both have a first-party CLI (Grok Build, and DeepSeek Harness `dsh` with `--profile headless/acp/sdk`, read 2026-11-25) and both stay `disabled` until their terms and login flows are read. See `docs/PROVIDER-FEASIBILITY.md`.
 - Host policy for the new extensions: `sandbox::OFFICIAL_CLIS` only lists claude, codex, gemini and kimi, so `copilot`, `cursor-agent` and `qwen` are refused with `NotOfficial` until the user adds them to `extra_official_clis`, and `flags.rs` has no per-CLI flag list for them, so once added only the denylist checks their argv. Adding them to the allowlist with flag lists is a core edit that waits until a real CLI of each has been read.
+
+## A3.2 OpenTelemetry export (#292)
+
+Cut from the reduced scope, still wanted:
+
+- A retention policy (per-project retention and deletion of local traces). Export redaction is in; retention is not.
+- Reading `Destination` and `Revisions` from the aibus config file and a CLI switch. Today they are plain structs a caller fills in.
+- Langfuse interop. The OTLP body follows the generic OTLP/HTTP shape, but I have not run it against Langfuse, so that row is unverified. Langfuse-specific attribute mapping (`langfuse.*`) is not done.
+- Wiring the completeness diagnostics into the trace inspector.
+- Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
+- A bounded queue between the run and the exporter. Each export is one thread (the caller writes the `thread::spawn`), so a slow collector under many exports would pile threads up; a bounded queue with drop-on-full belongs with the config wiring.
+- Model and version labels on the resource (spec 7.2). Only the provider extension is exported today.

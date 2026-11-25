@@ -1,0 +1,5 @@
+node_modules
+dist
+run-out
+src-tauri/target
+src-tauri/gen

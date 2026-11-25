@@ -1,9 +1,10 @@
 //! `aibus sessions` (#355, phase 1 of #348): list the Claude Code sessions open in other
 //! terminals and tap in to one, read-only. The texts come from `aibus_tap::show`, which builds on
 //! `aibus_trace::view`, so this prints what `/sessions` and `/tap` show and what `aibus runs
-//! inspect` prints for the graph and timeline. Nothing here sends anything to a session.
+//! inspect` prints for the graph and timeline. `send` (#373) is the one way to reach a session:
+//! the inbox socket, a keyboard confirmation each time, never a permission answer.
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use aibus_core::{AibusError, Redactor};
-use aibus_tap::{agents, hooks, show, tap, transcript, Env};
+use aibus_tap::{agents, control, hooks, show, tap, transcript, Env};
 use bytes::Bytes;
 use http::{header, Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full, Limited};
@@ -63,7 +64,8 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
                         json!({
                             "client": "claude", "session_id": s.session_id, "job_id": s.job_id,
                             "name": s.name, "cwd": s.cwd, "kind": s.kind, "state": s.state,
-                            "started_ms": s.started_ms, "pid": s.pid, "can_do": ["watch"],
+                            "started_ms": s.started_ms, "pid": s.pid,
+                            "can_do": if s.socket.is_some() { json!(["watch", "send"]) } else { json!(["watch"]) },
                         })
                     })
                     .collect();
@@ -86,6 +88,36 @@ pub fn sessions(args: &SessionsArgs, g: &Global, redactor: &Redactor) -> Result<
                 drop(out);
                 return follow_session(&e, session, redactor).map(|()| 0);
             }
+        }
+        SessionsCmd::Send {
+            session,
+            text,
+            config_dir,
+        } => {
+            let e = env(g, config_dir)?;
+            let mut list =
+                agents::parse_agents(&agents::run_agents_json().map_err(usage)?).map_err(usage)?;
+            agents::merge_local(&mut list, &e.config.join("sessions"));
+            let s = agents::resolve(&list, session).map_err(usage)?;
+            // No terminal, no send: the confirmation is the consent, and there is no `--yes`.
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                return Err(usage(
+                    "sending needs a terminal for both input and output to confirm at: there is no --yes, and no tty means no send",
+                ));
+            }
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as i64);
+            let mut confirm = |p: &str| {
+                let _ = write!(out, "{p}\nsend it? [y/N] ");
+                let _ = out.flush();
+                let mut line = String::new();
+                std::io::stdin().lock().read_line(&mut line).is_ok()
+                    && matches!(line.trim(), "y" | "Y" | "yes")
+            };
+            let said =
+                control::send(&e, s, text, redactor, None, now, &mut confirm).map_err(usage)?;
+            writeln!(out, "{said}")?;
         }
         SessionsCmd::Hooks(h) => {
             let (cmd, client, config_dir, yes) = match h {

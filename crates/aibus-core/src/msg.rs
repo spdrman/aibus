@@ -629,6 +629,10 @@ pub enum RunsQuery {
     Inspect { run: String, node: Option<String> },
     /// The offline replay of one run.
     Replay(String),
+    /// Two recorded runs side by side (#294).
+    Compare { a: String, b: String },
+    /// What replaying and re-running one recorded run would need (#294).
+    Repro(String),
 }
 
 /// What `Command::WorkflowFile` asks the loop to do with the workflow files.

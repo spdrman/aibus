@@ -819,7 +819,7 @@ fn workflow(c: &Call, out: &mut Out) -> Result<(), String> {
     }
 }
 
-/// `/runs`, `/runs inspect <run> [<node>]` and `/runs replay <run>`. The terminal loop reads the
+/// `/runs`, `/runs inspect <run> [<node>]`, `/runs replay <run>`, `/runs compare <a> <b>` and `/runs repro <run>`. The terminal loop reads the
 /// trace store; a run id is checked there, where the directory is.
 fn recorded(c: &Call, out: &mut Out) -> Result<(), String> {
     let words: Vec<&str> = c.args.split_whitespace().collect();
@@ -828,7 +828,9 @@ fn recorded(c: &Call, out: &mut Out) -> Result<(), String> {
         ["inspect", run] => RunsQuery::Inspect { run: (*run).to_owned(), node: None },
         ["inspect", run, node] => RunsQuery::Inspect { run: (*run).to_owned(), node: Some((*node).to_owned()) },
         ["replay", run] => RunsQuery::Replay((*run).to_owned()),
-        _ => return Err(format!("/{} takes no argument, inspect <run> [<node>] or replay <run>", c.name)),
+        ["compare", a, b] => RunsQuery::Compare { a: (*a).to_owned(), b: (*b).to_owned() },
+        ["repro", run] => RunsQuery::Repro((*run).to_owned()),
+        _ => return Err(format!("/{} takes no argument, inspect <run> [<node>], replay <run>, compare <a> <b> or repro <run>", c.name)),
     };
     command(out, Command::Runs(query))
 }

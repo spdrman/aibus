@@ -135,6 +135,26 @@ fn slash_runs_inspect_a_node_opens_the_inspector_and_replay_shows_the_transition
 }
 
 #[test]
+fn slash_runs_compare_and_repro_open_what_the_commands_print() {
+    let mut r = rig();
+    line(&mut r, &traces(), "/runs compare 06-basic 07-deleg");
+    let text = r.text();
+    assert!(
+        text.contains("comparison of 06-basic (a) and 07-deleg (b)"),
+        "{text}"
+    );
+    assert!(text.contains("comparability unknown"), "{text}");
+    r.key(K::Esc);
+    line(&mut r, &traces(), "/runs repro 07-deleg");
+    let text = r.text();
+    assert!(text.contains("reproducibility of 07-deleg"), "{text}");
+    assert!(text.contains("not a replay"), "{text}");
+    r.key(K::Esc);
+    line(&mut r, &traces(), "/runs compare 06-basic nope");
+    assert!(r.text().contains("no run nope"), "{}", r.text());
+}
+
+#[test]
 fn a_bad_run_or_argument_says_so_in_the_log_and_opens_nothing() {
     let mut r = rig();
     line(&mut r, &traces(), "/runs inspect ../etc");
@@ -144,7 +164,7 @@ fn a_bad_run_or_argument_says_so_in_the_log_and_opens_nothing() {
     line(&mut r, &traces(), "/runs frobnicate");
     assert!(
         r.text()
-            .contains("/runs takes no argument, inspect <run> [<node>] or replay <run>"),
+            .contains("/runs takes no argument, inspect <run> [<node>], replay <run>, compare <a> <b> or repro <run>"),
         "{}",
         r.text()
     );

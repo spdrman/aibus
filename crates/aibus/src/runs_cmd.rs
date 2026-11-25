@@ -7,6 +7,9 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use aibus_core::AibusError;
+use aibus_trace::causal::{inspector, render_reproducibility, reproducibility};
+use aibus_trace::compare::{compare_runs, render, RunInput};
+use aibus_trace::eval::EvaluationResult;
 use aibus_trace::view::{self, Filter, Recorded};
 use serde_json::Value;
 
@@ -19,6 +22,18 @@ fn load(root: &Path, run: &str) -> Result<(String, Recorded), AibusError> {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let rec = Recorded::load(&dir).map_err(|e| AibusError::Usage(format!("run {name}: {e}")))?;
     Ok((name, rec))
+}
+
+/// An `EvaluationResult` read from a file the user named: a regular file of at most 4 MiB.
+fn result_file(path: &Path) -> Result<EvaluationResult, AibusError> {
+    let bad =
+        |why: String| AibusError::Usage(format!("evaluation result {}: {why}", path.display()));
+    let meta = std::fs::metadata(path).map_err(|e| bad(e.to_string()))?;
+    if !meta.is_file() || meta.len() > 4 << 20 {
+        return Err(bad("not a regular file of at most 4 MiB".into()));
+    }
+    let bytes = std::fs::read(path).map_err(|e| bad(e.to_string()))?;
+    serde_json::from_slice(&bytes).map_err(|e| bad(e.to_string()))
 }
 
 pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
@@ -58,12 +73,18 @@ pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
         } => {
             let (name, rec) = load(&root(r)?, run)?;
             let text = if let Some(id) = node {
-                view::inspect(&rec, id).ok_or_else(|| {
+                let missing = || {
                     AibusError::Usage(format!(
                         "run {name} has no agent, tool use or attempt {}",
                         view::clean(id, 160)
                     ))
-                })?
+                };
+                if g.json {
+                    let v = inspector(&rec, id).ok_or_else(missing)?;
+                    serde_json::to_string(&v).map_err(std::io::Error::other)? + "\n"
+                } else {
+                    view::inspect(&rec, id).ok_or_else(missing)?
+                }
             } else if let Some(seq) = event {
                 view::event(&rec, *seq)
                     .ok_or_else(|| AibusError::Usage(format!("run {name} has no event #{seq}")))?
@@ -118,6 +139,53 @@ pub fn runs(cmd: &RunsCmd, g: &Global) -> Result<u8, AibusError> {
                 }
             } else {
                 out.write_all(view::replay(&rec, &name).as_bytes())?;
+            }
+        }
+        RunsCmd::Compare {
+            a,
+            b,
+            root: r,
+            result_a,
+            result_b,
+        } => {
+            let root = root(r)?;
+            let (name_a, rec_a) = load(&root, a)?;
+            let (name_b, rec_b) = load(&root, b)?;
+            let res_a = result_a.as_deref().map(result_file).transpose()?;
+            let res_b = result_b.as_deref().map(result_file).transpose()?;
+            let c = compare_runs(
+                &RunInput {
+                    id: &name_a,
+                    rec: &rec_a,
+                    result: res_a.as_ref(),
+                },
+                &RunInput {
+                    id: &name_b,
+                    rec: &rec_b,
+                    result: res_b.as_ref(),
+                },
+            );
+            if g.json {
+                writeln!(
+                    out,
+                    "{}",
+                    serde_json::to_string(&c).map_err(std::io::Error::other)?
+                )?;
+            } else {
+                out.write_all(render(&c).as_bytes())?;
+            }
+        }
+        RunsCmd::Repro { run, root: r } => {
+            let (name, rec) = load(&root(r)?, run)?;
+            let rep = reproducibility(&name, &rec);
+            if g.json {
+                writeln!(
+                    out,
+                    "{}",
+                    serde_json::to_string(&rep).map_err(std::io::Error::other)?
+                )?;
+            } else {
+                out.write_all(render_reproducibility(&rep).as_bytes())?;
             }
         }
         RunsCmd::Rerun {

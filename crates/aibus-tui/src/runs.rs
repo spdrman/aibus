@@ -7,6 +7,8 @@
 use std::path::Path;
 
 use aibus_core::{Command, Msg, RunsQuery, Screen};
+use aibus_trace::causal::{render_reproducibility, reproducibility};
+use aibus_trace::compare::{compare_runs, render, RunInput};
 use aibus_trace::view::{self, Filter, Recorded};
 
 /// What `query` shows, read from the run directories under `root`.
@@ -45,6 +47,28 @@ pub fn apply(query: &RunsQuery, root: &Path) -> Vec<Msg> {
         RunsQuery::Replay(run) => {
             open(run).map(|(name, rec)| (format!("replay {name}"), view::replay(&rec, &name)))
         }
+        RunsQuery::Compare { a, b } => open(a).and_then(|(name_a, rec_a)| {
+            let (name_b, rec_b) = open(b)?;
+            let c = compare_runs(
+                &RunInput {
+                    id: &name_a,
+                    rec: &rec_a,
+                    result: None,
+                },
+                &RunInput {
+                    id: &name_b,
+                    rec: &rec_b,
+                    result: None,
+                },
+            );
+            Ok((format!("compare {name_a} {name_b}"), render(&c)))
+        }),
+        RunsQuery::Repro(run) => open(run).map(|(name, rec)| {
+            (
+                format!("repro {name}"),
+                render_reproducibility(&reproducibility(&name, &rec)),
+            )
+        }),
     };
     match shown {
         Ok((title, text)) => vec![

@@ -217,26 +217,19 @@ impl HookRunner {
         scoped: &HookSet,
         cancel: &CancellationToken,
     ) -> Fired {
-        self.fire_from(input, scoped, cancel, true).await
+        self.fire_from(input, scoped, cancel, true, None).await
     }
 
-    /// Like `fire`, but only `scoped` runs: not `[hooks]`, which a caller that already fired
-    /// the event must not run twice (the compiled `done_when` check uses it).
-    pub async fn fire_scoped(
-        &self,
-        input: &HookInput<'_>,
-        scoped: &HookSet,
-        cancel: &CancellationToken,
-    ) -> Fired {
-        self.fire_from(input, scoped, cancel, false).await
-    }
-
-    async fn fire_from(
+    /// `fire` with two choices. `with_global` false runs only `scoped`, not `[hooks]`, for a
+    /// caller that already fired the event and must not run those twice (the `done_when` check).
+    /// `cwd` is where a command runs when it is not the project directory (a run in a worktree).
+    pub async fn fire_from(
         &self,
         input: &HookInput<'_>,
         scoped: &HookSet,
         cancel: &CancellationToken,
         with_global: bool,
+        cwd: Option<&Path>,
     ) -> Fired {
         // 01 section 6.3: a hook gets a minute unless it says otherwise, and the user is waiting
         // on `user_prompt_submit`, so that one never gets more than ten seconds.
@@ -319,7 +312,7 @@ impl HookRunner {
                 HookKind::Command => {
                     let job = exec::Job {
                         command: spec.command.clone(),
-                        cwd: self.project_dir.clone(),
+                        cwd: cwd.map_or_else(|| self.project_dir.clone(), Path::to_path_buf),
                         env: scrubbed_env(
                             &self.env,
                             &self.pass_env,

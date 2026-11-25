@@ -4,25 +4,24 @@
 
 use serde_json::Value;
 
-const TYPES: [&str; 7] = [
-    "object", "array", "string", "number", "integer", "boolean", "null",
-];
-const KEYWORDS: [&str; 10] = [
-    "type",
-    "enum",
-    "required",
-    "properties",
-    "additionalProperties",
-    "items",
-    "minimum",
-    "maximum",
-    "description",
-    "title",
-];
-
 /// The first problem with the schema itself, or `None`: an unknown `type`, a `required` that is
 /// not a list of names, a keyword the check does not read.
 pub fn check_schema(schema: &Value) -> Option<String> {
+    const TYPES: [&str; 7] = [
+        "object", "array", "string", "number", "integer", "boolean", "null",
+    ];
+    const KEYWORDS: [&str; 10] = [
+        "type",
+        "enum",
+        "required",
+        "properties",
+        "additionalProperties",
+        "items",
+        "minimum",
+        "maximum",
+        "description",
+        "title",
+    ];
     let Value::Object(o) = schema else {
         return Some("a schema is a map".into());
     };

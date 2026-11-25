@@ -11,7 +11,7 @@
 
 mod assist;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
@@ -37,7 +37,7 @@ use super::{
 };
 use assist::{LeadAssist, Route};
 
-use crate::agent::{AgentDef, HookKind, HookSet, HookSpec, PermissionMode, Role, DONE_RETRIES};
+use crate::agent::{AgentDef, HookKind, HookSet, HookSpec, PermissionMode, Role};
 use crate::assist::Assist;
 use crate::context::{self, ContextInput};
 use crate::credentials::CredentialSource;
@@ -448,56 +448,13 @@ impl Task<'_> {
         mode: PermissionMode,
         extra: Map<String, Value>,
     ) -> Fired {
-        self.fire_from(&self.cfg.def.hooks, true, event, matcher, mode, extra)
+        self.fire_from(None, event, matcher, mode, extra)
             .await
-    }
-
-    /// The `done_when` command of the definition as the stop hook of `event`, run alone (the
-    /// `[hooks]` of the event already ran). It gets the run's own permission `mode` in its
-    /// input and runs as a hook command, so it has no wider rights than any other hook.
-    /// `Err` is the reason to send back; `Ok(true)` means something was checked and passed.
-    async fn check_done(
-        &self,
-        event: HookEvent,
-        matcher: Option<&str>,
-        mode: PermissionMode,
-        last: &str,
-    ) -> Result<bool, String> {
-        let done = &self.cfg.def.done;
-        let mut checked = false;
-        if let Some(schema) = &done.output_schema {
-            super::done::check_output(schema, last).map_err(|e| format!("output_schema: {e}"))?;
-            checked = true;
-        }
-        if let Some(command) = &done.done_when {
-            let scoped = HookSet::from([(
-                event.as_str().into(),
-                vec![HookSpec {
-                    matcher: None,
-                    command: command.clone(),
-                    timeout_secs: None,
-                    kind: HookKind::Command,
-                }],
-            )]);
-            let mut extra = Map::from_iter([("last_assistant_message".to_owned(), json!(last))]);
-            if let Some(goal) = &done.goal {
-                extra.insert("goal".into(), json!(goal));
-            }
-            let fired = self
-                .fire_from(&scoped, false, event, matcher, mode, extra)
-                .await;
-            if let Some(b) = fired.block {
-                return Err(format!("done_when: {}", b.reason));
-            }
-            checked |= !fired.ran.is_empty();
-        }
-        Ok(checked)
     }
 
     async fn fire_from(
         &self,
-        scoped: &HookSet,
-        with_global: bool,
+        only: Option<(&HookSet, &Path)>,
         event: HookEvent,
         matcher: Option<&str>,
         mode: PermissionMode,
@@ -519,14 +476,13 @@ impl Task<'_> {
             permission_mode: mode,
             extra,
         };
-        let fired = if with_global {
-            self.deps.hooks.fire(&input, scoped, self.cancel).await
-        } else {
-            self.deps
-                .hooks
-                .fire_scoped(&input, scoped, self.cancel)
-                .await
-        };
+        // `only`: that set alone, in that directory; otherwise `[hooks]` and the definition's.
+        let (scoped, cwd) = only.map_or((&cfg.def.hooks, None), |(s, c)| (s, Some(c)));
+        let fired = self
+            .deps
+            .hooks
+            .fire_from(&input, scoped, self.cancel, only.is_none(), cwd)
+            .await;
         for ran in &fired.ran {
             self.send(Msg::HookFired {
                 run: Some(cfg.run),
@@ -1083,7 +1039,7 @@ async fn drive(
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
     let mut lead = LeadAssist::new(t);
-    // Failed `done_when` / `output_schema` checks so far, against `done_retries`.
+    // Failed `done_when` / `output_schema` checks so far, against `done_retries` (3 when unset).
     let mut done_failures = 0u32;
 
     loop {
@@ -1224,12 +1180,55 @@ async fn drive(
                     // The agent's own definition of done is checked last, once the other
                     // stop hooks have let it go.
                     let last = last_text(conv);
-                    match t.check_done(event, matcher.as_deref(), mode, &last).await {
-                        Ok(checked) => t.verified.store(checked, Ordering::SeqCst),
+                    let done = &cfg.def.done;
+                    // Every configured check has to have run and passed for `verified`. A
+                    // `done_when` that never ran (hooks off, or a cancel) is no pass.
+                    let mut ran_all = done.output_schema.is_some() || done.done_when.is_some();
+                    let mut check = Ok(());
+                    if let Some(schema) = &done.output_schema {
+                        check = super::done::check_output(schema, &last)
+                            .map_err(|e| format!("output_schema: {e}"));
+                    }
+                    if let (Ok(()), Some(command)) = (&check, &done.done_when) {
+                        let scoped = HookSet::from([(
+                            event.as_str().into(),
+                            vec![HookSpec {
+                                matcher: None,
+                                command: command.clone(),
+                                timeout_secs: None,
+                                kind: HookKind::Command,
+                            }],
+                        )]);
+                        let mut extra =
+                            Map::from_iter([("last_assistant_message".to_owned(), json!(last))]);
+                        if let Some(goal) = &done.goal {
+                            extra.insert("goal".into(), json!(goal));
+                        }
+                        // Alone (the `[hooks]` of the event already ran), in the run's own
+                        // tree. Exit 0 passes, exit 2 or a verdict blocks with its reason, and
+                        // any other exit, a signal, a timeout or a start error is no pass.
+                        let fired = t
+                            .fire_from(Some((&scoped, &cfg.cwd)), event, matcher.as_deref(), mode, extra)
+                            .await;
+                        check = match (fired.block, fired.ran.first()) {
+                            (Some(b), _) => Err(format!("done_when: {}", b.reason)),
+                            (None, Some(r)) if r.outcome.exit_code != 0 => Err(format!(
+                                "done_when exited {} and only exit 0 passes",
+                                r.outcome.exit_code
+                            )),
+                            (None, None) => {
+                                ran_all = false;
+                                Ok(())
+                            }
+                            (None, Some(_)) => Ok(()),
+                        };
+                    }
+                    match check {
+                        Ok(()) => t.verified.store(ran_all, Ordering::SeqCst),
                         Err(reason) => {
                             t.verified.store(false, Ordering::SeqCst);
                             done_failures += 1;
-                            let cap = cfg.def.done.done_retries.unwrap_or(DONE_RETRIES);
+                            let cap = cfg.def.done.done_retries.unwrap_or(3);
                             if done_failures > cap {
                                 // The last failing reason ends up in the summary.
                                 if let Some(m) = conv.messages.last_mut() {

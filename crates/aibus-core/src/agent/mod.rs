@@ -239,16 +239,14 @@ pub struct DefSource {
 pub struct DoneSpec {
     /// What the run is for, in a sentence. Shown to the model with the retry reason.
     pub goal: Option<String>,
-    /// A shell command compiled to the agent's stop hook: exit 2 keeps the run going.
+    /// A shell command run at each stop, in the run's own tree: exit 0 passes, anything else fails
+    /// the check (exit 2 with stderr as the reason, the `subagent_stop` contract).
     pub done_when: Option<String>,
-    /// How many times a failed check may send the run round again; `DONE_RETRIES` when unset.
+    /// How many times a failed check may send the run round again; 3 when unset.
     pub done_retries: Option<u32>,
     /// A JSON Schema (the subset in `run::done`) the final message has to satisfy.
     pub output_schema: Option<serde_json::Value>,
 }
-
-/// Retries a failed `done_when` or `output_schema` check gets when `done_retries` is not set.
-pub const DONE_RETRIES: u32 = 3;
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct AgentDef {

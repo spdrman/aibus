@@ -82,7 +82,7 @@ async fn cost_of(provider: Arc<dyn Provider>) -> f64 {
             context: Vec::new(),
             background: false,
             max_spawn_depth: 3,
-            forced: None,
+            forced: Vec::new(),
             start: Start::New,
             worktree: None,
         },

@@ -143,7 +143,7 @@ pub struct RunConfig {
     /// A tool call the run opens with in place of its first request, and then goes on with the
     /// result in hand: `@agent-<name> <rest>` is a foreground `delegate` (01 section 4.2), `/fix
     /// <text>` and `--workflow` are a `workflow` call (01 section 8.4).
-    pub forced: Option<(smol_str::SmolStr, serde_json::Value)>,
+    pub forced: Vec<(smol_str::SmolStr, serde_json::Value)>,
     pub start: Start,
     /// The worktree `cwd` points into, removed when the run ends if nothing in it changed.
     pub worktree: Option<WorktreeInfo>,
@@ -951,17 +951,21 @@ impl Task<'_> {
     }
 }
 
-/// The assistant turn a forced call stands for: one tool call, made before the first request.
-fn opening_call(name: &str, input: serde_json::Value) -> ChatResponse {
+/// The assistant turn the forced calls stand for: one tool call each, made before the first
+/// request.
+fn opening_calls(calls: Vec<(smol_str::SmolStr, serde_json::Value)>) -> ChatResponse {
     ChatResponse {
         message: Message {
             role: MessageRole::Assistant,
-            blocks: vec![ContentBlock::ToolUse {
-                id: aibus_provider::ToolCallId(ulid::Ulid::new()),
-                name: name.into(),
-                input,
-                signature: None,
-            }],
+            blocks: calls
+                .into_iter()
+                .map(|(name, input)| ContentBlock::ToolUse {
+                    id: aibus_provider::ToolCallId(ulid::Ulid::new()),
+                    name: name.as_str().into(),
+                    input,
+                    signature: None,
+                })
+                .collect(),
             at: SystemTime::UNIX_EPOCH,
         },
         usage: Default::default(),
@@ -1025,7 +1029,7 @@ async fn drive(
             return End::of(RunStatus::Cancelled);
         }
         if let Some(call) = t.boundary(mail, &mut queued, conv, mode, pre_tokens).await {
-            forced = Some(call);
+            forced = vec![call];
         }
         // What the model this turn talks to allows and costs: read again every turn, because
         // `/model` may have changed it at the boundary just now.
@@ -1071,13 +1075,14 @@ async fn drive(
             la.before_request(t, conv).await;
         }
 
-        // A forced delegate opens the run in place of the first request.
-        let (resp, seeded) = match forced.take() {
-            Some((name, input)) => (opening_call(&name, input), true),
-            None => match t.request(conv, &specs, max_output, mode, pre_tokens).await {
+        // Forced delegates (one per `@agent-` mention) open the run in place of the first request.
+        let (resp, seeded) = if forced.is_empty() {
+            match t.request(conv, &specs, max_output, mode, pre_tokens).await {
                 Ok(resp) => (resp, false),
                 Err(end) => return end,
-            },
+            }
+        } else {
+            (opening_calls(std::mem::take(&mut forced)), true)
         };
         if !seeded {
             *turns += 1;

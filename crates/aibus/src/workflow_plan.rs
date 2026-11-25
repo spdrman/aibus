@@ -233,6 +233,85 @@ pub fn plan(
         for note in plan["notes"].as_array().into_iter().flatten() {
             println!("note: {}", short(note));
         }
+        // What the scheduler would do (#288): who Jev picks and why, what a person is asked, what
+        // each step hands on, and which steps can run together. Nothing runs.
+        let d = match workflow::sched::dry_run(plan) {
+            Ok(d) => d,
+            Err(why) => {
+                for w in why {
+                    println!("schedule: refused: {}", strip_ansi(&w));
+                }
+                return;
+            }
+        };
+        println!("\nschedule (policy {}):", short(&d["policy_revision"]));
+        for s in d["steps"].as_array().into_iter().flatten() {
+            let list = |v: &Value| -> String {
+                let items: Vec<String> = v.as_array().into_iter().flatten().map(short).collect();
+                if items.is_empty() {
+                    "none".into()
+                } else {
+                    items.join(", ")
+                }
+            };
+            let dec = &s["decision"];
+            println!(
+                "  {}: {} ({}), candidates {}",
+                short(&s["key"]),
+                dec["selected_runtime"]
+                    .as_str()
+                    .map_or("nobody".to_owned(), |r| strip_ansi(r).into_owned()),
+                short(&dec["reason_code"]),
+                list(&s["candidates"]),
+            );
+            let routes: Vec<String> = s["route_candidates"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|r| format!("{} when {}", short(&r["to"]), short(&r["when"])))
+                .collect();
+            println!(
+                "      routes: {}",
+                if routes.is_empty() {
+                    "none".into()
+                } else {
+                    routes.join("; ")
+                }
+            );
+            println!(
+                "      asks: {}; handoffs: {}",
+                list(&s["approvals"]),
+                list(&s["handoffs"])
+            );
+            let a = &s["artifact"];
+            println!(
+                "      artifact: {}, read by {}, validity tested by routes to {}",
+                short(&a["output"]),
+                list(&a["read_by"]),
+                list(&a["validity_tested_by_routes_to"])
+            );
+        }
+        let waves: Vec<String> = d["waves"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|w| {
+                format!(
+                    "[{}]",
+                    w.as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(short)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })
+            .collect();
+        println!(
+            "waves (max_parallel {}): {}",
+            d["envelope"]["max_parallel"],
+            waves.join(" ")
+        );
     }
 
     if !dry_run {

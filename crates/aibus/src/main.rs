@@ -51,7 +51,10 @@ fn main() -> std::process::ExitCode {
     #[cfg(target_os = "linux")]
     {
         let mut args = std::env::args_os().skip(1);
-        if args.next().is_some_and(|a| a == aibus_supervisor::reaper::MARKER) {
+        if args
+            .next()
+            .is_some_and(|a| a == aibus_supervisor::reaper::MARKER)
+        {
             return std::process::ExitCode::from(aibus_supervisor::reaper::run(args.collect()));
         }
     }

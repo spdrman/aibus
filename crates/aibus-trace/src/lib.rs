@@ -13,9 +13,12 @@
 //! offline replay. Nothing here launches a process.
 #![forbid(unsafe_code)]
 
+pub mod eval;
+pub mod experiment;
 pub mod otel;
 mod project;
 mod store;
+pub mod suggest;
 pub mod view;
 
 pub use project::{

@@ -187,6 +187,26 @@ imports them by package name. What I left for later...
 - Building anything for xAI/Grok or DeepSeek: both have a first-party CLI (Grok Build, and DeepSeek Harness `dsh` with `--profile headless/acp/sdk`, read 2026-11-25) and both stay `disabled` until their terms and login flows are read. See `docs/PROVIDER-FEASIBILITY.md`.
 - Host policy for the new extensions: `sandbox::OFFICIAL_CLIS` only lists claude, codex, gemini and kimi, so `copilot`, `cursor-agent` and `qwen` are refused with `NotOfficial` until the user adds them to `extra_official_clis`, and `flags.rs` has no per-CLI flag list for them, so once added only the denylist checks their argv. Adding them to the allowlist with flag lists is a core edit that waits until a real CLI of each has been read.
 
+## A3.3 evaluation datasets, experiments and suggestions (#293)
+
+I built the library part in `aibus-trace` (`eval`, `experiment`, `suggest`): the case and suite schema, `evaluate` into a versioned `EvaluationResult` with assessor provenance, `plan` and `compare` for A/B experiments over recorded traces, `Comparison::judge`, and four kinds of suggestion. This is what I cut...
+
+- **`aibus eval run <suite> --variants A,B` and `aibus runs compare`.** There is no CLI yet. The functions take recorded runs and the outcomes of the deterministic commands, so nothing drives a provider or runs a test command from them. A runner that launches the variants, runs each case's commands in its fixture checkout and records the outcomes is the next piece.
+- **Real timed A/B runs.** The ten cases in `fixtures/eval-293/suite.json` are a schema fixture and the traces in the tests are synthetic, so no number in this PR describes a real provider. Timed runs belong on Mercury through `bench-queue.sh`, once the runner exists.
+- **Reusing the A1.5 corpus (#285).** The ten cases are new; mapping the reference corpus onto the schema is not done.
+- **Suggestions that need events nothing emits yet.** Routing inefficiency, unnecessary model-based routing, overqualified model assignment, unsuitable capability selection and excess approval waiting. `RouteDecided` has no producer, the trace carries a model name only on the lead, and approval requests and resolutions have no shared key to pair on. Not guessed at.
+- **Searches are counted, not compared.** The trace holds no tool input, so "repeated search" is three or more search-tool calls by one agent, labelled a heuristic.
+- **Human review intake.** The `Human` assessor and its scores are in the schema and the result; there is no screen or command to enter a score.
+- **Per-agent evals (#392, H1.5).** Not built here. A case already takes an optional `agent`, which is read, written and evaluated like any case, so a per-agent suite should not need a new schema version. Whether per-agent cases need more than that field is #392's call.
+- **Langfuse score export.** Linking scores and comparisons to the OTLP revisions of #292 is not done.
+- **Side effects are checked by tool name only.** `evaluate` adds an `allowed_side_effects` check: a Bash, Edit, Write, WebFetch, WebSearch or other call that is not read-only and not named in the case's list fails the case, and a call the supervisor denied is ignored unless the same id also completed. The trace holds no tool input, so a path in the list is not checked, and a call with no tool name makes the check NotRun. A runner that confines the fixture checkout still has to enforce paths.
+- **Privacy is recorded, not enforced.** The result carries the case's `privacy` policy, and it holds only names, counts, ids and metrics. Nothing stores or shows a payload from an eval yet, so nothing gates on it; whatever does later has to read it first.
+- **Active runtime and account context.** The wall time is first to last event of the trace, there is no active-runtime metric (time spent waiting on approvals or a provider is not separated). `RunContext` has no account entitlement or limits, so a run throttled by its plan looks the same as a slow one.
+- **Fixture repositories.** The ten repository paths under `fixtures/eval-293/repos/` do not exist in the tree (the suite is a schema fixture). A runner has to confine `fixture.repository` to the checkout root and refuse a `commit` that starts with a dash.
+- **Denied approvals.** `permission_denials` counts `tool_failed` with reason `permission_denied`; a denied `approval_resolved` is not counted yet.
+- **Rendering suggestions.** A suggestion's text carries agent ids and tool names straight from the trace, so a TUI or markdown renderer has to escape control characters and markup.
+- **Run-to-run variability.** `repetitions` is in the plan and the median and p95 appear only with 3 and 20 samples. There is no confidence interval, and no pass-rate interval.
+
 ## A3.2 OpenTelemetry export (#292)
 
 Cut from the reduced scope, still wanted:

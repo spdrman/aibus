@@ -625,11 +625,3 @@ impl EvaluationResult {
         self.metric(name).and_then(|m| m.value)
     }
 }
-
-/// Counts for the checks of a result, by outcome, used by the comparison.
-pub(crate) fn failed_checks(r: &EvaluationResult, kind: Option<CheckKind>) -> usize {
-    r.checks
-        .iter()
-        .filter(|c| c.outcome == CheckOutcome::Fail && kind.is_none_or(|k| c.kind == k))
-        .count()
-}

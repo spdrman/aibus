@@ -18,15 +18,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::eval::{
-    failed_checks, CheckKind, EvalError, EvalSuite, EvaluationResult, Fixture, Verdict,
+    CheckKind, CheckOutcome, EvalError, EvalSuite, EvaluationResult, Fixture, Verdict,
     MIN_BENCHMARK_CASES,
 };
 
 pub const MANIFEST_VERSION: u32 = 1;
-/// A median needs this many samples before it is reported.
-pub const MEDIAN_MIN_SAMPLES: usize = 3;
-/// A p95 needs this many samples before it is reported.
-pub const P95_MIN_SAMPLES: usize = 20;
 
 /// One side of an A/B. `pins` is what the variant fixes (workflow file, provider extension,
 /// model), as free key and value pairs.
@@ -218,6 +214,9 @@ pub enum Judgement {
 }
 
 fn spread(mut v: Vec<f64>) -> Spread {
+    // A median needs 3 samples before it is reported, a p95 needs 20.
+    const MEDIAN_MIN_SAMPLES: usize = 3;
+    const P95_MIN_SAMPLES: usize = 20;
     v.sort_by(f64::total_cmp);
     let n = v.len();
     Spread {
@@ -260,6 +259,12 @@ pub fn compare(
             ));
         }
     }
+    let failed_checks = |r: &EvaluationResult, kind: Option<CheckKind>| {
+        r.checks
+            .iter()
+            .filter(|c| c.outcome == CheckOutcome::Fail && kind.is_none_or(|k| c.kind == k))
+            .count()
+    };
     let mut summaries = Vec::new();
     let mut caveats = Vec::new();
     for v in &manifest.variants {

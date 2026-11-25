@@ -20,13 +20,6 @@ use uuid::Uuid;
 use crate::eval::{EvaluationResult, Verdict};
 use crate::{project, EventKind, TraceEvent};
 
-/// Tools whose repeated use is worth a look. Matched on the tool name the trace carries.
-const SEARCH_TOOLS: [&str; 4] = ["Grep", "Glob", "WebSearch", "WebFetch"];
-/// Calls by one agent before repeated searches are mentioned.
-const SEARCH_REPEAT_MIN: usize = 3;
-/// Failures of one tool by one agent before repeated failures are mentioned.
-const FAILURE_REPEAT_MIN: usize = 2;
-
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Category {
@@ -81,6 +74,11 @@ pub struct Suggestion {
 
 /// Suggestions for one evaluated run and its trace.
 pub fn suggest(result: &EvaluationResult, events: &[TraceEvent]) -> Vec<Suggestion> {
+    // Tools whose repeated use is worth a look, matched on the tool name the trace carries.
+    const SEARCH_TOOLS: [&str; 4] = ["Grep", "Glob", "WebSearch", "WebFetch"];
+    // Calls (searches) or failures by one agent before they are mentioned.
+    const SEARCH_REPEAT_MIN: usize = 3;
+    const FAILURE_REPEAT_MIN: usize = 2;
     let mut sorted: Vec<&TraceEvent> = events.iter().filter(|e| e.corroborates.is_none()).collect();
     sorted.sort_by_key(|e| e.event_id);
     let safe = result.verdict == Verdict::Pass && result.value("permission_denials") == Some(0.0);

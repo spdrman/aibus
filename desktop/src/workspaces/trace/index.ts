@@ -5,3 +5,4 @@ export { GraphView } from "./GraphView";
 export { TimelineView } from "./TimelineView";
 export { InspectorView } from "./InspectorView";
 export { layout } from "./layout";
+export { TraceWorkspace } from "./TraceWorkspace";

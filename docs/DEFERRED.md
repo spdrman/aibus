@@ -36,8 +36,7 @@ I cut these from the spike on 2026-11-22. B1.5 (#308) reviews them with the go/n
 - **Timing benchmarks.** The Linux numbers in `docs/desktop/B1.1-go-no-go.md` are observations from
   two Xvfb runs on the NAS, not benchmarks. A queued Mercury run (`bench-queue.sh`) can repeat them once
   Phase 2 has a workload worth timing.
-- **Shared UI components.** The spike styles its own few elements. #307 swaps them for the shared
-  React primitives and tokens from #305 (PR #374) once that merges.
+- **Shared UI components.** Done in #307: the shell uses the shared primitives and tokens.
 - **Bundling and signing.** `bundle.active` is false. AppImage/deb, `.app`/`.dmg`, notarisation and
   updater keys are release work, not spike work.
 
@@ -114,6 +113,18 @@ gaps came up in review that were already there before this change, and I left th
   owner move where the rule points, so it needs the same owner check the allow side has.
 
 Scope I cut on purpose, with where it goes. I add a section per piece of work and I do not open issues for these.
+
+## B1.4 desktop shell and workspace layout (#307)
+
+I built the shell, the four workspaces from a list, the shared primitives and tokens, theme, shortcuts, state notices, safe external links and the saved dock layout, all in `desktop/src`. Left for later...
+
+- **The bridge wiring.** The Tauri commands and the `Channel` that carry a `Request` to `aibus_bridge::handle_json` are not added: `desktop/src-tauri` still only has the two spike commands. The Run and Trace workspaces keep reading the fixture replay. It needs a build of `src-tauri` with WebKitGTK, which the main gate does not have.
+- **Live tailing and the open-run summary row** (both listed under B1.3) wait on that wiring.
+- **An opener command for external links.** `ExternalLink` only accepts plain https URLs and hands them to an injected opener. The default is `window.open` with `noopener,noreferrer`, which a Tauri webview may block. A host command (no shell or opener plugin in the capability) is the proper fix and needs the Rust build too.
+- **Native window size and position across restart.** The dock layout, workspace and theme persist in webview storage. The window frame itself needs `tauri-plugin-window-state` (or a small host command), again Rust. `tauri.conf.json` now sets a 640 by 480 minimum so small windows stay usable.
+- **Playwright and GIFs.** The suite is vitest in jsdom. Nothing drives the real webview, so layout at small sizes and mixed DPI is untested; the CSS uses rem, flex and relative units only.
+- **Webview parity on macOS and Windows.** Not run. Steps stay in `docs/desktop/VERIFY-MACOS.md`.
+- **Replay and Compare** is #314: one more entry in the list in `App.tsx`.
 
 ## B1.3 typed bridge (#306)
 

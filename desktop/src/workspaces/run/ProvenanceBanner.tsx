@@ -1,3 +1,4 @@
+import { Button } from "@sharedui/react-primitives";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import type { Snapshot, StackInfo } from "../../ipc";
@@ -25,7 +26,7 @@ export function ProvenanceBanner({ snap, error, onReplay }: { snap: Snapshot | n
       ) : (
         <span>{error ?? "Starting..."}</span>
       )}
-      <button onClick={onReplay}>Replay</button>
+      <Button variant="quiet" size="sm" onClick={onReplay}>Replay</Button>
       {stack && (
         <span className="stack">
           Tauri {stack.tauri}, {stack.os}/{stack.arch}, webview {stack.webview ?? "unknown"}

@@ -140,13 +140,17 @@ impl Tracker {
     /// current-thread runtime this holds everything else for the time it takes (tens of
     /// milliseconds, a few times over).
     pub fn kill_all(&self) {
-        sweep(&self.seen.lock().unwrap().clone());
+        sweep(&self.seen.lock().unwrap().clone(), Signal::STOP);
     }
 }
 
-/// Stops and then kills everything under the remembered processes, as [`Tracker::kill_all`]
-/// does. The helper calls it for itself (`kill_under`).
-fn sweep(seen: &HashMap<u32, String>) {
+/// Ends everything under the remembered processes, as [`Tracker::kill_all`] does: each round
+/// sends `first` to what is new, then the next round looks again, and what was found is killed at
+/// the end. Returns how many processes it signalled. The tracker passes STOP (a stopped process
+/// keeps its children, so they can still be found through it). The helper passes KILL (every
+/// orphan is handed to it, so a killed process loses nothing from view), which means a helper that
+/// is itself killed partway leaves nothing stopped behind, only what it had not reached yet.
+fn sweep(seen: &HashMap<u32, String>, first: Signal) -> usize {
     let mut frozen = HashSet::new();
     for _ in 0..10 {
         let fresh: Vec<u32> = ours(&table(), seen)
@@ -156,9 +160,11 @@ fn sweep(seen: &HashMap<u32, String>) {
         if fresh.is_empty() {
             break;
         }
-        signal(fresh, Signal::STOP);
+        signal(fresh, first);
     }
+    let n = frozen.len();
     signal(frozen, Signal::KILL);
+    n
 }
 
 /// Ends every process under `root` (not `root` itself when it is this process), stopping what it
@@ -171,11 +177,43 @@ pub fn kill_under(root: u32) {
         .filter(|p| p.pid == root)
         .map(|p| (p.pid, p.start))
         .collect();
-    sweep(&seen);
+    sweep(&seen, Signal::STOP);
 }
 
 impl Drop for Tracker {
     fn drop(&mut self) {
         self.sampler.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    /// No other unit test of this crate starts a process, so the sleeper is this process's only
+    /// child besides the `ps` of `table`.
+    #[test]
+    fn issue_352_a_sweep_signals_the_descendants_and_not_its_own_ps() {
+        let me = std::process::id();
+        let mut sleeper = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .unwrap();
+        let seen = table()
+            .into_iter()
+            .filter(|p| p.pid == me)
+            .map(|p| (p.pid, p.start))
+            .collect();
+        // The `ps` that lists the table is a child of this process too, and is gone by the time
+        // anything is signalled. Counting it means the sweep never sees a round with nothing new.
+        let n = sweep(&seen, Signal::KILL);
+        assert_eq!(n, 1, "only the sleeper is a descendant, got {n}");
+        let st = sleeper.wait().unwrap();
+        assert_eq!(
+            st.signal(),
+            Some(9),
+            "the sleeper was killed outright, not just stopped"
+        );
     }
 }

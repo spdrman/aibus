@@ -278,7 +278,12 @@ impl Rig {
                 max_spawn_depth: 3,
                 forced: forced
                     .iter()
-                    .map(|(a, r)| ("delegate".into(), json!({"agent": a, "prompt": r, "background": false})))
+                    .map(|(a, r)| {
+                        (
+                            "delegate".into(),
+                            json!({"agent": a, "prompt": r, "background": false}),
+                        )
+                    })
                     .collect(),
                 start: Start::New,
                 worktree: None,
@@ -762,7 +767,10 @@ async fn a_mention_opens_the_lead_with_a_delegate_and_the_lead_still_gets_the_re
     let mut rig = Rig::new(Setup::default(), script([text("thanks")]), |_| {
         script([text("the report")])
     });
-    rig.start_lead("@agent-explore map the repo", &[("explore", "map the repo")]);
+    rig.start_lead(
+        "@agent-explore map the repo",
+        &[("explore", "map the repo")],
+    );
     let out = rig.pump(|_, _, _| {}).await;
 
     let reqs = rig.lead_requests();
@@ -800,9 +808,17 @@ async fn two_mentions_open_the_lead_with_two_delegates_and_it_gets_both_reports(
     rig.pump(|_, _, _| {}).await;
 
     let reqs = rig.lead_requests();
-    assert_eq!(reqs.len(), 1, "the delegates stood in for the first request");
+    assert_eq!(
+        reqs.len(),
+        1,
+        "the delegates stood in for the first request"
+    );
     let m = &reqs[0].request.messages;
-    assert_eq!(m.len(), 3, "the task, the turn with two delegate calls, their results");
+    assert_eq!(
+        m.len(),
+        3,
+        "the task, the turn with two delegate calls, their results"
+    );
     let agents: Vec<String> = m[1]
         .blocks
         .iter()

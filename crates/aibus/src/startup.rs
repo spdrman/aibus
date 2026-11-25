@@ -673,7 +673,10 @@ impl Step for EnterLoop {
         // `@agent-<name> <rest>` opens the lead with a delegate to that agent (01 section 4.2).
         // Each `@agent-<name>` in the prompt is one such delegate (#390).
         let mut forced = Vec::new();
-        for (agent, rest) in parse_mentions(&prompt).into_iter().filter(|_| resume.is_none()) {
+        for (agent, rest) in parse_mentions(&prompt)
+            .into_iter()
+            .filter(|_| resume.is_none())
+        {
             if !agents.agents.contains_key(&agent) {
                 return Err(AibusError::UnknownAgent(agent.to_string()));
             }
@@ -698,7 +701,10 @@ impl Step for EnterLoop {
                     "workflow {name} has an attached step, which runs from the interactive session started with --control-attach (/workflow run {name}); nothing was started"
                 )));
             }
-            forced = vec![("workflow".to_owned(), serde_json::json!({"name": name, "input": prompt}))];
+            forced = vec![(
+                "workflow".to_owned(),
+                serde_json::json!({"name": name, "input": prompt}),
+            )];
             prompt = format!("/workflow {name} {prompt}");
         }
         let limits = Limits::resolve(cfg, |k| std::env::var(k).ok())?;

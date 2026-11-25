@@ -77,14 +77,24 @@ fn unknown_tools_in_either_list_are_warnings_and_mcp_patterns_pass() {
         "---\nname: a\ndescription: d\ntools: [read, teleport]\ndisallowed_tools: [bogus, mcp:x:*]\n---\n",
     );
     let accounts = accounts();
-    let cx = ValidateCx { accounts: &accounts, model_resolves: &|_| true, project_dir: &dir };
+    let cx = ValidateCx {
+        accounts: &accounts,
+        model_resolves: &|_| true,
+        project_dir: &dir,
+    };
     let r = validate_path(&file, &cx);
     assert!(r.ok && r.errors.is_empty(), "{r:?}");
     assert_eq!(
         fields(&r.warnings),
         [
-            ("tools", "`tools` lists `teleport`, which aibus has no tool for, so it is ignored"),
-            ("disallowed_tools", "`disallowed_tools` lists `bogus`, which aibus has no tool for, so it is ignored")
+            (
+                "tools",
+                "`tools` lists `teleport`, which aibus has no tool for, so it is ignored"
+            ),
+            (
+                "disallowed_tools",
+                "`disallowed_tools` lists `bogus`, which aibus has no tool for, so it is ignored"
+            )
         ]
     );
 }
@@ -296,7 +306,10 @@ fn examples_agents_are_the_built_in_sources() {
         .filter(|n| n.ends_with(".md"))
         .collect();
     on_disk.sort();
-    let mut want: Vec<String> = BUILTINS.iter().map(|t| format!("{}.md", def(t).name)).collect();
+    let mut want: Vec<String> = BUILTINS
+        .iter()
+        .map(|t| format!("{}.md", def(t).name))
+        .collect();
     // The principal is a profile to copy, not a built-in (#390).
     want.push("principal.md".into());
     want.sort();

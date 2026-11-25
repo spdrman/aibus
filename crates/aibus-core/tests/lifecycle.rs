@@ -288,7 +288,10 @@ impl Rig {
                 context: Vec::new(),
                 background: false,
                 max_spawn_depth: 3,
-                forced: forced.map(|(a, r)| (a.parse().unwrap(), r.into())).into_iter().collect(),
+                forced: forced
+                    .map(|(a, r)| (a.parse().unwrap(), r.into()))
+                    .into_iter()
+                    .collect(),
                 start: Start::New,
                 worktree: None,
             },

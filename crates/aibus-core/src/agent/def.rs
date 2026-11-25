@@ -16,7 +16,6 @@ use super::{
     AgentDef, CheckpointSpec, DefSource, Effort, HookKind, HookSet, HookSpec, ModelRef,
     PermissionMode, Role, RouterSpec, ToolPattern, ToolPolicy,
 };
-use super::validate::KNOWN_TOOLS;
 use crate::ids::{AgentName, InvalidAgentName};
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -129,7 +128,10 @@ pub(crate) fn from_fields(
 
     // A name with no counterpart (`TodoWrite`, `NotebookEdit`, `WebSearch`) does nothing: say so
     // here, where both `agent validate` and a run's startup read the warnings.
-    for (field, list) in [("tools", allow.as_deref().unwrap_or_default()), ("disallowed_tools", &deny[..])] {
+    for (field, list) in [
+        ("tools", allow.as_deref().unwrap_or_default()),
+        ("disallowed_tools", &deny[..]),
+    ] {
         for p in list {
             if !KNOWN_TOOLS.contains(&p.tool.as_str()) && !p.tool.starts_with("mcp") {
                 warnings.push(format!(

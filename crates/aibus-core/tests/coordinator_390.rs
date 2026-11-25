@@ -10,15 +10,32 @@ use aibus_core::agent::validate::{validate_path, ValidateCx};
 use aibus_core::*;
 
 fn def(text: &str) -> (AgentDef, Vec<String>) {
-    parse(text, DefSource { path: None, scope: Scope::Project }).unwrap()
+    parse(
+        text,
+        DefSource {
+            path: None,
+            scope: Scope::Project,
+        },
+    )
+    .unwrap()
 }
 
 fn tools(d: &AgentDef) -> Vec<String> {
-    d.tools.allow.as_ref().unwrap().iter().map(|p| p.tool.to_string()).collect()
+    d.tools
+        .allow
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|p| p.tool.to_string())
+        .collect()
 }
 
 fn run_tools(d: &AgentDef, role: Role) -> Vec<String> {
-    effective_tools(d, role, 0, false, 3).allow.iter().map(|p| p.tool.to_string()).collect()
+    effective_tools(d, role, 0, false, 3)
+        .allow
+        .iter()
+        .map(|p| p.tool.to_string())
+        .collect()
 }
 
 #[test]
@@ -34,7 +51,10 @@ fn claude_code_tool_names_become_the_aibus_ones_in_both_lists() {
     let (d, w) = def(
         "---\nname: a\ndescription: d\ntools: [Read, WebFetch, Task, Agent, mcp__srv__do_it]\ndisallowed_tools: [WebFetch, mcp__srv__bad]\n---\nB",
     );
-    assert_eq!(tools(&d), ["read", "web_fetch", "delegate", "delegate", "mcp:srv:do_it"]);
+    assert_eq!(
+        tools(&d),
+        ["read", "web_fetch", "delegate", "delegate", "mcp:srv:do_it"]
+    );
     let deny: Vec<_> = d.tools.deny.iter().map(|p| p.tool.to_string()).collect();
     assert_eq!(deny, ["web_fetch", "mcp:srv:bad"]);
     assert!(w.is_empty(), "{w:?}");
@@ -43,7 +63,8 @@ fn claude_code_tool_names_become_the_aibus_ones_in_both_lists() {
 
 #[test]
 fn a_name_with_no_counterpart_warns_when_read_and_in_validate_and_is_not_an_error() {
-    let text = "---\nname: a\ndescription: d\ntools: [Read, TodoWrite, NotebookEdit, WebSearch]\n---\nB";
+    let text =
+        "---\nname: a\ndescription: d\ntools: [Read, TodoWrite, NotebookEdit, WebSearch]\n---\nB";
     let (_, w) = def(text);
     for name in ["todowrite", "notebookedit", "websearch"] {
         assert!(w.iter().any(|m| m.contains(name)), "{name} in {w:?}");
@@ -59,18 +80,36 @@ fn a_name_with_no_counterpart_warns_when_read_and_in_validate_and_is_not_an_erro
     };
     let r = validate_path(&file, &cx);
     assert!(r.ok && r.errors.is_empty(), "{r:?}");
-    assert_eq!(r.warnings.iter().filter(|f| f.message.contains("todowrite")).count(), 1, "{r:?}");
+    assert_eq!(
+        r.warnings
+            .iter()
+            .filter(|f| f.message.contains("todowrite"))
+            .count(),
+        1,
+        "{r:?}"
+    );
 }
 
 #[test]
 fn the_principal_profile_routes_and_reviews_but_has_no_tool_that_changes_files() {
-    let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/agents/principal.md")).unwrap();
+    let text = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/agents/principal.md"),
+    )
+    .unwrap();
     let (d, w) = def(&text);
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(d.role, Role::Lead);
     assert_eq!(
         tools(&d),
-        ["delegate", "resume_run", "send_message", "recall", "read", "ledger_update", "create_handoff"]
+        [
+            "delegate",
+            "resume_run",
+            "send_message",
+            "recall",
+            "read",
+            "ledger_update",
+            "create_handoff"
+        ]
     );
     let got = run_tools(&d, Role::Lead);
     for t in ["bash", "write", "edit"] {
@@ -79,5 +118,8 @@ fn the_principal_profile_routes_and_reviews_but_has_no_tool_that_changes_files()
     assert!(got.contains(&"delegate".to_owned()));
 
     let (lead, _) = def(include_str!("../../../examples/agents/lead.md"));
-    assert!(run_tools(&lead, Role::Lead).contains(&"bash".to_owned()), "the built-in lead keeps every tool");
+    assert!(
+        run_tools(&lead, Role::Lead).contains(&"bash".to_owned()),
+        "the built-in lead keeps every tool"
+    );
 }

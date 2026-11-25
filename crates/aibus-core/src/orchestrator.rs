@@ -105,9 +105,7 @@ impl Limits {
 /// does not start with a mention, or the name is not a valid agent name.
 pub fn parse_mention(text: &str) -> Option<(AgentName, &str)> {
     let body = text.trim_start().strip_prefix("@agent-")?;
-    let (name, rest) = body
-        .split_once(char::is_whitespace)
-        .unwrap_or((body, ""));
+    let (name, rest) = body.split_once(char::is_whitespace).unwrap_or((body, ""));
     Some((name.parse().ok()?, rest.trim_start()))
 }
 
@@ -119,7 +117,10 @@ pub fn parse_mentions(text: &str) -> Vec<(AgentName, &str)> {
     let mut names: Vec<AgentName> = Vec::new();
     for word in text.split_whitespace() {
         let word = word.trim_end_matches(|c: char| c.is_ascii_punctuation() && c != '-');
-        if let Some(name) = word.strip_prefix("@agent-").and_then(|n| n.parse::<AgentName>().ok()) {
+        if let Some(name) = word
+            .strip_prefix("@agent-")
+            .and_then(|n| n.parse::<AgentName>().ok())
+        {
             if !names.contains(&name) {
                 names.push(name);
             }
@@ -152,7 +153,17 @@ impl Roster {
             text: roster::text(defs.clone()),
             builtins: workers()
                 .filter(|d| d.source.scope == Scope::Builtin)
-                .map(|d| (d.name.clone(), d.description.lines().next().unwrap_or_default().trim().to_owned()))
+                .map(|d| {
+                    (
+                        d.name.clone(),
+                        d.description
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .trim()
+                            .to_owned(),
+                    )
+                })
                 .collect(),
             isolated: workers()
                 .filter(|d| d.isolation == Isolation::Worktree)

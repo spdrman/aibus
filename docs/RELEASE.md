@@ -407,6 +407,12 @@ the open one) when it finds an advisory. It is `workflow_dispatch` only: no sche
 the rest of the workflows. I start it before every tag and whenever I touch `Cargo.lock`. `cargo
 deny check` in the local gate covers the same advisory database.
 
+`deny.toml` carries one reviewed ignore, RUSTSEC-2026-0543 (`chrono` unmaintained, through `rmcp`, no
+fix exists), with a review-by date of 2027-02-25 in its reason. `cargo-deny` does not expire an ignore
+by itself, so before a tag I check that date, and drop the entry once `rmcp` stops using `chrono`. The
+`aibus-gate:1.89` image has neither `cargo-deny` nor `cargo-audit`; `docs/SECURITY-REVIEW-295.md` says how I
+ran them in it.
+
 ## Last
 
 * [ ] The version in `Cargo.toml` and in `aibus version` agree with the tag.

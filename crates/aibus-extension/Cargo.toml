@@ -27,7 +27,7 @@ regex = "1"
 # Pinned to the 36.0.x long-term-support line: it still gets security fixes and its MSRV (1.86) fits
 # the workspace's 1.89, while 40.0.4 (the newest 1.89 release) has open advisories. No default features:
 # no WASI, no component model, no async, no cache, no profiling. The guest gets no ambient authority.
-wasmtime = { version = "=36.0.20", optional = true, default-features = false, features = ["runtime", "cranelift", "std"] }
+wasmtime = { version = "=36.0.21", optional = true, default-features = false, features = ["runtime", "cranelift", "std"] }
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

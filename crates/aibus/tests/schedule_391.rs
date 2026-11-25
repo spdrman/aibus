@@ -51,6 +51,8 @@ fn each_schedule_prints_the_three_forms_as_in_the_snapshot() {
 fn print_says_it_installs_nothing_and_writes_nothing() {
     let home = xdg_temp();
     let cfg = config(home.path(), include_str!("schedule_391/config.toml"));
+    // The test harness makes the working directory on first use.
+    fs::create_dir_all(home.path().join("proj")).unwrap();
     let before: Vec<_> = fs::read_dir(home.path())
         .unwrap()
         .map(|e| e.unwrap().file_name())

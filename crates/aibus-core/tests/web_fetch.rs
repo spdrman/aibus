@@ -217,7 +217,7 @@ async fn the_page_is_a_tool_result_and_never_part_of_the_system_prompt() {
             context: Vec::new(),
             background: false,
             max_spawn_depth: 3,
-            forced: None,
+            forced: Vec::new(),
             start: Start::New,
             worktree: None,
         },

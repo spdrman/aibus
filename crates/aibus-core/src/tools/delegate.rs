@@ -53,8 +53,10 @@ impl Tool for Delegate {
         let mut description = String::from("Hand a task to a sub-agent. Roster:\n");
         description.push_str(&roster.text);
         if !roster.builtins.is_empty() {
-            let names: Vec<&str> = roster.builtins.iter().map(AgentName::as_str).collect();
-            description.push_str(&format!("Built in: {}\n", names.join(", ")));
+            description.push_str("Built in:\n");
+            for (name, line) in &roster.builtins {
+                description.push_str(&format!("- {name}: {line}\n"));
+            }
         }
         let agents: Vec<&str> = roster.agents.iter().map(|(a, _)| a.as_str()).collect();
         ToolSpec {

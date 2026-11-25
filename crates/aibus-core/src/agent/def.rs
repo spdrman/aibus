@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use smol_str::SmolStr;
 use yaml_rust2::{Yaml, YamlLoader};
 
+use super::validate::KNOWN_TOOLS;
 use super::{
     AgentDef, CheckpointSpec, DefSource, DoneSpec, Effort, HookKind, HookSet, HookSpec, ModelRef,
     PermissionMode, Role, RouterSpec, ToolPattern, ToolPolicy,
@@ -125,6 +126,22 @@ pub(crate) fn from_fields(
         }
         None => Vec::new(),
     };
+
+    // A name with no counterpart (`TodoWrite`, `NotebookEdit`, `WebSearch`) does nothing: say so
+    // here, where both `agent validate` and a run's startup read the warnings.
+    for (field, list) in [
+        ("tools", allow.as_deref().unwrap_or_default()),
+        ("disallowed_tools", &deny[..]),
+    ] {
+        for p in list {
+            if !KNOWN_TOOLS.contains(&p.tool.as_str()) && !p.tool.starts_with("mcp") {
+                warnings.push(format!(
+                    "`{field}` lists `{}`, which aibus has no tool for, so it is ignored",
+                    p.tool
+                ));
+            }
+        }
+    }
 
     let model = match string(&mut m, "model")? {
         None => ModelRef::Inherit,
@@ -635,10 +652,20 @@ fn patterns(field: &'static str, v: Value) -> Result<Vec<ToolPattern>, DefError>
             if tool.is_empty() || tool.contains(')') {
                 return Err(want(field, "tool or tool(specifier)"));
             }
+            // Claude Code spellings: `mcp__server__tool` is `mcp:server:tool`, and the three
+            // names that differ from ours are mapped (#390).
             let tool = if tool.starts_with("mcp") {
-                tool.to_string()
+                // `mcp__server` alone is every tool of that server.
+                match crate::mcp::allow_name(tool).into_owned() {
+                    n if n.starts_with("mcp__") => format!("mcp:{}:*", &n[5..]),
+                    n => n,
+                }
             } else {
-                tool.to_ascii_lowercase()
+                match tool.to_ascii_lowercase().as_str() {
+                    "webfetch" => "web_fetch".to_owned(),
+                    "task" | "agent" => "delegate".to_owned(),
+                    other => other.to_owned(),
+                }
             };
             Ok(ToolPattern {
                 tool: tool.into(),

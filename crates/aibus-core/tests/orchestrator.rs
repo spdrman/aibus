@@ -377,6 +377,39 @@ fn a_mention_is_the_name_and_the_rest() {
 }
 
 #[test]
+fn mentions_anywhere_are_one_delegate_each_and_one_at_the_start_still_takes_the_rest() {
+    let m = |t: &str| -> Vec<(String, String)> {
+        parse_mentions(t)
+            .into_iter()
+            .map(|(a, r)| (a.to_string(), r.to_owned()))
+            .collect()
+    };
+    assert_eq!(
+        m("@agent-explore find it"),
+        [("explore".into(), "find it".into())]
+    );
+    assert!(
+        m("please @agent-explore this").is_empty(),
+        "one mention, not at the start, is no delegate"
+    );
+    let both = "Use @agent-docs, and @agent-review.";
+    assert_eq!(
+        m(both),
+        [("docs".into(), both.into()), ("review".into(), both.into())]
+    );
+    assert_eq!(
+        m("@agent-explore x @agent-explore y").len(),
+        1,
+        "the same name twice is one delegate"
+    );
+    assert!(m("@agent-Bad @agent-worse").is_empty());
+    assert!(
+        m("mail me@agent-explore.com and you@agent-plan.org").is_empty(),
+        "inside a word is not a mention"
+    );
+}
+
+#[test]
 fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
     let mut a = app();
     a.step(Msg::SubmitPrompt { text: "hello".into() }).unwrap();
@@ -398,6 +431,41 @@ fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
     assert_eq!(get(meta, "background"), Some(&aibus_graph::Value::Bool(true)));
     assert_eq!(as_str(get(meta, "prompt").unwrap()), Some("find the parser"));
     assert_eq!(runnable(&a), [child.to_owned()], "the lead is alive, so it can start");
+}
+
+#[test]
+fn two_mentions_in_a_prompt_start_two_delegates_of_the_lead() {
+    let mut a = app();
+    a.step(Msg::SubmitPrompt {
+        text: "hello".into(),
+    })
+    .unwrap();
+    let lead = as_str(&as_list(a.graph.read_key("model:runs:order").unwrap())[0].clone())
+        .unwrap()
+        .parse::<RunId>()
+        .unwrap();
+    start_with(&mut a, lead, None, "acct");
+    a.step(Msg::SubmitPrompt {
+        text: "Use @agent-explore and @agent-plan on the parser".into(),
+    })
+    .unwrap();
+    let order = as_list(a.graph.read_key("model:runs:order").unwrap()).to_vec();
+    assert_eq!(order.len(), 3, "the lead and one delegate per mention");
+    let agents: Vec<String> = order[1..]
+        .iter()
+        .map(|id| {
+            let meta = a
+                .graph
+                .read_key(&format!("model:run:{}:meta", as_str(id).unwrap()))
+                .unwrap();
+            assert_eq!(
+                as_str(get(meta, "parent").unwrap()),
+                Some(lead.to_string().as_str())
+            );
+            as_str(get(meta, "agent").unwrap()).unwrap().to_owned()
+        })
+        .collect();
+    assert_eq!(agents, ["explore", "plan"]);
 }
 
 // ---- the schema ---------------------------------------------------------------------------
@@ -450,7 +518,22 @@ fn the_delegate_tool_matches_01_section_4_1() {
     let roster = aibus_core::agent::roster::text(defs.iter());
     assert!(roster.contains("- code-reviewer: Reviews a diff for bugs."));
     assert!(spec.description.contains(&roster));
-    assert!(!spec.description.contains("- explore:"));
+    assert!(
+        !roster.contains("- explore:"),
+        "the shared roster text is still non-built-ins only"
+    );
+    // The built-in workers show a one-line description too, not just a name (#390).
+    assert!(
+        spec.description
+            .contains("- explore: Read-only codebase search"),
+        "{}",
+        spec.description
+    );
+    assert!(
+        spec.description.contains("- plan: Read-only research"),
+        "{}",
+        spec.description
+    );
 }
 
 // ---- the executor hands runs over ---------------------------------------------------------

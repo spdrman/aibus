@@ -49,10 +49,13 @@ fn disable_hooks(text: &str) -> String {
             fences += 1;
         }
         // Between the first fence and the second is the frontmatter.
-        let renamed = [("hooks:", "disabled_hooks:"), ("done_when:", "disabled_done_when:")]
-            .into_iter()
-            .find_map(|(key, parked)| Some((parked, line.strip_prefix(key)?)))
-            .filter(|_| fences == 1);
+        let renamed = [
+            ("hooks:", "disabled_hooks:"),
+            ("done_when:", "disabled_done_when:"),
+        ]
+        .into_iter()
+        .find_map(|(key, parked)| Some((parked, line.strip_prefix(key)?)))
+        .filter(|_| fences == 1);
         match renamed {
             Some((parked, rest)) => {
                 out.push_str(parked);
@@ -114,7 +117,9 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<Imported>, String> {
             // The copy has to parse with no hooks and no `done_when` left, or nothing is written.
             let copy = disable_hooks(&text);
             let source = DefSource { path: None, scope: Scope::Project };
-            if parse(&copy, source).is_ok_and(|(d, _)| d.hooks.is_empty() && d.done.done_when.is_none()) {
+            if parse(&copy, source)
+                .is_ok_and(|(d, _)| d.hooks.is_empty() && d.done.done_when.is_none())
+            {
                 std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
                 std::fs::write(&dest, copy).map_err(|e| format!("{}: {e}", dest.display()))?;
                 Outcome::Copied(dest)

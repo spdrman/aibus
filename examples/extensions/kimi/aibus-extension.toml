@@ -1,0 +1,105 @@
+# The Kimi Code extension (#291, A3.1): the official, unmodified Kimi Code CLI as an aibus extension on the
+# A2.1 contract. Local, opt-in use with the user's own installed CLI; the CLI owns its sign-in and
+# aibus never reads or stores the token.
+#
+# UNVERIFIED: the CLI was never installed or run when this was written. The flags and the stream
+# shape below come from the vendor's public documentation as I read it, not from a recording, and
+# the fixtures are synthetic. Nothing here is enabled by default.
+
+schema_version = "2"
+id = "org.devshell.aibus.kimi-cli"
+version = "0.1.0"
+name = "Kimi Code"
+kind = "official_cli"
+provider = "Moonshot AI"
+license = "MIT"
+source_url = "https://github.com/spdrman/aibus/tree/main/examples/extensions/kimi"
+
+[publisher]
+name = "devshell"
+url = "https://devshell.org"
+
+[compat]
+protocol = ">=1.1.0, <2.0.0"
+os = ["macos", "linux"]
+# A placeholder: no version has been run. Tighten it when someone records one.
+cli_versions = ">=0.1.0, <1000.0.0"
+
+[cli]
+executable_candidates = ["kimi"]
+vendor_urls = ["https://github.com/MoonshotAI/kimi-code"]
+
+[auth]
+owner = "vendor_cli"
+credential_access = "forbidden"
+login_argv = []
+status_argv = []
+
+[execution]
+# UNVERIFIED: the argv, and that the prompt can go on stdin.
+argv = ["--print", "--output-format", "stream-json"]
+prompt = "stdin"
+stdout = "jsonl"
+env_allow = []
+
+[limits]
+wall_time_secs = 1800
+
+[normalizer]
+engine = "declarative-jsonl"
+
+[[normalizer.rule]]
+pointer = "/role"
+equals = "assistant"
+when = [{ pointer = "/tool_calls/0/type", equals = "function" }]
+kind = "tool_started"
+id_pointer = "/tool_calls/0/id"
+
+[[normalizer.rule]]
+pointer = "/role"
+equals = "assistant"
+kind = "message_chunk"
+
+[[normalizer.rule]]
+pointer = "/role"
+equals = "tool"
+kind = "tool_completed"
+id_pointer = "/tool_call_id"
+
+[capabilities]
+login_status = "unsupported"
+one_shot = "supported"
+structured_events = "probe_required"
+native_child_lineage = "unsupported"
+tool_events = "supported"
+usage_report = "unsupported"
+session_resume = "unsupported"
+interactive_approval = "unsupported"
+cancel = "supported"
+workspace_control = "unsupported"
+headless = "supported"
+supported_os = "supported"
+hook_channel = "unsupported"
+
+[[probe]]
+capability = "structured_events"
+flags = ["--output-format"]
+
+[runtime]
+usage_quality = "unknown"
+
+[permissions]
+spawn_only_declared_cli = true
+read_provider_credentials = false
+external_network_from_parser = false
+
+[policy]
+owner = "aibus maintainers"
+review_date = "2026-11-22"
+
+[fixtures]
+files = ["fixtures/basic.jsonl", "fixtures/tool-run.jsonl", "fixtures/crash.jsonl"]
+
+[notes]
+upgrade = "Install the new version from the registry. A version that asks for more executables, environment names, flags or capabilities has to be accepted by name."
+rollback = "aibus extensions rollback org.devshell.aibus.kimi-cli returns to the previous installed version."

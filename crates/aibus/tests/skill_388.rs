@@ -155,3 +155,23 @@ fn import_copies_claude_skills_into_the_project() {
     let listed = stdout(&aibus(home.path(), &["skill", "list", "--names"]));
     assert_eq!(listed.trim(), "imported");
 }
+
+#[test]
+fn a_bare_skill_file_is_a_warning_and_agent_validate_still_exits_zero() {
+    let home = xdg_temp();
+    let (project, _) = setup(home.path());
+    fs::create_dir_all(project.join("old")).unwrap();
+    fs::write(project.join("old/SKILL.md"), "just instructions, no frontmatter").unwrap();
+    let agents = home.path().join("proj/.aibus/agents");
+    fs::create_dir_all(&agents).unwrap();
+    fs::write(
+        agents.join("a.md"),
+        "---\nname: a\ndescription: d\nmodel: inherit\nskills: [old]\n---\nDo it.\n",
+    )
+    .unwrap();
+    for args in [["agent", "validate"], ["skill", "validate"]] {
+        let out = aibus(home.path(), &args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {}{}", stdout(&out), stderr(&out));
+        assert!(stdout(&out).contains("warning:") && stdout(&out).contains("frontmatter"), "{}", stdout(&out));
+    }
+}

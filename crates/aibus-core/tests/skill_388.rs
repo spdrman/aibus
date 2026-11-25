@@ -130,6 +130,18 @@ fn a_file_without_a_usable_frontmatter_is_reported() {
     fs::write(nodesc.join("SKILL.md"), "---\nname: nodesc\n---\nb").unwrap();
 
     let set = skill::discover(d.path(), None, &[]);
+    // A bare file is a warning: it still preloads whole, so `agent validate` stays green on it.
+    assert!(
+        set.findings.warnings.iter().any(|f| f.field == "frontmatter"
+            && f.path.as_ref().unwrap().ends_with("bare/SKILL.md")),
+        "{:?}",
+        set.findings
+    );
+    assert!(
+        !set.findings.errors.iter().any(|f| f.field == "frontmatter"),
+        "{:?}",
+        set.findings
+    );
     let fields: Vec<(&str, &str)> = set
         .findings
         .errors
@@ -149,7 +161,6 @@ fn a_file_without_a_usable_frontmatter_is_reported() {
             )
         })
         .collect();
-    assert!(fields.contains(&("bare", "frontmatter")), "{fields:?}");
     assert!(fields.contains(&("wrong", "name")), "{fields:?}");
     assert!(fields.contains(&("nodesc", "description")), "{fields:?}");
     // A bare file still preloads, as it did before frontmatter existed.
@@ -418,4 +429,100 @@ async fn a_matching_task_loads_the_body_through_the_tool_and_an_unrelated_one_lo
         .request
         .system
         .contains("Run the deploy script."));
+}
+
+// ---- links and size at read time (review of #395) -------------------------------------------
+
+#[cfg(unix)]
+mod confinement {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn secret(d: &Path) -> PathBuf {
+        let outside = d.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("id_ed25519"), "PRIVATE KEY MATERIAL").unwrap();
+        outside
+    }
+
+    #[test]
+    fn a_skill_file_that_is_a_link_out_of_the_scope_is_refused() {
+        let (d, project, _) = world();
+        let outside = secret(d.path());
+        fs::create_dir_all(project.join("notes")).unwrap();
+        symlink(outside.join("id_ed25519"), project.join("notes/SKILL.md")).unwrap();
+        let set = skill::discover(d.path(), None, &[]);
+        assert!(!set.skills.contains_key("notes"), "{:?}", set.skills);
+        assert!(set.body("notes").is_none());
+        assert!(
+            set.findings
+                .errors
+                .iter()
+                .any(|f| f.message.contains("outside the skill directory")),
+            "{:?}",
+            set.findings
+        );
+        assert!(!skill::index(&set, INDEX_BUDGET_TOKENS).0.contains("notes"));
+    }
+
+    #[test]
+    fn a_skill_directory_that_is_a_link_out_of_the_scope_is_refused() {
+        let (d, project, _) = world();
+        let outside = secret(d.path());
+        fs::write(outside.join("SKILL.md"), "---\nname: linked\ndescription: d\n---\nsecret body").unwrap();
+        symlink(&outside, project.join("linked")).unwrap();
+        let set = skill::discover(d.path(), None, &[]);
+        assert!(!set.skills.contains_key("linked"), "{:?}", set.skills);
+        assert!(set.body("linked").is_none());
+        assert!(!set.findings.ok);
+    }
+
+    #[test]
+    fn a_scope_directory_that_is_itself_a_link_still_works() {
+        let (d, _, _) = world();
+        let real = d.path().join("dotfiles-skills");
+        skill_file(&real, "ok", "Fine", "body");
+        let user = d.path().join("user-link");
+        symlink(&real, &user).unwrap();
+        let set = skill::discover(d.path(), Some(&user), &[]);
+        assert_eq!(set.body("ok").unwrap(), "body");
+        assert!(set.findings.ok, "{:?}", set.findings);
+    }
+
+    #[test]
+    fn a_link_swapped_in_after_discovery_is_not_followed() {
+        let (d, project, _) = world();
+        let outside = secret(d.path());
+        let file = skill_file(&project, "swap", "Fine", "body");
+        let set = skill::discover(d.path(), None, &[]);
+        assert_eq!(set.body("swap").unwrap(), "body");
+        fs::remove_file(&file).unwrap();
+        symlink(outside.join("id_ed25519"), &file).unwrap();
+        assert!(set.body("swap").is_none());
+    }
+
+    #[test]
+    fn import_skips_a_link_out_of_the_claude_skills_directory() {
+        let d = xdg_temp();
+        let outside = secret(d.path());
+        let from = d.path().join(".claude/skills");
+        fs::create_dir_all(from.join("stolen")).unwrap();
+        symlink(outside.join("id_ed25519"), from.join("stolen/SKILL.md")).unwrap();
+        let to = d.path().join(".aibus/skills");
+        let done = skill::import(&from, &to).unwrap();
+        assert!(done
+            .iter()
+            .all(|(_, o)| matches!(o, aibus_core::agent::import::Outcome::Skipped(_))));
+        assert!(!to.join("stolen").exists());
+    }
+}
+
+#[test]
+fn a_file_that_grew_past_the_cap_after_discovery_is_not_loaded() {
+    let (d, project, _) = world();
+    let file = skill_file(&project, "grows", "Fine", "small");
+    let set = skill::discover(d.path(), None, &[]);
+    assert_eq!(set.body("grows").unwrap(), "small");
+    fs::write(&file, "x".repeat(300 * 1024)).unwrap();
+    assert!(set.body("grows").is_none());
 }

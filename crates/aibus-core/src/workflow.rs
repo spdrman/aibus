@@ -32,11 +32,13 @@ const MAX_RETRIES: u32 = 5;
 const REASON_BYTES: usize = 2048;
 
 pub mod compile;
+pub mod durable;
 pub mod graph;
 pub mod handoff;
 pub mod jev;
 pub mod manifest;
 pub mod native;
+pub mod sched;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Workflow {

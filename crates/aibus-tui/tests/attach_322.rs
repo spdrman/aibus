@@ -276,7 +276,7 @@ fn a_step_can_be_cancelled_from_the_keyboard_and_a_late_result_is_refused() {
     let step = call(&mut r, Ask::NextStep).unwrap();
     let token = step["step"]["token"].as_str().unwrap().to_owned();
     let said = type_line(&mut r, "/attach cancel").unwrap();
-    assert!(said.contains("session not interruptible"), "{said}");
+    assert!(said.contains("interrupt queued"), "{said}");
     let why = call(
         &mut r,
         Ask::StepResult {
@@ -422,4 +422,74 @@ fn the_transcript_a_client_reads_does_not_carry_the_acceptance_code() {
         log_text(&r).contains(&code),
         "the user's own log still has it"
     );
+}
+
+// #346: step_ack, tool-call correlation and the interrupt through the screen's loop.
+
+#[test]
+fn a_keyboard_cancel_after_the_pull_reaches_the_session_on_its_next_report() {
+    let mut r = rig(true, false);
+    attached(&mut r);
+    type_line(&mut r, "/attach step review").unwrap();
+    let step = call(&mut r, Ask::NextStep).unwrap();
+    let token = step["step"]["token"].as_str().unwrap().to_owned();
+    let ack = call(
+        &mut r,
+        Ask::StepAck {
+            token: token.clone(),
+        },
+    )
+    .unwrap();
+    assert_eq!(ack["state"], "started");
+    call(
+        &mut r,
+        Ask::StepToolCall {
+            token: token.clone(),
+            name: "Read".into(),
+        },
+    )
+    .unwrap();
+    type_line(&mut r, "/attach cancel").unwrap();
+    let seen = call(
+        &mut r,
+        Ask::StepToolCall {
+            token: token.clone(),
+            name: "Edit".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(seen["interrupt"], true, "{seen}");
+    let late = call(
+        &mut r,
+        Ask::StepResult {
+            token,
+            status: "done".into(),
+            summary: "late".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(late.contains("cancelled"), "{late}");
+}
+
+#[test]
+fn a_client_that_does_not_hold_the_attachment_cannot_ack_or_report() {
+    let mut r = rig(true, false);
+    connect(&mut r);
+    let why = call(
+        &mut r,
+        Ask::StepAck {
+            token: "st-1".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(why.contains("not attached"), "{why}");
+    let why = call(
+        &mut r,
+        Ask::StepToolCall {
+            token: "st-1".into(),
+            name: "Read".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(why.contains("not attached"), "{why}");
 }

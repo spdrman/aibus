@@ -32,6 +32,14 @@ const CELL_MAX: usize = 80;
 pub const STEP_WITHIN: Duration = Duration::from_secs(10 * 60);
 /// The most a step's summary keeps.
 const SUMMARY_MAX: usize = 16 * 1024;
+/// Where a cancel got to for a step the session had already pulled (#346). The pull leg cannot
+/// push, so the interrupt waits for the session's next call and is shown to it once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Interrupt {
+    None,
+    Pending,
+    Seen,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepState {
@@ -74,6 +82,12 @@ pub struct Step {
     pub summary: String,
     queued: Instant,
     delivered: Option<Instant>,
+    /// When the session said it began (`step_ack`).
+    started: Option<Instant>,
+    /// Tool calls the session reported against this step's token, by name (capped), and how many.
+    calls: Vec<String>,
+    call_count: u32,
+    pub interrupt: Interrupt,
     ended: Option<Instant>,
     deadline: Instant,
 }
@@ -90,12 +104,22 @@ impl Step {
                 Some(_) => json!({"visibility": "observed", "source": "next_step answered"}),
                 None => unavailable("the session never pulled it"),
             },
-            "started": unavailable("the pull leg has no ack"),
-            "tool_calls": unavailable("no hook posts them to aibus in this spike"),
+            "started": match self.started {
+                Some(at) => json!({"visibility": "observed", "source": "step_ack", "after_ms": ms(self.queued, at)}),
+                None => unavailable("the session sent no step_ack"),
+            },
+            "tool_calls": if self.call_count == 0 {
+                unavailable("the session reported none with step_tool_call")
+            } else {
+                json!({"visibility": "correlated", "source": "step_tool_call by step token, reported by the session", "count": self.call_count, "names": self.calls})
+            },
             "summary": {"visibility": "inferred", "source": "agent reported"},
             "tokens": {"visibility": "unavailable", "quality": "unknown"},
             "cost": {"visibility": "unavailable", "quality": "unknown"},
         });
+        if self.interrupt != Interrupt::None {
+            ev["interrupt"] = json!({"visibility": "observed", "source": "aibus", "shown_to_session": self.interrupt == Interrupt::Seen});
+        }
         if let Some(end) = self.ended {
             ev["duration_ms"] = json!({"visibility": "observed", "quality": "derived", "value": ms(self.queued, end)});
         }
@@ -269,8 +293,8 @@ impl Attachments {
     }
 
     /// Ends what ran out of time, then answers every workflow step that has ended. A step whose
-    /// workflow stopped waiting (it was cancelled) is cancelled here, and says it cannot interrupt
-    /// the other session. The lines are for the log.
+    /// workflow stopped waiting (it was cancelled) is cancelled here, and queues an interrupt
+    /// for it. The lines are for the log.
     pub fn settle(&mut self, now: Instant) -> Vec<String> {
         let mut notes = self.expire(now);
         let mut i = 0;
@@ -280,12 +304,8 @@ impl Attachments {
                 continue;
             };
             if step.state.open() && self.waiting[i].1.is_closed() {
-                step.state = StepState::Cancelled;
-                step.ended = Some(now);
-                notes.push(format!(
-                    "step {} cancelled with its workflow; cancel requested, session not interruptible (a late result is refused)",
-                    step.token
-                ));
+                let said = Self::interrupt_step(step, now);
+                notes.push(format!("{said} (its workflow was cancelled)"));
             }
             if step.state.open() {
                 i += 1;
@@ -461,6 +481,10 @@ impl Attachments {
             summary: String::new(),
             queued: now,
             delivered: None,
+            started: None,
+            calls: Vec::new(),
+            call_count: 0,
+            interrupt: Interrupt::None,
             ended: None,
             deadline: now + within,
         });
@@ -483,6 +507,16 @@ impl Attachments {
         self.holds(client)?;
         self.expire(now);
         let lineage = self.lineage.clone();
+        if let Some(s) = self
+            .steps
+            .iter_mut()
+            .find(|s| s.interrupt == Interrupt::Pending)
+        {
+            s.interrupt = Interrupt::Seen;
+            return Ok(
+                json!({"step": null, "interrupt": {"token": s.token, "why": "cancelled at the aibus keyboard or with its workflow"}}),
+            );
+        }
         let Some(s) = self.steps.iter_mut().find(|s| s.state == StepState::Queued) else {
             return Ok(json!({"step": null}));
         };
@@ -540,15 +574,111 @@ impl Attachments {
         Ok(json!({"token": s.token, "state": s.state.as_str(), "evidence": s.evidence()}))
     }
 
-    /// The keyboard cancels the step in flight. aibus cannot interrupt the other session, and
-    /// says so.
+    /// The keyboard cancels the step in flight. A step the session already pulled is interrupted
+    /// on the pull leg: the session is told on its next `step_ack`, `step_tool_call` or
+    /// `next_step`, because nothing here can push to it. A late result is refused either way.
     pub fn cancel(&mut self, now: Instant) -> Result<String, String> {
         let Some(s) = self.steps.iter_mut().find(|s| s.state.open()) else {
             return Err("no step is in flight".into());
         };
+        Ok(Self::interrupt_step(s, now))
+    }
+
+    fn interrupt_step(s: &mut Step, now: Instant) -> String {
+        let pulled = s.state == StepState::Delivered;
         s.state = StepState::Cancelled;
         s.ended = Some(now);
-        Ok(format!("step {} cancelled; cancel requested, session not interruptible (a late result is refused)", s.token))
+        if pulled {
+            s.interrupt = Interrupt::Pending;
+            format!("step {} cancelled; interrupt queued, the session sees it on its next step_ack, step_tool_call or next_step (it cannot be pushed), and a late result is refused", s.token)
+        } else {
+            format!(
+                "step {} cancelled before the session pulled it; a late result is refused",
+                s.token
+            )
+        }
+    }
+
+    /// The attached session says it has begun the step it pulled. Once only. A step that was
+    /// cancelled answers with the interrupt (once) instead of an error.
+    pub fn step_ack(&mut self, client: &str, token: &str, now: Instant) -> Result<Value, String> {
+        self.holds(client)?;
+        self.expire(now);
+        let s = self.step_for_report(token)?;
+        if let Some(seen) = Self::seen_interrupt(s) {
+            return Ok(seen);
+        }
+        if s.state != StepState::Delivered {
+            return Err(format!(
+                "refused: step {} is {}, only a step that was pulled and is open takes an ack",
+                s.token,
+                s.state.as_str()
+            ));
+        }
+        if s.started.is_some() {
+            return Err(format!(
+                "refused: step {} was already acknowledged",
+                s.token
+            ));
+        }
+        s.started = Some(now);
+        Ok(json!({"token": s.token, "state": "started"}))
+    }
+
+    /// The attached session reports one tool call it made for the step it holds, by name only (no
+    /// arguments, no output). The name is cleaned and capped, the count is capped, and what comes
+    /// back is labelled `correlated`: aibus matched it to the step by token, it did not see the call.
+    pub fn tool_call(
+        &mut self,
+        client: &str,
+        token: &str,
+        name: &str,
+        now: Instant,
+    ) -> Result<Value, String> {
+        /// Names a step keeps (the count goes on), a name's length, and the most calls counted.
+        const KEPT: usize = 100;
+        const NAME_MAX: usize = 40;
+        const COUNT_MAX: u32 = 10_000;
+        self.holds(client)?;
+        self.expire(now);
+        let s = self.step_for_report(token)?;
+        if let Some(seen) = Self::seen_interrupt(s) {
+            return Ok(seen);
+        }
+        if s.state != StepState::Delivered {
+            return Err(format!("refused: step {} is {}", s.token, s.state.as_str()));
+        }
+        if s.call_count >= COUNT_MAX {
+            return Err(format!(
+                "refused: step {} already holds {COUNT_MAX} reported calls",
+                s.token
+            ));
+        }
+        s.call_count += 1;
+        if s.calls.len() < KEPT {
+            s.calls.push(clean(name, NAME_MAX, false));
+        }
+        Ok(json!({"token": s.token, "calls": s.call_count}))
+    }
+
+    fn step_for_report(&mut self, token: &str) -> Result<&mut Step, String> {
+        self.steps
+            .iter_mut()
+            .find(|s| s.token == token)
+            .ok_or_else(|| format!("no step {}", clean(token, 40, false)))
+    }
+
+    /// The interrupt, shown once, to a session that reports on a step that was cancelled.
+    fn seen_interrupt(s: &mut Step) -> Option<Value> {
+        match s.interrupt {
+            Interrupt::Pending => {
+                s.interrupt = Interrupt::Seen;
+                Some(
+                    json!({"token": s.token, "interrupt": true, "why": "cancelled at the aibus keyboard or with its workflow; stop work on this step"}),
+                )
+            }
+            _ => None,
+        }
     }
 
     /// Ends what ran out of time. The notes are rows for the log.
@@ -589,6 +719,14 @@ impl Attachments {
         }
         if self.attachment.as_ref().is_some_and(|a| a.client == client) {
             self.attachment = None;
+            // An interrupt the client never saw dies with it: the next client must not get it.
+            for s in self
+                .steps
+                .iter_mut()
+                .filter(|s| s.interrupt == Interrupt::Pending)
+            {
+                s.interrupt = Interrupt::Seen;
+            }
             for s in self.steps.iter_mut().filter(|s| s.state.open()) {
                 s.state = StepState::Unavailable;
                 notes.push(format!(

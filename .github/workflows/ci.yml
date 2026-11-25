@@ -149,6 +149,21 @@ jobs:
   # `causl-differential` job in causl-spike.yml, so the private source is fetched in one workflow
   # only. That file is the one that is already dispatchable from main.
 
+  # shared-ui (B1.2): build, unit tests, the aibus consumer build and the npm licence gate. The webapp
+  # consumer check needs a checkout of the private webapp, so it is run by hand (shared-ui/README.md).
+  shared-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shared-ui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: node --version
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+
   supply-chain:
     runs-on: ubuntu-latest
     steps:

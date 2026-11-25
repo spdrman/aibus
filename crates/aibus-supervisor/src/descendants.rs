@@ -20,21 +20,35 @@ use std::sync::{Arc, Mutex, Once};
 
 use rustix::process::{kill_process, Pid, Signal};
 
-struct Proc {
-    pid: u32,
+pub(crate) struct Proc {
+    pub(crate) pid: u32,
     ppid: u32,
     /// Fixes the process in time: a pid that comes back later has another one.
-    start: String,
+    pub(crate) start: String,
 }
 
 /// Every process of every user, with its parent and start time. Warns once when `ps` cannot give
 /// that (missing, or a busybox `ps` without `-ax` and `-o lstart`).
-fn table() -> Vec<Proc> {
+pub(crate) fn table() -> Vec<Proc> {
     static WARN: Once = Once::new();
-    let procs: Vec<Proc> = std::process::Command::new("ps")
+    // By absolute path, not through a PATH the CLI's tree may have written to.
+    let ps = ["/bin/ps", "/usr/bin/ps"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
+        .unwrap_or("ps");
+    // The `ps` is a child of this process, so it would show up under the helper as a new
+    // descendant on every look, already gone by the time it is signalled. Its pid is known from
+    // the spawn, so it is left out.
+    let child = std::process::Command::new(ps)
         .args(["-ax", "-o", "pid=,ppid=,lstart="])
-        .output()
-        .ok()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok();
+    let ps_pid = child.as_ref().map(|c| c.id());
+    let procs: Vec<Proc> = child
+        .and_then(|c| c.wait_with_output().ok())
         .filter(|o| o.status.success())
         .map(|o| {
             String::from_utf8_lossy(&o.stdout)
@@ -46,14 +60,17 @@ fn table() -> Vec<Proc> {
                     let start = f.collect::<Vec<_>>().join(" ");
                     Some(Proc { pid, ppid, start })
                 })
+                .filter(|p| Some(p.pid) != ps_pid)
                 .collect()
         })
         .unwrap_or_default();
     if procs.is_empty() {
         WARN.call_once(|| {
-            eprintln!(
-                "aibus: `ps -ax -o pid=,ppid=,lstart=` gave nothing (missing, or a busybox ps), \
-                 so descendants that left the process group are not tracked (#338)"
+            // Not `eprintln!`, which panics when stderr is a closed pipe.
+            let _ = std::io::Write::write_all(
+                &mut std::io::stderr(),
+                b"aibus: `ps -ax -o pid=,ppid=,lstart=` gave nothing (missing, or a busybox ps), \
+                  so descendants that left the process group are not tracked (#338)\n",
             );
         });
     }
@@ -135,24 +152,67 @@ impl Tracker {
     /// current-thread runtime this holds everything else for the time it takes (tens of
     /// milliseconds, a few times over).
     pub fn kill_all(&self) {
-        let mut frozen = HashSet::new();
-        for _ in 0..10 {
-            let seen = self.seen.lock().unwrap().clone();
-            let fresh: Vec<u32> = ours(&table(), &seen)
-                .into_iter()
-                .filter(|p| frozen.insert(*p))
-                .collect();
-            if fresh.is_empty() {
-                break;
-            }
-            signal(fresh, Signal::STOP);
-        }
-        signal(frozen, Signal::KILL);
+        sweep(&self.seen.lock().unwrap().clone(), Signal::STOP);
     }
+}
+
+/// Ends everything under the remembered processes, as [`Tracker::kill_all`] does: each round
+/// sends `first` to what is new, then the next round looks again, and what was found is killed at
+/// the end. Returns how many processes it signalled. The tracker passes STOP (a stopped process
+/// keeps its children, so they can still be found through it). The helper passes KILL (every
+/// orphan is handed to it, so a killed process loses nothing from view), which means a helper that
+/// is itself killed partway leaves nothing stopped behind, only what it had not reached yet.
+pub(crate) fn sweep(seen: &HashMap<u32, String>, first: Signal) -> usize {
+    let mut frozen = HashSet::new();
+    for _ in 0..10 {
+        let fresh: Vec<u32> = ours(&table(), seen)
+            .into_iter()
+            .filter(|p| frozen.insert(*p))
+            .collect();
+        if fresh.is_empty() {
+            break;
+        }
+        signal(fresh, first);
+    }
+    let n = frozen.len();
+    signal(frozen, Signal::KILL);
+    n
 }
 
 impl Drop for Tracker {
     fn drop(&mut self) {
         self.sampler.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    /// No other unit test of this crate starts a process, so the sleeper is this process's only
+    /// child besides the `ps` of `table`.
+    #[test]
+    fn issue_352_a_sweep_signals_the_descendants_and_not_its_own_ps() {
+        let me = std::process::id();
+        let mut sleeper = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .unwrap();
+        let seen = table()
+            .into_iter()
+            .filter(|p| p.pid == me)
+            .map(|p| (p.pid, p.start))
+            .collect();
+        // The `ps` that lists the table is a child of this process too, and is gone by the time
+        // anything is signalled. Counting it means the sweep never sees a round with nothing new.
+        let n = sweep(&seen, Signal::KILL);
+        assert_eq!(n, 1, "only the sleeper is a descendant, got {n}");
+        let st = sleeper.wait().unwrap();
+        assert_eq!(
+            st.signal(),
+            Some(9),
+            "the sleeper was killed outright, not just stopped"
+        );
     }
 }

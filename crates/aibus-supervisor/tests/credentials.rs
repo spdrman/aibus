@@ -136,6 +136,7 @@ async fn a_run_leaves_no_credential_from_the_cli_config_anywhere_in_the_trace() 
         env: cli::bounded_env(parent, &[], &[]).unwrap(),
         stdin: b"prompt".to_vec(),
         limits: Limits::default(),
+        helper: None,
     };
     let trace = root.join("trace");
     let (mut store, _) = TraceStore::open(

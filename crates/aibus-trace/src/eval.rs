@@ -49,7 +49,8 @@ pub struct EvalCase {
     pub case_id: String,
     pub task_input: String,
     pub fixture: Fixture,
-    /// What the run may change (tool names or paths); a policy check reads it, the runner does not.
+    /// The tools that may change things in this run. `evaluate` fails the case on a Bash, Edit or
+    /// other tool call not named here. Paths are not checked, the trace has no tool input.
     pub allowed_side_effects: Vec<String>,
     /// Artifact names the trace must show as created.
     pub expected_artifacts: Vec<String>,
@@ -193,6 +194,9 @@ pub struct EvaluationResult {
     /// Secondary. These never change the verdict.
     pub assessments: Vec<Assessment>,
     pub metrics: Vec<Metric>,
+    /// The case's privacy policy. The result holds only names, counts, ids and metrics, so it is
+    /// safe under either policy; whatever stores or shows a payload must read this first.
+    pub privacy: PrivacyPolicy,
 }
 
 #[derive(Debug, PartialEq)]
@@ -255,12 +259,13 @@ impl EvalSuite {
         let mut seen = BTreeSet::new();
         for c in &self.cases {
             let id_ok = !c.case_id.is_empty()
+                && !c.case_id.starts_with('.')
                 && c.case_id
                     .chars()
                     .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
             if !id_ok {
                 return bad(format!(
-                    "case id {:?} is empty or has characters outside [A-Za-z0-9._-]",
+                    "case id {:?} is empty or starts with a dot or has characters outside [A-Za-z0-9._-]",
                     c.case_id
                 ));
             }
@@ -298,33 +303,6 @@ impl EvalSuite {
     }
 }
 
-/// How well a metric is known, weakest last.
-fn rank(q: DataQuality) -> u8 {
-    match q {
-        DataQuality::Reported => 0,
-        DataQuality::Derived => 1,
-        DataQuality::Estimated => 2,
-        DataQuality::Unknown => 3,
-    }
-}
-
-fn derived(name: &str, value: f64, unit: &str, source: &str) -> Metric {
-    Metric {
-        name: name.into(),
-        value: Some(value),
-        unit: unit.into(),
-        quality: DataQuality::Derived,
-        source: source.into(),
-    }
-}
-
-/// The millisecond a uuid v7 event id carries, which aibus stamped from its own clock.
-fn id_ms(id: Uuid) -> u64 {
-    id.as_bytes()[..6]
-        .iter()
-        .fold(0u64, |a, x| a << 8 | u64::from(*x))
-}
-
 /// Evaluates one recorded run against its case. Every number it makes is derived from the trace or
 /// handed in by a vendor, with its quality, and an unknown stays unknown.
 pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult, EvalError> {
@@ -357,6 +335,11 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
                 a.score, a.max_score
             )));
         }
+        if matches!(&a.assessor, Assessor::Human { reviewer } if reviewer.trim().is_empty()) {
+            return Err(EvalError::BadAssessment(
+                "a human score records who the reviewer is".into(),
+            ));
+        }
         if let Assessor::Model {
             model,
             prompt_sha256,
@@ -380,6 +363,19 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
         .filter(|e| e.corroborates.is_none())
         .collect();
     sorted.sort_by_key(|e| e.event_id);
+    // The millisecond a uuid v7 event id carries, which aibus stamped from its own clock.
+    let id_ms = |id: Uuid| {
+        id.as_bytes()[..6]
+            .iter()
+            .fold(0u64, |a, x| a << 8 | u64::from(*x))
+    };
+    let derived = |name: &str, value: f64, unit: &str, source: &str| Metric {
+        name: name.into(),
+        value: Some(value),
+        unit: unit.into(),
+        quality: DataQuality::Derived,
+        source: source.into(),
+    };
     let count = |k: EventKind| sorted.iter().filter(|e| e.kind == k).count() as f64;
     let projection = project(&run.events);
 
@@ -387,13 +383,25 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
     // trace, then whatever else was recorded (compile, policy invariants).
     let mut checks: Vec<CheckResult> = Vec::new();
     for cmd in &case.test_commands {
-        let recorded = run.checks.iter().find(|c| &c.name == cmd);
-        checks.push(recorded.cloned().unwrap_or_else(|| CheckResult {
-            kind: CheckKind::UnitTests,
+        // Every record under the command's name counts: any Fail fails, then a NotRun (or no
+        // record at all) is NotRun, and only an all-Pass set passes.
+        let recorded: Vec<&CheckResult> = run.checks.iter().filter(|c| &c.name == cmd).collect();
+        let any = |o: CheckOutcome| recorded.iter().any(|c| c.outcome == o);
+        checks.push(CheckResult {
+            kind: recorded.first().map_or(CheckKind::UnitTests, |c| c.kind),
             name: cmd.clone(),
-            outcome: CheckOutcome::NotRun,
-            evidence: Vec::new(),
-        }));
+            outcome: if any(CheckOutcome::Fail) {
+                CheckOutcome::Fail
+            } else if recorded.is_empty() || any(CheckOutcome::NotRun) {
+                CheckOutcome::NotRun
+            } else {
+                CheckOutcome::Pass
+            },
+            evidence: recorded
+                .iter()
+                .flat_map(|c| c.evidence.iter().copied())
+                .collect(),
+        });
     }
     for art in &case.expected_artifacts {
         let hits: Vec<Uuid> = sorted
@@ -420,6 +428,56 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
             checks.push(c.clone());
         }
     }
+
+    // Side effects: the trace names every tool call, so a tool that can change things and is not
+    // in the case's `allowed_side_effects` fails the case. A call the supervisor denied did not
+    // happen. The trace carries no tool input, so a path in the list is not checked; docs/DEFERRED.md.
+    const READ_ONLY_TOOLS: [&str; 11] = [
+        "Read",
+        "Grep",
+        "Glob",
+        "LS",
+        "NotebookRead",
+        "WebFetch",
+        "WebSearch",
+        "TodoWrite",
+        "Task",
+        "Agent",
+        "ExitPlanMode",
+    ];
+    let denied: BTreeSet<&str> = sorted
+        .iter()
+        .filter(|e| e.kind == EventKind::ToolFailed && e.data["reason"] == "permission_denied")
+        .filter_map(|e| e.native.tool_use_id.as_deref())
+        .collect();
+    let (mut broke, mut unnamed) = (Vec::new(), false);
+    for e in sorted.iter().filter(|e| {
+        e.kind == EventKind::ToolStarted
+            && !e
+                .native
+                .tool_use_id
+                .as_deref()
+                .is_some_and(|id| denied.contains(id))
+    }) {
+        match e.data["tool"].as_str() {
+            Some(t) if READ_ONLY_TOOLS.contains(&t) => {}
+            Some(t) if case.allowed_side_effects.iter().any(|a| a == t) => {}
+            Some(_) => broke.push(e.event_id),
+            None => unnamed = true,
+        }
+    }
+    checks.push(CheckResult {
+        kind: CheckKind::PolicyInvariant,
+        name: "allowed_side_effects".into(),
+        outcome: if !broke.is_empty() {
+            CheckOutcome::Fail
+        } else if unnamed {
+            CheckOutcome::NotRun
+        } else {
+            CheckOutcome::Pass
+        },
+        evidence: broke,
+    });
 
     // Metrics.
     let mut metrics = Vec::new();
@@ -526,6 +584,13 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
     // Usage: summed over the attempts, as weak as the weakest attempt. An attempt with no usage
     // report leaves the sum unknown for that name rather than a smaller number.
     let attempts = projection.attempts.len();
+    // How well a metric is known, weakest last.
+    let rank = |q: DataQuality| match q {
+        DataQuality::Reported => 0,
+        DataQuality::Derived => 1,
+        DataQuality::Estimated => 2,
+        DataQuality::Unknown => 3,
+    };
     let mut usage: BTreeMap<(String, String), (f64, usize, DataQuality, String)> = BTreeMap::new();
     for a in &projection.attempts {
         for m in &a.usage {
@@ -572,7 +637,9 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
     let over_time = wall_ms.map(|w| w > case.envelope.max_duration_secs as f64 * 1000.0);
     let over_cost = match (case.envelope.max_cost_usd, cost) {
         (Some(max), Some(c)) => Some(c > max),
-        _ => Some(false),
+        // A cost limit with no cost figure is unknown, the same as an unknown wall time.
+        (Some(_), None) => None,
+        (None, _) => Some(false),
     };
     checks.push(CheckResult {
         kind: CheckKind::PolicyInvariant,
@@ -612,6 +679,7 @@ pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult
         checks,
         assessments: run.assessments.clone(),
         metrics,
+        privacy: case.privacy,
     })
 }
 

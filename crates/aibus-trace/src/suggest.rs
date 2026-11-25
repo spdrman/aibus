@@ -214,7 +214,7 @@ pub fn suggest(result: &EvaluationResult, events: &[TraceEvent]) -> Vec<Suggesti
             Label::Hypothesis,
             Basis::Heuristic,
             Direction::LessWallTime,
-            format!("{parent} delegated {} tasks one after another and did nothing between them; the trace does not say whether they depend on each other", kids.len()),
+            format!("{parent} delegated tasks one after another and did nothing between them; the trace does not say whether they depend on each other"),
             "if the tasks are independent, try starting them together and compare wall time and the checks",
             ids,
         );

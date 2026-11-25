@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 
 use crate::eval::{
     CheckKind, CheckOutcome, EvalError, EvalSuite, EvaluationResult, Fixture, Verdict,
-    MIN_BENCHMARK_CASES,
+    MIN_BENCHMARK_CASES, RESULT_VERSION,
 };
 
 pub const MANIFEST_VERSION: u32 = 1;
@@ -122,7 +122,11 @@ pub fn plan(
             let orders = (0..repetitions as usize)
                 .map(|r| {
                     (0..variants.len())
-                        .map(|i| variants[(start + r + i) % variants.len()].id.clone())
+                        .map(|i| {
+                            variants[(start % variants.len() + r + i) % variants.len()]
+                                .id
+                                .clone()
+                        })
                         .collect()
                 })
                 .collect();
@@ -213,32 +217,42 @@ pub enum Judgement {
     },
 }
 
-fn spread(mut v: Vec<f64>) -> Spread {
-    // A median needs 3 samples before it is reported, a p95 needs 20.
-    const MEDIAN_MIN_SAMPLES: usize = 3;
-    const P95_MIN_SAMPLES: usize = 20;
-    v.sort_by(f64::total_cmp);
-    let n = v.len();
-    Spread {
-        samples: n,
-        median: (n >= MEDIAN_MIN_SAMPLES).then(|| {
-            if n % 2 == 1 {
-                v[n / 2]
-            } else {
-                (v[n / 2 - 1] + v[n / 2]) / 2.0
-            }
-        }),
-        // Nearest rank.
-        p95: (n >= P95_MIN_SAMPLES).then(|| v[(n as f64 * 0.95).ceil() as usize - 1]),
-    }
-}
-
 /// Reads evaluated runs back against the manifest.
 pub fn compare(
     manifest: &ComparisonManifest,
     results: &[EvaluationResult],
 ) -> Result<Comparison, ExperimentError> {
     let bad = |m: String| Err(ExperimentError::Mismatch(m));
+    if manifest.manifest_version != MANIFEST_VERSION
+        || manifest.repetitions == 0
+        || manifest.variants.len() < 2
+        || manifest.cases.is_empty()
+    {
+        return bad("the manifest is not a plan this build made".into());
+    }
+    if let Some(r) = results.iter().find(|r| r.result_version != RESULT_VERSION) {
+        return bad(format!(
+            "{}/{} has result_version {}, this build reads {RESULT_VERSION}",
+            r.case_id, r.variant, r.result_version
+        ));
+    }
+    // Wall time spread. A median needs 3 samples before it is reported, a p95 needs 20.
+    let spread = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        let n = v.len();
+        Spread {
+            samples: n,
+            median: (n >= 3).then(|| {
+                if n % 2 == 1 {
+                    v[n / 2]
+                } else {
+                    (v[n / 2 - 1] + v[n / 2]) / 2.0
+                }
+            }),
+            // Nearest rank.
+            p95: (n >= 20).then(|| v[(n as f64 * 0.95).ceil() as usize - 1]),
+        }
+    };
     for r in results {
         if r.suite != manifest.suite || r.suite_version != manifest.suite_version {
             return bad(format!(

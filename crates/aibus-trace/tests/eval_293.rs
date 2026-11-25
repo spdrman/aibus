@@ -640,8 +640,9 @@ fn missing_coverage_is_reported_not_filled_in() {
     let (_, manifest, results) = experiment(1, |c| {
         let mut s = lean(c);
         if c < 4 {
+            // Cost stays: with a cost limit in the case, an unknown cost is Incomplete, which
+            // an_unknown_cost_is_not_inside_a_cost_envelope covers.
             s.tokens = None;
-            s.cost = None;
         }
         (s, true)
     });

@@ -29,11 +29,16 @@
 //! - The CLI's exit status passes through: its exit code is the helper's, and a CLI that died of a
 //!   signal makes the helper die of the same signal. A tree ended by force dies of SIGKILL.
 //!
-//! Ending the tree is the #338 sweep's algorithm (stop what the table shows under the helper,
-//! look again until nothing new turns up, then kill), but started from the helper's own pid, so
-//! nothing has to be remembered. The table comes from `ps`, so the helper opens no file and reads
-//! no environment (by reading the code; the pass-through is tested in `tests/subreaper_352.rs`). Without a usable `ps` the helper can still reap and
-//! forward signals but cannot enumerate, and it warns once.
+//! Ending the tree is the #338 sweep's algorithm (look at the table under the helper, kill
+//! what is new, look again until nothing new turns up), started from the helper's own pid, so
+//! nothing has to be remembered. It kills at once where the #338 sweep stops first (every orphan is
+//! handed to the helper, so a killed process loses nothing from view), so a helper that is itself
+//! killed partway leaves nothing stopped behind. A descendant of the same user can still kill or
+//! stop the helper (it is the CLI's `$PPID`), and a process that runs as another user (`sudo`) is
+//! not the helper's to signal; both are outside what the helper holds. The table comes from `ps`,
+//! so the helper opens no file and reads no environment (by reading the code; the pass-through is
+//! tested in `tests/subreaper_352.rs`). Without a usable `ps` the helper can still reap and forward
+//! signals but cannot enumerate, and it warns once.
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -42,6 +47,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::descendants::{sweep, table};
 use rustix::io::Errno;
 use rustix::process::{
     getpgrp, getpid, getppid, kill_process, kill_process_group, set_child_subreaper, wait, Pid,
@@ -143,7 +149,15 @@ pub fn run(args: Vec<OsString>) -> u8 {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    crate::descendants::kill_under(me.as_raw_pid() as u32);
+    // Every orphan is a child of this process, so the table reaches all of it from here. KILL, not
+    // STOP first: a helper that is killed itself partway must not leave anything stopped behind.
+    let root = me.as_raw_pid() as u32;
+    let seen = table()
+        .into_iter()
+        .filter(|p| p.pid == root)
+        .map(|p| (p.pid, p.start))
+        .collect();
+    sweep(&seen, Signal::KILL);
     // What `ps` could not show (no `ps`) is at least the CLI itself, but only while it is still
     // unreaped: once `wait` returned it, its pid is free and may already be someone else's.
     if let Some(cli) = cli.filter(|_| status.is_none()) {

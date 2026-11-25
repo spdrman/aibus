@@ -20,26 +20,35 @@ use std::sync::{Arc, Mutex, Once};
 
 use rustix::process::{kill_process, Pid, Signal};
 
-struct Proc {
-    pid: u32,
+pub(crate) struct Proc {
+    pub(crate) pid: u32,
     ppid: u32,
     /// Fixes the process in time: a pid that comes back later has another one.
-    start: String,
+    pub(crate) start: String,
 }
 
 /// Every process of every user, with its parent and start time. Warns once when `ps` cannot give
 /// that (missing, or a busybox `ps` without `-ax` and `-o lstart`).
-fn table() -> Vec<Proc> {
+pub(crate) fn table() -> Vec<Proc> {
     static WARN: Once = Once::new();
     // By absolute path, not through a PATH the CLI's tree may have written to.
     let ps = ["/bin/ps", "/usr/bin/ps"]
         .into_iter()
         .find(|p| std::path::Path::new(p).is_file())
         .unwrap_or("ps");
-    let procs: Vec<Proc> = std::process::Command::new(ps)
+    // The `ps` is a child of this process, so it would show up under the helper as a new
+    // descendant on every look, already gone by the time it is signalled. Its pid is known from
+    // the spawn, so it is left out.
+    let child = std::process::Command::new(ps)
         .args(["-ax", "-o", "pid=,ppid=,lstart="])
-        .output()
-        .ok()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok();
+    let ps_pid = child.as_ref().map(|c| c.id());
+    let procs: Vec<Proc> = child
+        .and_then(|c| c.wait_with_output().ok())
         .filter(|o| o.status.success())
         .map(|o| {
             String::from_utf8_lossy(&o.stdout)
@@ -51,14 +60,17 @@ fn table() -> Vec<Proc> {
                     let start = f.collect::<Vec<_>>().join(" ");
                     Some(Proc { pid, ppid, start })
                 })
+                .filter(|p| Some(p.pid) != ps_pid)
                 .collect()
         })
         .unwrap_or_default();
     if procs.is_empty() {
         WARN.call_once(|| {
-            eprintln!(
-                "aibus: `ps -ax -o pid=,ppid=,lstart=` gave nothing (missing, or a busybox ps), \
-                 so descendants that left the process group are not tracked (#338)"
+            // Not `eprintln!`, which panics when stderr is a closed pipe.
+            let _ = std::io::Write::write_all(
+                &mut std::io::stderr(),
+                b"aibus: `ps -ax -o pid=,ppid=,lstart=` gave nothing (missing, or a busybox ps), \
+                  so descendants that left the process group are not tracked (#338)\n",
             );
         });
     }
@@ -150,7 +162,7 @@ impl Tracker {
 /// keeps its children, so they can still be found through it). The helper passes KILL (every
 /// orphan is handed to it, so a killed process loses nothing from view), which means a helper that
 /// is itself killed partway leaves nothing stopped behind, only what it had not reached yet.
-fn sweep(seen: &HashMap<u32, String>, first: Signal) -> usize {
+pub(crate) fn sweep(seen: &HashMap<u32, String>, first: Signal) -> usize {
     let mut frozen = HashSet::new();
     for _ in 0..10 {
         let fresh: Vec<u32> = ours(&table(), seen)
@@ -165,19 +177,6 @@ fn sweep(seen: &HashMap<u32, String>, first: Signal) -> usize {
     let n = frozen.len();
     signal(frozen, Signal::KILL);
     n
-}
-
-/// Ends every process under `root` (not `root` itself when it is this process), stopping what it
-/// finds first. For the subreaper helper (#352): there every orphan is a child of `root`, so the
-/// table always reaches it, whatever session or group it is in.
-#[cfg(target_os = "linux")]
-pub fn kill_under(root: u32) {
-    let seen = table()
-        .into_iter()
-        .filter(|p| p.pid == root)
-        .map(|p| (p.pid, p.start))
-        .collect();
-    sweep(&seen, Signal::STOP);
 }
 
 impl Drop for Tracker {

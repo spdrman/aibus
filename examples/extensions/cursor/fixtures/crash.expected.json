@@ -1,0 +1,9 @@
+{
+  "ending": "exit:1",
+  "kinds": [
+    "attempt_started",
+    "trace_warning",
+    "attempt_failed"
+  ],
+  "status": "failed"
+}

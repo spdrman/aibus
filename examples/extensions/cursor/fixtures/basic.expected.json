@@ -1,0 +1,11 @@
+{
+  "ending": "exit:0",
+  "kinds": [
+    "attempt_started",
+    "trace_warning",
+    "message_chunk",
+    "trace_warning",
+    "attempt_completed"
+  ],
+  "status": "completed"
+}

@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"s-1","model":"model-x"}
+{"type":"tool_call","subtype":"started","call_id":"tool-0001","tool_call":{}}
+{"type":"tool_call","subtype":"completed","call_id":"tool-0001","tool_call":{}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]},"session_id":"s-1"}

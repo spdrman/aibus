@@ -49,7 +49,7 @@ Names are `snake_case` in aibus. The loader also accepts the Claude Code `camelC
 | `max_tokens_total` | no | u64 | config default | Input plus output tokens the run may consume. |
 | `max_cost_usd` | no | f64 | config default | Hard stop on estimated cost. |
 | `effort` | no | `low`, `medium`, `high`, `max` | provider default | Passed through to providers that support it; others ignore it with a debug log. |
-| `skills` | no | list of names | `[]` | Skill bodies preloaded into the system prompt. First 32 distinct names. |
+| `skills` | no | list of names | `[]` | Skill bodies preloaded into the system prompt (frontmatter left out). First 32 distinct names. A name that does not resolve is an `agent validate` error and a run-time warning. See "Skills" below. |
 | `hooks` | no | map | `{}` | Lifecycle hooks scoped to this agent (section 6). |
 | `memory` | no | `user`, `project`, `local` | none | Persistent memory directory (section 8.3). |
 | `background` | no | bool | `false` | When true the run is always background, even if the parent asked to wait. |
@@ -133,6 +133,10 @@ Built-ins can be overridden by a project or user definition with the same name, 
 ### 1.5 The roster budget
 
 The lead's `delegate` tool description embeds the roster: every non-built-in definition's `name` and `description`. When the roster passes 15,000 tokens (counted with the lead's provider tokenizer, or 4 chars per token as a fallback) aibus warns at startup with the total and still loads everything. Keep descriptions short; detail goes in the body, which only loads when the agent runs.
+
+### 1.6 Skills
+
+A skill is `<dir>/<name>/SKILL.md` with `name` (equal to the directory) and `description` in the frontmatter. Directories, first match by name wins: `.aibus/skills`, `~/.config/aibus/skills`, then `skills.extra_dirs`. Leads and workers get a read-only `skill(name)` tool when any skill exists; its description lists `- name: description` lines under a 1,500 token budget and says how many were left out (the tool still loads any discovered skill by name). `skills:` on an agent still preloads bodies. `aibus skill list|show|validate|import` manage them; `agent validate` fails on a `skills:` name that does not resolve and on a name defined in two scopes. Skills that carry scripts or tools are out of scope: only `SKILL.md` is read, and `skill import` copies nothing else.
 
 ## 2. Roles
 
@@ -544,6 +548,7 @@ The tool set workers can be granted. Names are lower-case; specifiers in parenth
 | `ls` | `path` | |
 | `bash` | `command`, `timeout?`, `background?` | 08 section 3; specifier `bash(git *)` |
 | `web_fetch` | `url`, `prompt?` | off by default, `tools.web = true` |
+| `skill` | `name` | read-only; lead and workers; offered when a skill exists (1.6) |
 | `delegate` | 4.1 | lead and workers below depth limit |
 | `fork` | `prompt` | lead only |
 | `resume_run`, `send_message` | | lead only |

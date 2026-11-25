@@ -26,6 +26,7 @@ pub mod remote;
 pub mod replay;
 pub mod router;
 pub mod run;
+pub mod skill;
 pub mod state;
 pub mod text;
 pub mod tool;

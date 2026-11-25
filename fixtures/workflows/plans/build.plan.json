@@ -16,6 +16,7 @@
         "bash",
         "report_artifact",
         "web_fetch",
+        "skill",
         "delegate",
         "mcp:*"
       ]
@@ -178,7 +179,7 @@
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:74a348545d24eed2e06a881192a60c5a2b084ccfa2cdd3b8248f31d755347187",
+  "plan_hash": "sha256:13019a045e91f3954c920cac3a32158104c84e4e78f3c6f18828d9391eacb8e6",
   "plan_only_because": null,
   "prompts": {
     "sha256:a0b5f5b5b1d765d426c0d66f97b417a4c0d8ea9e3ea713e8a03deeb66929686f": "Implement this plan: {{prev.summary}}",

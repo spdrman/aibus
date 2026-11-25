@@ -16,6 +16,7 @@
         "bash",
         "report_artifact",
         "web_fetch",
+        "skill",
         "delegate",
         "mcp:*"
       ]
@@ -131,7 +132,7 @@
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:d5754779fd625b39e5635f6eb52366a08bab47bdf5f4bfae104f4d13e8cb1850",
+  "plan_hash": "sha256:4dc8953e6f39c3910bb1b429950d63a8a6b66bac652b111420b7dfbc617cb9ea",
   "plan_only_because": null,
   "prompts": {
     "sha256:1df96bee67e80df75cc3a55dbdee0dcd01fb22f7a8eb72b3630b9c67d1e0e546": "Draft a fix for: {{input}}",

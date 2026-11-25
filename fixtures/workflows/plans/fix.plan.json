@@ -29,6 +29,7 @@
         "bash",
         "report_artifact",
         "web_fetch",
+        "skill",
         "delegate",
         "mcp:*"
       ]
@@ -237,7 +238,7 @@
   "kind": "aibus.workflow.plan",
   "manifest_version": 1,
   "notes": [],
-  "plan_hash": "sha256:3f5e5ab0ddef6c8cc78ba9d1cf64cf5c162cee3b23e08444ffbbd2b81f8f608e",
+  "plan_hash": "sha256:fb9a8f8683c387702544a007b28ae293f71d4f39d896cef62a6c26b2c7c566fe",
   "plan_only_because": null,
   "prompts": {
     "sha256:3458bae05aa0b647229604f9ef2633ce10f2840dc62c610658491449d1be7062": "Verify the fix: run the project's tests and report what passed and what failed. Problem: {{input}}",

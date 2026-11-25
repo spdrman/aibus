@@ -856,6 +856,20 @@ impl Step for EnterLoop {
         }
         registry.register(Arc::new(RunWorkflow::new(orch.clone(), hooks.clone(), workflow_dirs.clone(), to_attached)));
         registry.register(Arc::new(Delegate::new(orch.clone())));
+        // Skills (EPIC H): the tool only exists when there is something to load.
+        let skill_user = paths.config.join("skills");
+        let skill_extra: Vec<PathBuf> = cfg
+            .skills
+            .extra_dirs
+            .iter()
+            .map(|d| ctx.cwd.join(d))
+            .collect();
+        let skills = aibus_core::skill::discover(&ctx.cwd, Some(&skill_user), &skill_extra);
+        aibus_core::skill::set_session_dirs(Some(skill_user), skill_extra);
+        if !skills.skills.is_empty() {
+            let tool = aibus_core::tools::SkillTool::new(Arc::new(skills));
+            registry.register(Arc::new(tool));
+        }
         registry.register(Arc::new(Fork::new(orch.clone())));
         registry.register(Arc::new(ResumeRun::new(orch.clone())));
         registry.register(Arc::new(SendMessage::new(orch.clone())));

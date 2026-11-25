@@ -11,6 +11,7 @@ mod policy;
 mod readonly;
 mod sandbox;
 mod shell;
+mod skill;
 mod user;
 mod web;
 mod workflow;
@@ -41,6 +42,7 @@ pub use readonly::{Glob, Grep, Ls, Read};
 pub use sandbox::Sandbox;
 pub use shell::split;
 pub use shell::ShellDeny;
+pub use skill::SkillTool;
 pub use user::{AskUser, EnterPlanMode, ExitPlanMode, Plan, ReportArtifact};
 pub use web::{Fetched, WebFetch, WebFetcher};
 pub use workflow::RunWorkflow;
@@ -64,7 +66,7 @@ pub fn effective_tools(
     background: bool,
     max_spawn_depth: u8,
 ) -> EffectiveTools {
-    const COMMON: [&str; 9] = [
+    const COMMON: [&str; 10] = [
         "read",
         "write",
         "edit",
@@ -74,6 +76,7 @@ pub fn effective_tools(
         "bash",
         "report_artifact",
         "web_fetch",
+        "skill",
     ];
     const LEAD_ONLY: [&str; 11] = [
         "fork",

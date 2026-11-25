@@ -275,7 +275,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         .with_annotations(read_only()),
         Tool::new(
             "agent_list",
-            "List the agents a workflow step can name: built-in, project and user, with role, model and tools.",
+            "List the agents a workflow step can name: built-in, project and user, with role, model and tools, and the skills of the project and the user.",
             schema(json!({
                 "$schema": DRAFT_2020_12,
                 "type": "object",
@@ -298,8 +298,23 @@ pub(crate) fn tools() -> Vec<Tool> {
                             "model": { "type": "string" },
                             "tools": { "type": ["array", "null"], "items": { "type": "string" } },
                             "description": { "type": "string" },
+                            "skills": { "type": "array", "items": { "type": "string" } },
                         },
                         "required": ["name", "scope", "role", "model", "tools", "description"],
+                        "additionalProperties": false,
+                    },
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "scope": { "type": "string" },
+                            "path": { "type": "string" },
+                            "description": { "type": "string" },
+                        },
+                        "required": ["name", "scope", "path", "description"],
                         "additionalProperties": false,
                     },
                 },
@@ -423,7 +438,7 @@ impl Server {
             .values()
             .map(|d| {
                 let full = to_json(d);
-                json!({
+                let mut row = json!({
                     "name": d.name.as_str(),
                     "scope": match d.source.scope {
                         Scope::Cli => "cli",
@@ -436,6 +451,43 @@ impl Server {
                     "model": model_str(&d.model),
                     "tools": full.get("tools").cloned().unwrap_or(Value::Null),
                     "description": d.description,
+                });
+                // Left out when empty, so what an older client sees does not change.
+                if !d.skills.is_empty() {
+                    row["skills"] = json!(d.skills);
+                }
+                row
+            })
+            .collect()
+    }
+
+    /// The `agent_list` answer: the agents, and the skills when there are any.
+    fn agents_and_skills(&self) -> Value {
+        let mut out = json!({ "agents": self.agent_rows() });
+        let skills = self.skill_rows();
+        if !skills.is_empty() {
+            out["skills"] = Value::Array(skills);
+        }
+        out
+    }
+
+    /// The skills of this project and user (the server does not read `skills.extra_dirs`), the
+    /// winner of each name, as `aibus skill list --json` shows them.
+    pub(crate) fn skill_rows(&self) -> Vec<Value> {
+        let set =
+            aibus_core::skill::discover(&self.project, Some(&self.config.join("skills")), &[]);
+        set.skills
+            .values()
+            .map(|s| {
+                json!({
+                    "name": s.name,
+                    "scope": match s.scope {
+                        Scope::Project => "project",
+                        Scope::User => "user",
+                        _ => "extra",
+                    },
+                    "path": s.path.display().to_string(),
+                    "description": s.description,
                 })
             })
             .collect()
@@ -496,7 +548,7 @@ impl Server {
         match name {
             "agent_list" => {
                 take(args, name, &[])?;
-                Ok(self.data_result("the list of agents", json!({ "agents": self.agent_rows() })))
+                Ok(self.data_result("the list of agents", self.agents_and_skills()))
             }
             "workflow_validate" => self.validate_tool(args),
             "workflow_plan" => self.plan_tool(args),

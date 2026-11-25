@@ -10,6 +10,7 @@ use aibus_core::agent::discover::{discover, project_root, scope_dirs, Discovered
 use aibus_core::agent::validate::{validate_path, Report, ValidateCx};
 use aibus_core::config::{self, Config};
 use aibus_core::persist::paths::{project_dir, Paths};
+use aibus_core::skill::{self, SkillSet};
 use aibus_core::{AccountName, AgentName, AibusError, ModelRef, Scope};
 use aibus_provider::ProviderRegistry;
 use serde_json::{json, Value};
@@ -39,6 +40,37 @@ impl Env {
             config: loaded.config,
             paths,
         })
+    }
+
+    pub(crate) fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    /// The skills of the project, the user and `skills.extra_dirs`.
+    pub(crate) fn skill_set(&self) -> SkillSet {
+        let extra = self.dirs(&self.config.skills.extra_dirs);
+        skill::discover(&self.cwd, Some(&self.paths.config.join("skills")), &extra)
+    }
+
+    /// The `skills:` of the definitions that live under `only` (all of them without it) against
+    /// the skills that exist. Discovery warnings are left out: `agent validate` has its own.
+    pub(crate) fn agent_skill_report(&self, only: Option<&Path>) -> Report {
+        let defs = discover(
+            None,
+            &self.cwd,
+            Some(&self.user_dir),
+            &self.extra_dirs(),
+            &self.dirs(&self.config.agents.trusted_dirs),
+        )
+        .map(|f| f.agents)
+        .unwrap_or_default();
+        let under = only.map(|o| self.cwd.join(o));
+        let wanted = defs.values().filter(|d| match (&d.source.path, &under) {
+            (Some(p), Some(o)) => p.starts_with(o),
+            (Some(_), None) => true,
+            (None, _) => false,
+        });
+        skill::check_agents(wanted, &self.skill_set())
     }
 
     /// `agents.extra_dirs` or `agents.trusted_dirs`, relative to the project.
@@ -125,7 +157,7 @@ fn import(env: &Env, g: &Global, dir: &Path) -> Result<u8, AibusError> {
     Ok(0)
 }
 
-fn scope_name(s: &Scope) -> &'static str {
+pub(crate) fn scope_name(s: &Scope) -> &'static str {
     match s {
         Scope::Cli => "cli",
         Scope::Project => "project",
@@ -280,7 +312,7 @@ fn check(env: &Env, path: &Path) -> Result<Report, AibusError> {
 }
 
 fn validate(env: &Env, g: &Global, path: Option<&Path>) -> Result<u8, AibusError> {
-    let report = match path {
+    let mut report = match path {
         Some(p) => check(env, p)?,
         None => {
             let mut all = Report::default();
@@ -289,10 +321,12 @@ fn validate(env: &Env, g: &Global, path: Option<&Path>) -> Result<u8, AibusError
             for (_, dir) in dirs.iter().filter(|(_, d)| d.is_dir()) {
                 all.merge(check(env, dir)?);
             }
-            all.ok = all.errors.is_empty();
+            // A skill name nobody defines, or one defined in two scopes, fails like a bad field.
+            all.merge(env.skill_set().findings);
             all
         }
     };
+    report.merge(env.agent_skill_report(path));
     if g.json {
         println!("{}", serde_json::to_string(&report).map_err(std::io::Error::other)?);
     } else {
@@ -301,7 +335,7 @@ fn validate(env: &Env, g: &Global, path: Option<&Path>) -> Result<u8, AibusError
     Ok(if report.ok { 0 } else { 12 })
 }
 
-fn print_report(report: &Report) {
+pub(crate) fn print_report(report: &Report) {
     for (kind, list) in [("error", &report.errors), ("warning", &report.warnings)] {
         for f in list {
             let path = f.path.as_deref().map_or("-".into(), |p| p.display().to_string());

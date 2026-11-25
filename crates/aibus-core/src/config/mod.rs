@@ -27,6 +27,7 @@ pub struct Config {
     #[serde(rename = "provider")]
     pub providers: Vec<aibus_provider::ProviderDef>,
     pub agents: Agents,
+    pub skills: Skills,
     pub limits: Limits,
     pub router: Router,
     pub advisor: Advisor,
@@ -166,6 +167,14 @@ impl Default for Agents {
             reload_on_change: true,
         }
     }
+}
+
+/// `[skills]`: where skills are read besides `.aibus/skills` and `~/.config/aibus/skills`.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Skills {
+    /// Relative to the project, like `agents.extra_dirs`.
+    pub extra_dirs: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]

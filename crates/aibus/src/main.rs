@@ -30,6 +30,7 @@ mod extensions_cmd;
 mod runs_cmd;
 mod sessions_cmd;
 mod session_cmd;
+mod skill_cmd;
 mod signals;
 mod startup;
 mod term;
@@ -82,6 +83,7 @@ fn real_main(redactor: &Redactor) -> Result<u8, AibusError> {
         }
         Some(Command::Config(c)) => commands::config(&c, &cli.global),
         Some(Command::Agent(c)) => agent_cmd::agent(&c, &cli.global),
+        Some(Command::Skill(c)) => skill_cmd::skill(&c, &cli.global),
         Some(Command::Account(c)) => commands::account(&c, &cli.global, redactor),
         Some(Command::Session(cli::SessionCmd::Resume {
             id,

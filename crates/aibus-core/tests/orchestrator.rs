@@ -138,6 +138,7 @@ fn a_run_whose_parent_ended_is_cancelled_and_never_listed() {
             duration: Default::default(),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();
@@ -271,6 +272,7 @@ fn the_ninth_run_stays_queued_and_runnable_excludes_it() {
             duration: Default::default(),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();
@@ -299,6 +301,7 @@ fn counts_has_running_queued_done_and_failed() {
                 duration: Default::default(),
                 error: None,
                 worktree: None,
+                verified: false,
             },
         })
         .unwrap()

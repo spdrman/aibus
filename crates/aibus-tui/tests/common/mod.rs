@@ -357,6 +357,7 @@ pub fn finish(app: &mut App<MiniGraph>, seq: u128, status: RunStatus) {
             duration: Duration::from_secs(1),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();

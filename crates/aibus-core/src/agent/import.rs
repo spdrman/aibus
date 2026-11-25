@@ -1,6 +1,7 @@
 //! `aibus agent import <dir>` (09 section 6, Q1): copies definitions from another tool's directory
 //! (`.claude/agents`) into `.aibus/agents/`, and turns every hook in them off. The `hooks` key is
-//! renamed `disabled_hooks`, which aibus ignores, and each hook is reported with its command text
+//! renamed `disabled_hooks`, which aibus ignores, and so is `done_when` (a shell command run at
+//! every stop, so a hook in all but name). Each one is reported with its command text
 //! so the user can look at it and put the key back on purpose.
 //!
 //! Nothing in `.claude/agents` is read by aibus itself unless `agents.extra_dirs` names it; this
@@ -37,8 +38,8 @@ pub struct Imported {
     pub hooks: Vec<FoundHook>,
 }
 
-/// Renames the top-level `hooks:` key of the frontmatter to `disabled_hooks:`, and leaves the
-/// rest of the file byte for byte as it was.
+/// Renames the top-level `hooks:` and `done_when:` keys of the frontmatter to `disabled_hooks:`
+/// and `disabled_done_when:`, and leaves the rest of the file byte for byte as it was.
 fn disable_hooks(text: &str) -> String {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut fences = 0;
@@ -48,9 +49,16 @@ fn disable_hooks(text: &str) -> String {
             fences += 1;
         }
         // Between the first fence and the second is the frontmatter.
-        match line.strip_prefix("hooks:").filter(|_| fences == 1) {
-            Some(rest) => {
-                out.push_str("disabled_hooks:");
+        let renamed = [
+            ("hooks:", "disabled_hooks:"),
+            ("done_when:", "disabled_done_when:"),
+        ]
+        .into_iter()
+        .find_map(|(key, parked)| Some((parked, line.strip_prefix(key)?)))
+        .filter(|_| fences == 1);
+        match renamed {
+            Some((parked, rest)) => {
+                out.push_str(parked);
                 out.push_str(rest);
             }
             None => out.push_str(line),
@@ -84,7 +92,7 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<Imported>, String> {
                 continue;
             }
         };
-        let hooks = def
+        let mut hooks: Vec<FoundHook> = def
             .hooks
             .iter()
             .flat_map(|(event, specs)| {
@@ -96,14 +104,22 @@ pub fn import(from: &Path, to: &Path) -> Result<Vec<Imported>, String> {
                 })
             })
             .collect();
+        hooks.extend(def.done.done_when.iter().map(|command| FoundHook {
+            event: "done_when".into(),
+            kind: HookKind::Command,
+            matcher: None,
+            text: command.clone(),
+        }));
         let dest = to.join(format!("{}.md", def.name));
         let outcome = if dest.exists() {
             Outcome::Skipped(format!("{} already exists", dest.display()))
         } else {
-            // The copy has to parse with no hooks left, or nothing is written.
+            // The copy has to parse with no hooks and no `done_when` left, or nothing is written.
             let copy = disable_hooks(&text);
             let source = DefSource { path: None, scope: Scope::Project };
-            if parse(&copy, source).is_ok_and(|(d, _)| d.hooks.is_empty()) {
+            if parse(&copy, source)
+                .is_ok_and(|(d, _)| d.hooks.is_empty() && d.done.done_when.is_none())
+            {
                 std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
                 std::fs::write(&dest, copy).map_err(|e| format!("{}: {e}", dest.display()))?;
                 Outcome::Copied(dest)

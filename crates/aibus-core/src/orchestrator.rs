@@ -597,6 +597,7 @@ impl Orchestrator {
             duration: Default::default(),
             error: Some(error),
             worktree: None,
+            verified: false,
         });
     }
 

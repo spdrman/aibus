@@ -87,6 +87,14 @@ pub fn discover(
                     dir.display()
                 ));
             }
+            // `done_when` is a shell command run at every stop, the same power as a hook.
+            if !trusted && def.done.done_when.take().is_some() {
+                warnings.push(format!(
+                    "{}: done_when ignored, {} is not in agents.trusted_dirs",
+                    def.name,
+                    dir.display()
+                ));
+            }
             // A file nobody reviewed does not get to switch permission prompts off.
             if def.permission_mode != PermissionMode::Default {
                 def.permission_mode = PermissionMode::Default;

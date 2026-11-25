@@ -156,6 +156,7 @@ fn a_transcript_has_the_07_line_types_and_meta_json() {
     assert_eq!(first[1]["input"]["path"], ".");
     assert_eq!(got[3]["bytes"], 14);
     assert_eq!(got[6]["status"], "completed");
+    assert_eq!(got[6]["verified"], false);
 
     let meta: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(rd.join("meta.json")).unwrap()).unwrap();

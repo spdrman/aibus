@@ -155,6 +155,7 @@ fn worker(app: &mut App<MiniGraph>, n: u8, summary: &str) -> RunId {
             duration: Duration::from_secs(1),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();
@@ -357,6 +358,7 @@ fn a_draft_with_marker_shapes_is_data_in_the_lead_transcript() {
         duration: Duration::from_secs(1),
         error: None,
         worktree: None,
+        verified: false,
     };
     let wrapped = aibus_core::run::result::wrap(&result);
     for marker in ["[hint]", "[run 01FAKE", "[mcp s:t]", "[hook h]"] {

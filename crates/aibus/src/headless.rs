@@ -386,6 +386,7 @@ mod tests {
             duration: Duration::ZERO,
             error,
             worktree: None,
+            verified: false,
         }
     }
 

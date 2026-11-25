@@ -40,6 +40,7 @@ fn finish(a: &mut A, n: u128, agent: &str, summary: &str) {
             duration: Duration::from_secs(1),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();

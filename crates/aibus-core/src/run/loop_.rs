@@ -11,7 +11,8 @@
 
 mod assist;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
@@ -36,7 +37,7 @@ use super::{
 };
 use assist::{LeadAssist, Route};
 
-use crate::agent::{AgentDef, PermissionMode, Role};
+use crate::agent::{AgentDef, HookKind, HookSet, HookSpec, PermissionMode, Role};
 use crate::assist::Assist;
 use crate::context::{self, ContextInput};
 use crate::credentials::CredentialSource;
@@ -222,6 +223,8 @@ struct Task<'a> {
     hint: Mutex<Option<smol_str::SmolStr>>,
     /// Where the next request goes; `RunMail::Model` replaces it at a turn boundary.
     now: Mutex<ModelSwitch>,
+    /// Set when the last stop passed the agent's `done_when` or `output_schema`.
+    verified: AtomicBool,
 }
 
 async fn task(
@@ -243,6 +246,7 @@ async fn task(
             model: cfg.model.clone(),
             account: cfg.account.clone(),
         }),
+        verified: AtomicBool::new(false),
     };
     t.send(Msg::RunStarted {
         run: cfg.run,
@@ -444,6 +448,17 @@ impl Task<'_> {
         mode: PermissionMode,
         extra: Map<String, Value>,
     ) -> Fired {
+        self.fire_from(None, event, matcher, mode, extra).await
+    }
+
+    async fn fire_from(
+        &self,
+        only: Option<(&HookSet, &Path)>,
+        event: HookEvent,
+        matcher: Option<&str>,
+        mode: PermissionMode,
+        extra: Map<String, Value>,
+    ) -> Fired {
         let cfg = self.cfg;
         let input = HookInput {
             event,
@@ -460,10 +475,12 @@ impl Task<'_> {
             permission_mode: mode,
             extra,
         };
+        // `only`: that set alone, in that directory; otherwise `[hooks]` and the definition's.
+        let (scoped, cwd) = only.map_or((&cfg.def.hooks, None), |(s, c)| (s, Some(c)));
         let fired = self
             .deps
             .hooks
-            .fire(&input, &cfg.def.hooks, self.cancel)
+            .fire_from(&input, scoped, self.cancel, only.is_none(), cwd)
             .await;
         for ran in &fired.ran {
             self.send(Msg::HookFired {
@@ -928,6 +945,7 @@ impl Task<'_> {
                 .await;
             }
         }
+        let verified = end.status == RunStatus::Completed && self.verified.load(Ordering::SeqCst);
         let agent: AgentName = cfg.def.name.clone();
         // The final send ignores a closed channel: there is nothing left to stop.
         let _ = deps
@@ -945,6 +963,7 @@ impl Task<'_> {
                     duration: started.elapsed(),
                     error: end.error,
                     worktree,
+                    verified,
                 },
             })
             .await;
@@ -1023,6 +1042,8 @@ async fn drive(
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
     let mut lead = LeadAssist::new(t);
+    // Failed `done_when` / `output_schema` checks so far, against `done_retries` (3 when unset).
+    let mut done_failures = 0u32;
 
     loop {
         if cancel.is_cancelled() {
@@ -1146,6 +1167,7 @@ async fn drive(
                 Role::Advisor | Role::Router => None,
             };
             let mut again = false;
+            t.verified.store(false, Ordering::SeqCst);
             if let Some((event, matcher)) = stop {
                 let extra = Map::from_iter([(
                     "last_assistant_message".to_owned(),
@@ -1158,6 +1180,87 @@ async fn drive(
                         &format!("[hook {}] {}", b.hook, b.reason),
                     ));
                     again = true;
+                } else {
+                    // The agent's own definition of done is checked last, once the other
+                    // stop hooks have let it go.
+                    let last = last_text(conv);
+                    let done = &cfg.def.done;
+                    // Every configured check has to have run and passed for `verified`. A
+                    // `done_when` that never ran (hooks off, or a cancel) is no pass.
+                    let mut ran_all = done.output_schema.is_some() || done.done_when.is_some();
+                    let mut check = Ok(());
+                    if let Some(schema) = &done.output_schema {
+                        check = super::done::check_output(schema, &last)
+                            .map_err(|e| format!("output_schema: {e}"));
+                    }
+                    if let (Ok(()), Some(command)) = (&check, &done.done_when) {
+                        let scoped = HookSet::from([(
+                            event.as_str().into(),
+                            vec![HookSpec {
+                                matcher: None,
+                                command: command.clone(),
+                                timeout_secs: None,
+                                kind: HookKind::Command,
+                            }],
+                        )]);
+                        let mut extra =
+                            Map::from_iter([("last_assistant_message".to_owned(), json!(last))]);
+                        if let Some(goal) = &done.goal {
+                            extra.insert("goal".into(), json!(goal));
+                        }
+                        // Alone (the `[hooks]` of the event already ran), in the run's own
+                        // tree. Exit 0 passes, exit 2 or a verdict blocks with its reason, and
+                        // any other exit, a signal, a timeout or a start error is no pass.
+                        let fired = t
+                            .fire_from(
+                                Some((&scoped, &cfg.cwd)),
+                                event,
+                                matcher.as_deref(),
+                                mode,
+                                extra,
+                            )
+                            .await;
+                        check = match (fired.block, fired.ran.first()) {
+                            (Some(b), _) => Err(format!("done_when: {}", b.reason)),
+                            (None, Some(r)) if r.outcome.exit_code != 0 => Err(format!(
+                                "done_when exited {} and only exit 0 passes",
+                                r.outcome.exit_code
+                            )),
+                            (None, None) => {
+                                ran_all = false;
+                                Ok(())
+                            }
+                            (None, Some(_)) => Ok(()),
+                        };
+                    }
+                    match check {
+                        Ok(()) => t.verified.store(ran_all, Ordering::SeqCst),
+                        Err(reason) => {
+                            t.verified.store(false, Ordering::SeqCst);
+                            done_failures += 1;
+                            let cap = cfg.def.done.done_retries.unwrap_or(3);
+                            if done_failures > cap {
+                                // The last failing reason ends up in the summary.
+                                if let Some(m) = conv.messages.last_mut() {
+                                    m.blocks.push(ContentBlock::Text(format!(
+                                        "\n\n[not done after {cap} retries] {reason}"
+                                    )));
+                                }
+                                return End::of(RunStatus::Partial);
+                            }
+                            let goal = cfg
+                                .def
+                                .done
+                                .goal
+                                .as_deref()
+                                .map_or(String::new(), |g| format!(" (goal: {g})"));
+                            conv.messages.push(Message::text(
+                                MessageRole::User,
+                                &format!("[done check] not done yet{goal}: {reason}"),
+                            ));
+                            again = true;
+                        }
+                    }
                 }
             }
             if let (false, Some(la)) = (again, lead.as_mut()) {
@@ -1181,6 +1284,10 @@ async fn drive(
                 }
             }
             if !again {
+                // A cancel that landed during the stop hooks or `done_when` is not a finish.
+                if cancel.is_cancelled() {
+                    return End::of(RunStatus::Cancelled);
+                }
                 return End::of(RunStatus::Completed);
             }
         }

@@ -129,6 +129,35 @@ pub fn validate(def: &AgentDef, cx: &ValidateCx) -> Report {
     if def.router.is_some() && def.role != Role::Router {
         error("router", "router settings are only for router agents".into());
     }
+    let done = &def.done;
+    if matches!(def.role, Role::Advisor | Role::Router)
+        && (done.done_when.is_some() || done.output_schema.is_some())
+    {
+        error(
+            "done_when",
+            "done_when and output_schema are for lead and worker agents (an advisor or router has no stop to check)".into(),
+        );
+    }
+    if done
+        .done_when
+        .as_deref()
+        .is_some_and(|c| c.trim().is_empty())
+    {
+        error("done_when", "done_when is empty".into());
+    }
+    if done.done_retries.is_some() && done.done_when.is_none() && done.output_schema.is_none() {
+        error(
+            "done_retries",
+            "done_retries needs done_when or output_schema".into(),
+        );
+    }
+    if let Some(problem) = done
+        .output_schema
+        .as_ref()
+        .and_then(crate::run::done::check_schema)
+    {
+        error("output_schema", problem);
+    }
 
     let mut warnings = Vec::new();
     for (event, specs) in &def.hooks {

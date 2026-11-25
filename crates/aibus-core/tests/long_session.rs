@@ -221,6 +221,7 @@ fn finish<G: Graph>(app: &mut App<G>, l: &Live) {
             duration: Duration::from_secs(1),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();

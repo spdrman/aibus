@@ -203,11 +203,14 @@ impl Transcript {
         self.line(at, v)
     }
 
-    fn end(&mut self, at: SystemTime, status: &str, turns: u32) -> io::Result<()> {
+    fn end(&mut self, at: SystemTime, status: &str, turns: u32, verified: bool) -> io::Result<()> {
         self.assistant(at)?;
         self.meta.status = status.into();
         self.meta.ended_at = Some(rfc3339(at));
-        self.line(at, json!({"type": "end", "status": status, "turns": turns}))?;
+        self.line(
+            at,
+            json!({"type": "end", "status": status, "turns": turns, "verified": verified}),
+        )?;
         self.write_meta()
     }
 
@@ -234,10 +237,10 @@ impl Transcript {
                 self.meta.cost_usd = result.usage.cost_usd;
                 let head = cut(&result.summary, SUMMARY_HEAD);
                 self.meta.summary_head = self.redactor.redact(head).into_owned();
-                self.end(at, &result.status.as_value(), result.turns)
+                self.end(at, &result.status.as_value(), result.turns, result.verified)
             }
             Msg::RunFailed { .. } => {
-                self.end(at, "failed", self.meta.turns)
+                self.end(at, "failed", self.meta.turns, false)
             }
             _ => Ok(()),
         }

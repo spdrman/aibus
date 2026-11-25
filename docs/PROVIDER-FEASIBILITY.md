@@ -24,7 +24,7 @@ I could not read at the source are listed as unverified, not guessed.
 - E7: https://github.com/deepseek-ai/deepseek-harness/blob/master/BRAND_GUIDELINES.md: "DeepSeek Harness" is a registered trademark, so projects should not use the full name in their own names.
 - E8: https://api-docs.deepseek.com/ ("Agent Integrations" section) and https://api-docs.deepseek.com/guides/anthropic_api.
 - E9: https://github.com/deepseek-ai/awesome-deepseek-agent, README, no entry marked official.
-- E10: https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/README.md (the CLI README linked from the quickstart as "other CLI modes"), profile table: `headless` ("Run one fresh persisted session, print the final answer, and exit."), `acp` ("Serve automation clients over ACP stdio until disconnect."), `sdk` ("Serve SDK clients over JSON-RPC stdio until shutdown or disconnect."). Read with WebFetch on 2026-11-25.
+- E10: https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/README.md (the CLI README linked from the quickstart as "other CLI modes"), profile table: `headless` ("Run one fresh persisted session, print the final answer, and exit."), `acp` ("Serve automation clients over ACP stdio until disconnect."), `sdk` ("Serve SDK clients over JSON-RPC stdio until shutdown or disconnect."). Read on 2026-11-25.
 
 ## Unverified
 

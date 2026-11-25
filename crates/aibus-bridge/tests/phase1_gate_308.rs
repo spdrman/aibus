@@ -239,7 +239,7 @@ fn medium_has_10000_events_and_50_agents_and_streams_in_bounded_batches() {
         panic!("not a projection")
     };
     assert_eq!(projection.agents.len(), 50);
-    // The cursor walk delivers every event once, in order, never more than MAX_BATCH at a time.
+    // The cursor walk is a count check: 10,000 events over 20 calls, never more than MAX_BATCH in one.
     let (mut after, mut seen, mut calls) = (None, 0usize, 0usize);
     loop {
         let b = batch(root.path(), after.clone());
@@ -263,11 +263,6 @@ fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
 
-fn min_median(mut v: Vec<f64>) -> (f64, f64) {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    (v[0], v[v.len() / 2])
-}
-
 /// One JSON line per dataset: how long the bridge takes to load a run and build its projection,
 /// how big that reply is, what one event batch costs at the start, middle and end of the run, and
 /// (medium) a whole cursor walk. Each figure is the best and the median of five rounds. Nothing
@@ -275,6 +270,10 @@ fn min_median(mut v: Vec<f64>) -> (f64, f64) {
 #[test]
 #[ignore = "timing probe, run through the bench queue (docs/desktop/B1.5-phase1-gate.md)"]
 fn timing_probe() {
+    let min_median = |mut v: Vec<f64>| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (v[0], v[v.len() / 2])
+    };
     for (name, agents, total) in [("medium", 50, 10_000), ("large", 500, 100_000)] {
         let events = dataset(agents, total);
         let root = tempfile::tempdir().unwrap();

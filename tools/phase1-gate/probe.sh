@@ -17,7 +17,14 @@ set -euo pipefail
 build=${BUILD_HOST:-local}; run=${RUN_HOST:-mercury}; job=${JOB:-s308-probe}
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(/usr/bin/mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+cleanup() {
+  rm -rf "$tmp"
+  # the four volumes this script made: two job volumes (dh.sh clean) and the two cargo caches
+  "$DH" clean "$build" "$job-src" >/dev/null 2>&1 || true
+  "$DH" clean "$run" "$job" >/dev/null 2>&1 || true
+  "$DH" d "$build" volume rm -f "$job-target" "$job-registry" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 # 1. Build with the tree at /work: the test finds its fixture through CARGO_MANIFEST_DIR, which is
 #    baked into the binary, so the run host needs the fixture at the same path.

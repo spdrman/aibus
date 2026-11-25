@@ -35,6 +35,15 @@ Smaller leftovers from the #385 review, none of them a bug...
 Work cut from an issue's reduced definition of done, kept here so it is not lost. Each section names
 the issue it came from and what picks it up.
 
+## B1.5 Phase 1 gate (#308)
+
+The gate record is `docs/desktop/B1.5-phase1-gate.md`: GO-WITH-CONDITIONS on ADR-B-001. What it leaves open, and who takes it...
+
+- **macOS run and numeric responsiveness targets.** They block opening Phase 2 (conditions 1 and 3 there); the owner runs `docs/desktop/VERIFY-MACOS.md`.
+- **Bridge wiring, deltas, the per-call re-read of the trace, and a bounded graph** go to #310. The re-read costs about 53 ms per 500-event batch at 10,000 events and about 0.6 s at 100,000.
+- **Virtualised timeline** goes to #311, **command grants and the DTO credential test** to #312, **Playwright on the real webview and keyboard access to graph nodes** to #313.
+- **Webview timings at medium and large** (first render, latency, memory, graph interaction) and **React Flow with memoisation** are unmeasured; nothing here runs a webview at scale.
+
 ## B1.1 Tauri desktop spike (#304)
 
 I cut these from the spike on 2026-11-22. B1.5 (#308) reviews them with the go/no-go.
@@ -209,3 +218,11 @@ Cut from the reduced scope, still wanted:
 - Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
 - A bounded queue between the run and the exporter. Each export is one thread (the caller writes the `thread::spawn`), so a slow collector under many exports would pile threads up; a bounded queue with drop-on-full belongs with the config wiring.
 - Model and version labels on the resource (spec 7.2). Only the provider extension is exported today.
+
+## H1.5 per-agent track record (#392)
+
+- **Evals result type.** PR #398 (branch `feat/293-evals`, #293 / A3.3) is open now and has `EvaluationResult` in `crates/aibus-trace/src/eval.rs`, but I wrote the `agent eval` scorecard before it and did not merge the two: the scorecard is its own minimal JSON (`scorecard_version` as a string, `agent`, `summary`, `cases[]` with `result`, `reason` and the two exit codes) and `EvaluationResult` is one row per case with `result_version` as a `u32`, a verdict (pass, fail, incomplete), checks and a run context. They should converge later: each case row becomes an `EvaluationResult` with `done_when` as a deterministic check, and the scorecard keeps only the summary, with the version types lined up. It is a different crate and a separate command, so it is a follow-up once #398 lands.
+- **Cases only judge by exit codes.** A case passes when the run exits 0 and its `done_when` exits 0. Output matching, scoring and cost or turn budgets per case are not there. Cases run in the project directory, not a scratch copy, so a case whose agent writes files leaves them there.
+- **Learning extraction uses the lead's model** for workers too, one call per finished worker run (at most four a session). A per-agent extraction model is not wired.
+- **Roster suffix is read once at session start.** An agent reload (`reload_on_change`, TUI) rebuilds the roster without it until the next session.
+- **`agent stats` reads the session index**, so runs of a session that was killed before it ended are not counted until `aibus session list --rebuild` or the next start rebuilds the index.

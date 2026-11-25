@@ -3,6 +3,7 @@
 
 mod account;
 mod agent_cmd;
+mod agent_track;
 mod agent_watch;
 mod author;
 mod cli;

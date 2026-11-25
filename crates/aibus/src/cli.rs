@@ -323,6 +323,23 @@ pub enum AgentCmd {
     Validate { path: Option<PathBuf> },
     Import { dir: PathBuf },
     Where,
+    /// Completed, partial and failed runs, turns and cost of one agent, from the index
+    Stats {
+        name: String,
+        /// Count only this many of the newest runs
+        #[arg(long, value_name = "N", default_value_t = 20)]
+        last: u32,
+    },
+    /// Run every case in .aibus/evals/<name>/ (prompt plus done_when) against the agent; exits 1 when one fails
+    Eval {
+        name: String,
+        /// Read the cases from this directory instead
+        #[arg(long, value_name = "DIR")]
+        cases: Option<PathBuf>,
+        /// Seconds one run may take
+        #[arg(long, value_name = "SECS", default_value_t = 600)]
+        timeout: u64,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -803,6 +820,8 @@ mod tests {
         "agent validate",
         "agent import",
         "agent where",
+        "agent stats",
+        "agent eval",
         "skill list",
         "skill show",
         "skill validate",

@@ -35,6 +35,18 @@ pub(crate) fn io_err(e: rusqlite::Error) -> io::Error {
     io::Error::other(format!("index.sqlite: {e}"))
 }
 
+/// One agent's track record (H1.5): runs counted by status, with the turns and cost they used.
+/// Runs that ended some other way (cancelled, denied, still going) count in `runs` only.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct AgentStats {
+    pub runs: u32,
+    pub completed: u32,
+    pub partial: u32,
+    pub failed: u32,
+    pub turns: u64,
+    pub cost_usd: f64,
+}
+
 pub struct Index {
     conn: Connection,
 }
@@ -111,6 +123,41 @@ impl Index {
             .map_err(io_err)?;
         }
         tx.commit().map_err(io_err)
+    }
+
+    /// What the `runs` table holds for `agent`: its newest `last` runs, counted by status. Only
+    /// counts, sums and the status word are read, never a run's summary.
+    pub fn agent_stats(&self, agent: &str, last: u32) -> io::Result<AgentStats> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT status, turns, cost_usd FROM runs WHERE agent = ?1
+                 ORDER BY started_at DESC, id DESC LIMIT ?2",
+            )
+            .map_err(io_err)?;
+        let rows = stmt
+            .query_map(params![agent, last], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
+            })
+            .map_err(io_err)?;
+        let mut s = AgentStats::default();
+        for row in rows {
+            let (status, turns, cost) = row.map_err(io_err)?;
+            s.runs += 1;
+            s.turns += turns.max(0) as u64;
+            s.cost_usd += cost;
+            match status.as_str() {
+                "completed" => s.completed += 1,
+                "partial" => s.partial += 1,
+                "failed" => s.failed += 1,
+                _ => {}
+            }
+        }
+        Ok(s)
     }
 
     pub fn forget(&mut self, id: &str) -> io::Result<()> {
@@ -226,6 +273,44 @@ mod tests {
             cost_usd: cost,
             ..RunMeta::default()
         }
+    }
+
+    #[test]
+    fn agent_stats_count_the_newest_runs_of_one_agent_by_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut idx = Index::open(&dir.path().join("i.sqlite")).unwrap();
+        let at = |n: u32, status: &str, agent: &str| RunMeta {
+            started_at: format!("2026-11-0{n}T00:00:00.000Z"),
+            status: status.into(),
+            agent: agent.into(),
+            ..run(&format!("R{n}{agent}"), 0.5)
+        };
+        let runs = [
+            at(1, "failed", "scribe"),
+            at(2, "completed", "scribe"),
+            at(3, "partial", "scribe"),
+            at(4, "cancelled", "scribe"),
+            at(5, "completed", "scribe"),
+            at(5, "completed", "other"),
+        ];
+        idx.upsert(&session("S1", "2026-11-01T00:00:00.000Z"), &runs)
+            .unwrap();
+        let all = idx.agent_stats("scribe", 20).unwrap();
+        assert_eq!(
+            (all.runs, all.completed, all.partial, all.failed),
+            (5, 2, 1, 1)
+        );
+        assert_eq!((all.turns, all.cost_usd), (10, 2.5));
+        let newest = idx.agent_stats("scribe", 2).unwrap();
+        assert_eq!(
+            (newest.runs, newest.completed, newest.partial, newest.failed),
+            (2, 1, 0, 0),
+            "cancelled and the newest completed"
+        );
+        assert_eq!(
+            idx.agent_stats("nobody", 20).unwrap(),
+            AgentStats::default()
+        );
     }
 
     #[test]

@@ -122,10 +122,19 @@ pub struct CheckResult {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Assessor {
-    Deterministic { tool: String, version: String },
-    Human { reviewer: String },
+    Deterministic {
+        tool: String,
+        version: String,
+    },
+    Human {
+        reviewer: String,
+    },
     /// A model judge: the model, the prompt (by hash) and the version are all recorded.
-    Model { model: String, prompt_sha256: String, version: String },
+    Model {
+        model: String,
+        prompt_sha256: String,
+        version: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -192,7 +201,11 @@ pub enum EvalError {
     Invalid(String),
     UnknownCase(String),
     /// The run's repository revision is not the case's fixture commit.
-    RevisionMismatch { case_id: String, want: String, got: String },
+    RevisionMismatch {
+        case_id: String,
+        want: String,
+        got: String,
+    },
     ModelJudgeOff(String),
     BadAssessment(String),
 }
@@ -204,7 +217,10 @@ impl fmt::Display for EvalError {
             Self::Invalid(e) => write!(f, "eval suite is invalid: {e}"),
             Self::UnknownCase(c) => write!(f, "the suite has no case {c}"),
             Self::RevisionMismatch { case_id, want, got } => {
-                write!(f, "case {case_id} runs at fixture commit {want}, the run says {got}")
+                write!(
+                    f,
+                    "case {case_id} runs at fixture commit {want}, the run says {got}"
+                )
             }
             Self::ModelJudgeOff(c) => write!(
                 f,
@@ -226,8 +242,60 @@ impl EvalSuite {
     }
 
     pub fn validate(&self) -> Result<(), EvalError> {
-    todo!("#293 red")
-}
+        let bad = |m: String| Err(EvalError::Invalid(m));
+        if self.schema_version != SUITE_SCHEMA_VERSION {
+            return bad(format!(
+                "schema_version {} (this build reads {SUITE_SCHEMA_VERSION})",
+                self.schema_version
+            ));
+        }
+        if self.name.trim().is_empty() || self.suite_version == 0 || self.cases.is_empty() {
+            return bad("a suite needs a name, a suite_version of at least 1 and a case".into());
+        }
+        let mut seen = BTreeSet::new();
+        for c in &self.cases {
+            let id_ok = !c.case_id.is_empty()
+                && c.case_id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+            if !id_ok {
+                return bad(format!(
+                    "case id {:?} is empty or has characters outside [A-Za-z0-9._-]",
+                    c.case_id
+                ));
+            }
+            if !seen.insert(c.case_id.as_str()) {
+                return bad(format!("case id {} appears twice", c.case_id));
+            }
+            if c.task_input.trim().is_empty()
+                || c.fixture.repository.is_empty()
+                || c.fixture.commit.is_empty()
+            {
+                return bad(format!(
+                    "case {} needs a task input and a fixture repository and commit",
+                    c.case_id
+                ));
+            }
+            // Spec 9.1: deterministic checks are the primary gate, so a case must have one.
+            if c.test_commands.is_empty() && c.expected_artifacts.is_empty() {
+                return bad(format!(
+                    "case {} has no deterministic check (test command or expected artifact)",
+                    c.case_id
+                ));
+            }
+            if c.envelope.max_duration_secs == 0
+                || c.envelope
+                    .max_cost_usd
+                    .is_some_and(|v| !v.is_finite() || v < 0.0)
+            {
+                return bad(format!(
+                    "case {} has an empty or invalid envelope",
+                    c.case_id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// How well a metric is known, weakest last.
@@ -252,13 +320,299 @@ fn derived(name: &str, value: f64, unit: &str, source: &str) -> Metric {
 
 /// The millisecond a uuid v7 event id carries, which aibus stamped from its own clock.
 fn id_ms(id: Uuid) -> u64 {
-    id.as_bytes()[..6].iter().fold(0u64, |a, x| a << 8 | u64::from(*x))
+    id.as_bytes()[..6]
+        .iter()
+        .fold(0u64, |a, x| a << 8 | u64::from(*x))
 }
 
 /// Evaluates one recorded run against its case. Every number it makes is derived from the trace or
 /// handed in by a vendor, with its quality, and an unknown stays unknown.
 pub fn evaluate(suite: &EvalSuite, run: &RecordedRun) -> Result<EvaluationResult, EvalError> {
-    todo!("#293 red")
+    suite.validate()?;
+    let case = suite
+        .cases
+        .iter()
+        .find(|c| c.case_id == run.case_id)
+        .ok_or_else(|| EvalError::UnknownCase(run.case_id.clone()))?;
+    if run.context.repository_revision != case.fixture.commit {
+        return Err(EvalError::RevisionMismatch {
+            case_id: case.case_id.clone(),
+            want: case.fixture.commit.clone(),
+            got: run.context.repository_revision.clone(),
+        });
+    }
+    for a in &run.assessments {
+        if !case.rubric.contains(&a.rubric_item) {
+            return Err(EvalError::BadAssessment(format!(
+                "{} is not a rubric item of case {}",
+                a.rubric_item, case.case_id
+            )));
+        }
+        if !(a.score.is_finite() && a.max_score.is_finite() && a.max_score > 0.0)
+            || a.score < 0.0
+            || a.score > a.max_score
+        {
+            return Err(EvalError::BadAssessment(format!(
+                "score {} of {} is out of range",
+                a.score, a.max_score
+            )));
+        }
+        if let Assessor::Model {
+            model,
+            prompt_sha256,
+            version,
+        } = &a.assessor
+        {
+            if !suite.model_judge {
+                return Err(EvalError::ModelJudgeOff(case.case_id.clone()));
+            }
+            if model.is_empty() || prompt_sha256.is_empty() || version.is_empty() {
+                return Err(EvalError::BadAssessment(
+                    "a model score records the model, the prompt hash and the version".into(),
+                ));
+            }
+        }
+    }
+
+    let mut sorted: Vec<&TraceEvent> = run
+        .events
+        .iter()
+        .filter(|e| e.corroborates.is_none())
+        .collect();
+    sorted.sort_by_key(|e| e.event_id);
+    let count = |k: EventKind| sorted.iter().filter(|e| e.kind == k).count() as f64;
+    let projection = project(&run.events);
+
+    // Checks: the case's commands (each must be accounted for), the expected artifacts read off the
+    // trace, then whatever else was recorded (compile, policy invariants).
+    let mut checks: Vec<CheckResult> = Vec::new();
+    for cmd in &case.test_commands {
+        let recorded = run.checks.iter().find(|c| &c.name == cmd);
+        checks.push(recorded.cloned().unwrap_or_else(|| CheckResult {
+            kind: CheckKind::UnitTests,
+            name: cmd.clone(),
+            outcome: CheckOutcome::NotRun,
+            evidence: Vec::new(),
+        }));
+    }
+    for art in &case.expected_artifacts {
+        let hits: Vec<Uuid> = sorted
+            .iter()
+            .filter(|e| {
+                e.kind == EventKind::ArtifactCreated
+                    && e.data["name"].as_str() == Some(art.as_str())
+            })
+            .map(|e| e.event_id)
+            .collect();
+        checks.push(CheckResult {
+            kind: CheckKind::ExpectedArtifact,
+            name: art.clone(),
+            outcome: if hits.is_empty() {
+                CheckOutcome::Fail
+            } else {
+                CheckOutcome::Pass
+            },
+            evidence: hits,
+        });
+    }
+    for c in &run.checks {
+        if !case.test_commands.contains(&c.name) {
+            checks.push(c.clone());
+        }
+    }
+
+    // Metrics.
+    let mut metrics = Vec::new();
+    let first = sorted.first().map(|e| id_ms(e.event_id));
+    let last = sorted.last().map(|e| id_ms(e.event_id));
+    let wall_ms = match (first, last) {
+        (Some(a), Some(b)) if sorted.len() > 1 => Some((b - a) as f64),
+        _ => None,
+    };
+    metrics.push(match wall_ms {
+        Some(v) => derived(
+            "wall_time_ms",
+            v,
+            "ms",
+            "aibus clock, first to last event of the trace",
+        ),
+        None => Metric {
+            name: "wall_time_ms".into(),
+            value: None,
+            unit: "ms".into(),
+            quality: DataQuality::Unknown,
+            source: "the trace has fewer than two events".into(),
+        },
+    });
+    let src = "counted from the trace";
+    metrics.push(derived(
+        "invocations",
+        count(EventKind::AttemptStarted),
+        "attempts",
+        src,
+    ));
+    metrics.push(derived(
+        "delegated_tasks",
+        count(EventKind::TaskDelegated),
+        "tasks",
+        src,
+    ));
+    metrics.push(derived(
+        "tool_calls",
+        count(EventKind::ToolStarted),
+        "calls",
+        src,
+    ));
+    metrics.push(derived(
+        "tool_failures",
+        count(EventKind::ToolFailed),
+        "calls",
+        src,
+    ));
+    metrics.push(derived(
+        "permission_denials",
+        sorted
+            .iter()
+            .filter(|e| e.kind == EventKind::ToolFailed && e.data["reason"] == "permission_denied")
+            .count() as f64,
+        "calls",
+        src,
+    ));
+    metrics.push(derived(
+        "approvals_requested",
+        count(EventKind::ApprovalRequested),
+        "approvals",
+        src,
+    ));
+    metrics.push(derived(
+        "failed_attempts",
+        projection
+            .attempts
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a.status,
+                    Some(AttemptStatus::Failed | AttemptStatus::Interrupted)
+                )
+            })
+            .count() as f64,
+        "attempts",
+        src,
+    ));
+    // Parallelism: the most tools open at once, in event order.
+    let (mut open, mut peak) = (BTreeSet::new(), 0usize);
+    for e in &sorted {
+        let Some(id) = e.native.tool_use_id.clone() else {
+            continue;
+        };
+        match e.kind {
+            EventKind::ToolStarted => {
+                open.insert(id);
+                peak = peak.max(open.len());
+            }
+            EventKind::ToolCompleted | EventKind::ToolFailed => {
+                open.remove(&id);
+            }
+            _ => {}
+        }
+    }
+    metrics.push(derived(
+        "max_parallel_tools",
+        peak as f64,
+        "tools",
+        "counted from the trace, in event order",
+    ));
+
+    // Usage: summed over the attempts, as weak as the weakest attempt. An attempt with no usage
+    // report leaves the sum unknown for that name rather than a smaller number.
+    let attempts = projection.attempts.len();
+    let mut usage: BTreeMap<(String, String), (f64, usize, DataQuality, String)> = BTreeMap::new();
+    for a in &projection.attempts {
+        for m in &a.usage {
+            let Some(v) = m.value else { continue };
+            let slot = usage.entry((m.name.clone(), m.unit.clone())).or_insert((
+                0.0,
+                0,
+                m.quality,
+                m.source.clone(),
+            ));
+            slot.0 += v;
+            slot.1 += 1;
+            if rank(m.quality) > rank(slot.2) {
+                slot.2 = m.quality;
+                slot.3.clone_from(&m.source);
+            }
+        }
+    }
+    for ((name, unit), (sum, n, quality, source)) in usage {
+        if n == attempts {
+            metrics.push(Metric {
+                name,
+                value: Some(sum),
+                unit,
+                quality,
+                source,
+            });
+        } else {
+            metrics.push(Metric {
+                name,
+                value: None,
+                unit,
+                quality: DataQuality::Unknown,
+                source: format!("reported for {n} of {attempts} attempts"),
+            });
+        }
+    }
+
+    // The envelope is a check of its own.
+    let cost = metrics
+        .iter()
+        .find(|m| m.name == "cost_usd")
+        .and_then(|m| m.value);
+    let over_time = wall_ms.map(|w| w > case.envelope.max_duration_secs as f64 * 1000.0);
+    let over_cost = match (case.envelope.max_cost_usd, cost) {
+        (Some(max), Some(c)) => Some(c > max),
+        _ => Some(false),
+    };
+    checks.push(CheckResult {
+        kind: CheckKind::PolicyInvariant,
+        name: "within_envelope".into(),
+        outcome: match (over_time, over_cost) {
+            (Some(true), _) | (_, Some(true)) => CheckOutcome::Fail,
+            (Some(false), Some(false)) => CheckOutcome::Pass,
+            _ => CheckOutcome::NotRun,
+        },
+        evidence: Vec::new(),
+    });
+
+    let verdict = if checks.iter().any(|c| c.outcome == CheckOutcome::Fail) {
+        Verdict::Fail
+    } else if checks.iter().any(|c| c.outcome == CheckOutcome::NotRun)
+        || checks.iter().all(|c| c.name == "within_envelope")
+    {
+        Verdict::Incomplete
+    } else {
+        Verdict::Pass
+    };
+
+    let ids: BTreeSet<Uuid> = run.events.iter().map(|e| e.workflow_run_id).collect();
+    Ok(EvaluationResult {
+        result_version: RESULT_VERSION,
+        suite: suite.name.clone(),
+        suite_version: suite.suite_version,
+        case_id: case.case_id.clone(),
+        variant: run.variant.clone(),
+        workflow_run_ids: ids.into_iter().collect(),
+        context: run.context.clone(),
+        assessor: Assessor::Deterministic {
+            tool: "aibus-trace eval".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
+        verdict,
+        checks,
+        assessments: run.assessments.clone(),
+        metrics,
+    })
 }
 
 impl EvaluationResult {
@@ -279,4 +633,3 @@ pub(crate) fn failed_checks(r: &EvaluationResult, kind: Option<CheckKind>) -> us
         .filter(|c| c.outcome == CheckOutcome::Fail && kind.is_none_or(|k| c.kind == k))
         .count()
 }
-

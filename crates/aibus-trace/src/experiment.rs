@@ -84,7 +84,68 @@ pub fn plan(
     variants: Vec<Variant>,
     repetitions: u32,
 ) -> Result<ComparisonManifest, ExperimentError> {
-    todo!("#293 red")
+    suite.validate().map_err(ExperimentError::Suite)?;
+    if variants.len() < 2 {
+        return Err(ExperimentError::Plan(
+            "an A/B needs at least two variants".into(),
+        ));
+    }
+    if repetitions == 0 {
+        return Err(ExperimentError::Plan(
+            "repetitions must be at least 1".into(),
+        ));
+    }
+    for (i, v) in variants.iter().enumerate() {
+        if v.id.is_empty() || variants[..i].iter().any(|o| o.id == v.id) {
+            return Err(ExperimentError::Plan(format!(
+                "variant id {:?} is empty or repeated",
+                v.id
+            )));
+        }
+    }
+    let fixed: Vec<(&str, &Fixture)> = suite
+        .cases
+        .iter()
+        .map(|c| (c.case_id.as_str(), &c.fixture))
+        .collect();
+    let basis = serde_json::to_vec(&(
+        &suite.name,
+        suite.suite_version,
+        repetitions,
+        &variants,
+        &fixed,
+    ))
+    .map_err(|e| ExperimentError::Plan(e.to_string()))?;
+    let experiment_id = crate::sha256_hex(&basis);
+    let cases = suite
+        .cases
+        .iter()
+        .map(|c| {
+            let h = Sha256::digest([experiment_id.as_bytes(), c.case_id.as_bytes()].concat());
+            let start = u64::from_le_bytes(h[..8].try_into().unwrap_or([0; 8])) as usize;
+            let orders = (0..repetitions as usize)
+                .map(|r| {
+                    (0..variants.len())
+                        .map(|i| variants[(start + r + i) % variants.len()].id.clone())
+                        .collect()
+                })
+                .collect();
+            ManifestCase {
+                case_id: c.case_id.clone(),
+                fixture: c.fixture.clone(),
+                orders,
+            }
+        })
+        .collect();
+    Ok(ComparisonManifest {
+        manifest_version: MANIFEST_VERSION,
+        experiment_id,
+        suite: suite.name.clone(),
+        suite_version: suite.suite_version,
+        repetitions,
+        variants,
+        cases,
+    })
 }
 
 /// Wall time spread. Each figure is `None` until there are enough samples to support it.
@@ -138,13 +199,22 @@ pub struct Comparison {
 #[serde(tag = "judgement", rename_all = "snake_case")]
 pub enum Judgement {
     /// No gate regressed and something got better. An observation, not a proof of cause.
-    Improvement { better: Vec<String> },
+    Improvement {
+        better: Vec<String>,
+    },
     /// Faster, cheaper or leaner, but the tests, policy checks or permissions got worse. Never
     /// offered as an improvement.
-    Unsafe { regressed: Vec<String>, better: Vec<String> },
-    Regression { regressed: Vec<String> },
+    Unsafe {
+        regressed: Vec<String>,
+        better: Vec<String>,
+    },
+    Regression {
+        regressed: Vec<String>,
+    },
     NoDifference,
-    Inconclusive { reason: String },
+    Inconclusive {
+        reason: String,
+    },
 }
 
 fn spread(mut v: Vec<f64>) -> Spread {
@@ -169,7 +239,138 @@ pub fn compare(
     manifest: &ComparisonManifest,
     results: &[EvaluationResult],
 ) -> Result<Comparison, ExperimentError> {
-    todo!("#293 red")
+    let bad = |m: String| Err(ExperimentError::Mismatch(m));
+    for r in results {
+        if r.suite != manifest.suite || r.suite_version != manifest.suite_version {
+            return bad(format!(
+                "{}/{} comes from suite {} v{}",
+                r.case_id, r.variant, r.suite, r.suite_version
+            ));
+        }
+        let Some(case) = manifest.cases.iter().find(|c| c.case_id == r.case_id) else {
+            return bad(format!("case {} is not in the manifest", r.case_id));
+        };
+        if !manifest.variants.iter().any(|v| v.id == r.variant) {
+            return bad(format!("variant {} is not in the manifest", r.variant));
+        }
+        if r.context.repository_revision != case.fixture.commit {
+            return bad(format!(
+                "{}/{} ran at {}, not the fixture commit",
+                r.case_id, r.variant, r.context.repository_revision
+            ));
+        }
+    }
+    let mut summaries = Vec::new();
+    let mut caveats = Vec::new();
+    for v in &manifest.variants {
+        for c in &manifest.cases {
+            let n = results
+                .iter()
+                .filter(|r| r.variant == v.id && r.case_id == c.case_id)
+                .count();
+            if n != manifest.repetitions as usize {
+                return bad(format!(
+                    "variant {} has {n} runs of case {}, the plan has {}",
+                    v.id, c.case_id, manifest.repetitions
+                ));
+            }
+        }
+        let mine: Vec<&EvaluationResult> = results.iter().filter(|r| r.variant == v.id).collect();
+        let runs = mine.len();
+        let count =
+            |name: &str| -> u64 { mine.iter().filter_map(|r| r.value(name)).sum::<f64>() as u64 };
+        let tokens: Vec<f64> = mine
+            .iter()
+            .filter_map(|r| Some(r.value("input_tokens")? + r.value("output_tokens")?))
+            .collect();
+        let costs: Vec<f64> = mine.iter().filter_map(|r| r.value("cost_usd")).collect();
+        let share = |n: usize| n as f64 / runs as f64;
+        let verdicts = |w: Verdict| mine.iter().filter(|r| r.verdict == w).count();
+        summaries.push(VariantSummary {
+            variant: v.id.clone(),
+            runs,
+            passed: verdicts(Verdict::Pass),
+            failed: verdicts(Verdict::Fail),
+            incomplete: verdicts(Verdict::Incomplete),
+            pass_rate: share(verdicts(Verdict::Pass)),
+            wall_time_ms: spread(
+                mine.iter()
+                    .filter_map(|r| r.value("wall_time_ms"))
+                    .collect(),
+            ),
+            usage_coverage: share(tokens.len()),
+            tokens: (!tokens.is_empty()).then(|| tokens.iter().sum()),
+            cost_coverage: share(costs.len()),
+            cost_usd_estimated: (!costs.is_empty()).then(|| costs.iter().sum()),
+            tool_calls: count("tool_calls"),
+            delegated_tasks: count("delegated_tasks"),
+            tool_failures: count("tool_failures"),
+            permission_denials: count("permission_denials"),
+            failed_attempts: count("failed_attempts"),
+            failed_checks: mine.iter().map(|r| failed_checks(r, None)).sum(),
+            policy_failures: mine
+                .iter()
+                .map(|r| failed_checks(r, Some(CheckKind::PolicyInvariant)))
+                .sum(),
+        });
+        if mine.iter().any(|r| r.context.concurrent_runs > 1) {
+            caveats.push(format!(
+                "variant {}: runs overlapped, so wall times are not isolated",
+                v.id
+            ));
+        }
+    }
+    let differs = |label: &str, pick: &dyn Fn(&EvaluationResult) -> String| {
+        let mut seen: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+        for v in &manifest.variants {
+            let versions: std::collections::BTreeSet<String> = results
+                .iter()
+                .filter(|r| r.variant == v.id)
+                .map(pick)
+                .collect();
+            seen.entry(versions.into_iter().collect::<Vec<_>>().join("+"))
+                .or_default()
+                .push(&v.id);
+        }
+        (seen.len() > 1).then(|| {
+            format!(
+                "the variants ran with different {label}s: {}",
+                seen.iter()
+                    .map(|(k, v)| format!("{} on {k}", v.join(",")))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        })
+    };
+    caveats.extend(differs("CLI version", &|r| {
+        r.context
+            .cli_version
+            .clone()
+            .unwrap_or_else(|| "unknown".into())
+    }));
+    caveats.extend(differs("extension version", &|r| {
+        r.context.extension_version.clone()
+    }));
+    let benchmark_sized = manifest.cases.len() >= MIN_BENCHMARK_CASES;
+    if !benchmark_sized {
+        caveats.push(format!(
+            "{} cases is below the {MIN_BENCHMARK_CASES} a benchmark needs",
+            manifest.cases.len()
+        ));
+    }
+    if manifest.repetitions == 1 {
+        caveats.push("one run per case: no estimate of run to run variability".into());
+    }
+    Ok(Comparison {
+        experiment_id: manifest.experiment_id.clone(),
+        suite: manifest.suite.clone(),
+        suite_version: manifest.suite_version,
+        cases: manifest.cases.len(),
+        repetitions: manifest.repetitions,
+        benchmark_sized,
+        variants: summaries,
+        caveats,
+    })
 }
 
 impl Comparison {
@@ -177,6 +378,77 @@ impl Comparison {
     /// policy invariants, permission denials) outweighs any gain, and a gain is only counted from
     /// numbers both sides have.
     pub fn judge(&self, baseline: &str, candidate: &str) -> Result<Judgement, ExperimentError> {
-    todo!("#293 red")
-}
+        let find = |id: &str| {
+            self.variants
+                .iter()
+                .find(|v| v.variant == id)
+                .ok_or_else(|| {
+                    ExperimentError::Mismatch(format!("no variant {id} in the comparison"))
+                })
+        };
+        let (a, b) = (find(baseline)?, find(candidate)?);
+        let mut regressed = Vec::new();
+        if b.pass_rate < a.pass_rate {
+            regressed.push(format!(
+                "pass rate {:.2} against {:.2}",
+                b.pass_rate, a.pass_rate
+            ));
+        }
+        if b.failed_checks > a.failed_checks {
+            regressed.push(format!(
+                "failed checks {} against {}",
+                b.failed_checks, a.failed_checks
+            ));
+        }
+        if b.policy_failures > a.policy_failures {
+            regressed.push(format!(
+                "policy invariant failures {} against {}",
+                b.policy_failures, a.policy_failures
+            ));
+        }
+        if b.permission_denials > a.permission_denials {
+            regressed.push(format!(
+                "permission denials {} against {}",
+                b.permission_denials, a.permission_denials
+            ));
+        }
+        let mut better = Vec::new();
+        if let (Some(x), Some(y)) = (a.wall_time_ms.median, b.wall_time_ms.median) {
+            if y < x {
+                better.push(format!("median wall time {y:.0} ms against {x:.0} ms"));
+            }
+        }
+        if b.tool_calls < a.tool_calls {
+            better.push(format!(
+                "tool calls {} against {}",
+                b.tool_calls, a.tool_calls
+            ));
+        }
+        if let (Some(x), Some(y)) = (a.tokens, b.tokens) {
+            if a.usage_coverage == 1.0 && b.usage_coverage == 1.0 && y < x {
+                better.push(format!("tokens {y:.0} against {x:.0}"));
+            }
+        }
+        if let (Some(x), Some(y)) = (a.cost_usd_estimated, b.cost_usd_estimated) {
+            if a.cost_coverage == 1.0 && b.cost_coverage == 1.0 && y < x {
+                better.push(format!("estimated cost {y:.4} usd against {x:.4} usd"));
+            }
+        }
+        Ok(if !regressed.is_empty() && !better.is_empty() {
+            Judgement::Unsafe { regressed, better }
+        } else if !regressed.is_empty() {
+            Judgement::Regression { regressed }
+        } else if !self.benchmark_sized {
+            Judgement::Inconclusive {
+                reason: format!(
+                    "{} cases, a benchmark needs {MIN_BENCHMARK_CASES}",
+                    self.cases
+                ),
+            }
+        } else if better.is_empty() {
+            Judgement::NoDifference
+        } else {
+            Judgement::Improvement { better }
+        })
+    }
 }

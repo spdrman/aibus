@@ -265,10 +265,9 @@ fn result(
     revision: &str,
 ) -> EvaluationResult {
     let mut checks = Vec::new();
-    for (n, outcome) in std::iter::repeat(CheckOutcome::Pass)
-        .take(pass)
-        .chain(std::iter::repeat(CheckOutcome::Fail).take(fail))
-        .chain(std::iter::repeat(CheckOutcome::NotRun).take(not_run))
+    for (n, outcome) in std::iter::repeat_n(CheckOutcome::Pass, pass)
+        .chain(std::iter::repeat_n(CheckOutcome::Fail, fail))
+        .chain(std::iter::repeat_n(CheckOutcome::NotRun, not_run))
         .enumerate()
     {
         checks.push(CheckResult {

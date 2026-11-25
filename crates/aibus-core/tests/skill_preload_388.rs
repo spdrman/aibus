@@ -25,7 +25,10 @@ fn preload_reads_the_user_and_extra_scopes_set_at_startup() {
     }
     skill::set_session_dirs(Some(user), vec![extra]);
     let name: AgentName = "general".parse().unwrap();
-    let mut def = discover_agents(None, d.path(), None, &[], &[]).unwrap().agents[&name].clone();
+    let mut def = discover_agents(None, d.path(), None, &[], &[])
+        .unwrap()
+        .agents[&name]
+        .clone();
     def.skills = vec!["from-user".into(), "from-extra".into()];
     let conv = build(&ContextInput {
         def: &def,
@@ -36,6 +39,16 @@ fn preload_reads_the_user_and_extra_scopes_set_at_startup() {
         git: None,
         data_home: None,
     });
-    assert!(conv.system.contains("## Skill: from-user\nfrom-user body\n"), "{}", conv.system);
-    assert!(conv.system.contains("## Skill: from-extra\nfrom-extra body\n"), "{}", conv.system);
+    assert!(
+        conv.system
+            .contains("## Skill: from-user\nfrom-user body\n"),
+        "{}",
+        conv.system
+    );
+    assert!(
+        conv.system
+            .contains("## Skill: from-extra\nfrom-extra body\n"),
+        "{}",
+        conv.system
+    );
 }

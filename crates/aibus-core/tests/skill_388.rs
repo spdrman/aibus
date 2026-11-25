@@ -132,8 +132,9 @@ fn a_file_without_a_usable_frontmatter_is_reported() {
     let set = skill::discover(d.path(), None, &[]);
     // A bare file is a warning: it still preloads whole, so `agent validate` stays green on it.
     assert!(
-        set.findings.warnings.iter().any(|f| f.field == "frontmatter"
-            && f.path.as_ref().unwrap().ends_with("bare/SKILL.md")),
+        set.findings.warnings.iter().any(
+            |f| f.field == "frontmatter" && f.path.as_ref().unwrap().ends_with("bare/SKILL.md")
+        ),
         "{:?}",
         set.findings
     );
@@ -469,7 +470,11 @@ mod confinement {
     fn a_skill_directory_that_is_a_link_out_of_the_scope_is_refused() {
         let (d, project, _) = world();
         let outside = secret(d.path());
-        fs::write(outside.join("SKILL.md"), "---\nname: linked\ndescription: d\n---\nsecret body").unwrap();
+        fs::write(
+            outside.join("SKILL.md"),
+            "---\nname: linked\ndescription: d\n---\nsecret body",
+        )
+        .unwrap();
         symlink(&outside, project.join("linked")).unwrap();
         let set = skill::discover(d.path(), None, &[]);
         assert!(!set.skills.contains_key("linked"), "{:?}", set.skills);

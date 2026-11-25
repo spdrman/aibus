@@ -161,7 +161,11 @@ fn a_bare_skill_file_is_a_warning_and_agent_validate_still_exits_zero() {
     let home = xdg_temp();
     let (project, _) = setup(home.path());
     fs::create_dir_all(project.join("old")).unwrap();
-    fs::write(project.join("old/SKILL.md"), "just instructions, no frontmatter").unwrap();
+    fs::write(
+        project.join("old/SKILL.md"),
+        "just instructions, no frontmatter",
+    )
+    .unwrap();
     let agents = home.path().join("proj/.aibus/agents");
     fs::create_dir_all(&agents).unwrap();
     fs::write(
@@ -171,7 +175,17 @@ fn a_bare_skill_file_is_a_warning_and_agent_validate_still_exits_zero() {
     .unwrap();
     for args in [["agent", "validate"], ["skill", "validate"]] {
         let out = aibus(home.path(), &args);
-        assert_eq!(out.status.code(), Some(0), "{args:?}: {}{}", stdout(&out), stderr(&out));
-        assert!(stdout(&out).contains("warning:") && stdout(&out).contains("frontmatter"), "{}", stdout(&out));
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{args:?}: {}{}",
+            stdout(&out),
+            stderr(&out)
+        );
+        assert!(
+            stdout(&out).contains("warning:") && stdout(&out).contains("frontmatter"),
+            "{}",
+            stdout(&out)
+        );
     }
 }

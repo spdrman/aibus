@@ -115,8 +115,8 @@ pub fn session_dirs() -> (Option<&'static Path>, &'static [PathBuf]) {
 /// under `root` (the `read` tool's rule, `tools::policy::resolve`), so a link that leaves the scope
 /// is refused. The size cap is applied to what is read now, not to what discovery saw.
 fn read_skill(root: &Path, name: &str) -> Result<String, String> {
-    let (real, inside) = resolve(root, &format!("{name}/SKILL.md"))
-        .map_err(|e| format!("cannot read: {e}"))?;
+    let (real, inside) =
+        resolve(root, &format!("{name}/SKILL.md")).map_err(|e| format!("cannot read: {e}"))?;
     if !inside {
         return Err(format!(
             "resolves to {}, outside the skill directory {}",
@@ -144,7 +144,11 @@ pub fn discover(cwd: &Path, user_dir: Option<&Path>, extra_dirs: &[PathBuf]) -> 
         .map(|r| (Scope::Project, r.join(".aibus/skills")))
         .into_iter()
         .chain(user_dir.map(|d| (Scope::User, d.to_owned())))
-        .chain(extra_dirs.iter().map(|d| (Scope::Extra(d.clone()), d.clone())));
+        .chain(
+            extra_dirs
+                .iter()
+                .map(|d| (Scope::Extra(d.clone()), d.clone())),
+        );
     for (scope, dir) in scopes {
         let Ok(read) = fs::read_dir(&dir) else {
             continue;

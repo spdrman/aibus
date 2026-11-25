@@ -1,25 +1,24 @@
-import { DockviewReact, type DockviewReadyEvent } from "dockview-react";
 import { useState } from "react";
-import { ProvenanceBanner, useFixtureReplay } from "./workspaces/run";
-import { GraphView, InspectorView, TimelineView, TraceContext } from "./workspaces/trace";
+import type { Workspace } from "./shell/registry";
+import { Shell } from "./shell/Shell";
+import { ProvidersWorkspace } from "./workspaces/providers";
+import { ProvenanceBanner, RunWorkspace, useFixtureReplay } from "./workspaces/run";
+import { TraceContext, TraceWorkspace } from "./workspaces/trace";
+import { WorkflowWorkspace } from "./workspaces/workflow";
 
-const components = { graph: GraphView, timeline: TimelineView, details: InspectorView } as const;
-
-function onReady(e: DockviewReadyEvent) {
-  const graph = e.api.addPanel({ id: "graph", component: "graph", title: "Graph" });
-  e.api.addPanel({ id: "timeline", component: "timeline", title: "Timeline", position: { referencePanel: graph, direction: "below" } });
-  e.api.addPanel({ id: "details", component: "details", title: "Details", position: { referencePanel: graph, direction: "right" } });
-}
-
+// The data hooks live here, above the shell, so they survive any workspace switch.
 export function App() {
   const { snap, error, replay } = useFixtureReplay();
   const [selected, select] = useState<string | null>(null);
+  const workspaces: Workspace[] = [
+    { id: "workflow", label: "Workflow", render: () => <WorkflowWorkspace /> },
+    { id: "run", label: "Run", render: () => <RunWorkspace snap={snap} error={error} /> },
+    { id: "trace", label: "Trace", render: () => <TraceWorkspace /> },
+    { id: "providers", label: "Providers", render: () => <ProvidersWorkspace /> },
+  ];
   return (
     <TraceContext.Provider value={{ snap, selected, select }}>
-      <div className="app">
-        <ProvenanceBanner snap={snap} error={error} onReplay={() => void replay()} />
-        <DockviewReact className="dock dockview-theme-spike" components={components} onReady={onReady} />
-      </div>
+      <Shell workspaces={workspaces} header={<ProvenanceBanner snap={snap} error={error} onReplay={() => void replay()} />} />
     </TraceContext.Provider>
   );
 }

@@ -1,39 +1,53 @@
+/* Colours come from @sharedui/design-tokens (--ui-*), which switch with data-theme and
+   prefers-color-scheme. The short names below are aliases for the trace views, so there is one
+   palette and no second dark block to keep in step. Measured in src/contrast.test.ts. */
 :root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --surface: #f1f4f9;
-  --text: #1a1f2b;
-  --muted: #475266;
-  --border: #66718a;
-  --accent: #1d4ed8;
-  --ok: #0f6b2f;
-  --fail: #b42318;
-  --warn: #7a4f00;
-  --banner-bg: #fff1c2;
-  --banner-text: #3d2a00;
-  --tab-bg: #e3e8f1;
-  --tab-active-bg: #ffffff;
-  --tab-text: #2c3547;
-  --tab-active-text: #0b1220;
+  --bg: var(--ui-bg-app);
+  --surface: var(--ui-surface-raised);
+  --text: var(--ui-text-primary);
+  --muted: var(--ui-text-secondary);
+  --border: var(--ui-border);
+  --accent: var(--ui-text-link);
+  --ok: var(--ui-text-success);
+  --fail: var(--ui-text-danger);
+  --warn: var(--ui-text-warning);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #0f1420; --surface: #1a2132; --text: #e6eaf2; --muted: #aab4c6; --border: #8793aa; --accent: #8ab4ff; --ok: #6fd08c; --fail: #ff9a90; --warn: #f2c14e; --banner-bg: #3a2f10; --banner-text: #ffe9a8; --tab-bg: #1f2840; --tab-active-bg: #0f1420; --tab-text: #c3ccdc; --tab-active-text: #ffffff; }
-}
-:root[data-theme="dark"] { --bg: #0f1420; --surface: #1a2132; --text: #e6eaf2; --muted: #aab4c6; --border: #8793aa; --accent: #8ab4ff; --ok: #6fd08c; --fail: #ff9a90; --warn: #f2c14e; --banner-bg: #3a2f10; --banner-text: #ffe9a8; --tab-bg: #1f2840; --tab-active-bg: #0f1420; --tab-text: #c3ccdc; --tab-active-text: #ffffff; }
 
+[hidden] { display: none !important; }
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.app { display: flex; flex-direction: column; height: 100%; }
-.banner { background: var(--banner-bg); color: var(--banner-text); padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+body { background: var(--ui-bg-app); color: var(--ui-text-primary); font: var(--ui-font-size-sm)/1.4 var(--ui-font-sans); }
+code, kbd { font-family: var(--ui-font-mono); }
+a { color: var(--ui-text-link); }
+
+.shell { display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.shell__bar { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); align-items: center; justify-content: space-between; padding: var(--ui-space-2) var(--ui-space-3); background: var(--ui-bg-subtle); border-bottom: 1px solid var(--ui-divider); }
+.shell__nav, .shell__tools { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.shell__main { flex: 1; min-height: 0; min-width: 0; position: relative; }
+.shell__workspace { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; }
+.shell__help { padding: var(--ui-space-2) var(--ui-space-3); background: var(--ui-surface-raised); border-bottom: 1px solid var(--ui-divider); }
+.shell__help dl { display: flex; flex-wrap: wrap; gap: var(--ui-space-2) var(--ui-space-5); margin: 0; }
+.shell__shortcut { display: flex; gap: var(--ui-space-2); }
+.shell__shortcut dd { margin: 0; color: var(--ui-text-secondary); }
+kbd { padding: 0 var(--ui-space-1); border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); background: var(--ui-surface); }
+
+.banner { background: var(--ui-surface-selected); color: var(--ui-text-primary); padding: var(--ui-space-2) var(--ui-space-4); border-bottom: 1px solid var(--ui-border-strong); display: flex; gap: var(--ui-space-4); align-items: center; flex-wrap: wrap; }
 .banner strong { text-transform: uppercase; letter-spacing: .04em; }
-.banner button { font: inherit; color: var(--banner-text); background: transparent; border: 1px solid var(--banner-text); border-radius: 4px; padding: 2px 10px; cursor: pointer; }
-.dock { flex: 1; min-height: 0; }
-.panel { height: 100%; overflow: auto; background: var(--bg); color: var(--text); padding: 12px; box-sizing: border-box; }
-.muted { color: var(--muted); }
+.banner .stack { margin-left: auto; }
+
+.notice { margin: var(--ui-space-4); padding: var(--ui-space-4); max-width: 40rem; border: 1px solid var(--ui-border); border-left-width: 4px; border-radius: var(--ui-radius-md); background: var(--ui-surface-raised); color: var(--ui-text-primary); }
+.notice h2 { margin: 0 0 var(--ui-space-2); font-size: var(--ui-font-size-md); }
+.notice p { margin: 0; color: var(--ui-text-secondary); }
+.notice:not([data-kind="empty"]) { border-left-color: var(--ui-border-danger); }
+.notice:not([data-kind="empty"]) h2 { color: var(--ui-text-danger); }
+
+.dock { flex: 1; min-height: 0; min-width: 0; }
+.panel { height: 100%; overflow: auto; background: var(--ui-bg-app); color: var(--ui-text-primary); padding: var(--ui-space-3); box-sizing: border-box; }
+.muted { color: var(--ui-text-secondary); }
 table { border-collapse: collapse; width: 100%; }
-th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--surface); white-space: nowrap; }
-th { color: var(--muted); font-weight: 600; position: sticky; top: -12px; z-index: 1; background: var(--bg); }
-tr[data-selected="true"] td { background: var(--surface); }
+th, td { text-align: left; padding: var(--ui-space-1) var(--ui-space-2); border-bottom: 1px solid var(--ui-divider); white-space: nowrap; }
+th { color: var(--ui-text-secondary); font-weight: 600; position: sticky; top: calc(-1 * var(--ui-space-3)); z-index: 1; background: var(--ui-bg-app); }
+tr[data-selected="true"] td { background: var(--ui-surface-selected); }
+tr[tabindex]:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: -2px; }
 .node rect { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; }
 .node[data-selected="true"] rect { stroke: var(--accent); stroke-width: 3; }
 .node text { fill: var(--text); }
@@ -43,23 +57,28 @@ tr[data-selected="true"] td { background: var(--surface); }
 .node[data-status="running"] rect { stroke: var(--accent); stroke-dasharray: 5 3; }
 .link { stroke: var(--border); stroke-width: 1.5; fill: none; }
 .link.delegation { stroke: var(--accent); stroke-width: 2; }
-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
-dt { color: var(--muted); }
-dd { margin: 0; word-break: break-all; }
-.dockview-theme-spike {
-  --dv-group-view-background-color: var(--bg);
-  --dv-tabs-and-actions-container-background-color: var(--tab-bg);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--tab-active-bg);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--tab-bg);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--tab-active-bg);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--tab-bg);
-  --dv-activegroup-visiblepanel-tab-color: var(--tab-active-text);
-  --dv-activegroup-hiddenpanel-tab-color: var(--tab-text);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--tab-active-text);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--tab-text);
-  --dv-separator-border: var(--border);
-  --dv-tab-divider-color: var(--border);
-  --dv-paneview-header-border-color: var(--border);
-}
 .node { cursor: pointer; }
-.banner .stack { margin-left: auto; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--ui-space-1) var(--ui-space-3); }
+dt { color: var(--ui-text-secondary); }
+dd { margin: 0; word-break: break-all; }
+
+.dockview-theme-spike {
+  --dv-group-view-background-color: var(--ui-bg-app);
+  --dv-tabs-and-actions-container-background-color: var(--ui-bg-subtle);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--ui-bg-app);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--ui-bg-subtle);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--ui-bg-app);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--ui-bg-subtle);
+  --dv-activegroup-visiblepanel-tab-color: var(--ui-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--ui-text-secondary);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--ui-text-primary);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--ui-text-secondary);
+  --dv-separator-border: var(--ui-border);
+  --dv-tab-divider-color: var(--ui-border);
+  --dv-paneview-header-border-color: var(--ui-border);
+}
+
+@media (max-width: 720px) {
+  .banner .stack { margin-left: 0; }
+  .shell__help dl { flex-direction: column; }
+}

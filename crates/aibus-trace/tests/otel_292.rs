@@ -209,3 +209,79 @@ fn a_thin_trace_reports_what_is_missing() {
     let tool = find(&s, "aibus.tool", None);
     assert_eq!(attr(tool, "aibus.complete").unwrap()["boolValue"], false);
 }
+
+fn ev(n: u64, kind: EventKind, f: &dyn Fn(&mut TraceEvent)) -> TraceEvent {
+    let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000 + n);
+    let mut e = TraceEvent::new(
+        &attempt(),
+        EventIds::default().next(at, &[&n.to_le_bytes()]),
+        kind,
+        Origin::CliStream,
+        Visibility::Observed,
+        at,
+        "test/1",
+    );
+    f(&mut e);
+    e
+}
+
+#[test]
+fn a_repeated_delegation_is_one_span_and_the_child_still_parents_under_it() {
+    let mut t = trace(true, true);
+    t.push(ev(50, EventKind::TaskDelegated, &|e| {
+        e.agent_id = Some("lead".into());
+        e.native.tool_use_id = Some("toolu_A".into());
+    }));
+    let (body, c) = to_otlp(&t, &Revisions::default(), &Redactor::new());
+    let s = spans(&body);
+    let deleg: Vec<&Value> = s
+        .iter()
+        .filter(|x| x["name"] == "aibus.delegation")
+        .collect();
+    assert_eq!(
+        deleg.len(),
+        1,
+        "same tool_use_id twice is one delegation span"
+    );
+    let child = find(&s, "aibus.agent", Some(("aibus.agent.id", "child")));
+    assert_eq!(child["parentSpanId"], deleg[0]["spanId"]);
+    assert_eq!(c.unresolved_parents, 0);
+}
+
+#[test]
+fn an_agent_naming_itself_as_parent_hangs_under_the_attempt_and_is_counted() {
+    let mut t = trace(true, true);
+    t.push(ev(50, EventKind::AgentStarted, &|e| {
+        e.agent_id = Some("solo".into());
+        e.parent_agent_id = Some("solo".into());
+    }));
+    let (body, c) = to_otlp(&t, &Revisions::default(), &Redactor::new());
+    let s = spans(&body);
+    let att = find(&s, "aibus.attempt", None);
+    let solo = find(&s, "aibus.agent", Some(("aibus.agent.id", "solo")));
+    assert_eq!(solo["parentSpanId"], att["spanId"]);
+    assert_ne!(solo["parentSpanId"], solo["spanId"]);
+    assert_eq!(c.unresolved_parents, 1);
+}
+
+#[test]
+fn a_repeated_agent_started_does_not_repeat_the_parent_attributes() {
+    let mut t = trace(true, true);
+    t.push(ev(50, EventKind::AgentStarted, &|e| {
+        e.agent_id = Some("child".into());
+        e.parent_agent_id = Some("lead".into());
+        e.parent_tool_use_id = Some("toolu_A".into());
+    }));
+    let (body, _) = to_otlp(&t, &Revisions::default(), &Redactor::new());
+    let s = spans(&body);
+    let child = find(&s, "aibus.agent", Some(("aibus.agent.id", "child")));
+    for key in ["aibus.parent_agent_id", "aibus.parent_tool_use_id"] {
+        let n = child["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| a["key"] == key)
+            .count();
+        assert_eq!(n, 1, "{key} appears once");
+    }
+}

@@ -202,7 +202,7 @@
             }
           },
           "invocation": {
-            "description": "aibus_run (a run the lead starts), process (an official CLI started with an argv vector, no shell, and native subagents inline in --agents), native_subagent, or attached_session (handed to the agent session attached to this one, which pulls it with next_step).",
+            "description": "aibus_run (a run the lead starts), process (an official CLI started with an argv vector, no shell, and native subagents inline in --agents), native_subagent, attached_session (handed to the agent session attached to this one, which pulls it with next_step), cli_run (an extension's CLI runtime, codex or gemini, with the prompt on stdin), or openrouter_run (a run billed to the user's own OpenRouter account, after their approval).",
             "type": "object",
             "required": [
               "kind"
@@ -213,7 +213,9 @@
                   "aibus_run",
                   "process",
                   "native_subagent",
-                  "attached_session"
+                  "attached_session",
+                  "cli_run",
+                  "openrouter_run"
                 ]
               },
               "shell": {

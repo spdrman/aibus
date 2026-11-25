@@ -198,3 +198,11 @@ Cut from the reduced scope, still wanted:
 - Scheduler decisions and provider sessions as their own spans (route decisions are events on the attempt span for now).
 - A bounded queue between the run and the exporter. Each export is one thread (the caller writes the `thread::spawn`), so a slow collector under many exports would pile threads up; a bounded queue with drop-on-full belongs with the config wiring.
 - Model and version labels on the resource (spec 7.2). Only the provider extension is exported today.
+
+## H1.5 per-agent track record (#392)
+
+- **Evals result type.** PR #398 (branch `feat/293-evals`, #293 / A3.3) is open now and has `EvaluationResult` in `crates/aibus-trace/src/eval.rs`, but I wrote the `agent eval` scorecard before it and did not merge the two: the scorecard is its own minimal JSON (`scorecard_version` as a string, `agent`, `summary`, `cases[]` with `result`, `reason` and the two exit codes) and `EvaluationResult` is one row per case with `result_version` as a `u32`, a verdict (pass, fail, incomplete), checks and a run context. They should converge later: each case row becomes an `EvaluationResult` with `done_when` as a deterministic check, and the scorecard keeps only the summary, with the version types lined up. It is a different crate and a separate command, so it is a follow-up once #398 lands.
+- **Cases only judge by exit codes.** A case passes when the run exits 0 and its `done_when` exits 0. Output matching, scoring and cost or turn budgets per case are not there. Cases run in the project directory, not a scratch copy, so a case whose agent writes files leaves them there.
+- **Learning extraction uses the lead's model** for workers too, one call per finished worker run (at most four a session). A per-agent extraction model is not wired.
+- **Roster suffix is read once at session start.** An agent reload (`reload_on_change`, TUI) rebuilds the roster without it until the next session.
+- **`agent stats` reads the session index**, so runs of a session that was killed before it ended are not counted until `aibus session list --rebuild` or the next start rebuilds the index.

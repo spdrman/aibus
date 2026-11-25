@@ -144,6 +144,7 @@ auth = { keyring = true }
 extra_dirs = [".claude/agents"]
 trusted_dirs = []
 reload_on_change = true
+roster_stats = false   # true adds "(last 18 runs: 15 completed)" to each roster line, from the index
 
 [skills]               # read after .aibus/skills and ~/.config/aibus/skills
 extra_dirs = []

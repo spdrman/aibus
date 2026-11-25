@@ -117,7 +117,7 @@ Markdown with YAML frontmatter (01 section 1), TOML (01 section 8.4), YAML (01 s
 
 ## 3. Config file
 
-TOML. User config at `~/.config/aibus/config.toml`, project overrides at `.aibus/settings.toml`, merged with project winning per key (tables merge, arrays replace, except `[[account]]` which is user-only and `[hooks]` which concatenates). `aibus config show` prints the merged result; `aibus config validate` exits 3 with the path and line of the first error.
+TOML. User config at `~/.config/aibus/config.toml`, project overrides at `.aibus/settings.toml`, merged with project winning per key (tables merge, arrays replace, except `[[account]]`, `[[provider]]` and `[[schedule]]`, which are user-only, and `[hooks]` which concatenates). `aibus config show` prints the merged result; `aibus config validate` exits 3 with the path and line of the first error.
 
 ```toml
 [defaults]

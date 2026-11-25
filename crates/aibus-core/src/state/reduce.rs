@@ -177,7 +177,8 @@ impl R<'_> {
 
     /// A deterministic id: the clock for the time part, the session and a counter for the rest.
     fn next_run_id(&mut self) -> RunId {
-        let seq = as_i64(self.cur(RUN_SEQ)).unwrap_or(0) + 1;
+        // The pending value: two runs queued in one step (two `@agent-` mentions) get two ids.
+        let seq = as_i64(&self.now(RUN_SEQ)).unwrap_or(0) + 1;
         self.put(RUN_SEQ, n(seq));
         let session = as_str(self.cur(SESSION_ID))
             .and_then(|t| Ulid::from_string(t).ok())
@@ -198,7 +199,7 @@ impl R<'_> {
         let max = get(self.cur(LIMITS), "max_runs_per_session")
             .and_then(as_i64)
             .unwrap_or(500);
-        if as_list(self.cur(RUNS_ORDER)).len() as i64 >= max {
+        if as_list(&self.now(RUNS_ORDER)).len() as i64 >= max {
             self.log("warn", "run limit reached, nothing queued");
             return;
         }

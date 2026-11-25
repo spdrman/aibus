@@ -421,6 +421,7 @@ impl View {
                     if let Some(summary) = raw_of("summary") {
                         push_both(&mut self.tail, &mut self.log, &format!("\n{summary}\n"));
                     }
+                    self.verified = ev["verified"].as_bool().unwrap_or(false);
                     self.ended_as = Some(status);
                 } else if let Some(a) = self
                     .attempts

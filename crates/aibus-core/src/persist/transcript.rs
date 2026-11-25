@@ -207,7 +207,7 @@ impl Transcript {
         self.assistant(at)?;
         self.meta.status = status.into();
         self.meta.ended_at = Some(rfc3339(at));
-        self.line(at, json!({"type": "end", "status": status, "turns": turns}))?;
+        self.line(at, json!({"type": "end", "status": status, "turns": turns, "verified": verified}))?;
         self.write_meta()
     }
 

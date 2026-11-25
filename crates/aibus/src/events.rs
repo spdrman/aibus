@@ -168,6 +168,7 @@ impl<'a> Events<'a> {
                 },
                 "summary": prefix(&result.summary, self.max_bytes),
                 "summary_file": result.summary_file,
+                "verified": result.verified,
             }),
             Msg::RunFailed { run, error } => json!({
                 "run": run.to_string(),

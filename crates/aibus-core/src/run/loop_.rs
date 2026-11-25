@@ -1214,6 +1214,33 @@ async fn drive(
                         &format!("[hook {}] {}", b.hook, b.reason),
                     ));
                     again = true;
+                } else {
+                    // The agent's own definition of done is checked last, once the other
+                    // stop hooks have let it go.
+                    let last = last_text(conv);
+                    match t.check_done(event, matcher.as_deref(), mode, &last).await {
+                        Ok(checked) => t.verified.store(checked, Ordering::SeqCst),
+                        Err(reason) => {
+                            t.verified.store(false, Ordering::SeqCst);
+                            done_failures += 1;
+                            let cap = cfg.def.done.done_retries.unwrap_or(DONE_RETRIES);
+                            if done_failures > cap {
+                                // The last failing reason ends up in the summary.
+                                if let Some(m) = conv.messages.last_mut() {
+                                    m.blocks.push(ContentBlock::Text(format!(
+                                        "\n\n[not done after {cap} retries] {reason}"
+                                    )));
+                                }
+                                return End::of(RunStatus::Partial);
+                            }
+                            let goal = cfg.def.done.goal.as_deref().map_or(String::new(), |g| format!(" (goal: {g})"));
+                            conv.messages.push(Message::text(
+                                MessageRole::User,
+                                &format!("[done check] not done yet{goal}: {reason}"),
+                            ));
+                            again = true;
+                        }
+                    }
                 }
             }
             if let (false, Some(la)) = (again, lead.as_mut()) {

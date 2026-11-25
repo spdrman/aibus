@@ -542,7 +542,10 @@ fn extra_dirs_lose_their_done_when_unless_trusted() {
     assert_eq!(found.agents[&key].done.done_when, None);
     assert_eq!(found.agents[&key].done.goal.as_deref(), Some("g"));
     assert!(
-        found.warnings.iter().any(|w| w.contains("done_when ignored")),
+        found
+            .warnings
+            .iter()
+            .any(|w| w.contains("done_when ignored")),
         "{:?}",
         found.warnings
     );

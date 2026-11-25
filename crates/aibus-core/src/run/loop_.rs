@@ -448,8 +448,7 @@ impl Task<'_> {
         mode: PermissionMode,
         extra: Map<String, Value>,
     ) -> Fired {
-        self.fire_from(None, event, matcher, mode, extra)
-            .await
+        self.fire_from(None, event, matcher, mode, extra).await
     }
 
     async fn fire_from(
@@ -1208,7 +1207,13 @@ async fn drive(
                         // tree. Exit 0 passes, exit 2 or a verdict blocks with its reason, and
                         // any other exit, a signal, a timeout or a start error is no pass.
                         let fired = t
-                            .fire_from(Some((&scoped, &cfg.cwd)), event, matcher.as_deref(), mode, extra)
+                            .fire_from(
+                                Some((&scoped, &cfg.cwd)),
+                                event,
+                                matcher.as_deref(),
+                                mode,
+                                extra,
+                            )
                             .await;
                         check = match (fired.block, fired.ran.first()) {
                             (Some(b), _) => Err(format!("done_when: {}", b.reason)),

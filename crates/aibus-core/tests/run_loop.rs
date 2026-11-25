@@ -1071,7 +1071,8 @@ async fn only_exit_zero_passes_done_when_and_everything_else_ends_partial_unveri
         assert!(!r.verified, "{command}");
         assert_eq!(done.fake.requests().len(), 2, "{command}: one retry");
         assert!(
-            r.summary.contains("not done after 1 retries") && r.summary.contains("only exit 0 passes"),
+            r.summary.contains("not done after 1 retries")
+                && r.summary.contains("only exit 0 passes"),
             "{command}: {}",
             r.summary
         );

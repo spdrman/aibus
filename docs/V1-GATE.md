@@ -108,7 +108,7 @@ All fifteen are closed except this one. A closed issue here means its reduced sc
 What I ran, on 2026-11-25, as job `295-bench-mercury` through `/Users/rom/workspace/bench-queue.sh dh`:
 
 * **Build** (no exclusivity needed, so not on Mercury and not in the queue): the three bench executables, built with `cargo bench --locked --no-run` in `rust:1.89-bookworm` (linux/arm64) on the MacBook's Docker, from this PR's tree. The same bench binaries then ran in `debian:bookworm-slim` (same glibc) on Mercury. The tree sat at `/work` for both, so the baseline directory the binaries compiled in resolves.
-* **Host:** MERCURY, a colima Linux VM (aarch64, 6 CPUs, kernel 6.8.0-117), load 0.00 when the turn started, queue empty before and after. The queue held the turn for about 30 seconds.
+* **Host:** MERCURY, a colima Linux VM (aarch64, 6 CPUs, kernel 6.8.0-117), load 0.00 when the turn started, queue empty before and after. The turn lasted well under a minute.
 * **Pass 1** `AIBUS_RUNNER_CLASS=mercury AIBUS_BENCH_SAVE=1` wrote `benches/baselines/mercury/*.txt` (ten files, in this PR). **Pass 2** `AIBUS_BENCH_GATE=1` ran straight after against them: every bench was inside its absolute budget and inside baseline times 1.20 plus the 25 us noise floor, exit 0 for all three.
 
 | Bench | Baseline p99 (us) | Pass 2 p99 (us) | Budget p99 (us) |

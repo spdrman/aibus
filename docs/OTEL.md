@@ -23,4 +23,4 @@ docker run -d --name otelcol -p 4318:4318 -v $PWD/otelcol.yaml:/etc/otelcol/conf
 AIBUS_OTLP_TEST_ENDPOINT=http://127.0.0.1:4318/v1/traces cargo test -p aibus-otel -- --ignored
 ```
 
-with `otelcol.yaml` receiving OTLP http and exporting to `debug` (detailed verbosity). The test is ignored in gates because it needs the collector.
+with `otelcol.yaml` receiving OTLP http and exporting to `debug` (detailed verbosity). The test is ignored in gates because it needs the collector. I ran it on 2026-11-25 against `otel/opentelemetry-collector:0.116.1` (default config, in its own container on a throw-away docker network): the collector accepted the body and its debug exporter logged the resource attributes and spans. Langfuse is still unrun.

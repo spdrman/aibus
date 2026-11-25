@@ -397,6 +397,32 @@ fn a_mention_in_a_prompt_is_a_forced_background_delegate_of_the_lead() {
     assert_eq!(runnable(&a), [child.to_owned()], "the lead is alive, so it can start");
 }
 
+#[test]
+fn two_mentions_in_a_prompt_start_two_delegates_of_the_lead() {
+    let mut a = app();
+    a.step(Msg::SubmitPrompt { text: "hello".into() }).unwrap();
+    let lead = as_str(&as_list(a.graph.read_key("model:runs:order").unwrap())[0].clone())
+        .unwrap()
+        .parse::<RunId>()
+        .unwrap();
+    start_with(&mut a, lead, None, "acct");
+    a.step(Msg::SubmitPrompt {
+        text: "Use @agent-explore and @agent-plan on the parser".into(),
+    })
+    .unwrap();
+    let order = as_list(a.graph.read_key("model:runs:order").unwrap()).to_vec();
+    assert_eq!(order.len(), 3, "the lead and one delegate per mention");
+    let agents: Vec<String> = order[1..]
+        .iter()
+        .map(|id| {
+            let meta = a.graph.read_key(&format!("model:run:{}:meta", as_str(id).unwrap())).unwrap();
+            assert_eq!(as_str(get(meta, "parent").unwrap()), Some(lead.to_string().as_str()));
+            as_str(get(meta, "agent").unwrap()).unwrap().to_owned()
+        })
+        .collect();
+    assert_eq!(agents, ["explore", "plan"]);
+}
+
 // ---- the schema ---------------------------------------------------------------------------
 
 fn defs_with_reviewer() -> (Xdg, Vec<AgentDef>) {
@@ -447,7 +473,10 @@ fn the_delegate_tool_matches_01_section_4_1() {
     let roster = aibus_core::agent::roster::text(defs.iter());
     assert!(roster.contains("- code-reviewer: Reviews a diff for bugs."));
     assert!(spec.description.contains(&roster));
-    assert!(!spec.description.contains("- explore:"));
+    assert!(!roster.contains("- explore:"), "the shared roster text is still non-built-ins only");
+    // The built-in workers show a one-line description too, not just a name (#390).
+    assert!(spec.description.contains("- explore: Read-only codebase search"), "{}", spec.description);
+    assert!(spec.description.contains("- plan: Read-only research"), "{}", spec.description);
 }
 
 // ---- the executor hands runs over ---------------------------------------------------------

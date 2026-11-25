@@ -174,6 +174,7 @@ fn the_ninth_run_stays_queued_until_one_finishes_and_runnable_says_so() {
             duration: Default::default(),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();

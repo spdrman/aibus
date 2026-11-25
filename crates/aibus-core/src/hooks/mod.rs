@@ -217,6 +217,27 @@ impl HookRunner {
         scoped: &HookSet,
         cancel: &CancellationToken,
     ) -> Fired {
+        self.fire_from(input, scoped, cancel, true).await
+    }
+
+    /// Like `fire`, but only `scoped` runs: not `[hooks]`, which a caller that already fired
+    /// the event must not run twice (the compiled `done_when` check uses it).
+    pub async fn fire_scoped(
+        &self,
+        input: &HookInput<'_>,
+        scoped: &HookSet,
+        cancel: &CancellationToken,
+    ) -> Fired {
+        self.fire_from(input, scoped, cancel, false).await
+    }
+
+    async fn fire_from(
+        &self,
+        input: &HookInput<'_>,
+        scoped: &HookSet,
+        cancel: &CancellationToken,
+        with_global: bool,
+    ) -> Fired {
         // 01 section 6.3: a hook gets a minute unless it says otherwise, and the user is waiting
         // on `user_prompt_submit`, so that one never gets more than ten seconds.
         const DEFAULT_TIMEOUT_SECS: u32 = 60;
@@ -256,6 +277,7 @@ impl HookRunner {
             .global
             .get(event.as_str())
             .into_iter()
+            .filter(|_| with_global)
             .chain(scoped.get(event.as_str()))
             .chain(alias.and_then(|a| scoped.get(a)))
             .flatten()

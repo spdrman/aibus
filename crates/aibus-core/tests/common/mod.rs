@@ -235,6 +235,7 @@ fn def() -> AgentDef {
         initial_prompt: None,
         auto_compact_at: None,
         fallback: None,
+        done: Default::default(),
         system_prompt: SENTINEL.into(),
         source: DefSource {
             path: None,
@@ -277,6 +278,7 @@ fn setup_finished(a: &mut A) {
             duration: Duration::from_secs(1),
             error: None,
             worktree: None,
+            verified: false,
         },
     })
     .unwrap();
@@ -473,6 +475,7 @@ pub fn cases() -> Vec<Case> {
                     duration: Duration::from_secs(1),
                     error: None,
                     worktree: None,
+                    verified: false,
                 },
             },
             expect: vec![

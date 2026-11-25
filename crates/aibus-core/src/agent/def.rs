@@ -13,7 +13,7 @@ use smol_str::SmolStr;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use super::{
-    AgentDef, CheckpointSpec, DefSource, Effort, HookKind, HookSet, HookSpec, ModelRef,
+    AgentDef, CheckpointSpec, DefSource, DoneSpec, Effort, HookKind, HookSet, HookSpec, ModelRef,
     PermissionMode, Role, RouterSpec, ToolPattern, ToolPolicy,
 };
 use crate::ids::{AgentName, InvalidAgentName};
@@ -243,6 +243,20 @@ pub(crate) fn from_fields(
         None => None,
     };
 
+    let done = DoneSpec {
+        goal: string(&mut m, "goal")?,
+        done_when: string(&mut m, "done_when")?,
+        done_retries: match uint(&mut m, "done_retries")? {
+            Some(n) => Some(u32::try_from(n).map_err(|_| want("done_retries", "a u32"))?),
+            None => None,
+        },
+        output_schema: match m.remove("output_schema") {
+            None => None,
+            Some(v @ Value::Object(_)) => Some(v),
+            Some(_) => return Err(want("output_schema", "a JSON Schema map")),
+        },
+    };
+
     // `aibus agent import` parks the hooks of a foreign definition here; the user renames the key
     // to `hooks` to turn them on, so it is not an unknown key.
     m.remove("disabled_hooks");
@@ -273,6 +287,7 @@ pub(crate) fn from_fields(
             initial_prompt,
             auto_compact_at,
             fallback,
+            done,
             system_prompt: body.trim().to_string(),
             source,
         },
@@ -404,6 +419,18 @@ pub fn to_json(def: &AgentDef) -> Value {
     if let Some(f) = &def.fallback {
         m.insert("fallback".into(), f.iter().map(|a| a.0.as_str()).collect());
     }
+    if let Some(g) = &def.done.goal {
+        m.insert("goal".into(), g.clone().into());
+    }
+    if let Some(c) = &def.done.done_when {
+        m.insert("done_when".into(), c.clone().into());
+    }
+    if let Some(n) = def.done.done_retries {
+        m.insert("done_retries".into(), n.into());
+    }
+    if let Some(s) = &def.done.output_schema {
+        m.insert("output_schema".into(), s.clone());
+    }
     m.insert("prompt".into(), def.system_prompt.clone().into());
     Value::Object(m)
 }
@@ -416,7 +443,7 @@ pub fn to_markdown(def: &AgentDef) -> String {
     };
     fields.remove("prompt");
     // The order of the table in 01 section 1.1, not the map's alphabetical one.
-    const ORDER: [&str; 24] = [
+    const ORDER: [&str; 28] = [
         "name",
         "description",
         "role",
@@ -441,6 +468,10 @@ pub fn to_markdown(def: &AgentDef) -> String {
         "initial_prompt",
         "auto_compact_at",
         "fallback",
+        "goal",
+        "done_when",
+        "done_retries",
+        "output_schema",
     ];
     let mut out = String::from("---\n");
     for (k, v) in ORDER.iter().filter_map(|k| fields.get_key_value(*k)) {

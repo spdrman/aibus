@@ -615,6 +615,7 @@ fn result_with(summary: &str) -> RunResult {
         duration: Duration::ZERO,
         error: None,
         worktree: None,
+        verified: false,
     }
 }
 

@@ -233,6 +233,23 @@ pub struct DefSource {
     pub scope: Scope,
 }
 
+/// What "done" means for an agent (01 section 1.1): `goal`, `done_when`, `output_schema`.
+/// They are read and written together, so they live in one field.
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+pub struct DoneSpec {
+    /// What the run is for, in a sentence. Shown to the model with the retry reason.
+    pub goal: Option<String>,
+    /// A shell command compiled to the agent's stop hook: exit 2 keeps the run going.
+    pub done_when: Option<String>,
+    /// How many times a failed check may send the run round again; `DONE_RETRIES` when unset.
+    pub done_retries: Option<u32>,
+    /// A JSON Schema (the subset in `run::done`) the final message has to satisfy.
+    pub output_schema: Option<serde_json::Value>,
+}
+
+/// Retries a failed `done_when` or `output_schema` check gets when `done_retries` is not set.
+pub const DONE_RETRIES: u32 = 3;
+
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct AgentDef {
     pub name: AgentName,
@@ -259,6 +276,8 @@ pub struct AgentDef {
     pub auto_compact_at: Option<u32>,
     /// The accounts to fall back to, replacing the account's own list; `Some([])` stays put.
     pub fallback: Option<Vec<AccountName>>,
+    #[serde(default)]
+    pub done: DoneSpec,
     pub system_prompt: String,
     pub source: DefSource,
 }

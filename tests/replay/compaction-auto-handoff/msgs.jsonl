@@ -8,4 +8,4 @@
 {"msg":"Compacted","pre_tokens":500,"run":"01M769A77HMTESPXA2T8A1594H"}
 {"chunks":[{"k":"text","v":"done after compacting"},{"k":"done","v":"EndTurn"}],"msg":"Stream","run":"01M769A77HMTESPXA2T8A1594H"}
 {"msg":"UsageUpdate","run":"01M769A77HMTESPXA2T8A1594H","usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000525,"input_tokens":500,"output_tokens":5,"reasoning_tokens":null}}
-{"msg":"RunFinished","result":{"agent":"compacting","duration":{"nanos":8809508,"secs":0},"error":null,"run_id":"01M769A77HMTESPXA2T8A1594H","status":"Completed","summary":"","summary_file":null,"summary_len":21,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000525,"input_tokens":500,"output_tokens":5,"reasoning_tokens":null}},"run":"01M769A77HMTESPXA2T8A1594H"}
+{"msg":"RunFinished","result":{"agent":"compacting","duration":{"nanos":8809508,"secs":0},"error":null,"run_id":"01M769A77HMTESPXA2T8A1594H","status":"Completed","summary":"","summary_file":null,"summary_len":21,"turns":2,"usage":{"cache_read":0,"cache_write":0,"cost_usd":0.000525,"input_tokens":500,"output_tokens":5,"reasoning_tokens":null},"verified":false},"run":"01M769A77HMTESPXA2T8A1594H"}

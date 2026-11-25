@@ -60,9 +60,35 @@ Names are `snake_case` in aibus. The loader also accepts the Claude Code `camelC
 | `router` | router only | map | | `threshold` (f32, 0.85), `questions` (list), see section 7.2. |
 | `initial_prompt` | no | string | | Auto-submitted first turn when run as the session's lead (`aibus --agent name`). |
 | `auto_compact_at` | no | u32 tokens | from model's context size | Compact this run's context when input tokens pass this value. |
+| `goal` | no | string | | What the run is for, in a sentence. Sent back with the reason when a done check fails (section 1.6). |
+| `done_when` | no | shell command | | Compiled to the agent's stop hook (section 1.6): exit 2 keeps the run going, with stderr as the reason. |
+| `done_retries` | no | u32 | `3` | How many times a failed `done_when` or `output_schema` check may send the run round again. |
+| `output_schema` | no | JSON Schema map | | The final message has to be JSON that satisfies it (section 1.6). |
 | `fallback` | no | list of account names | the account's `fallback` | Accounts to try, in order, when the run's account fails before the first token (04 section 4.3). `[]` keeps the run on its account. |
 
 Unknown keys are a validation warning, not an error (`aibus agent validate` prints them). A missing `name` or `description` is an error.
+
+### 1.6 Done: goal, done_when and output_schema
+
+"Done" is a property of the definition. Without these keys a run ends when the model stops calling tools, or on `max_turns` or a budget, and nothing says whether the work was finished. With them, the end of the run is checked.
+
+```yaml
+goal: the failing test in tests/parser.rs passes
+done_when: cargo test -p parser --test parser
+done_retries: 3
+output_schema:
+  type: object
+  required: [summary, files]
+  properties:
+    summary: {type: string}
+    files: {type: array, items: {type: string}}
+```
+
+- `done_when` is sugar over the `subagent_stop` hook (`stop` for a lead that talks to the user): when the model would end the run, aibus runs the command the way it runs any hook command, with the usual hook input on stdin (`last_assistant_message`, `goal`, and the run's own `permission_mode`). It runs after the agent's other stop hooks have let the run go, and not as a copy of `[hooks]`, so those never run twice. Exit 2 sends the run round again with stderr as the reason, in a `[done check]` message that repeats the `goal`. Any other exit passes. It has the permission mode of the agent and no wider one: it is a hook command, never a tool call with its own grant.
+- `output_schema` is checked first, on the final assistant text (bare or in a ```json fence). The checked subset is `type`, `enum`, `required`, `properties`, `additionalProperties: false`, `items`, `minimum` and `maximum`. A message that does not fit is sent back with the path of the first mismatch, like a failed `done_when`.
+- Both checks share one retry count, `done_retries` (3 when unset). When the count is spent the run ends `Partial`, and the last failing reason is appended to `summary`: `[not done after N retries] <reason>`.
+- `RunResult.verified` is `true` when the run ended `Completed` and a configured check ran and passed at its last stop, and `false` otherwise: no keys set, the run did not complete, or hooks were off (`--no-hooks`), so nothing ran. It is in the NDJSON `RunFinished` event, in the `end` line of `transcript.jsonl` and in the MCP `run_status` result.
+- `aibus agent validate` rejects `done_when` or `output_schema` on an advisor or router, an empty `done_when`, `done_retries` without a check, and a schema with a `type` it does not know or a keyword it would not check. A Claude Code file without these keys parses unchanged.
 
 ### 1.2 Scope and precedence
 
@@ -233,6 +259,7 @@ pub struct RunResult {
     pub duration: Duration,
     pub worktree: Option<WorktreeInfo>,
     pub error: Option<RunError>,
+    pub verified: bool,              // done_when / output_schema checked and passed (section 1.6)
 }
 ```
 

@@ -9,6 +9,7 @@ pub mod result;
 pub mod transcript;
 
 mod compact;
+pub mod done;
 
 pub use budget::Budgets;
 pub use compact::{AutoHandoff, ModelCompactor};
@@ -166,6 +167,10 @@ pub struct RunResult {
     /// removed at the end of the run and not reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeInfo>,
+    /// True when the agent's `done_when` or `output_schema` was checked and passed at the end of
+    /// the run; false when neither is set or the run did not get there (01 section 5.3).
+    #[serde(default)]
+    pub verified: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]

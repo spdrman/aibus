@@ -12,6 +12,7 @@
 mod assist;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
@@ -36,7 +37,7 @@ use super::{
 };
 use assist::{LeadAssist, Route};
 
-use crate::agent::{AgentDef, PermissionMode, Role};
+use crate::agent::{AgentDef, HookKind, HookSet, HookSpec, PermissionMode, Role, DONE_RETRIES};
 use crate::assist::Assist;
 use crate::context::{self, ContextInput};
 use crate::credentials::CredentialSource;
@@ -222,6 +223,8 @@ struct Task<'a> {
     hint: Mutex<Option<smol_str::SmolStr>>,
     /// Where the next request goes; `RunMail::Model` replaces it at a turn boundary.
     now: Mutex<ModelSwitch>,
+    /// Set when the last stop passed the agent's `done_when` or `output_schema`.
+    verified: AtomicBool,
 }
 
 async fn task(
@@ -243,6 +246,7 @@ async fn task(
             model: cfg.model.clone(),
             account: cfg.account.clone(),
         }),
+        verified: AtomicBool::new(false),
     };
     t.send(Msg::RunStarted {
         run: cfg.run,
@@ -444,6 +448,58 @@ impl Task<'_> {
         mode: PermissionMode,
         extra: Map<String, Value>,
     ) -> Fired {
+        self.fire_from(&self.cfg.def.hooks, true, event, matcher, mode, extra).await
+    }
+
+    /// The `done_when` command of the definition as the stop hook of `event`, run alone (the
+    /// `[hooks]` of the event already ran). It gets the run's own permission `mode` in its
+    /// input and runs as a hook command, so it has no wider rights than any other hook.
+    /// `Err` is the reason to send back; `Ok(true)` means something was checked and passed.
+    async fn check_done(
+        &self,
+        event: HookEvent,
+        matcher: Option<&str>,
+        mode: PermissionMode,
+        last: &str,
+    ) -> Result<bool, String> {
+        let done = &self.cfg.def.done;
+        let mut checked = false;
+        if let Some(schema) = &done.output_schema {
+            super::done::check_output(schema, last).map_err(|e| format!("output_schema: {e}"))?;
+            checked = true;
+        }
+        if let Some(command) = &done.done_when {
+            let scoped = HookSet::from([(
+                event.as_str().into(),
+                vec![HookSpec {
+                    matcher: None,
+                    command: command.clone(),
+                    timeout_secs: None,
+                    kind: HookKind::Command,
+                }],
+            )]);
+            let mut extra = Map::from_iter([("last_assistant_message".to_owned(), json!(last))]);
+            if let Some(goal) = &done.goal {
+                extra.insert("goal".into(), json!(goal));
+            }
+            let fired = self.fire_from(&scoped, false, event, matcher, mode, extra).await;
+            if let Some(b) = fired.block {
+                return Err(format!("done_when: {}", b.reason));
+            }
+            checked |= !fired.ran.is_empty();
+        }
+        Ok(checked)
+    }
+
+    async fn fire_from(
+        &self,
+        scoped: &HookSet,
+        with_global: bool,
+        event: HookEvent,
+        matcher: Option<&str>,
+        mode: PermissionMode,
+        extra: Map<String, Value>,
+    ) -> Fired {
         let cfg = self.cfg;
         let input = HookInput {
             event,
@@ -460,11 +516,11 @@ impl Task<'_> {
             permission_mode: mode,
             extra,
         };
-        let fired = self
-            .deps
-            .hooks
-            .fire(&input, &cfg.def.hooks, self.cancel)
-            .await;
+        let fired = if with_global {
+            self.deps.hooks.fire(&input, scoped, self.cancel).await
+        } else {
+            self.deps.hooks.fire_scoped(&input, scoped, self.cancel).await
+        };
         for ran in &fired.ran {
             self.send(Msg::HookFired {
                 run: Some(cfg.run),
@@ -928,6 +984,7 @@ impl Task<'_> {
                 .await;
             }
         }
+        let verified = end.status == RunStatus::Completed && self.verified.load(Ordering::SeqCst);
         let agent: AgentName = cfg.def.name.clone();
         // The final send ignores a closed channel: there is nothing left to stop.
         let _ = deps
@@ -945,6 +1002,7 @@ impl Task<'_> {
                     duration: started.elapsed(),
                     error: end.error,
                     worktree,
+                    verified,
                 },
             })
             .await;
@@ -1019,6 +1077,8 @@ async fn drive(
     let mut pre_tokens = 0;
     let mut forced = cfg.forced.clone();
     let mut lead = LeadAssist::new(t);
+    // Failed `done_when` / `output_schema` checks so far, against `done_retries`.
+    let mut done_failures = 0u32;
 
     loop {
         if cancel.is_cancelled() {
@@ -1141,6 +1201,7 @@ async fn drive(
                 Role::Advisor | Role::Router => None,
             };
             let mut again = false;
+            t.verified.store(false, Ordering::SeqCst);
             if let Some((event, matcher)) = stop {
                 let extra = Map::from_iter([(
                     "last_assistant_message".to_owned(),

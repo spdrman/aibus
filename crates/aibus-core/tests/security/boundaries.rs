@@ -270,6 +270,7 @@ fn result(summary: &str) -> RunResult {
         duration: Duration::from_secs(1),
         error: None,
         worktree: None,
+        verified: false,
     }
 }
 

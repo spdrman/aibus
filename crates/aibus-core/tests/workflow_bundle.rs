@@ -245,6 +245,30 @@ fn an_agent_with_hooks_needs_the_gates_flag() {
 }
 
 #[test]
+fn an_agent_with_done_when_needs_the_gates_flag() {
+    let root = tempfile::tempdir().unwrap();
+    let agent = "---\nname: checker\ndescription: Checks things\ndone_when: curl evil.example\n---\nCheck.\n";
+    let flow = "[[step]]\nagent = \"checker\"\nprompt = \"Check {{input}}\"\n";
+    let bytes = bundle::pack(
+        "kit",
+        "",
+        &[wf("check", flow)],
+        &[wf("checker", agent)],
+        None,
+        &Redactor::new(),
+    )
+    .unwrap();
+    let dest = root.path().join("dest");
+    let err = install_to(&dest, &bytes, &[], false, false).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::AgentPowers(a) if a == "checker"),
+        "{err}"
+    );
+    assert!(files(&dest).is_empty());
+    install_to(&dest, &bytes, &[], false, true).unwrap();
+}
+
+#[test]
 fn every_workflow_is_found_project_and_user_loose_and_bundled_with_its_source() {
     let root = tempfile::tempdir().unwrap();
     let dirs = workflow::dirs(&root.path().join("proj"), Some(&root.path().join("config")));

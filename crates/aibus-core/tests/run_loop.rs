@@ -893,21 +893,6 @@ fn done_def(done_when: Option<&str>, retries: Option<u32>, schema: Option<Value>
     d
 }
 
-fn stop_events(done: &Done) -> usize {
-    done.msgs
-        .iter()
-        .filter(|m| {
-            matches!(
-                m,
-                Msg::HookFired {
-                    event: HookEvent::SubagentStop,
-                    ..
-                }
-            )
-        })
-        .count()
-}
-
 #[tokio::test]
 async fn a_failing_done_when_keeps_the_worker_going_and_it_stops_once_it_passes() {
     let d = done_def(
@@ -934,7 +919,20 @@ async fn a_failing_done_when_keeps_the_worker_going_and_it_stops_once_it_passes(
         .unwrap()
         .plain_text();
     assert!(sent.contains("tests still failing"), "{sent}");
-    assert_eq!(stop_events(&done), 2, "the check ran at each stop");
+    let stops = done
+        .msgs
+        .iter()
+        .filter(|m| {
+            matches!(
+                m,
+                Msg::HookFired {
+                    event: HookEvent::SubagentStop,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(stops, 2, "the check ran at each stop");
 }
 
 #[tokio::test]
@@ -1054,4 +1052,70 @@ async fn done_when_under_no_hooks_is_not_verified() {
     let r = done.finished();
     assert_eq!(r.status, RunStatus::Completed);
     assert!(!r.verified, "nothing ran, so nothing was checked");
+}
+
+// ---- done_when passes on exit 0 only (#389 review r1) ----------------------------------
+
+#[tokio::test]
+async fn only_exit_zero_passes_done_when_and_everything_else_ends_partial_unverified() {
+    // Exit 1, a failing `cargo test` (101), a typo (127) and a signal are not a pass.
+    for command in ["exit 1", "exit 101", "no_such_command_389", "kill -9 $$"] {
+        let s = script([
+            Step::Text("one".into()),
+            Step::Stop(StopReason::EndTurn),
+            Step::Text("two".into()),
+        ]);
+        let done = run(s, done_def(Some(command), Some(1), None)).await;
+        let r = done.finished();
+        assert_eq!(r.status, RunStatus::Partial, "{command}");
+        assert!(!r.verified, "{command}");
+        assert_eq!(done.fake.requests().len(), 2, "{command}: one retry");
+        assert!(
+            r.summary.contains("not done after 1 retries") && r.summary.contains("only exit 0 passes"),
+            "{command}: {}",
+            r.summary
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_failing_done_when_beside_a_passing_schema_is_not_verified() {
+    let schema = json!({"type": "object"});
+    let s = script([Step::Text("{}".into())]);
+    let done = run(s, done_def(Some("exit 1"), Some(0), Some(schema.clone()))).await;
+    let r = done.finished();
+    assert_eq!(r.status, RunStatus::Partial);
+    assert!(!r.verified);
+}
+
+#[tokio::test]
+async fn a_passing_schema_with_no_hooks_does_not_verify_a_configured_done_when() {
+    let schema = json!({"type": "object"});
+    let (mut p, rx) = plan(
+        script([Step::Text("{}".into())]),
+        done_def(Some("exit 1"), None, Some(schema)),
+    );
+    p.deps.hooks = Arc::new(HookRunner::default());
+    let done = collect(p, rx, |_| {}).await;
+    let r = done.finished();
+    assert_eq!(r.status, RunStatus::Completed);
+    assert!(!r.verified, "done_when never ran, so it cannot be verified");
+}
+
+#[tokio::test]
+async fn done_when_runs_in_the_worktree_of_the_run_not_the_project_dir() {
+    let (mut p, rx) = plan(
+        script([Step::Text("ok".into())]),
+        done_def(Some("touch ran-here"), None, None),
+    );
+    let tree = p.dir.path().join("wt");
+    std::fs::create_dir_all(&tree).unwrap();
+    p.cfg.cwd = tree.clone();
+    let done = collect(p, rx, |_| {}).await;
+    assert!(done.finished().verified);
+    assert!(tree.join("ran-here").exists(), "ran in the run's cwd");
+    assert!(
+        !done.dir.path().join("ran-here").exists(),
+        "and not in the project dir"
+    );
 }

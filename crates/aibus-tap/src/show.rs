@@ -48,7 +48,7 @@ pub fn list(
 }
 
 /// One session: header, what each source gives, the graph and timeline `aibus runs inspect`
-/// prints, intent, transcript tail, and what control exists (none in phase 1).
+/// prints, intent, transcript tail, and what control exists.
 pub fn tap(
     env: &Env,
     lister: &dyn Fn() -> Result<Vec<u8>, String>,
@@ -71,6 +71,7 @@ pub fn tap(
                 state: "gone".into(),
                 pid: None,
                 version: None,
+                socket: None,
             };
             &gone
         }
@@ -128,9 +129,19 @@ pub fn tap(
         },
     }
     out.push_str("  plan and task files: intent, not proof of execution\n");
-    out.push_str(
-        "control: watch only (phase 1 has no control path: aibus sends nothing to the session, types nothing and answers no permission prompt)\n\n",
+    let project = std::path::Path::new(&s.cwd);
+    let managed = crate::control::managed_path();
+    let setting = crate::control::inbound(
+        &env.config,
+        if project.is_absolute() {
+            project
+        } else {
+            std::path::Path::new("/nonexistent")
+        },
+        managed.exists().then_some(managed.as_path()),
     );
+    out.push_str(&crate::control::status_lines(s, setting));
+    out.push('\n');
 
     match &rec {
         Some(r) => {

@@ -1284,6 +1284,10 @@ async fn drive(
                 }
             }
             if !again {
+                // A cancel that landed during the stop hooks or `done_when` is not a finish.
+                if cancel.is_cancelled() {
+                    return End::of(RunStatus::Cancelled);
+                }
                 return End::of(RunStatus::Completed);
             }
         }

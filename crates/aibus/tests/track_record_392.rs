@@ -93,6 +93,75 @@ fn a_worker_without_memory_gets_no_learnings_file() {
         .exists());
 }
 
+#[test]
+fn a_worker_with_local_memory_is_gitignored_and_not_committed() {
+    let home = xdg_temp();
+    let h = home.path();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(proj(h))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    fs::create_dir_all(proj(h)).unwrap();
+    git(&["init", "-q"]);
+    agent(h, "scribe", "memory: local\n");
+    let out = delegate_and_learn(h, "scribe", LEAD_REPLY, WORKER_REPLY);
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    let file = proj(h).join(".aibus/agent-memory-local/scribe/LEARNINGS.md");
+    assert!(fs::read_to_string(&file)
+        .unwrap()
+        .contains("the worker learned this"));
+    let ignore = fs::read_to_string(proj(h).join(".gitignore")).unwrap();
+    assert!(
+        ignore.lines().any(|l| l == ".aibus/agent-memory-local/"),
+        "{ignore}"
+    );
+    git(&["add", "-A"]);
+    let tracked = git(&["ls-files"]);
+    assert!(!tracked.contains("agent-memory-local"), "{tracked}");
+}
+
+#[test]
+fn an_earlier_lead_run_of_the_session_is_not_extracted_as_a_worker() {
+    let home = xdg_temp();
+    let h = home.path();
+    agent(h, "scribe", "memory: project\n");
+    let dir = h.join("session");
+    let script = h.join("s.ron");
+    // Two lead runs in one session, both as `scribe` (a lead whose definition sets memory). The
+    // second run's end must not ask for the first one's learnings as if it were a worker's.
+    for _ in 0..2 {
+        fs::write(
+            &script,
+            format!(
+                "[Text(\"done\"), Stop(EndTurn), Text({LEAD_REPLY:?}), Text({WORKER_REPLY:?})]"
+            ),
+        )
+        .unwrap();
+        let out = command(h)
+            .args(["run", "--agent", "scribe", "--json", "--script"])
+            .arg(&script)
+            .arg("--session-dir")
+            .arg(&dir)
+            .arg("go")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+    }
+    assert!(!proj(h)
+        .join(".aibus/agent-memory/scribe/LEARNINGS.md")
+        .exists());
+}
+
 /// A finished session of one run, written the way the session writer does.
 fn past_run(home: &Path, n: u32, agent: &str, status: &str, cost: f64, summary: &str) {
     let dir = home.join(format!(".local/state/aibus/sessions/S{n:03}"));

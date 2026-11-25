@@ -1,0 +1,1 @@
+These baselines are the runner class `mercury` (`AIBUS_RUNNER_CLASS=mercury`), written by `AIBUS_BENCH_SAVE=1` on 2026-11-25 for the v1 gate (#295). The numbers are p99 microseconds and the calibration time of the machine, read by `benches/gate.rs`. The run, the host and how to repeat it are in `docs/V1-GATE.md` ("Benchmark regression").

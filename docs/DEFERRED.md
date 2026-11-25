@@ -241,3 +241,21 @@ I built the library and CLI/TUI side that exists without the desktop UI: `aibus_
 - **Evaluation results in the TUI.** `/runs compare` cannot take result files, so it shows quality as a gap. Only the CLI takes `--result-a` and `--result-b`.
 - **The inspector's approval gate.** A prompt is shown when the delegating payload was retained, which only happens under an explicit payload policy. There is no separate per-prompt approval state to check.
 - **Cross-attempt comparison inside one run directory.** A side is the whole run (all its attempts, usage summed only when every attempt agrees on the unit). Comparing two attempts of one run is not built.
+
+## A3.5 security, compatibility, benchmark regression and the v1 gate (#295)
+
+I wrote the review, the compatibility matrix and the gate checklist (docs/SECURITY-REVIEW-295.md, docs/COMPATIBILITY.md, docs/V1-GATE.md), fixed the four advisories the supply-chain run found, and stopped there. These are what I cut...
+
+* **The gate is not passed.** docs/V1-GATE.md says which Phase 3 exit items are met, partly met or not met. I did not tick anything in #280 and did not tag a release.
+* **Unmaintained dependencies.** `chrono` (ignored in `deny.toml` with a review-by date of 2027-02-25, because `cargo deny` would otherwise fail on it) and `zbus_names`, `zvariant`, `zvariant_derive` (cargo-audit notices only). Nobody enforces the date. Moving `rmcp` off `chrono`, or replacing `keyring`'s Secret Service path, is what removes them.
+* **The causl crate's lock** (`crates/aibus-graph-causl`, private source) was not scanned: the gate image cannot reach the git host. `cargo deny --config crates/aibus-graph-causl/deny.toml ...` needs a run where it can.
+* **`cargo-deny` and `cargo-audit` are not in the `aibus-gate:1.89` image.** I downloaded the release binaries inside the container for the run (docs/SECURITY-REVIEW-295.md). Baking them into the image would make the supply-chain check part of every gate.
+* **OTLP destination checks (F2).** A plain `http://` endpoint to a public host with credential headers is accepted. It needs the same warning a provider `base_url` already gets, in the place the destination is read from config, which does not exist yet (see the A3.2 list above).
+* **Flag lists for `copilot`, `cursor-agent` and `qwen` (F3).** Same as the A3.1 list above: a real CLI of each has to be read first.
+* **Benchmarks for Phase 2 and 3 code.** The committed baselines cover only the four Phase 0 benches (`commit_stream`, `hydrate_snapshot`, `render_dashboard`, causl `recompute`). The trace store write and replay, `to_otlp`, `compare` and the WASM host have no bench and no baseline. Writing them, and recording a Mercury baseline for each, is the follow-up; each one goes through `/Users/rom/workspace/bench-queue.sh` (docs/V1-GATE.md has what ran for this PR).
+* **A CHANGELOG entry** for everything after 0.2.1. The release workflow reads the entry for the version it cuts, so the version number has to be chosen first, and that is the owner's.
+* **A re-read of the vendor terms** before any release, as the terms gate asks (docs/spikes/A1.1-claude-code/terms-gate.md), and a dated terms record for Codex, Gemini and OpenRouter. I did not fetch any of them for this PR.
+* **The end-to-end demo** of Claude Code, one more official CLI and OpenRouter through aibus. It needs the scheduler host (#288 and #289 wiring) first.
+* **A reproducibility manifest file.** `aibus runs repro` prints what a rerun would need; there is no manifest format to publish.
+* **Extension authoring tried by a third party.** The docs and the template exist; nobody who did not write them has followed them.
+* **Windows, Linux aarch64 and macOS x86_64** smoke runs (docs/RELEASE.md).

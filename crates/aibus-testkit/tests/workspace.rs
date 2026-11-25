@@ -299,10 +299,18 @@ fn the_lock_holds_no_version_with_a_known_advisory_fix_missed() {
         if let Some(n) = line.strip_prefix("name = \"") {
             name = n.trim_end_matches('"');
         } else if let Some(v) = line.strip_prefix("version = \"") {
-            let Some((_, floor)) = floors.iter().find(|(n, _)| *n == name) else { continue };
+            let Some((_, floor)) = floors.iter().find(|(n, _)| *n == name) else {
+                continue;
+            };
             let v = v.trim_end_matches('"');
-            let have: Vec<u32> = v.split('.').map(|p| p.parse().expect("numeric version")).collect();
-            assert!(have.as_slice() >= floor.as_slice(), "{name} {v} in Cargo.lock is below {floor:?}, which has the advisory fix");
+            let have: Vec<u32> = v
+                .split('.')
+                .map(|p| p.parse().expect("numeric version"))
+                .collect();
+            assert!(
+                have.as_slice() >= floor.as_slice(),
+                "{name} {v} in Cargo.lock is below {floor:?}, which has the advisory fix"
+            );
         }
     }
 }

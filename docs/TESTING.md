@@ -251,3 +251,7 @@ first run with `AIBUS_UPDATE_SNAPSHOTS=1` creates it.
 
 `crates/aibus-tui/tests/theme_contrast.rs` measures every text and background pair of the themes
 and pins the number. A palette change shows up there as a failing ratio.
+
+## The EPIC A acceptance index
+
+`docs/V1-GATE.md` indexes the acceptance evidence of the fifteen EPIC A issues (which test or fixture shows what, and what is still open), and `docs/COMPATIBILITY.md` says which CLI versions and platforms any of it was run on. They are written by hand from the tests above, so a renamed test breaks a name there and nothing checks it.

@@ -45,7 +45,7 @@ fn claude_code_tool_names_become_the_aibus_ones_in_both_lists() {
 fn a_name_with_no_counterpart_warns_when_read_and_in_validate_and_is_not_an_error() {
     let text = "---\nname: a\ndescription: d\ntools: [Read, TodoWrite, NotebookEdit, WebSearch]\n---\nB";
     let (_, w) = def(text);
-    for name in ["TodoWrite", "NotebookEdit", "WebSearch"] {
+    for name in ["todowrite", "notebookedit", "websearch"] {
         assert!(w.iter().any(|m| m.contains(name)), "{name} in {w:?}");
     }
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("coordinator_390");
@@ -59,7 +59,7 @@ fn a_name_with_no_counterpart_warns_when_read_and_in_validate_and_is_not_an_erro
     };
     let r = validate_path(&file, &cx);
     assert!(r.ok && r.errors.is_empty(), "{r:?}");
-    assert_eq!(r.warnings.iter().filter(|f| f.message.contains("TodoWrite")).count(), 1, "{r:?}");
+    assert_eq!(r.warnings.iter().filter(|f| f.message.contains("todowrite")).count(), 1, "{r:?}");
 }
 
 #[test]

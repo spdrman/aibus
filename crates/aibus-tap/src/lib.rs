@@ -1,4 +1,4 @@
-//! Tap in to Claude Code sessions that are already open (#348 phase 1, #355). Read-only.
+//! Tap in to Claude Code sessions that are already open (#348 phases 1 and 2, #355, #373).
 //!
 //! * `agents`: the list, from `claude agents --json` (the one process this crate starts).
 //! * `hooks`: the settings entries that make a session post its events to aibus, shown as a diff.
@@ -7,10 +7,12 @@
 //! * `transcript`: the opt-in, version-gated transcript tail.
 //! * `show`: one text for `aibus sessions tap` and `/tap`, built on `aibus_trace::view`.
 //!
-//! Nothing here sends to a session: no inbox socket, no keystroke, no permission answer.
+//! * `control`: guidance to a session (#373), over the documented inbox socket only, with consent
+//!   at both ends. Nothing here types a key, answers a permission prompt or changes a setting.
 #![forbid(unsafe_code)]
 
 pub mod agents;
+pub mod control;
 pub mod hooks;
 pub mod intent;
 pub mod show;

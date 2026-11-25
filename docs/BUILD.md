@@ -38,7 +38,7 @@ The MSRV pins two versions in `Cargo.lock`: `smol_str` 0.3.2 (newer ones need ru
 
 ## HTTP and TLS (B1.5)
 
-Only the `aibus-provider-*` crates open sockets. `aibus-provider-http` holds the one `reqwest` 0.12 client setup, and `aibus-provider-anthropic`, `aibus-provider-openai` and `aibus-provider-gemini` use it, so `aibus-provider`, `aibus-core` and `aibus-tui` stay free of it (`crates/aibus-testkit/tests/workspace.rs` checks that, and that no OpenSSL or native TLS crate is in the provider crates' tree).
+Only the `aibus-provider-*` crates and `aibus-otel` (opt-in export, see below) open sockets. `aibus-provider-http` holds the one `reqwest` 0.12 client setup, and `aibus-provider-anthropic`, `aibus-provider-openai` and `aibus-provider-gemini` use it, so `aibus-provider`, `aibus-core` and `aibus-tui` stay free of it (`crates/aibus-testkit/tests/workspace.rs` checks that, and that no OpenSSL or native TLS crate is in the provider crates' tree).
 
 `reqwest` is built with `default-features = false` and `rustls-tls-native-roots`: rustls with the `ring` crypto provider, and the root certificates read from the system's store (so a company CA or a proxy's CA that is installed system-wide works). I picked `ring` over `aws-lc-rs` because `aws-lc-sys` can want cmake or a prebuilt binary and `ring` only wants a C compiler. I picked the native roots over `webpki-roots` because the latter's data is CDLA-Permissive-2.0, which is not in `deny.toml`'s allow-list, and I did not want to widen it. `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured by `reqwest` itself (there is a test for `HTTP_PROXY`; `HTTPS_PROXY` goes through the same code but needs a CONNECT proxy, which I did not fake). I did not turn on `macos-system-configuration`, so the macOS system proxy settings are not read.
 
@@ -103,3 +103,7 @@ Crates in that set that run code at build time:
 ## CI
 
 `.github/workflows/fuzz.yml` runs the fuzz targets nightly. `.github/workflows/ci.yml` runs `cargo build --locked`, `clippy --all-targets -D warnings`, `cargo test --locked`, `cargo deny check` and `cargo audit` on push and PR. GitHub Actions are switched off for this repo, so I run the same commands locally before merging.
+
+## OTLP export (A3.2)
+
+`aibus-otel` is the one crate outside the provider crates that opens a socket, and only when the user configures a destination (no `OTEL_*` variable switches it on; reqwest's usual proxy variables still apply to a configured destination). It uses `reqwest` 0.12 with the `blocking` feature and the same rustls setup as the provider crates, on its own thread with a hard timeout. The span mapping itself is pure and lives in `aibus-trace`, which still has no network code.

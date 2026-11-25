@@ -1,0 +1,3 @@
+{"type":"tool.execution_start","data":{"toolCallId":"tool-0001","toolName":"view"}}
+{"type":"tool.execution_complete","data":{"toolCallId":"tool-0001","success":"true"}}
+{"type":"assistant.message","data":{"content":"done"}}

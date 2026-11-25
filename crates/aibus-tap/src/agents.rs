@@ -30,6 +30,8 @@ pub struct Session {
     pub pid: Option<u32>,
     /// Only when a local session file carries one; the command does not.
     pub version: Option<String>,
+    /// The inbox socket the session's local file names; the command does not list it.
+    pub socket: Option<std::path::PathBuf>,
 }
 
 const MAX_JSON: usize = 4 << 20;
@@ -62,6 +64,7 @@ pub fn parse_agents(json: &[u8]) -> Result<Vec<Session>, String> {
                     .and_then(Value::as_u64)
                     .and_then(|p| u32::try_from(p).ok()),
                 version: None,
+                socket: None,
             })
         })
         .collect())
@@ -106,14 +109,28 @@ pub fn merge_local(list: &mut [Session], sessions_dir: &Path) {
         if s.version.is_none() {
             s.version = v.get("version").and_then(Value::as_str).map(str::to_owned);
         }
+        if s.socket.is_none() {
+            s.socket = v
+                .get("messagingSocketPath")
+                .and_then(Value::as_str)
+                .and_then(|p| p.strip_prefix("uds:"))
+                .map(std::path::PathBuf::from)
+                .filter(|p| p.is_absolute());
+        }
     }
 }
 
-fn alive(pid: u32) -> bool {
+/// A process of another user answers EPERM: it is there.
+pub(crate) fn alive(pid: u32) -> bool {
     i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
-        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+        .is_some_and(|p| {
+            matches!(
+                rustix::process::test_kill_process(p),
+                Ok(()) | Err(rustix::io::Errno::PERM)
+            )
+        })
 }
 
 fn ago(ms: i64) -> String {
@@ -126,7 +143,7 @@ fn ago(ms: i64) -> String {
     }
 }
 
-/// The list as text: what each session is and what aibus can do with it. Phase 1 can only watch.
+/// The list as text: what each session is and what aibus can do with it. Send needs an inbox socket.
 pub fn render_list(list: &[Session], tapped: &[String], now_ms: i64) -> String {
     if list.is_empty() {
         return "no live Claude Code sessions\n".into();
@@ -140,10 +157,11 @@ pub fn render_list(list: &[Session], tapped: &[String], now_ms: i64) -> String {
         let started = s
             .started_ms
             .map_or_else(|| "unknown".into(), |t| ago(now_ms - t));
-        let can = if tapped.contains(&s.session_id) {
-            "watch (tapped)"
-        } else {
-            "watch"
+        let can = match (s.socket.is_some(), tapped.contains(&s.session_id)) {
+            (true, true) => "watch + send (tapped)",
+            (true, false) => "watch + send",
+            (false, true) => "watch (tapped)",
+            (false, false) => "watch",
         };
         out.push_str(&format!(
             "{:<9} {:<8} {:<11} {:<22} {:<9} {:<14} {} {}\n",

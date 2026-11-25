@@ -342,7 +342,7 @@ async fn run_lead(d: &Path, script: Script) -> Ran {
             context: Vec::new(),
             background: false,
             max_spawn_depth: 3,
-            forced: None,
+            forced: Vec::new(),
             start: Start::New,
             worktree: None,
         },

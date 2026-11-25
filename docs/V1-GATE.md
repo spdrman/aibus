@@ -1,13 +1,13 @@
 # v1 release gate for EPIC A (A3.5, #295)
 
-Date: 2026-11-25. Tip: GATE_TIP.
+Date: 2026-11-25. Gate tip: eb3eb17 (the docs-only edits after it change no code).
 
 **Verdict: the gate is not passed.** Nothing in this record is a release decision. I have not tagged anything and I have not ticked a box in #280; both are the owner's. "v1" here means the spec's product scope (spec 11 and 9 use it that way), not a semver 1.0: the workspace is 0.2.1 and whether the next cut is 1.0, 0.3 or something else is undecided.
 
 Why it is not passed, in the order that matters:
 
 1. **Most of Phase 2 and 3 exists as libraries that no command runs.** The scheduler (#288), the durable run (#289), worktree review (#290), OTLP export (#292), evaluation and the variant runner (#293) have no host. `aibus workflow run` still uses the chain runner. So the approvals, consent records, attempt review and exports that the gate asks me to attest are tested but not on the path a user's run takes.
-2. **The demo the issue asks for was not run.** "Claude + one more official CLI + OpenRouter on supported machines" has not been demonstrated end to end. Claude Code and Codex were each run live in earlier phases (the ignored live tests), and OpenRouter is verified offline, but nothing ran the three together through aibus.
+2. **The demo the issue asks for was not run.** "Claude + one more official CLI + OpenRouter on supported machines" has not been demonstrated end to end. Claude Code and Codex each have a live report from 2026-11-15 (`fixtures/claude-code/reference-285/live-report-2026-11-15.json`, `fixtures/codex/live-report-2026-11-15.json`), and OpenRouter is verified offline, but nothing ran the three together through aibus.
 3. **The benchmark regression row is only partly met** (see below): the three Phase 0 benches have a Mercury baseline and passed against it, and nothing from Phase 2 or 3 has a bench.
 4. **Five of the seven extensions were never run against a real CLI**, and Codex on this Mac is a newer version than its declared range.
 5. **Release hygiene is open:** the CHANGELOG has no entry after 0.2.1, the Windows, Linux aarch64 and macOS x86_64 builds were never smoke-run, and the subscription sign-in and commercial-use questions in the terms gate are still the owner's.
@@ -18,9 +18,9 @@ What I did deliver is the evidence that was missing: a security review record (d
 
 | Check | Where | Result | Log |
 |---|---|---|---|
-| Scoped gate: rustfmt ratchet, clippy of the changed crates (and `aibus-extension --features wasm`), the new test by name | MARS, `aibus-gate:1.89`, slot 1 | GATE_SCOPED | `/work/nas-work/feat-295-v1-gate/295-gate.log` on MARS |
-| Tip gate: `cargo clippy --workspace --all-targets --locked -D warnings`, then `cargo test` for `aibus-testkit` and `aibus-extension --features wasm` (the crates I changed, whole), and the three security suites | same container, same log | GATE_TIP_RESULT | same log |
-| `cargo deny --locked check` and `cargo audit` | same container, after the tests | GATE_SUPPLY | same log |
+| Scoped gate: rustfmt ratchet, clippy of the changed crates (and `aibus-extension --features wasm`), the new test by name | MARS, `aibus-gate:1.89`, slot 1 | Green. The first run failed the rustfmt ratchet by one diff in my new test (21 against a base of 20); I formatted it and the rerun is level at 20 | `/work/nas-work/feat-295-v1-gate/295-gate2.log` on MARS (`295-gate.log` is the failed first run) |
+| Tip gate: `cargo clippy --workspace --all-targets --locked -D warnings`, then `cargo test` for `aibus-testkit` and `aibus-extension --features wasm` (the crates I changed, whole), and the three security suites | same container, same log | Green: clippy clean, 38 test binaries ok, no failures. I also ran `cargo test -p aibus --test docs`, which checks the test names in docs/SECURITY.md | same log |
+| `cargo deny --locked check` and `cargo audit` | same container, after the tests | Advisories ok, bans ok, licenses ok, sources ok; `cargo audit` exit 0, only the four unmaintained notices | same log, last section |
 | Red test first | MARS | `the_lock_holds_no_version_with_a_known_advisory_fix_missed` failed on `url` 2.5.8 before the fix, passed after | `295-red.log` |
 | Benchmarks | Mercury, through `bench-queue.sh` | Passed against the baseline written in the same turn (table below) | see "Benchmark regression" |
 
@@ -50,7 +50,7 @@ Phase 3 gate (spec 13), one line each:
 |---|---|---|
 | Zero known credential-harvesting paths and no unapproved provider embedding paths; ambiguous integrations stay disabled | **Met for the code that exists, not demonstrated on a running product** | docs/SECURITY-REVIEW-295.md, "What the boundaries do not yet protect". xAI, DeepSeek and the unlisted CLIs are `disabled` |
 | Full 15-issue acceptance suite, sample redacted trace, benchmark scorecard and reproducibility manifest published | **Partly met** | The table below is the suite's index (published in the repository, which is where I decided it goes). Sample trace: `fixtures/claude-code/reference-285/example-trace/`. Scorecard: `fixtures/claude-code/reference-285/scorecard.json` and docs/spikes/A1.5-reference-pilot/benchmark.md (documentation-based, 2026-11-15). Reproducibility report: `aibus runs repro`; there is no manifest file format yet |
-| Claude + at least one more official CLI + OpenRouter on supported machines, with truthful limitations and user-owned auth | **Not met** | No end-to-end run. The pieces: Claude Code and Codex live tests (ignored, run by hand in earlier phases), OpenRouter offline |
+| Claude + at least one more official CLI + OpenRouter on supported machines, with truthful limitations and user-owned auth | **Not met** | No end-to-end run. The pieces: the two live reports above (separate runs, 2026-11-15), the ignored `handoff_live.rs` pair, OpenRouter offline |
 
 ## EPIC acceptance checklist (spec 13)
 

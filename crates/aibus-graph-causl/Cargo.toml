@@ -21,7 +21,7 @@ base64 = "0.22"
 indexmap = "2"
 smallvec = { version = "1", optional = true }
 # Private: git.opsite.ca needs a token, so only the causl-spike workflow fetches this.
-causl-engine-core = { git = "https://git.opsite.ca/causl/causl-core-rs.git", rev = "f00c4f8a5f2455acc66c8cae6b786c29b34814e0", optional = true }
+causl-engine-core = { git = "https://git.opsite.ca/causl/causl-core-rs.git", rev = "afd39707c938772ee3a45dd1714d0d7a8be23747", optional = true }
 
 [dev-dependencies]
 aibus-core = { path = "../aibus-core" }

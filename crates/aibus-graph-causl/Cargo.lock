@@ -353,7 +353,7 @@ dependencies = [
 [[package]]
 name = "causl-engine-core"
 version = "0.0.0"
-source = "git+https://git.opsite.ca/causl/causl-core-rs.git?rev=f00c4f8a5f2455acc66c8cae6b786c29b34814e0#f00c4f8a5f2455acc66c8cae6b786c29b34814e0"
+source = "git+https://git.opsite.ca/causl/causl-core-rs.git?rev=afd39707c938772ee3a45dd1714d0d7a8be23747#afd39707c938772ee3a45dd1714d0d7a8be23747"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
